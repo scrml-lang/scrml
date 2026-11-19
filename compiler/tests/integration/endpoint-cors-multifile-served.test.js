@@ -377,9 +377,12 @@ describe("LOW-2 — E-ENDPOINT-CORS-INVALID", () => {
 </program>
 `);
     expect(codesOf(r)).not.toContain("E-ENDPOINT-CORS-INVALID");
+    // `title=` itself is outside §61.2 endpoint-attrs (ruling:user-voice-scrml.md-S480-four-recs-2 item 1)
+    expect(codesOf(r)).toContain("E-ENDPOINT-ATTR-INVALID");
   });
   test("cors-max-age= on the <endpoint> opener is not read as cors=", () => {
     const r = compileOne("low2-maxage", endpointProgram(' cors-max-age="60"'));
     expect(codesOf(r)).not.toContain("E-ENDPOINT-CORS-INVALID");
+    expect(codesOf(r)).toContain("E-ENDPOINT-ATTR-INVALID"); // matched exactly: `cors-max-age` is not `cors` (S480)
   });
 });

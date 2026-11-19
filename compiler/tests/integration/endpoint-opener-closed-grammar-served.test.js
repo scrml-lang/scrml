@@ -151,19 +151,20 @@ describe("N1 — text inside a `'…'` / backtick run is never an attribute of t
     expect(errs[0].message).toContain("a backtick is not an attribute quote");
   });
 
-  test("control: the same opener with `\"…\"` builds, and serves no CORS", async () => {
-    const r = build("n1-control", { "app.scrml": app(`path="/a" method="POST" accepts=Op note="x cors='*' y"`) });
-    expect(r.exitCode).toBe(0);
-    const base = await startProd(r.dist);
-    const pre = await fetch(base + "/a", { method: "OPTIONS", headers: { Origin: A, "Access-Control-Request-Method": "POST" } });
-    expect(pre.status).toBe(405);
-    expect(pre.headers.get("Access-Control-Allow-Origin")).toBeNull();
-    const res = await fetch(base + "/a", { method: "POST", headers: { "Content-Type": "application/json", Origin: A }, body: '{"tag":"Ping"}' });
-    expect(res.status).toBe(200);
-    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
-    const evil = await fetch(base + "/evil", { method: "POST", headers: { "Content-Type": "application/json" }, body: '{"tag":"Ping"}' });
-    expect(evil.status).not.toBe(200);
-  }, TIMEOUT_MS);
+  // S480 (ruling:user-voice-scrml.md-S480-four-recs-2 item 1): `note=` is outside §61.2
+  // `endpoint-attrs`, so the `"…"` control is refused too — by E-ENDPOINT-ATTR-INVALID alone,
+  // at `note`: the reader read the opener whole (no E-ATTR-001) and the `cors='*'` inside the
+  // string was never the endpoint's cors= (no E-ENDPOINT-CORS-INVALID). Nothing is built.
+  test("control: the same opener with `\"…\"` is read whole — refused only as E-ENDPOINT-ATTR-INVALID at `note`", () => {
+    const opener = `path="/a" method="POST" accepts=Op note="x cors='*' y"`;
+    const errs = compileOne(app(opener));
+    expect(errs.map((e) => e.code)).toEqual(["E-ENDPOINT-ATTR-INVALID"]);
+    expect(errs[0].message).toContain("`note` is not an `<endpoint>` attribute");
+    const r = build("n1-control", { "app.scrml": app(opener) });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.out).toContain(`app.scrml:7:${11 + opener.indexOf("note")} E-ENDPOINT-ATTR-INVALID`);
+    expect(existsSync(join(r.dist, "_server.js"))).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -260,7 +261,9 @@ describe("each attribute: repeated → its own code; value-less → its own code
       const errs = compileOne(app(`${extra} path="/a" method="POST" accepts=Op`));
       expect(errs.length).toBeGreaterThan(0);
       const codes = new Set(errs.map((e) => e.code));
-      expect([...codes].every((c) => c === "E-ATTR-001" || c === "E-ATTR-UNQUOTED-OPERATOR")).toBe(true);
+      // (`note=` in "a dropped value" is itself outside §61.2 — E-ENDPOINT-ATTR-INVALID, S480)
+      expect([...codes].every((c) => c === "E-ATTR-001" || c === "E-ATTR-UNQUOTED-OPERATOR" || (c === "E-ENDPOINT-ATTR-INVALID" && extra.startsWith("note=")))).toBe(true);
+      expect(codes.has("E-ENDPOINT-CORS-INVALID")).toBe(false);
     });
   }
   test("`cors=*` (an unquoted value, §34 E-ENDPOINT-CORS-INVALID) → the dropped value named, then E-ENDPOINT-CORS-INVALID", () => {
@@ -284,14 +287,16 @@ describe("L2 — the opener's end is the attribute tokenizer's", () => {
     expect(errs.length).toBeGreaterThan(0);
     expect(errs[0].code).toBe("E-ATTR-001");
   });
-  test("a `>` inside a `\"…\"` value does not end the opener", async () => {
-    const r = build("l2-gt", { "app.scrml": app(`path="/a" method="POST" accepts=Op note="a>b" cors="${A}"`) });
-    expect(r.exitCode).toBe(0);
-    const base = await startProd(r.dist);
-    const pre = await fetch(base + "/a", { method: "OPTIONS", headers: { Origin: A, "Access-Control-Request-Method": "POST" } });
-    expect(pre.status).toBe(204);
-    expect(pre.headers.get("Access-Control-Allow-Origin")).toBe(A);
-  }, TIMEOUT_MS);
+  // S480: `note=` is outside §61.2 (E-ENDPOINT-ATTR-INVALID), so this is read at compile
+  // time: had the opener ended at the `>` inside `"a>b"`, `b" cors=…` would be body text and
+  // `cors=` lost. Read whole, the only refusal is `note` itself; the cors= is judged (valid).
+  test("a `>` inside a `\"…\"` value does not end the opener", () => {
+    const errs = compileOne(app(`path="/a" method="POST" accepts=Op note="a>b" cors="${A}"`));
+    expect(errs.map((e) => e.code)).toEqual(["E-ENDPOINT-ATTR-INVALID"]);
+    expect(errs[0].message).toContain("`note` is not an `<endpoint>` attribute");
+    const bad = compileOne(app(`path="/a" method="POST" accepts=Op note="a>b" cors="https://A.example"`));
+    expect(bad.map((e) => e.code)).toEqual(["E-ENDPOINT-ATTR-INVALID", "E-ENDPOINT-CORS-INVALID"]);
+  });
   test("an opener over several lines with tabs is read whole", () => {
     const errs = compileOne(app(`\tpath="/a"\n\tmethod="POST"\n\taccepts=Op\n\tcors="${A}"`));
     expect(errs).toEqual([]);
@@ -408,5 +413,36 @@ describe("path-rule messages match the bootstrap (compiler/self-host-v2/analyze.
     const errs = compileOne(app(`path="/\u{1F600}" method="POST" accepts=Op`));
     expect(errs.map((e) => e.code)).toEqual(["E-ENDPOINT-PATH-INVALID"]);
     expect(errs[0].message).toContain("`\uD83D` is not a path character");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S480 — E-ENDPOINT-ATTR-INVALID (ruling:user-voice-scrml.md-S480-four-recs-2 item 1):
+// §61.2 "An `<endpoint>` opener attribute whose name is not `path`, `method`, `accepts` or
+// `cors` — whatever its value, well-formed or none … — is `E-ENDPOINT-ATTR-INVALID`".
+// ---------------------------------------------------------------------------
+
+describe("§61.2 — an attribute outside endpoint-attrs is E-ENDPOINT-ATTR-INVALID", () => {
+  const BASE = `path="/a" method="POST" accepts=Op`;
+  for (const a of [`note="x"`, `note`, `cor="*"`, `CORS="*"`, `x:cors="*"`, `data-cors="*"`, `csrf="off"`, `bind:value=@x`, `onclick=f()`]) {
+    test(`\`${a}\` → E-ENDPOINT-ATTR-INVALID alone, at the attribute`, () => {
+      const errs = compileOne(app(`${BASE} ${a}`));
+      expect(errs.map((e) => e.code)).toEqual(["E-ENDPOINT-ATTR-INVALID"]);
+      expect(errs[0].span.line).toBe(7);
+      expect(errs[0].span.col).toBe(11 + BASE.length + 1);
+    });
+  }
+  test("each written occurrence is reported", () => {
+    const errs = compileOne(app(`${BASE} note="a" memo="b" note="c"`));
+    expect(errs.map((e) => e.code)).toEqual(["E-ENDPOINT-ATTR-INVALID", "E-ENDPOINT-ATTR-INVALID", "E-ENDPOINT-ATTR-INVALID"]);
+  });
+  test("`cor=\"*\"` is not compiled as an endpoint with no CORS: the build is refused", () => {
+    const r = build("attr-invalid-cor", { "app.scrml": app(`${BASE} cor="*"`) });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.out).toContain("E-ENDPOINT-ATTR-INVALID");
+    expect(existsSync(join(r.dist, "_server.js"))).toBe(false);
+  });
+  test("control: path= method= accepts= cors= only compiles clean", () => {
+    expect(compileOne(app(`${BASE} cors="${A}"`))).toEqual([]);
   });
 });

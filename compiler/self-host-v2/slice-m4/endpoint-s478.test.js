@@ -107,9 +107,24 @@ describe("A — §61 compile-time diagnostics", () => {
     expect(codes(withFn)).toEqual([]);
   });
 
-  test("§61.7: a csrf= attribute is refused (\"SHALL NOT carry a `csrf=` attribute\"), as is any other attribute", () => {
-    expect(refusals(ep(`path="/fsp" method="POST" accepts=FspMethod csrf="off"`)).join()).toContain("SHALL NOT carry a `csrf=`");
-    expect(codes(ep(`path="/fsp" method="POST" accepts=FspMethod auth="x"`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  // §61.2 / ruling:user-voice-scrml.md-S480-four-recs-2 item 1 — an attribute whose name is
+  // outside `endpoint-attrs` is E-ENDPOINT-ATTR-INVALID whatever its value (was E-BOOTSTRAP-UNSUPPORTED).
+  test("§61.7: a csrf= attribute is refused (\"SHALL NOT carry a `csrf=` attribute\"), as is any other attribute — E-ENDPOINT-ATTR-INVALID", () => {
+    const c = errs(ep(`path="/fsp" method="POST" accepts=FspMethod csrf="off"`));
+    expect(c.map((d) => d.code)).toEqual(["E-ENDPOINT-ATTR-INVALID"]);
+    expect(c[0].message).toContain("SHALL NOT carry a `csrf=`");
+    expect(codes(ep(`path="/fsp" method="POST" accepts=FspMethod auth="x"`))).toEqual(["E-ENDPOINT-ATTR-INVALID"]);
+  });
+
+  test("§61.2: a name outside endpoint-attrs is E-ENDPOINT-ATTR-INVALID whatever its value — matched exactly, at the attribute", () => {
+    for (const a of [`note="x"`, `note`, `cor="*"`, `CORS="*"`, `data-cors="*"`, `bind:value=@x`, `onclick=f()`]) {
+      const src = ep(`path="/fsp" method="POST" accepts=FspMethod ${a}`);
+      const ds = errs(src);
+      expect(ds.map((d) => d.code)).toEqual(["E-ENDPOINT-ATTR-INVALID"]);
+      expect(ds[0].span.start).toBe(src.indexOf(a));
+    }
+    // two unknown attributes: one report each
+    expect(errs(ep(`path="/fsp" method="POST" accepts=FspMethod note="a" memo="b"`)).map((d) => d.code)).toEqual(["E-ENDPOINT-ATTR-INVALID", "E-ENDPOINT-ATTR-INVALID"]);
   });
 
   // S479 ruling (user-voice) "program `cors=` does not cover `<endpoint>` routes; per-endpoint
