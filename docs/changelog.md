@@ -2,6 +2,16 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S479 — 2026-11-18 (bryan · theRog) — every S478 owner question ruled and built in reviewed lanes; three narrow impl#1 carve-outs; channel relay fold; file-scope `let`; endpoint path grammar and duplicate-key refusal; host OOM capped the session
+
+Rulings: user-voice §S479 (PA recs adopted on every batch; three impl#1 carve-outs). Every code PR took an S239 adversarial review on a frozen tree; every fix round got a fresh re-review.
+
+**Landed (13 PRs + bot regens):** #1957 (impl#1 endpoint 415 + strict keys) · #1958 (review markers) · #1960 (six SPEC-contradicting cases) · #1961 (keywordless binding = const; duplicate arm binder E-SCOPE-REDECLARE) · #1962 (file-scope `let`, per-artifact initializers, E-FILE-SCOPE-LET-SERVER-WRITE) · #1965 (E-ENDPOINT-PATH-INVALID, `/_scrml_local/`, duplicate JSON keys → Malformed, parseVariant alias) · #1966 (`:error` and E-DG-001 retired) · #1967 (channel relay fold + per-address bounds) · #1969 (E-PAGE-DUPLICATE, E-MATCH-FOR-REQUIRED) · #1970 (impl#1 `_dbVar` shared-type leak) · #1972 (timed engine cells judge `rule=` at commit) · #1974 (records; `url(#ident)`; `<db>` failure view) · #1978 (a `<request>` body is a client position).
+
+**Queued / open at wrap:** #1975, #1977 (merge queue); #1963, #1971 (reviewed, need main merged in); #1981 (unreviewed). Unpushed lanes and the owed list: `hand-off.md` §4.
+
+**Not run at wrap:** the full suite (systemd-oomd killed the whole session four times under parallel hooks); CI `gate` is the authority.
+
 ## S478 (second wrap) — 2026-11-17 → 11-18 (bryan · theRog) — op-based channel sync; 62 open owner questions ruled wholesale and built in 7 reviewed lanes; conformance PASS 599 → 638 (≈645 with #1947)
 
 - **Channels (§38):** op-based sync — each write syncs as its granted edit, checked by every receiver (#1937); relay-sequenced convergent order, a frame log replayed to late joiners and reconnects, derived writes kept local (#1941); relay bounds (64 KiB frames, 50/s burst-100 bucket, 1000-subscriber cap), client pacing so honest bursts lose nothing, dev-server Host allowlist, typed `onchange` arms (#1942). The tutorial chat compiles and converges.
