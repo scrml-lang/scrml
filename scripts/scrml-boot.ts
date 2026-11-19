@@ -554,7 +554,7 @@ function tenantScan(core: any, root: string, sources: Map<string, string>): Diag
 
 export async function compileSource(
   entry: string,
-  opts: { overlay?: ReadonlyMap<string, string>; rebuild?: boolean; log?: (s: string) => void; stdlibRoot?: string } = {},
+  opts: { overlay?: ReadonlyMap<string, string>; rebuild?: boolean; log?: (s: string) => void; stdlibRoot?: string; dev?: boolean } = {},
 ): Promise<CheckResult> {
   const entryAbs = resolve(entry);
   const overlay = opts.overlay;
@@ -637,7 +637,9 @@ export async function compileSource(
   // printProgram / printServer run checkCore themselves (the gate at emission); a finding is a refusal.
   const out = boot.mods.print.printProgram(fe.core, "program.client.js", "scrml-runtime.js");
   for (const r of out.refused ?? []) diagnostics.push(refusalDiag(String(r)));
-  const so = boot.mods["print-server"].printServer(fe.core, "program.server.js", "scrml-server-runtime.js");
+  // S480 (ruling:user-voice-scrml.md-S479-3B-rest-item-10, PERMANENT): the build mode is the artifact's —
+  // production unless the caller asks for a development build (`scrml-boot dev`, `compile --dev`)
+  const so = boot.mods["print-server"].printServerBuild(fe.core, "program.server.js", "scrml-server-runtime.js", opts.dev === true);
   for (const r of so.refused ?? []) if (!(out.refused ?? []).includes(r)) diagnostics.push(refusalDiag(String(r)));
   if (diagnostics.some((d) => d.severity === "error")) return result(false);
   const serverJs = typeof so.js === "string" && so.js !== "" ? (so.js as string) : undefined;
@@ -701,10 +703,10 @@ async function compileTool(
   return result(true, { tool: { file, js: String(to.js) }, hostFiles, hostSrc: { copies: hs.copies, shims: hs.shims } });
 }
 
-export async function compileFile(file: string, opts: { outDir?: string; rebuild?: boolean; log?: (s: string) => void; stdlibRoot?: string } = {}): Promise<CompileResult> {
+export async function compileFile(file: string, opts: { outDir?: string; rebuild?: boolean; log?: (s: string) => void; stdlibRoot?: string; dev?: boolean } = {}): Promise<CompileResult> {
   const entryAbs = resolve(file);
   const outDir = opts.outDir ? resolve(opts.outDir) : defaultOutDir(entryAbs);
-  const c = await compileSource(entryAbs, { rebuild: opts.rebuild, log: opts.log, stdlibRoot: opts.stdlibRoot });
+  const c = await compileSource(entryAbs, { rebuild: opts.rebuild, log: opts.log, stdlibRoot: opts.stdlibRoot, dev: opts.dev === true });
   const result = (ok: boolean, written: string[] = [], server = false): CompileResult =>
     ({ ok, diagnostics: c.diagnostics, sources: c.sources, files: c.files, outDir, written, server, tool: c.tool?.file, ms: c.ms });
   // s477 — a `kind="tool"` program: the module, its runtime, and the host files it imports
@@ -1307,7 +1309,8 @@ async function dev(file: string, opts: { outDir?: string; port: number; format: 
     const t = performance.now();
     let r: CompileResult;
     try {
-      r = await compileFile(entryAbs, { outDir: opts.outDir, log });
+      // S480 (ruling item 10): `scrml-boot dev` builds DEVELOPMENT
+      r = await compileFile(entryAbs, { outDir: opts.outDir, log, dev: true });
     } catch (e) {
       if (e instanceof OutDirError) log(red("scrml-boot: " + e.message));
       else log(red("scrml-boot: internal error: ") + String((e as Error)?.stack ?? e));
@@ -1335,10 +1338,11 @@ async function dev(file: string, opts: { outDir?: string; port: number; format: 
       // s478 review #1916 M2: an `<endpoint>` is mounted at its author-declared `path=` (§61.7),
       // outside `/_scrml/` — the dev server hands those exact paths to the program's server
       for (const e of mod.manifest?.endpoints ?? []) if (typeof e?.path === "string") endpointPaths.add(e.path);
-      // `dev: true` — this is the DEV build (S474 ruling 2 as amended, "capability over limitation"
-      // item 3): a failed query's driver text stays in the failure the client receives. A deployed
-      // `compile` output is served by its own host, which does not pass it: production, blanked.
-      server = mod.createServer({ root: dirname(entryAbs), dev: true });
+      // a DEVELOPMENT build (compiled `dev: true` above — S474 ruling 2 as amended, "capability over
+      // limitation" item 3): a failed query's driver text stays in the value the client receives. The
+      // ARTIFACT carries its mode (S480 ruling item 10); a host flag decides nothing, so a deployed
+      // `compile` output is production (driver text withheld) whatever serves it.
+      server = mod.createServer({ root: dirname(entryAbs) });
     }
     log(`✓ ${reason}: compiled ${shown(entryAbs)} in ${Math.round(performance.now() - t)} ms → ${shown(r.outDir)}`);
     for (const c of clients) { try { c.enqueue("data: reload\n\n"); } catch { clients.delete(c); } }
@@ -1429,8 +1433,8 @@ async function dev(file: string, opts: { outDir?: string; port: number; format: 
 const USAGE = `scrml-boot — compile scrml with the BOOTSTRAP compiler (compiler/self-host-v2/, the ruled language)
 
 Usage:
-  scrml-boot compile <file.scrml> [options]   Compile; write index.html + program.client.js + runtime
-  scrml-boot dev <file.scrml> [options]       Compile, serve on 127.0.0.1, recompile + reload on save
+  scrml-boot compile <file.scrml> [options]   Compile a PRODUCTION build; write index.html + program.client.js + runtime
+  scrml-boot dev <file.scrml> [options]       Compile a DEVELOPMENT build, serve on 127.0.0.1, recompile + reload on save
 
 Options:
   --output-dir, -o <dir>   Output directory (default: dist/<name>/ next to the file). scrml-boot records
@@ -1438,6 +1442,8 @@ Options:
                            only those files, and refuses a directory holding an unrecorded file it would write
   --format <pretty|line>   Diagnostic format (default pretty; line = file:line:col: error [CODE]: msg)
   --columns <utf16|bytes>  The col unit (default utf16, as JS/LSP count; bytes = UTF-8, for vim's %c)
+  --dev                    compile: a DEVELOPMENT build (what \`dev\` serves) — database driver text then
+                           reaches the client; never deploy one. Without it \`compile\` builds production
   --rebuild                Rebuild the cached bootstrap bundle even if its inputs did not change
   --port <n>               dev: HTTP port (default 3000)
   --allow-host <name>      dev: also answer requests whose Host is <name> (repeatable). Otherwise only
@@ -1464,6 +1470,7 @@ async function main(argv: string[]): Promise<number> {
   let port = 3000;
   let rebuild = false;
   let verbose = false;
+  let devBuild = false;
   const allowHosts = new Set<string>();
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i];
@@ -1488,6 +1495,7 @@ async function main(argv: string[]): Promise<number> {
         allowHosts.add(n);
       }
       else if (a === "--rebuild") rebuild = true;
+      else if (a === "--dev") devBuild = true;
       else if (a === "--verbose" || a === "-v") verbose = true;
       else if (a.startsWith("-")) throw new Error(`unknown option ${a}`);
       else if (file === undefined) file = a;
@@ -1510,7 +1518,7 @@ async function main(argv: string[]): Promise<number> {
   const t0 = performance.now();
   let r: CompileResult;
   try {
-    r = await compileFile(file, { outDir, rebuild, log: (s) => console.error(s) });
+    r = await compileFile(file, { outDir, rebuild, log: (s) => console.error(s), dev: devBuild });
   } catch (e) {
     if (!(e instanceof OutDirError)) throw e;
     console.error(red("scrml-boot: " + e.message));
@@ -1527,7 +1535,8 @@ async function main(argv: string[]): Promise<number> {
     return 1;
   }
   const outRel = shown(r.outDir);
-  console.log(`✓ compiled ${shown(resolve(file))} → ${outRel}/ (${r.written.join(", ")})${warnings ? ` · ${warnings} warning${warnings === 1 ? "" : "s"}` : ""}`);
+  console.log(`✓ compiled ${shown(resolve(file))} → ${outRel}/ (${r.written.join(", ")})${warnings ? ` · ${warnings} warning${warnings === 1 ? "" : "s"}` : ""}${devBuild ? " · DEVELOPMENT build" : ""}`);
+  if (devBuild && r.server) console.error(red("scrml-boot: --dev — a DEVELOPMENT build: database driver text reaches the client (§19.8.4); do not deploy it"));
   return 0;
 }
 

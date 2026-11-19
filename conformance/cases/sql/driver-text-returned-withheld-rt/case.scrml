@@ -1,0 +1,14 @@
+// §19.9.1 (S480, RULED S479 item 16) — a production build withholds a failed query's driver text from
+// a RETURNED value, not only from a failure: the handler's string comes back blanked, never "no such column …".
+<program db="./app.db">
+    function lookup(id: int) -> string {
+        let out: string = "none";
+        ?{`SELECT secret_col FROM users WHERE id = ${id}`}.run() !{ .QueryFailed(m) :> { out = m; }, _ :> { out = "other"; }, };
+        return out;
+    }
+    let <said:string="start"/>
+    <main>
+        <button id="go" onclick={ @said = lookup(1) !{ _ :> "transport", }; }>go</button>
+        <p id="said">[${@said}]</p>
+    </main>
+</program>

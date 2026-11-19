@@ -919,7 +919,7 @@ function logLine(host, line) {
 // (a unit variant is its name; a payload variant `{ variant, data: [...] }`).
 // The value keeps the full driver text, so a `?{}` handled in server code
 // where it is written sees it (S474 ruling 2); what crosses the wire in a
-// route's failure answer is decided at the boundary (`withholdDriverText`).
+// route's failure answer is decided at the boundary (`deliverable` — a failure and, S480, a returned value).
 // ---------------------------------------------------------------------------
 // `params`: each DISTINCT value, evaluated once (§8.2); `slots[i]`: the param the
 // template's i-th `${}` binds (core.scrml SqlQuery — C-SQL1 lines them up).
@@ -1225,14 +1225,39 @@ function constraintField(e, msg) {
 //  - NOT tracked (best effort, not a guarantee — g-boot-wire-driver-text-transformed-
 //    not-tracked-s474): driver text the author TRANSFORMS (`m.slice(16)`,
 //    `f.toUpperCase()`) — JS strings carry no taint, so the author owns what a
-//    handler builds — and a success value the author returns.
-//  - DEV build (`host.dev === true`, passed by `scrml-boot dev`; every other host,
-//    a deployed `scrml-boot compile` output included, is production): delivered
-//    unchanged.
+//    handler builds.
+//  - S480 (s480-build-mode; ruling:user-voice-scrml.md-S479-3B-rest-item-16, PERMANENT — "the
+//    production-build withhold applies to every value a route delivers, returned as well as
+//    failed"): the same rule is applied to a RETURNED value (`_ e :> { return e }`, a struct or
+//    string carrying `m`), and to an `<endpoint>` arm's answer (§61.5), not only to a failure.
+//    The walk is TYPE-DIRECTED (`withheldValue`, by the route's §57 table): only a `string`
+//    position is ever blanked — never a variant name, a field name, a number — so a blanked
+//    value still decodes against its type on the client.
+//  - DEV build: the ARTIFACT is a dev build (print-server.scrml printServerBuild with `dev` —
+//    `scrml-boot dev`, `scrml-boot compile --dev` — wraps its host in `devBuild`): delivered
+//    unchanged. Every other artifact is production, whatever its host passes (a host's own
+//    `dev: true` decides nothing — ruling item 10: "the deployed artifact fails safe").
 // Fail closed: with no AsyncLocalStorage the request's texts cannot be told
-// apart, so a production build blanks EVERY string of a failure payload.
+// apart, so a production build blanks EVERY string of a failure payload; a
+// returned value is checked against every driver text the process recorded
+// outside a request scope (`UNSCOPED`, bounded) — never blanked wholesale, so an
+// ordinary returned string is the author's.
 // The full text was already logged where the query failed (runQuery).
 // ---------------------------------------------------------------------------
+const DEV_BUILD = Symbol("scrml.devBuild");
+// The host of a DEVELOPMENT build's server (printed only by a dev compile). A new object whose
+// prototype is the host, so every host member (`connect`, `log`, `respond`, …) reads through.
+export function devBuild(host) {
+  const h = Object.create(host !== null && typeof host === "object" ? host : null);
+  Object.defineProperty(h, DEV_BUILD, { value: true });
+  return h;
+}
+function isDevBuild(host) {
+  return host !== null && typeof host === "object" && host[DEV_BUILD] === true;
+}
+// driver texts recorded where no request scope is open (no AsyncLocalStorage on this host)
+const UNSCOPED = { texts: [], messages: [], tokens: [], unknown: false };
+const UNSCOPED_MAX = 256;
 let reqScope = null;
 function requestStore() {
   if (reqScope === null) {
@@ -1245,13 +1270,14 @@ function requestStore() {
 }
 
 function noteDriverText(e, err) {
-  if (reqScope === null) return;
-  const rec = reqScope.getStore();
-  if (rec === undefined) return;
+  const scoped = reqScope === null ? undefined : reqScope.getStore();
+  const rec = scoped === undefined ? UNSCOPED : scoped;
   const addTo = (list, t) => {
     if (typeof t !== "string" || t === "" || list.includes(t)) return;
     list.push(t);
     rec.texts.push(t);
+    if (rec === UNSCOPED && list.length > UNSCOPED_MAX) list.shift();
+    if (rec === UNSCOPED && rec.texts.length > UNSCOPED_MAX * 2) rec.texts.shift();
   };
   const msg = messageOf(e);
   addTo(rec.messages, msg);
@@ -1265,25 +1291,74 @@ function noteDriverText(e, err) {
   }
 }
 
-// The encoded failure `wire` with every driver-derived string blanked (see above).
-function withholdDriverText(wire, rec) {
+// The runtime VALUE `v` of §57 table `table` with every driver-derived `string` blanked (see
+// above), walked by its type: a `str` position is blanked when `tainted`; a variant name, a field
+// name, a number, a boolean never is. A value whose shape is not its type's is returned as it is
+// (the encoder refuses it next: a 500, which carries nothing).
+function withheldValue(table, v, tainted) {
   let changed = false;
-  const tainted = (str) => rec.unknown || rec.messages.some((t) => str.includes(t)) || rec.tokens.includes(str);
-  const walk = (v) => {
-    if (typeof v === "string") {
-      if (v !== "" && tainted(v)) { changed = true; return ""; }
-      return v;
+  const defs = table && table.defs ? table.defs : [];
+  const walk = (ty, x) => {
+    if (ty === null || typeof ty !== "object") return x;
+    if (ty.k === "maybe") return x === null || x === undefined ? x : walk(ty.inner, x);
+    if (ty.k === "str") {
+      if (typeof x === "string" && x !== "" && tainted(x)) { changed = true; return ""; }
+      return x;
     }
-    if (Array.isArray(v)) return v.map(walk);
-    if (v !== null && typeof v === "object") {
-      const out = {};
-      for (const k of Object.keys(v)) out[k] = walk(v[k]);
-      return out;
+    if (ty.k === "seq") return Array.isArray(x) ? x.map((e) => walk(ty.elem, e)) : x;
+    if (ty.k !== "ref") return x;
+    const d = defs[ty.def];
+    if (d === undefined || x === null || typeof x !== "object") return x;
+    if (d.k === "enum") {
+      if (!Array.isArray(x.data) || !Array.isArray(d.variants)) return x;
+      const p = d.variants.find((q) => q.name === x.variant);
+      if (p === undefined || !Array.isArray(p.fields)) return x;
+      return { variant: x.variant, data: x.data.map((e, i) => (i < p.fields.length ? walk(p.fields[i].ty, e) : e)) };
     }
-    return v;
+    if (Array.isArray(x) || !Array.isArray(d.fields)) return x;
+    const out = {};
+    for (const k of Object.keys(x)) {
+      const f = d.fields.find((q) => q.name === k);
+      out[k] = f === undefined ? x[k] : walk(f.ty, x[k]);
+    }
+    return out;
   };
-  const data = walk(wire.data);
-  return { wire: changed ? { ...wire, data } : wire, changed };
+  const value = walk(table ? table.root : null, v);
+  return { value: changed ? value : v, changed };
+}
+
+// The tainted-string test of a request's record: a string CONTAINING a whole recorded driver
+// message, or EQUAL to a recorded non-column token (never a token as a substring — #1703 F2).
+function taintedBy(rec) {
+  return (str) => rec.messages.some((t) => str.includes(t)) || rec.tokens.includes(str);
+}
+
+// What a route of a PRODUCTION build delivers in place of `v` (its §57 table `table`): `v` with the
+// request's driver text withheld (S474 ruling 2; S480 ruling item 16 — "every value a route
+// delivers, returned as well as failed"). `what` names the delivery in the log line. A dev build
+// delivers `v` unchanged. `failure`: with no request scope a failure payload is blanked whole.
+function deliverable(host, rec, table, v, failure, where, what) {
+  if (isDevBuild(host)) return v;
+  let tainted;
+  if (rec.unknown && failure) tainted = () => true;
+  else {
+    const r = rec.unknown ? UNSCOPED : rec;
+    if (r.texts.length === 0) return v;
+    tainted = taintedBy(r);
+  }
+  const w = withheldValue(table, v, tainted);
+  if (w.changed) {
+    logLine(host, `scrml server: ${where} — ${what} carried database driver text; blanked in the response (production build, S474 ruling 2 / S480 ruling item 16) — the full text is logged above`);
+  }
+  return w.value;
+}
+
+// A fresh request record, and the scope it is noted in (`unknown`: no AsyncLocalStorage on this host).
+function requestRecord() {
+  const rec = { texts: [], messages: [], tokens: [], unknown: false };
+  const rs = requestStore();
+  if (rs === null) rec.unknown = true;
+  return { rec, run: (fn) => (rs === null ? fn() : rs.run(rec, fn)) };
 }
 
 // ---------------------------------------------------------------------------
@@ -2422,7 +2497,8 @@ async function handleEndpoint(host, ep, request) {
   let text;
   try { text = await request.text(); } catch { return decodeFailure(host, "Malformed", "the request body could not be read"); }
   let v;
-  try { v = JSON.parse(text); } catch (e) { return decodeFailure(host, "Malformed", `request body is not JSON: ${messageOf(e)}`); }
+  // S480: the JS host's parser message only in a dev build (a production answer carries no host error text)
+  try { v = JSON.parse(text); } catch (e) { return decodeFailure(host, "Malformed", isDevBuild(host) ? `request body is not JSON: ${messageOf(e)}` : "request body is not JSON"); }
   if (v === null || typeof v !== "object" || Array.isArray(v)) return decodeFailure(host, "Malformed", "request body is not a JSON object");
   const rep = jsonRepeatedKeyRt(text);
   if (rep !== undefined) return decodeFailure(host, "Malformed", `request body repeats the key '${clip(rep)}' in one object`);
@@ -2449,8 +2525,10 @@ async function handleEndpoint(host, ep, request) {
   }
   if (arm.run === null) return noContent(host);
   let result;
+  // S480 (ruling item 16): the arm's queries note their driver text in this request's record, as a route's do
+  const { rec, run } = requestRecord();
   try {
-    result = await arm.run(args);
+    result = await run(() => arm.run(args));
   } catch (e) {
     // the arm's parameter check (refineEntry) — the request's payload, not the server, is at fault (§61.3: "decoded with §53 refinement enforcement")
     if (e !== null && typeof e === "object" && ENTRY_TRAPS.has(e)) {
@@ -2466,7 +2544,7 @@ async function handleEndpoint(host, ep, request) {
     logLine(host, `scrml server: ${ep.method} ${ep.path} <${variant.name}> has no result table`);
     return jsonResponse(host, 500, FIXED[500]);
   }
-  const out = encode(arm.result, result);
+  const out = encode(arm.result, deliverable(host, rec, arm.result, result, false, `${ep.method} ${ep.path} <${variant.name}>`, "its answer"));
   if (!out.ok) {
     logLine(host, `scrml server: ${ep.method} ${ep.path} <${variant.name}> — its answer does not encode (${out.error.reason})`);
     return jsonResponse(host, 500, FIXED[500]);
@@ -2499,11 +2577,9 @@ async function handle(host, r, request) {
     args.push(d.value);
   }
   let result;
-  const rec = { texts: [], messages: [], tokens: [], unknown: false };
-  const rs = requestStore();
-  if (rs === null) rec.unknown = true;
+  const { rec, run } = requestRecord();
   try {
-    result = rs === null ? await r.run(args) : await rs.run(rec, () => r.run(args));
+    result = await run(() => r.run(args));
   } catch (e) {
     logLine(host, `scrml server: ${r.path} threw — ${messageOf(e)}`);
     // Review #1911 MED-1: the route's own parameter check (refineEntry) — 400, naming
@@ -2519,23 +2595,18 @@ async function handle(host, r, request) {
       logLine(host, `scrml server: ${r.path} returned a failure but declares no error type`);
       return jsonResponse(host, 500, FIXED[500]);
     }
-    const env = encodeError(r.desc.error, result.error);
+    const ev = result.error;
+    const errv = deliverable(host, rec, r.desc.error, ev, true, r.path, `its failure (${String(ev !== null && typeof ev === "object" ? ev.variant : ev)})`);
+    const env = encodeError(r.desc.error, errv);
     if (!env.ok) {
       logLine(host, `scrml server: ${r.path} — its error does not encode (${env.error.reason})`);
       return jsonResponse(host, 500, FIXED[500]);
     }
-    let out = env.wire;
-    if (!(host && host.dev === true) && (rec.unknown || rec.texts.length > 0)) {
-      const w = withholdDriverText(out, rec);
-      if (w.changed) {
-        out = w.wire;
-        logLine(host, `scrml server: ${r.path} — its failure (${out.variant}) carried database driver text; blanked in the response (production build, S474 ruling 2) — the full text is logged above`);
-      }
-    }
+    const out = env.wire;
     return jsonResponse(host, failStatus(out.variant), out);
   }
   if (r.desc.result === null) return noContent(host);
-  const out = encode(r.desc.result, result);
+  const out = encode(r.desc.result, deliverable(host, rec, r.desc.result, result, false, r.path, "its returned value"));
   if (!out.ok) {
     logLine(host, `scrml server: ${r.path} — its answer does not encode (${out.error.reason})`);
     return jsonResponse(host, 500, FIXED[500]);

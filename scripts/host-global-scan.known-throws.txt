@@ -122,6 +122,7 @@
 [esm] conformance/cases/reactive/w-timed-read-modify-write-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
 [esm] conformance/cases/server-db/sql-delete-reflects-rt-twin/case.scrml  # emit-client-esm: The keyword 'let' is reserved (a §66 twin, XFAIL on impl#1 by design: impl#1 does not parse the §66 opener; s468 U1c)
 [esm] conformance/cases/server-db/sql-get-single-row-rt-twin/case.scrml  # emit-client-esm: The keyword 'let' is reserved (a §66 twin, XFAIL on impl#1 by design: impl#1 does not parse the §66 opener; s468 U1c)
+[esm] conformance/cases/sql/driver-text-returned-withheld-rt/case.scrml  # emit-client-esm: The keyword 'let' is reserved
 [esm] samples/compilation-tests/error-004-in-logic.scrml  # emit-client-esm: The keyword 'let' is reserved
 [esm] samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-const-no-init-002.scrml  # emit-client-esm: Unexpected token
 [esm] samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-fn-prohibition-async-008.scrml  # emit-client-esm: Cannot use keyword 'await' outside an async function
