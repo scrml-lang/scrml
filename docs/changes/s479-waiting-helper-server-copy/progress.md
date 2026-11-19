@@ -32,3 +32,12 @@ Gap: g-boot-waiting-helper-server-copy-s479 (filed by #1978). Base: origin/main 
 - Mutation check: dropping keepNewDiags duplicates the defer-body refusal (test catches it).
 - Residue filed: g-boot-server-copy-bang-envelope-s479 (a `!` helper reached only through another copy — refused by name).
 
+
+## Final gates (head 0444654c1)
+- hook PASS (commit 0444654c1); pushed.
+- bootstrap conformance: PASS 730 / FAIL 0 / UNSUPPORTED 556 / CRASH 0 (base 726/0/560/0); 4 UNSUPPORTED→PASS
+  (mixed-recursion-client-caller-rt + the 3 new server-copy cases); no PASS→FAIL.
+- byte-compare (corpus.mjs, 3210 files): 299 compile on both (160 conformance cases) — all identical (client js/html,
+  server js, refusals); error-code sets identical for every file except the 4 target programs.
+- pretest rc 0; s34-census --check-new, types-gate --check, snippet-gate, claim-gate, corpus-compile-floor --check,
+  gen-md-shim --check: all PASS.
