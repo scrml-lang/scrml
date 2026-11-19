@@ -403,8 +403,9 @@ describe("r3 — every distinct fix reported, hints that compile (§66.12.6 rule
   // INFO: keptPathClass scanned every keep read per literal visit, and the memo recorded a key per path with keep
   // reads under it (each lookup linear in them) — quadratic in the keep reads. A let DAG 24 deep plus 800 literals each reading two places: base checkCore 2.2 s (1600: 8.3 s); r3 0.16 s (a sorted prefix set, "*"-only memo).
   // #2006 r1 (CI flake: at M = 800 the FRONT END, which this test does not measure, took 166 s on a CI runner and hit the
-  // 120 s test timeout): M = 600 and a 375 ms bound. Measured locally, check.scrml from 9047dd5de (before #2003) vs head on
-  // the same Core: base checkCore 1156-1172 ms (>= 3x the bound), head 100-109 ms (<= bound/3); front end 4.8 s (M = 800: 8.2 s).
+  // 120 s test timeout): M = 600 and a 750 ms bound. Measured locally, check.scrml from 9047dd5de (before #2003) vs head on
+  // the same Core: base checkCore 1156-1172 ms (fails the bound), head 100-109 ms (~7x headroom — CI runners have run ~20x
+  // slower than local on the front end); front end 4.8 s (M = 800: 8.2 s).
   test("kr24 + 600 keep-reading literals: Core C3 clean, fast (check.scrml keptPathClass)", () => {
     const n = 24, M = 600;
     let s = 12345;
@@ -419,7 +420,7 @@ describe("r3 — every distinct fix reported, hints that compile (§66.12.6 rule
     expect(errs(r)).toEqual([]);
     const [c, ms] = timed(() => mods().check.checkCore(r.core));
     expect(c).toEqual([]);
-    expect(ms).toBeLessThan(375);
+    expect(ms).toBeLessThan(750);
   }, 300_000);
 });
 
