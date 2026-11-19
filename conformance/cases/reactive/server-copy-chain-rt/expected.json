@@ -1,0 +1,60 @@
+{
+  "id": "reactive-server-copy-chain-rt",
+  "description": "A chain of waiting client helpers (`k` → `h` → server `down`), each with a client caller (the pending cell `v` calls `k`), also called from the server function `top`: each helper runs in place there through its server copy. v = k(1) = (down(1) + 1) * 10 = (1 + 1 + 1) * 10 = 30; w = top(1) = k(1) + u.id = 31. RUNTIME, sqlEngine \"real\".",
+  "language-version": "1.0",
+  "spec": "§12.2, §13.4, §19.9.10",
+  "provenance": "lane:s479-waiting-helper-server-copy (g-boot-waiting-helper-server-copy-s479, filed by #1978).",
+  "rationale": "§12.2 Trigger 5: 'A function with at least one client-classified caller SHALL remain ambient (client-classified).' §19.9.10 'Not affected': 'A call whose caller is itself server-placed runs in the same server handler: the callee is inlined (§13.4), no request is made, and nothing on the wire can fail. Its failure set is the callee's own — none for a function not declared `!`.' §13.4: 'the compiler SHALL generate TWO representations of B … These are independent code paths.'",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "sqlEngine": "real",
+    "serverDb": {
+      "users": [
+        {
+          "id": 1,
+          "name": "a"
+        }
+      ]
+    },
+    "input": [
+      {
+        "wait": "settle"
+      }
+    ],
+    "state": {
+      "v": 30,
+      "w": 31
+    },
+    "domAnchored": [
+      {
+        "selector": "#v",
+        "text": "30"
+      },
+      {
+        "selector": "#w",
+        "text": "31"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-pending-cells-unbuilt-s477",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=2",
+          "emitted:E-SCOPE-001=2",
+          "emitted:E-STATE-UNDECLARED=2",
+          "emitted:E-TYPE-045=2",
+          "prefix:E-MARKUP-001 (matches forbidden E-*)",
+          "prefix:E-SCOPE-001 (matches forbidden E-*)",
+          "prefix:E-STATE-UNDECLARED (matches forbidden E-*)",
+          "prefix:E-TYPE-045 (matches forbidden E-*)"
+        ],
+        "runtime": "sha256:48f96b59bef15d2d"
+      }
+    }
+  }
+}

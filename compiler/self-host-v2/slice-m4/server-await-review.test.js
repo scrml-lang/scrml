@@ -97,10 +97,15 @@ const REVIEW_EXPECT = {
   "s2/andLeftWait": ["PASS"],
   "s2/orBothSides": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
   "s2/nestedTernaryTest": ["PASS"],
-  "s3/twoRepServerFn": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED", "E-ERROR-002", "E-ERROR-013"]],
+  // s479 (s479-waiting-helper-server-copy): `cs` waits and has a client caller (the button) and a server
+  // caller — its server copy is built, so the server-copy refusal is gone; the probe's own defects remain
+  // (`cs`'s unhandled client call of `check`, E-ERROR-002; a handler on the non-failable `cs`, E-ERROR-013)
+  "s3/twoRepServerFn": ["REFUSED", ["E-ERROR-002", "E-ERROR-013"]],
   "s3/routeCalledInPlace": ["PASS"],
   "s3/routeCalledInPlaceNoQ": ["REFUSED", ["E-ERROR-002"]],
-  "s3/ambientWaitingRb": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED", "E-ERROR-002"]],
+  // s479 (s479-waiting-helper-server-copy): the server-placed `g3` calls the waiting ambient `amb` — its
+  // server copy is built (no server-copy refusal); `amb`'s unhandled client call of `f` stays E-ERROR-002
+  "s3/ambientWaitingRb": ["REFUSED", ["E-ERROR-002"]],
   // fix round 1 F1: implicit §19.8.2 propagation of a `?{}` — was checkCore RED (C-S7), now clean
   "s4/implicitProp": ["PASS"],
   "s4/implicitPropChain": ["PASS"],
