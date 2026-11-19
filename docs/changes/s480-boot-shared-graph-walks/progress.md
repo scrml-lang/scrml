@@ -10,5 +10,10 @@ Branch from origin/main c61700fee (#1991 merged). Review findings of #1991: F1, 
 - Residue filed: g-boot-shared-graph-walk-residue-s480. F1 filed+resolved: g-boot-tape-grant-walk-exponential-s480. Resolved: g-boot-host-desc-exponential-s480.
 - Tests: compiler/self-host-v2/slice-m4/shared-graph-walks-s480.test.js (21 pass on head; red on base: F1 counts/time, F3 time, F2 size; base OOM-killed at the depth-8 test under the 4G cap).
 
-## Gates
-- (filled in as run)
+## Gates (on 5239ec30e)
+- `bun run pretest` exit 0; the pre-commit hook PASSED (57 039 tests, 1964 files).
+- `bun scripts/bootstrap-conformance.ts --json`: 1919 attempted, PASS 724, FAIL 0, CRASH 0 (main is the same).
+- Corpus (examples/, samples/, benchmarks/, 959 files): old bootstrap (c61700fee) vs new, diagnostics and emitted
+  client/server/host outputs. 0 programs changed. (`files` differs only by the absolute tree path.)
+- CI checks: s34-census --check-new PASS; types-gate OK (unchanged); snippet-gate 0 fail; claim-gate 0 fail;
+  corpus-compile-floor PASS; gen-md-shim current.
