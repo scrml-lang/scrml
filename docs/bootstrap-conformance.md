@@ -7,22 +7,22 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1926 of 1926 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1928 of 1928 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 732 | 38.0% |
+| PASS | 734 | 38.1% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 0 | 0.0% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 638 | 33.1% |
-| UNSUPPORTED | 556 | 28.9% |
+| UNSUPPORTED | 556 | 28.8% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 732; of those, 732 hold (100.0%). Runtime half executed on the bootstrap for 238 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 734; of those, 734 hold (100.0%). Runtime half executed on the bootstrap for 238 case(s).
 
-- **Vacuous** passes: 17 of 732 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **715**.
+- **Vacuous** passes: 16 of 734 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **718**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 0 of 0; the other 0 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
@@ -30,7 +30,7 @@ UNSUPPORTED by reason: bootstrap-unsupported 556.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **889** — PASS 475 · UNSUPPORTED 414. Twin holds 475 (non-vacuous 461). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **889** — PASS 475 · UNSUPPORTED 414. Twin holds 475 (non-vacuous 462). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 5 replace a twin's expectations · 14 exclude a case.
 - Superseded-code mappings applied: 8 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -123,7 +123,7 @@ NOT-TWINNED by reason (638 cases; a case counts once per distinct reason):
 | error | 80 | 56 | · | · | · | 5 | 19 | · | · |
 | error-boundary | 11 | 1 | · | · | · | · | 10 | · | · |
 | files | 1 | 1 | · | · | · | · | · | · | · |
-| fn | 25 | 17 | · | · | · | 1 | 7 | · | · |
+| fn | 27 | 19 | · | · | · | 1 | 7 | · | · |
 | foreign | 16 | 8 | · | · | · | 7 | 1 | · | · |
 | form-for | 16 | · | · | · | · | · | 16 | · | · |
 | forms | 66 | 15 | · | · | · | 49 | 2 | · | · |
@@ -179,7 +179,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (732)
+### PASS / CODES-ONLY (734)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -288,7 +288,7 @@ none
 - `control-flow/ctrl-005-else-and-if-same-element-neg` — PASS · TWIN
 - `control-flow/ctrl-005-else-and-if-same-element-pos` — PASS · TWIN
 - `control-flow/ctrl-005-else-and-if-same-element-program-pos` — PASS
-- `control-flow/ctrl-010-else-on-for-without-lift-neg` — PASS · TWIN · VACUOUS
+- `control-flow/ctrl-010-else-on-for-without-lift-neg` — PASS · TWIN · VACUOUS (also emitted, unasserted: W-UNUSED-BINDING)
 - `control-flow/ctrl-012-bare-control-flow-default-logic-root-neg` — PASS
 - `control-flow/ctrl-012-bare-control-flow-in-markup-neg` — PASS · TWIN
 - `control-flow/ctrl-012-default-logic-multiline-prose-neg` — PASS
@@ -476,7 +476,7 @@ none
 - `error/handler-unhandled-failable-bare-and-expr-pos` — PASS · TWIN
 - `error/handler-unhandled-failable-multi-stmt-pos` — PASS · TWIN
 - `error/handler-unhandled-failable-one-stmt-pos` — PASS · TWIN
-- `error/implicit-tx-explicit-transaction-block` — PASS (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
+- `error/implicit-tx-explicit-transaction-block` — PASS (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER, W-UNUSED-BINDING)
 - `error/match-failable-ok-arm-rt` — PASS · TWIN
 - `error/propagate-in-non-failable-fn-neg` — PASS · TWIN
 - `error/propagate-in-non-failable-fn-pos` — PASS · TWIN
@@ -490,7 +490,7 @@ none
 - `error/transaction-non-failable-fn-neg` — PASS (also emitted, unasserted: E-ERROR-002)
 - `error/transaction-top-level-neg` — PASS
 - `error/try-not-in-scrml` — PASS · TWIN
-- `error/w-tx-exit-rolls-back-pos` — PASS (also emitted, unasserted: E-DG-002)
+- `error/w-tx-exit-rolls-back-pos` — PASS (also emitted, unasserted: E-DG-002, W-UNUSED-BINDING)
 - `files/multifile-import` — PASS · TWIN
 - `fn/arrow-body-reject` — PASS · TWIN
 - `fn/async-decl-reject` — PASS · TWIN
@@ -509,12 +509,14 @@ none
 - `fn/scope-redeclare-neg` — PASS · TWIN
 - `fn/scope-redeclare-nested-ok` — PASS · TWIN
 - `fn/sync-decl-clean` — PASS · TWIN
+- `fn/unused-binding-neg` — PASS
+- `fn/unused-binding-pos` — PASS
 - `foreign/foreign-crossing-shadow-in-block-neg` — PASS
 - `foreign/foreign-inline-no-lang-neg` — PASS
 - `foreign/foreign-lang-in-program-neg` — PASS
 - `foreign/foreign-slice-await-regex-pos` — PASS
 - `foreign/foreign-slice-lexing-regex-quote-pos` — PASS
-- `foreign/foreign-slice-no-free-capture-neg` — PASS
+- `foreign/foreign-slice-no-free-capture-neg` — PASS (also emitted, unasserted: W-UNUSED-BINDING)
 - `foreign/foreign-slice-sealed-crossings-pos` — PASS
 - `foreign/foreign-slice-unparseable-in-block-neg` — PASS
 - `forms/bind-value-input` — PASS · TWIN
@@ -547,7 +549,7 @@ none
 - `lifecycle/effect-writes-state-neg` — PASS · TWIN
 - `lifecycle/effect-writes-state-transitive-pos` — PASS · TWIN
 - `lifecycle/pending-cell-cell-free-helper-loads-once-rt` — PASS
-- `lifecycle/pending-cell-helper-reset-then-write-wins-rt` — PASS
+- `lifecycle/pending-cell-helper-reset-then-write-wins-rt` — PASS (also emitted, unasserted: W-UNUSED-BINDING)
 - `lifecycle/pending-cell-reset-on-cycle-pos` — PASS
 - `lifecycle/pending-cell-reset-on-reloads-rt` — PASS
 - `lifecycle/pending-cell-reset-reloads-rt` — PASS
@@ -573,10 +575,10 @@ none
 - `linear/lin-003-branch-asymmetry-neg` — PASS · TWIN
 - `linear/lin-003-branch-asymmetry-pos` — PASS · TWIN
 - `linear/must-use-unread-neg` — PASS · TWIN · VACUOUS
-- `linear/must-use-unread-pos` — PASS · TWIN · VACUOUS
+- `linear/must-use-unread-pos` — PASS · TWIN
 - `loop/loop-001-break-outside` — PASS · TWIN
 - `loop/loop-002-continue-outside` — PASS · TWIN
-- `loop/loop-006-neg` — PASS · TWIN
+- `loop/loop-006-neg` — PASS · TWIN (also emitted, unasserted: W-UNUSED-BINDING)
 - `markup-handler/inline-block-handler-assign-led-order` — PASS · TWIN
 - `markup-handler/inline-block-handler-call-first` — PASS · TWIN
 - `markup-handler/inline-block-handler-in-engine-state-child` — PASS · TWIN
@@ -778,7 +780,7 @@ none
 - `reactive/narrowing-survives-exiting-branch-write-pos` — PASS · TWIN
 - `reactive/narrowing-survives-non-writing-call-pos` — PASS · TWIN
 - `reactive/narrowing-survives-other-cell-write-pos` — PASS · TWIN
-- `reactive/narrowing-survives-write-after-loop-pos` — PASS · TWIN
+- `reactive/narrowing-survives-write-after-loop-pos` — PASS · TWIN (also emitted, unasserted: W-UNUSED-BINDING)
 - `reactive/narrowing-sync-callback-keeps-pos` — PASS · TWIN
 - `reactive/no-write-attr-neg` — PASS
 - `reactive/no-write-attr-pos` — PASS
@@ -893,7 +895,7 @@ none
 - `tool/file-scope-let-write-exempt` — PASS
 - `tool/tool-exit-harness-stdout-pos` — PASS
 - `tool/tool-fn-main-neg` — PASS
-- `tool/tool-foreign-crossing-shadow-neg` — PASS
+- `tool/tool-foreign-crossing-shadow-neg` — PASS (also emitted, unasserted: W-UNUSED-BINDING)
 - `tool/tool-foreign-unbuildable-neg` — PASS
 - `tool/tool-foreign-value-crossing-pos` — PASS
 - `tool/tool-import-page-neg` — PASS (also emitted, unasserted: E-IMPORT-004)
