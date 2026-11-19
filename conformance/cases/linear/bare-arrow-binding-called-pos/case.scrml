@@ -1,0 +1,7 @@
+<program>
+<items>: string[] = ["10", "20"]
+${
+    fmt = (n: string) => "$" + n
+}
+<ul><each in=@items as it><li>${fmt(it)}</li></each></ul>
+</program>
