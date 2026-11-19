@@ -193,6 +193,7 @@ describe("RUNS on a real SQLite: the client reads the loaded projection", () => 
     await settle();
     for (const t of bodies) expect(t).not.toContain("s3cr3t");
     expect(document.querySelector("#count")).toBe(null);   // not mounted
+    expect(document.body.textContent).not.toContain("s3cr3t");   // the default failure view quotes nothing (s479)
     expect(reported.join("\n")).not.toContain("s3cr3t");
     expect(reported.join("\n")).not.toContain("SELECT");
     expect(reported.length).toBeGreaterThan(0);
@@ -204,7 +205,10 @@ describe("RUNS on a real SQLite: the client reads the loaded projection", () => 
     expect(b.state.rows[0].secret).toBe("s3cr3t-1");
   });
 
-  test("a failed load (the server answers 500): the page is NOT mounted, and the report carries no server text", async () => {
+  // s479 (s479-records; SPEC §8.1.3 "A failed load", RULED S479 §3.B item 23 — "a program-level default
+  // failure view, not `@x.error`"): the page shows the compiler's default failure view in place of the
+  // program — fixed text, one element, nothing the server sent. Red on base: base left the body empty.
+  test("a failed load (the server answers 500): the page is NOT mounted, it shows the default failure view, and nothing quotes server text", async () => {
     const r = compile(BASIC);
     globalThis.fetch = async () => ({ status: 500, text: async () => "SELECT boom FROM people -- driver said: no such table", headers: { get: () => null } });
     const reported = [];
@@ -212,7 +216,13 @@ describe("RUNS on a real SQLite: the client reads the loaded projection", () => 
     await loadProgram(r.core, uniq("dbcell-fail"));
     await settle();
     expect(document.querySelector("#count")).toBe(null);
-    expect(document.body.textContent).toBe("");
+    const views = document.querySelectorAll("[data-scrml-load-failed]");
+    expect(views.length).toBe(1);
+    expect(views[0].tagName.toLowerCase()).toBe("p");
+    expect(views[0].getAttribute("role")).toBe("alert");
+    expect(document.body.textContent).toBe("This page could not load its data.");
+    expect(document.body.innerHTML).not.toContain("boom");
+    expect(document.body.innerHTML).not.toContain("500");
     expect(reported.length).toBeGreaterThan(0);
     expect(reported.join("\n")).not.toContain("boom");
     expect(reported.join("\n")).not.toContain("SELECT");

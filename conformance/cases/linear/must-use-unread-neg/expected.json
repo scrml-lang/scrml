@@ -1,9 +1,10 @@
 {
   "id": "linear-must-use-unread-neg",
-  "description": "The identical function RETURNING the binding it declared. Same declaration form, same scope — only the use is added, which is exactly the condition the code keys on.",
+  "description": "The identical function RETURNING the keywordless binding it declared. Read or unread, no E-MU-001: an unread binding is the S422 unused-binding lint (see linear/must-use-unread-pos), and a read one is not even that.",
   "language-version": "1.0",
-  "spec": "§35",
-  "rationale": "§35 — a must-use binding is one whose VALUE is the point of computing it; letting it fall out of scope unread is, with near-certainty, either a forgotten use or a dead computation. scrml makes that loud rather than silent, and gives an explicit opt-out (`_`-prefix) so the author can SAY \"computed for effect, value deliberately unused\" instead of leaving the reader to guess.",
+  "spec": "§50.8.5",
+  "provenance": "ruling:user-voice-scrml.md-S479-3B · ruling:user-voice-scrml.md S422 \"CALL 3 — unused-binding is a LINT across all binding forms\"",
+  "rationale": "§50.8.5: the keywordless statement `x = value` declares `x` exactly as `const x = value` does; E-MU-001 is \"Must-use: return value of `!` function not captured\" (§34), not an unread-binding code (S479 §3.B ruling).",
   "expect": {
     "codes": [],
     "notCodes": [

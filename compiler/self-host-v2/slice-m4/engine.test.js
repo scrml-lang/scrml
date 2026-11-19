@@ -194,6 +194,25 @@ type Phase:enum = { Idle, Loading, Done }
   test("a non-literal target is left to the runtime edge check", () => {
     expect(diags(prog("@phase = @phase"))).toEqual([]);
   });
+
+  // S479 (ruling §3.B item 7) — §51.0.F.1: "Outside any state-child body (function bodies,
+  // top-level logic, …) the lint does NOT fire." The CONSERVATIVE outside firing is struck.
+  test("S479: a literal write OUTSIDE every state-child body (a function body) fires no lint — any declared variant", () => {
+    for (const v of ["Idle", "Loading", "Done"]) {
+      const src = `<program>
+type Phase:enum = { Idle, Loading, Done }
+<phase:Phase=.Idle single>
+    <Idle rule=.Loading></>
+    <Loading rule=.Done></>
+    <Done rule=.Idle></>
+</>
+function go() { @phase = .${v}; }
+<main><p>\${@phase}</p><button onclick=go()>go</button></main>
+</program>
+`;
+      expect(diags(src)).toEqual([]);
+    }
+  });
 });
 
 // s478 fix r1 (#1894 H1) — §51.0.F: "Compile-time validation when from-state is statically

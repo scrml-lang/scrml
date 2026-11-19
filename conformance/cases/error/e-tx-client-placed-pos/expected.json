@@ -1,0 +1,27 @@
+{
+  "id": "error-e-tx-client-placed-pos",
+  "description": "§19.10.4 (S478; code name confirmed S479) — a `transaction` block in a client-placed `!` function that reaches a query through its server calls is E-TX-CLIENT-PLACED (PERMANENT): no transaction spans two requests.",
+  "language-version": "1.0",
+  "spec": "§19.10.4",
+  "provenance": "ruling:user-voice-scrml.md S478 \"⭐ RULED — open owner questions, PA recs adopted wholesale\" item 21 (b) · ruling:user-voice-scrml.md S479 \"⭐ RULED — S478 hand-off §3.A and §3.B, PA recs adopted\" item 2 (code name confirmed)",
+  "rationale": "§19.10.4: \"In a `!` function placed on the client (§12.2) whose transitive query set is non-empty … a `transaction { … }` block SHALL be a compile error: **E-TX-CLIENT-PLACED**.\"",
+  "expect": {
+    "codes": [
+      "E-TX-CLIENT-PLACED"
+    ],
+    "notCodes": []
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-ruled-codes-s479",
+      "fails": {
+        "codes": [
+          "emitted:E-CG-006=1",
+          "emitted:E-SCOPE-001=1",
+          "emitted:E-STATE-UNDECLARED=1",
+          "missing:E-TX-CLIENT-PLACED"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "id": "page-e-page-duplicate-neg",
+  "description": "§40.8 — one `<page>` in a `<program>` is not E-PAGE-DUPLICATE (clean twin of e-page-duplicate-pos).",
+  "language-version": "1.0",
+  "spec": "§40.8",
+  "provenance": "ruling:user-voice-scrml.md S479 \"⭐ RULED — S478 hand-off §3.A and §3.B, PA recs adopted\" item 4",
+  "rationale": "§40.8: a `<program>` MAY contain zero or one `<page>`; only a second one is E-PAGE-DUPLICATE.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-PAGE-DUPLICATE"
+    ]
+  }
+}

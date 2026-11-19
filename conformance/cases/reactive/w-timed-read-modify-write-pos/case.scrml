@@ -1,0 +1,5 @@
+<program>
+let <x:int=0 debounced=300ms/>
+function bump() { @x = @x + 1; }
+<main><p>${@x}</p><button onclick=bump()>"+"</button></main>
+</program>
