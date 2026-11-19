@@ -7,11 +7,11 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1919 of 1919 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1921 of 1921 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 724 | 37.7% |
+| PASS | 726 | 37.8% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 0 | 0.0% |
 | LEGACY | 0 | 0.0% |
@@ -20,9 +20,9 @@ Scope: **1919 of 1919 cases attempted** — every attempted case reached the pur
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 724; of those, 724 hold (100.0%). Runtime half executed on the bootstrap for 232 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 726; of those, 726 hold (100.0%). Runtime half executed on the bootstrap for 232 case(s).
 
-- **Vacuous** passes: 17 of 724 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **707**.
+- **Vacuous** passes: 17 of 726 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **709**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 0 of 0; the other 0 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
@@ -140,7 +140,7 @@ NOT-TWINNED by reason (638 cases; a case counts once per distinct reason):
 | match-leave | 46 | 19 | · | · | · | 12 | 15 | · | · |
 | md | 18 | 1 | · | · | · | 3 | 14 | · | · |
 | meta | 66 | 1 | · | · | · | 1 | 64 | · | · |
-| middleware | 4 | 1 | · | · | · | · | 3 | · | · |
+| middleware | 6 | 3 | · | · | · | · | 3 | · | · |
 | module | 51 | 30 | · | · | · | 11 | 10 | · | · |
 | navigate | 3 | · | · | · | · | · | 3 | · | · |
 | outlet | 7 | · | · | · | · | 1 | 6 | · | · |
@@ -179,7 +179,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (724)
+### PASS / CODES-ONLY (726)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -666,6 +666,8 @@ none
 - `md/in-logic-markup-refused` — PASS · TWIN
 - `meta/meta-reflect-outside-block-neg` — PASS · TWIN
 - `middleware/ratelimit-invalid-unit-pos` — PASS
+- `middleware/trusted-proxies-invalid-neg` — PASS
+- `middleware/trusted-proxies-invalid-pos` — PASS
 - `module/e-export-001-export-const-clean` — PASS · TWIN
 - `module/e-export-001-export-state-cell-reject` — PASS · TWIN
 - `module/e-import-001-export-inside-logic-clean` — PASS · TWIN · VACUOUS
