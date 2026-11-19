@@ -27,3 +27,7 @@ Base conformance: PASS 645 / FAIL 12 / CRASH 0 (~/.cache/scrml/review/s479-chann
 - LOW-1: filed as item 7 of g-boot-channel-relay-fold-residue-s479 (prov review:#1987); P3 unchanged by the MED-1 fix.
 - NIT-1 forwardedEntry safe-integer guard; NIT-2 trusted-proxies leading zero → E-MW-009 (SPEC §40.2 + E-MW-009 rows); NIT-3 §40.2 comment quote updated.
 - Tests: channel-follow-s479 part C2 (5 tests) + E additions — 7 red on b024ff914; channel-limits-s478 close test updated to the close bucket.
+- (S480 r2) merged origin/main (47f311232; severity.scrml regenerated, no gap id lost).
+- NEW-1: server-runtime.js takeToken returns "ok-dry" (a token spent, close bucket empty); the address-bucket refusal closes 1008 on it (refund kept). F2 fixed: 5000 refused / no close → 153 refused, 1008; F2 moving: 60 000 / no close → 153, 1008 in 0.1 s. P4 unchanged (2 / 23 / 108).
+- NEW-2: channelPacer keeps sent-unanswered frames (`flight`); `refused()` re-queues a rate-refused frame in order at the queue head after the frames sent after it are answered; `answered(applied)`; supersede / drop-on-non-commute (`io.coupled` = reset-on trigger). Client (runtime.js channel) wires it; the 2-key `__refused` is the rate shape (wire unchanged). F4r2 5888 == 5888; P4r2 3600/3300 3296 == 3296.
+- Tests: channel-follow-s479 C (4 new/changed) + F (9) — 12 red on aa0920cda.

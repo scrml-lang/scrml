@@ -1963,7 +1963,9 @@ function takeToken(data, ch, now) {
   let d = data.scrmlCloseBucket;
   if (d === undefined) { d = { tokens: ch.closeAt, at: now }; data.scrmlCloseBucket = d; }
   const within = spend(d, ch.closeAt, ch.rate, now);
-  if (spend(b, ch.burst, ch.rate, now)) return "ok";
+  // S480 r2 (#1987 review NEW-1): "ok-dry" — a token spent, but the close bucket is empty, so the
+  // frame closes the sender if a LATER bound (its address's bucket) refuses it
+  if (spend(b, ch.burst, ch.rate, now)) return within ? "ok" : "ok-dry";
   return within ? "refuse" : "close";
 }
 
@@ -2254,11 +2256,12 @@ function channelSockets(host, channels = [], limits = {}) {
       // S479 (s479-channel-follow) — §38.4.3 "Over a rate bound": a frame that finds less than one
       // token in its connection's bucket, or in its address's shared bucket, is REFUSED UNREAD — not
       // decoded, relayed to no one, numbered never, spending no token — and its sender is sent
-      // `{"__type":"__refused","__why"}`, which a client takes as its oldest pending edit refused, and
-      // slows down. Only SUSTAINED abuse closes: a refused frame that finds the connection's CLOSE bucket
-      // (`burst` + 30 s of `rate`, spent by every frame) empty closes the sender `1008`. An address's bucket never
-      // closes a connection (its clients may be many honest users behind one NAT, each pacing only its
-      // own connection): they are refused, and slow down.
+      // `{"__type":"__refused","__why"}`, which a client takes as its oldest unanswered frame refused: it
+      // slows down and re-sends that edit, paced (S480 r2). Only SUSTAINED abuse closes: a refused frame —
+      // by either bucket — that finds the connection's CLOSE bucket (`burst` + 30 s of `rate`, spent by
+      // every frame) empty closes the sender `1008`. An address's bucket alone never closes a connection
+      // (its clients may be many honest users behind one NAT, each pacing only its own connection, so
+      // none of them sends past `rate` and empties its own close bucket): they are refused, and slow down.
       const rate = takeToken(ws.data, ch, t);
       if (rate === "close") return closeSocket(host, ws, 1008, `frames faster than the channel's rate limit (${ch.rate}/s, burst ${ch.burst}), past its close bound (${ch.closeAt} frames over ${CHANNEL_CLOSE_WINDOW_S} s of the rate)`);
       if (rate === "refuse") return refuseUnread(ws, r, `over this connection's rate limit (${ch.rate}/s, burst ${ch.burst})`);
@@ -2269,6 +2272,10 @@ function channelSockets(host, channels = [], limits = {}) {
       const a = ws.data.scrmlAddr;
       const k = CHANNEL_ADDRESS_BUCKETS;
       if (a !== undefined && !spend(a.frames, ch.burst * k, ch.rate * k, t)) {
+        // S480 r2 (#1987 review NEW-1), §38.4.3: "a frame that is refused unread and also finds less than
+        // one token in its close bucket SHALL instead close the sender" — an address refusal too, so a
+        // socket whose address bucket is kept dry is bounded by its own close bucket
+        if (rate === "ok-dry") return closeSocket(host, ws, 1008, `frames refused over the rate limit of this connection's address (${ch.rate * k}/s, burst ${ch.burst * k}), past this connection's close bound (${ch.closeAt} frames over ${CHANNEL_CLOSE_WINDOW_S} s of the rate)`);
         // a refused frame spends no token of its connection's bucket (S480 r1): give back the one spent above
         ws.data.scrmlBucket.tokens += 1;
         return refuseUnread(ws, r, `over the rate limit of this connection's address (${ch.rate * k}/s, burst ${ch.burst * k}, shared by its connections)`);
