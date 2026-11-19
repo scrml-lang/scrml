@@ -66,7 +66,56 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { lex } from "../compiler/native-parser/lex.js";
+import { makeLexContext } from "../compiler/native-parser/lex.js";
+import { makeCursor, isEof } from "../compiler/native-parser/cursor.js";
+import { LexMode, getMode, setMode } from "../compiler/native-parser/lex-mode.js";
+import { dispatchInCode } from "../compiler/native-parser/lex-in-code.js";
+import { dispatchInSingleString } from "../compiler/native-parser/lex-in-single-string.js";
+import { dispatchInDoubleString } from "../compiler/native-parser/lex-in-double-string.js";
+import { dispatchInTemplateBody } from "../compiler/native-parser/lex-in-template.js";
+import { dispatchInLineComment } from "../compiler/native-parser/lex-in-line-comment.js";
+import { dispatchInBlockComment } from "../compiler/native-parser/lex-in-block-comment.js";
+import { dispatchInRegexBody } from "../compiler/native-parser/lex-in-regex.js";
+
+// S480 (L1) — THE LEXER, RUN ON DEMAND. Every region used to be lexed as `lex(src.slice(off))`: the
+// whole REST of the file, once per region (and once more after every markup element in a `<program>`
+// body), of which the region used a few tokens — O(regions × file); a 350 KB file took 85 s. The file
+// cannot instead be lexed ONCE from offset 0 and the regions cut out of that: markup is not code, and
+// the code lexer reading markup text (the `'` of `<p>don't</p>` opens a string) yields tokens that
+// lexing from the region's own start does not. So each region is lexed from its own start, as before,
+// but LAZILY: `lexAt` is compiler/native-parser/lex.js `lex`'s own loop (the same dispatchers, the same
+// context, the same per-step guard), started at `off` of the WHOLE source instead of over a slice, and
+// it yields tokens one at a time — the reader stops pulling at the region's end. The lexer never looks
+// behind its cursor (no dispatcher reads `pos - k`), so the tokens are exactly `lex(src.slice(off))`'s,
+// with absolute offsets (a test holds the two equal); the total work is linear in the file.
+export function lexAt(src, off) {
+  const cursor = makeCursor(src);
+  cursor.pos = off;
+  const ctx = makeLexContext();
+  const maxIters = (src.length - off + 1) * 4;
+  let iters = 0;
+  let emitted = 0;
+  const eof = { kind: "EOF", text: "", start: src.length, end: src.length };
+  return () => {
+    while (emitted >= ctx.tokens.length) {
+      if (isEof(cursor) || iters >= maxIters) return eof;
+      const mode = getMode(ctx);
+      const beforePos = cursor.pos;
+      if (mode === LexMode.InCode) dispatchInCode(cursor, ctx);
+      else if (mode === LexMode.InSingleString) dispatchInSingleString(cursor, ctx);
+      else if (mode === LexMode.InDoubleString) dispatchInDoubleString(cursor, ctx);
+      else if (mode === LexMode.InTemplateBody) dispatchInTemplateBody(cursor, ctx);
+      else if (mode === LexMode.InLineComment) dispatchInLineComment(cursor, ctx);
+      else if (mode === LexMode.InBlockComment) dispatchInBlockComment(cursor, ctx);
+      else if (mode === LexMode.InRegexBody) dispatchInRegexBody(cursor, ctx);
+      else setMode(ctx, LexMode.InCode);
+      if (cursor.pos === beforePos && !isEof(cursor)) cursor.pos = cursor.pos + 1;
+      iters = iters + 1;
+    }
+    const t = ctx.tokens[emitted++];
+    return { kind: t.kind, text: t.text, start: t.span.start, end: t.span.end };
+  };
+}
 
 const OPEN = new Set(["LParen", "LBracket", "LBrace", "TemplateInterpStart"]);
 const CLOSE = new Set(["RParen", "RBracket", "RBrace", "TemplateInterpEnd"]);
@@ -116,20 +165,60 @@ const RAW_TEXT_ELEMENTS = new Set(["script", "style"]);
 const CODE_BODY_ELEMENTS = new Set(["program", "page", "db"]);
 const NAME_START = /[A-Za-z_]/;
 const NAME_CHAR = /[A-Za-z0-9_.\-]/;
-// a token after which `<name` is a comparison, not markup
+// INSIDE a bracket (or a `${ … }` in a body): a token after which `<name` is a comparison, not markup
 const VALUE_END = new Set(["Ident", "NumberLit", "StringLit", "RegexLit", "BoolLit", "TemplateChunk", "RParen", "RBracket", "KwTrue", "KwFalse", "KwNull", "KwUndefined", "KwThis"]);
 const CELL_BINDERS = new Set(["KwConst", "KwLet", "KwLin"]);
+const isAsciiLetter = (c) => /^[A-Za-z]$/.test(c);
+
+// S480 (M2) — `<` AT A CODE-DEFAULT BODY'S TOP, by the bootstrap lexer's rule. compiler/self-host-v2/
+// lex.scrml reads a `<program>` / `<page>` / `<db>` body's bare run with `LexStop.CodeBody` ("a run of a
+// code-default body (§4.18.1): stop at depth 0 before a tag (`<x`, `</`, `<!`) or `${`") and a body-top
+// `const` / `let` / `type` with `LexStop.Decl` ("stop after a `;` at depth 0, or before a tag / `${`
+// there"); the tag test is
+//     export fn markupOpensAt(c0: int, c1: int) -> boolean {
+//         if (c0 != 60) return false
+//         return c1 == 47 || c1 == 33 || (c1 >= 65 && c1 <= 90) || (c1 >= 97 && c1 <= 122)
+//     }
+// with `atDepthZero` = no bracket open. There is NO left-operand test: `if (c) <p>hi</p>` is the
+// statement `if (c)` and then markup (the old rule here — "a value before `<` makes it a comparison" —
+// read the `<p>` as a less-than, so the `</` of `</p>` ended the body and every later collision was
+// missed). The bootstrap's lexer is a `.scrml` file this script must run BEFORE the bootstrap is built,
+// so the rule is mirrored, not called. Two body-top items are lexed WITHOUT that stop (parse.scrml
+// parseMarkupItem): a `fn` / `function` declaration (`LexStop.Statement`, "stop after a `}` that returns
+// to depth 0" — so `fn id<T>(x: T)` is a generic) and an `import` (`LexStop.Line`); in them `<` is
+// markup only as a markup VALUE (lex.scrml markupValueAhead: the last token leaves an operand to be
+// read — `operandSlot` below). Inside a bracket the old heuristic stands (it only has to keep the
+// brackets balanced: nothing nested is file scope).
+const OPERAND_SLOT = new Set(["KwReturn", "LParen", "LBracket", "Comma", "Assign", "Question", "Colon", "Arrow", "LogicalAnd", "LogicalOr", "NullishCoalesce", "Bang"]);
+// lex.scrml operandSlotAfter: "after `return`, `=`, `(`, `[`, `,`, `?`, `:`, `=>`, `&&`, `||`, `??`, `!`,
+// or an arm's `:>`" (`:>` = a `:` and a `>` touching)
+const operandSlot = (prev, prev2) => {
+  if (prev === null) return false;
+  if (OPERAND_SLOT.has(prev.kind)) return true;
+  return prev.kind === "GreaterThan" && prev2 !== null && prev2.kind === "Colon" && prev2.end === prev.start;
+};
 
 /**
  * The file-scope logic of one source text: `{ toks, cells, at }`. `toks` are lexer tokens with ABSOLUTE
- * offsets (`start`, `end`), in source order, plus two markers: `Region` (a new region starts: depth 0)
+ * offsets (`start`, `end`), in source order, plus markers: `Region` (a file-top `${ … }` starts: depth 0,
+ * scope 0), `Push` / `Pop` (a code-default body starts / ends: a new depth count, in the scope `scope`),
  * and `Sep` (skipped text in between — two tokens either side of it are not adjacent). `cells` are the
- * program cells found at file scope. `at(offset)` is `{ line, col }` (1-based).
+ * program cells found at file scope (`scope` on each). `at(offset)` is `{ line, col }` (1-based).
+ *
+ * S480 (M1) — SCOPES. SPEC §4.12: "A `<program>` is **top-level** if it has no `<program>` or `<page>`
+ * ancestor, whatever markup wraps it. It is **nested** if it has one"; §4.12.1: "A nested `<program>` is
+ * a completely isolated compilation unit. It does NOT inherit any lexical bindings from its parent" and
+ * "SHALL be a separate compilation unit". So the body of a NESTED `<program>` is not the file's scope:
+ * it is its own (scope 1, 2, … — one per nested program), and a collision inside it is reported there.
+ * Scope 0 is the file's: the file top, a top-level `<program>` (wrapped in markup or not), a `<page>`,
+ * a `<db>` outside a nested program.
  */
 export function logicTokens(src) {
   const n = src.length;
   const toks = [];
   const cells = [];
+  let scopes = 0;
+  let lowered = null; // src.toLowerCase(), made once (a raw-text element's closer is found in it)
   const lineStarts = [0];
   for (let k = 0; k < n; k++) if (src.charCodeAt(k) === 10) lineStarts.push(k + 1);
   const at = (off) => {
@@ -141,8 +230,16 @@ export function logicTokens(src) {
     }
     return { line: lo + 1, col: off - lineStarts[lo] + 1 };
   };
-  const lexFrom = (off) => lex(src.slice(off)).map((t) => ({ kind: t.kind, text: t.text, start: off + t.span.start, end: off + t.span.end }));
-  const mark = (kind, off) => toks.push({ kind, text: "", start: off, end: off });
+  // the tokens from `off` on, pulled one at a time (L1: `lexAt`), with a lookahead
+  const reader = (off) => {
+    const next = lexAt(src, off);
+    const ahead = [];
+    return {
+      peek: (k) => { while (ahead.length <= k) ahead.push(next()); return ahead[k]; },
+      take: () => (ahead.length > 0 ? ahead.shift() : next()),
+    };
+  };
+  const mark = (kind, off, scope) => toks.push({ kind, text: "", start: off, end: off, scope });
 
   // a quoted run starting at p (the quote); returns the offset after its closing quote
   const skipQuoted = (p) => {
@@ -187,33 +284,43 @@ export function logicTokens(src) {
     }
     return { name, isCell, selfClose, end: Math.min(q, n) };
   };
-  const addCell = (p, name) => { if (name) cells.push({ name, ...at(p + 1), kind: "cell" }); };
+  const addCell = (p, name, scope) => { if (name) cells.push({ name, ...at(p + 1), kind: "cell", scope }); };
 
-  // a `${ … }` logic region whose body starts at p (after the `{`); returns the offset after its `}`
+  // a `${ … }` logic region at the file top, whose body starts at p (after the `{`); returns the offset
+  // after its `}`
   const logicRegion = (p) => {
-    mark("Region", p);
+    mark("Region", p, 0);
+    const rd = reader(p);
     let depth = 0;
-    for (const t of lexFrom(p)) {
+    for (;;) {
+      const t = rd.take();
       if (t.kind === "EOF") return n;
       if (t.kind === "LBrace") depth++;
       else if (t.kind === "RBrace") { if (depth === 0) return t.end; depth--; }
       toks.push(t);
     }
-    return n;
   };
 
-  // an element at p (`<` + a name start). `fileScope`: a cell here binds at file scope.
-  const scanElement = (p, fileScope) => {
+  // an element at p (`<` + a name start). `fileScope`: a cell here binds in `cx.scope`. `cx`:
+  // `{ scope, nested }` — the scope a binding here is in, and whether a `<program>` / `<page>` is an
+  // ancestor (M1: a `<program>` under one is NESTED, §4.12, and its body is a scope of its own, §4.12.1)
+  const scanElement = (p, fileScope, cx) => {
     const head = readHead(p);
-    if (head.isCell) { if (fileScope) addCell(p, head.name); return head.end; }
+    if (head.isCell) { if (fileScope) addCell(p, head.name, cx.scope); return head.end; }
     const lower = head.name.toLowerCase();
     if (head.selfClose || VOID_ELEMENTS.has(lower) || head.end >= n) return head.end;
     let r;
     if (RAW_TEXT_ELEMENTS.has(lower)) {
-      const e = src.toLowerCase().indexOf("</" + lower, head.end);
+      if (lowered === null) lowered = src.toLowerCase();
+      const e = lowered.indexOf("</" + lower, head.end);
       r = e < 0 ? n : e;
-    } else if (CODE_BODY_ELEMENTS.has(head.name)) r = scanCodeBody(head.end);
-    else r = scanMarkup(head.end, false);
+    } else if (CODE_BODY_ELEMENTS.has(head.name)) {
+      const isProgram = head.name === "program";
+      const inner = isProgram && cx.nested
+        ? { scope: ++scopes, nested: true }
+        : { scope: cx.scope, nested: cx.nested || isProgram || head.name === "page" };
+      r = scanCodeBody(head.end, inner);
+    } else r = scanMarkup(head.end, false, cx);
     if (r >= n) return n;
     // r is at a closer `</…`: this element's (`</name>` / `</>`) is consumed; another's is left to it
     const m = /<\/\s*([A-Za-z0-9_.\-]*)\s*>/y;
@@ -225,7 +332,7 @@ export function logicTokens(src) {
 
   // markup (the file top when `top`, else an element's free-text body) from p; returns the offset of the
   // closer that ends the body (`</`), or n
-  const scanMarkup = (p, top) => {
+  const scanMarkup = (p, top, cx) => {
     while (p < n) {
       const c = src[p];
       if (c === "/" && src[p + 1] === "/" && (p === 0 || /\s/.test(src[p - 1]))) { p = lineEnd(p); continue; }
@@ -239,7 +346,7 @@ export function logicTokens(src) {
         p += m.exec(src)[0].length;
         continue;
       }
-      if (c === "<" && NAME_START.test(src[p + 1] ?? "")) { p = scanElement(p, top); continue; }
+      if (c === "<" && NAME_START.test(src[p + 1] ?? "")) { p = scanElement(p, top, cx); continue; }
       // `const <x> = …` / `let <x…/>` / `lin <x…/>` starting a line at the file top: a cell declaration
       if (top && (c === "c" || c === "l") && lineStartAt(p)) {
         const m = /(?:const|let|lin)[ \t]+(?=<[A-Za-z_])/y;
@@ -248,7 +355,7 @@ export function logicTokens(src) {
         if (hit) {
           const lt = p + hit[0].length;
           const head = readHead(lt);
-          addCell(lt, head.name);
+          addCell(lt, head.name, cx.scope);
           p = head.end;
           continue;
         }
@@ -258,53 +365,82 @@ export function logicTokens(src) {
     return n;
   };
 
-  // a code-default body (`<program>` / `<page>` / `<db>`) from p; returns the offset of its closer (`</`), or n
-  const scanCodeBody = (p) => {
-    mark("Region", p);
-    let lexed = lexFrom(p);
-    let i = 0;
+  // a code-default body (`<program>` / `<page>` / `<db>`) from p, binding in `cx.scope`; returns the
+  // offset of its closer (`</`), or n
+  const scanCodeBody = (p, cx) => {
+    mark("Push", p, cx.scope);
+    const r = codeBody(p, cx);
+    mark("Pop", r, cx.scope);
+    return r;
+  };
+  const codeBody = (p, cx) => {
+    let rd = reader(p);
     let prev = null;
-    let depth = 0;
+    let prev2 = null;
+    let depth = 0; // brackets open (a `${`'s own brace is not counted)
+    let dollar = 0; // `${ … }` blocks open
+    // the body-top item being read (M2, see OPERAND_SLOT above): "code" (a bare run or a declaration —
+    // a tag at depth 0 ends it), "stmt" (a `fn` / `function` declaration, to the `}` that returns to
+    // depth 0) or "line" (an `import`, to its line's end)
+    let item = "code";
     const regionBrace = []; // per open `{`: is it a `${`'s brace (not emitted)?
-    const resume = (off) => { mark("Sep", off); lexed = lexFrom(off); i = 0; prev = null; };
-    while (i < lexed.length) {
-      const t = lexed[i];
+    const resume = (off) => { mark("Sep", off, cx.scope); rd = reader(off); prev = null; prev2 = null; item = "code"; };
+    for (;;) {
+      const t = rd.peek(0);
       if (t.kind === "EOF") return n;
+      const bodyTop = depth === 0 && dollar === 0;
+      if (bodyTop && item === "line" && prev !== null && src.slice(prev.end, t.start).includes("\n")) item = "code";
+      if (bodyTop && item === "code") {
+        const t1 = rd.peek(1);
+        if ((t.kind === "KwFn" || t.kind === "KwFunction") && (t1.kind === "Ident" || t1.kind === "Star")) item = "stmt";
+        else if (t.kind === "KwImport") item = "line";
+      }
       if (t.kind === "LessThan") {
         const nx = src[t.end] ?? "";
         if (nx === "/") return t.start;
         if (src.startsWith("<!--", t.start)) { resume(skipHtmlComment(t.start)); continue; }
-        // markup when `<` cannot be a comparison: no value before it, or it starts its line (a line
-        // starting with an operator is E-STMT-LEADING-OPERATOR, §7.2.2, so a line-start `<` is a tag)
-        if (NAME_START.test(nx) && (prev === null || !VALUE_END.has(prev.kind) || lineStartAt(t.start))) {
+        let markup;
+        // lex.scrml markupOpensAt; and at an item's start (parse.scrml parseMarkupItem: `<` there, or after
+        // `let` / `export`, "return parseTagItem") any `<name` — `let <_done:int=0/>` is a cell
+        if (bodyTop && item === "code") markup = isAsciiLetter(nx) || nx === "!" || (NAME_START.test(nx) && (prev === null || CELL_BINDERS.has(prev.kind) || prev.kind === "KwExport" || lineStartAt(t.start)));
+        else if (bodyTop) markup = isAsciiLetter(nx) && operandSlot(prev, prev2); // markupValueAhead
+        // inside a bracket: markup when `<` cannot be a comparison — no value before it, or it starts its
+        // line (a line starting with an operator is E-STMT-LEADING-OPERATOR, §7.2.2)
+        else markup = NAME_START.test(nx) && (prev === null || !VALUE_END.has(prev.kind) || lineStartAt(t.start));
+        if (markup) {
           let end;
-          if (prev !== null && CELL_BINDERS.has(prev.kind)) {
+          if (nx === "!") {
+            const e = src.indexOf(">", t.end); // `<!DOCTYPE …>`: a tag, not code
+            end = e < 0 ? n : e + 1;
+          } else if (prev !== null && CELL_BINDERS.has(prev.kind)) {
             // `let <x…/>` / `const <x> = …`: a cell declaration; the `= …` after it is code
             const head = readHead(t.start);
-            if (depth === 0) addCell(t.start, head.name);
+            if (depth === 0) addCell(t.start, head.name, cx.scope);
             end = head.end;
-          } else end = scanElement(t.start, depth === 0);
+          } else end = scanElement(t.start, depth === 0, cx);
           resume(end);
           continue;
         }
       }
-      if (t.kind === "Ident" && t.text === "$" && lexed[i + 1] && lexed[i + 1].kind === "LBrace" && lexed[i + 1].start === t.end) {
+      rd.take();
+      if (t.kind === "Ident" && t.text === "$" && rd.peek(0).kind === "LBrace" && rd.peek(0).start === t.end) {
+        rd.take();
         regionBrace.push(true);
-        i += 2;
+        dollar++;
         continue;
       }
       if (t.kind === "LBrace") regionBrace.push(false);
-      if (t.kind === "RBrace" && regionBrace.pop() === true) { i++; continue; }
+      if (t.kind === "RBrace" && regionBrace.pop() === true) { dollar--; continue; }
       if (OPEN.has(t.kind)) depth++;
       else if (CLOSE.has(t.kind)) depth = Math.max(0, depth - 1);
       toks.push(t);
+      prev2 = prev;
       prev = t;
-      i++;
+      if (item === "stmt" && t.kind === "RBrace" && depth === 0 && dollar === 0) item = "code";
     }
-    return n;
   };
 
-  scanMarkup(0, true);
+  scanMarkup(0, true, { scope: 0, nested: false });
   return { toks, cells, at };
 }
 
@@ -351,22 +487,28 @@ function patternNames(toks, j, out, limit) {
  *   binds:   [{ name, line, col, kind }]     every file-scope `const` / `let` / `lin` / `type` binding
  *                                            (destructured names included) and program cell (kind "cell")
  *   imports: [{ name, line, col, from }]     every name an `import { … } from "…"` (or `import * as x`) binds
+ * Each entry also carries `scope`: 0 = the file's, n > 0 = the n-th nested `<program>`'s (M1, §4.12.1).
  */
 export function topLevelNames(src) {
   const { toks, cells, at } = logicTokens(src);
   const fns = [];
   const binds = [...cells];
   const imports = [];
-  const pos = (t) => at(t.start);
+  // the open code-default bodies, innermost last: each its own bracket depth (a body nested in a body —
+  // a `<page>` in an `if { }`, a nested `<program>` — must not reset its parent's) and its scope (M1)
+  const frames = [{ scope: 0, depth: 0 }];
+  let f = frames[0];
+  const pos = (t) => ({ ...at(t.start), scope: f.scope });
   const unquote = (s) => s.replace(/^["'`]|["'`]$/g, "");
-  let depth = 0;
   for (let i = 0; i < toks.length; i++) {
     const t = toks[i];
-    if (t.kind === "Region") { depth = 0; continue; }
+    if (t.kind === "Region") { frames.length = 1; f = frames[0] = { scope: t.scope, depth: 0 }; continue; }
+    if (t.kind === "Push") { f = { scope: t.scope, depth: 0 }; frames.push(f); continue; }
+    if (t.kind === "Pop") { if (frames.length > 1) frames.pop(); f = frames[frames.length - 1]; continue; }
     if (t.kind === "Sep") continue;
-    if (OPEN.has(t.kind)) { depth++; continue; }
-    if (CLOSE.has(t.kind)) { depth = Math.max(0, depth - 1); continue; }
-    if (depth > 0) continue;
+    if (OPEN.has(t.kind)) { f.depth++; continue; }
+    if (CLOSE.has(t.kind)) { f.depth = Math.max(0, f.depth - 1); continue; }
+    if (f.depth > 0) continue;
     // `import * as ns from "…"` binds `ns`
     if (t.kind === "KwImport" && toks[i + 1] && toks[i + 1].text === "*" && toks[i + 2] && toks[i + 2].kind === "KwAs" && toks[i + 3] && toks[i + 3].kind === "Ident") {
       const ns = toks[i + 3];
@@ -421,9 +563,23 @@ const what = (d) => (d.kind === "cell" ? `cell \`<${d.name}>\`` : d.kind ? `\`${
  * One file-scope namespace (SPEC §7.6, E-SCOPE-010 "duplicate binding in file scope"): the file's
  * top-level functions, `const` / `let` / `type` declarations and imported names. A second binding of
  * a name is reported at the second one (an import, at the local declaration it collides with).
+ * S480 (M1): one such namespace per scope — the file's, and each nested `<program>`'s own (§4.12.1); a
+ * violation in a nested program says so.
  */
 export function lintText(src) {
   const { fns, binds, imports } = topLevelNames(src);
+  const scopes = [...new Set([...fns, ...binds, ...imports].map((d) => d.scope ?? 0))].sort((a, b) => a - b);
+  const violations = [];
+  for (const s of scopes) {
+    const inScope = (d) => (d.scope ?? 0) === s;
+    const found = lintScope(fns.filter(inScope), binds.filter(inScope), imports.filter(inScope));
+    const where = s === 0 ? "" : " (in a nested `<program>`: its own scope, §4.12.1)";
+    for (const v of found) violations.push({ ...v, message: v.message + where });
+  }
+  return { violations };
+}
+
+function lintScope(fns, binds, imports) {
   const violations = [];
   const firstDecl = new Map();
   const firstImport = new Map();
@@ -449,7 +605,7 @@ export function lintText(src) {
       ? `E-SCOPE-010: top-level ${what(d)} has the name of an import (line ${im.line}, from "${im.from}") — impl#1 silently drops one of the two; rename one`
       : `E-SCOPE-010: top-level function \`${d.name}\` has the name of an import (line ${im.line}, from "${im.from}") — impl#1 binds every call to the import and this function is dead; rename one` });
   }
-  return { violations };
+  return violations;
 }
 
 const RELATIVE_IMPORT = /^\.\.?\//;
