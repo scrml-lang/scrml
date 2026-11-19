@@ -14,4 +14,9 @@ Ruled items (user-voice-scrml.md S479 "⭐ RULED — the rest of S478 hand-off �
 - [x] Item 25 — already built in the bootstrap (#1961 + §50.8.5 keywordless = const). Pins only. Gap
       g-bare-arrow-binding-false-e-mu-001 → status carried (impl#1 still false-errors; frozen).
 - Tests: slice-m4/typer-rulings-s480.test.js (26; 10 red on base, 16 pins green on base).
-- [ ] FINAL gates, conformance, byte-compare, corpus, PR.
+- [x] Conformance case linear/bare-arrow-binding-called-pos (impl#1 xfail pins the carried gap; bootstrap UNSUPPORTED, as `const`).
+- [x] FINAL gates at 939767fe2: hook PASS (56938 pass / 0 fail); conformance base→head PASS 732→732, FAIL 0, CRASH 0,
+      UNSUPPORTED 556→557 (the new case only), 0 PASS→FAIL; corpus 3214 files old vs new bootstrap: 0 newly rejecting,
+      byte-identical artifacts except tapes/join-primitives (new); s34-census / types-gate / snippet-gate / claim-gate /
+      corpus-compile-floor / gen-md-shim / severity --check all pass.
+- [ ] PR.
