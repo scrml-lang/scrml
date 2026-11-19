@@ -1,0 +1,18 @@
+// §51.0.R / §6.13.5 (S480) — a `debounced=` engine with an `<onIdle>` watchdog: the fire applies
+// immediately (not held by the 1 s window) and cancels the write still held.
+<program>
+    type Phase:enum = { Active, Busy, Idle }
+    <phase:Phase=.Active single debounced=1s>
+        <Active rule=(.Busy | .Idle)/>
+        <Busy rule=(.Active | .Idle)/>
+        <Idle rule=(.Active | .Busy)/>
+        <onIdle after=5s to=.Idle/>
+    </>
+    function busy() { @phase = .Busy; }
+    function active() { @phase = .Active; }
+    <main>
+        <p id="s">${@phase}</p>
+        <button id="busy" onclick=busy()>Busy</button>
+        <button id="active" onclick=active()>Active</button>
+    </main>
+</program>

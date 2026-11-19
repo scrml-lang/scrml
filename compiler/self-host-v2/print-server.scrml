@@ -705,7 +705,13 @@ ${
                 for (const n of allNodes(Node.NExpr(k.init))) {
                     const c: Sym | not = nodeCallee(n)
                     if (c is given) {
-                        if (findFn(p, c) is given && out.indexOf(c.id) < 0 && todo.indexOf(c.id) < 0) todo = todo.concat([c.id])
+                        // s480: a tool's functions are all server functions (§64.5.1), and a
+                        // synchronous one a tool initializer calls runs at module load (§7.6 rule
+                        // (a) in a tool, ruling S479 "three open S479 questions" item 1) — reached
+                        // too. (In a web program analyze refuses an initializer reaching a server
+                        // function, so no server function is ever added here.)
+                        const known: boolean = findFn(p, c) is given || findServerFn(p, c) is given
+                        if (known && out.indexOf(c.id) < 0 && todo.indexOf(c.id) < 0) todo = todo.concat([c.id])
                     }
                 }
             }

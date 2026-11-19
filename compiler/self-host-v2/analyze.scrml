@@ -10993,6 +10993,7 @@ ${
         const scan: BodyScan = scanExpr({ t: t, file: kc.file }, kc.init, emptyScan())
         const what: string = bindingWhat(kc)
         const initDefer: ASpan[] = deferredSpansInExpr(kc.init)
+        const inTool: boolean = fileIsTool(g, g.entry)
         // s479 r1 (#1975 review F2): a later binding reached only through a function value —
         // the first such, refused by name after every ref is judged (a proven reach wins)
         let lamLate: Diag | not = not
@@ -11005,7 +11006,20 @@ ${
             if (j >= 0) {
                 const c: Callable = sum.nodes[j]
                 if (c.kind != CallableK.KFn) return [newDiag("E-BOOTSTRAP-UNSUPPORTED", "the initializer of " + what + " runs " + c.label + " — a declaration's construction or formula at module initialization (§7.6 rule (b)) is not in the bootstrap (INTERIM, g-boot-file-scope-init-residue-s479)", r.file, r.span)]
-                if (servers[j].length > 0) {
+                // s480 (ruling user-voice-scrml.md S479 "three open S479 questions" item 1) — §7.6
+                // rule (a), in a tool (§64): "in a tool, refuse an initializer only when it reaches
+                // something that suspends (`?{}`, `_{}`, a waiting call). Run synchronous initializers
+                // at module load, as for any other program." Every tool `function` is server-placed
+                // (FnFacts.tool), so `servers` says nothing there: a tool judges `swaits` (a `?{}` or
+                // a `_{}` of its own, closed over the functions it calls — the server-side wait).
+                if (inTool) {
+                    const qa: FxAtom | not = witnessOf(sum.swaits[j])
+                    if (qa is given) {
+                        let via: string = ""
+                        if (qa.root != j) via = ", which reaches `" + sum.nodes[qa.root].label + "`,"
+                        return [newDiag("E-FILE-SCOPE-SERVER-ONLY-REACH", "the initializer of " + what + " calls `" + c.label + "`" + via + " which suspends (a `?{}` query or a `_{}` host block, awaited) — a tool's file-scope initializer runs at module load, which is synchronous and cannot wait (§7.6 rule (a), §64.5.1). Compute the value in `main` (or a function it calls) and pass it where it is needed", r.file, r.span)]
+                    }
+                } else if (servers[j].length > 0) {
                     const sa: FxAtom = servers[j][0]
                     let via: string = ""
                     if (sa.root != j) via = ", which reaches `" + sum.nodes[sa.root].label + "`,"
@@ -28922,6 +28936,8 @@ ${
         // server-only resource — a `?{}` query … SHALL be a compile error, `E-FILE-SCOPE-SERVER-ONLY-REACH`"
         // (the server-placed-call limb is judged after placement: fileScopePass)
         const q: AExpr | not = sqlIn(c.init)
+        // s480 (ruling S479 "three open S479 questions" item 1): a tool's `?{}` suspends — still refused, tool-worded
+        if (q is given && fileIsTool(g, g.entry)) return { c: constAs(c, c.annot, true, false), st: addDiag(st0, c.file, q.span, "E-FILE-SCOPE-SERVER-ONLY-REACH", "the initializer of " + what + " runs a query (`?{ … }`), which suspends — a tool's file-scope initializer runs at module load, which is synchronous and cannot wait (§7.6 rule (a), §64.5.1). Run the query in `main` (or a function it calls)") }
         if (q is given) return { c: constAs(c, c.annot, true, false), st: addDiag(st0, c.file, q.span, "E-FILE-SCOPE-SERVER-ONLY-REACH", "the initializer of " + what + " runs a query (`?{ … }`) — a file-scope initializer runs at module initialization, which is synchronous and cannot wait on the server (§7.6 rule (a), as §6.6.19 refuses a derived cell). Run the query in a server function and call it where the value is needed") }
         // s479 — §7.6 rule (b): "Any other non-constant initializer is evaluated at module
         // initialization, once (§7.4.2's one-shot evaluation), in EVERY artifact that reads the
@@ -41667,13 +41683,10 @@ ${
         // S479 (ruling §3.B item 8) — §6.13.5: "A `debounced=` / `throttled=` engine cell
         // transitions at commit … `rule=` (§51.0.F) is judged at the commit, against the
         // variant the cell holds then" — built (runtime `timed` carries the edge table;
-        // `heldWriteCheck` is the static half). INTERIM: an engine with an `<onIdle>`
-        // watchdog stays refused — no SPEC sentence says whether the watchdog's own fire is
-        // a local write the wrapper holds, or commits at once (and cancels a held write).
-        const gr: TransitionGraph | not = f.graph
-        if (gr is given) {
-            if (gr.idle is given) return "an engine with an `<onIdle>` watchdog: §6.13.5 makes a timed engine transition at commit, but no SPEC sentence says whether the watchdog's own fire is held by the timing rule or commits at once (cancelling a held write) — not built; drop one of the two"
-        }
+        // `heldWriteCheck` is the static half). An engine with an `<onIdle>` watchdog is
+        // accepted too (S479, ruling "three open S479 questions" item 2; §51.0.R): "The
+        // watchdog firing applies immediately … It cancels any write still waiting" — the
+        // runtime `idleWatch` fire bypasses the wrapper (`idleFire`).
         if (attrNamed(d.mods, "persist") is given) return "a `persist=` cell: its cross-tab sync is a server-origin write, which SHALL bypass the timing wrapper and cancel a pending local write (§6.13.1, §6.7.7.3 rule 6) — not built; drop one of the two"
         if (dbCellRecord(g, f.nid) is given) return "a `<db>` cell: its load is a server-origin write, which SHALL bypass the timing wrapper (§6.13.1) — not built"
         if (isPendingDecl(g, f.nid)) return "a pending cell: its load is a server-origin write, which SHALL bypass the timing wrapper (§6.13.1) — not built"
