@@ -1,0 +1,24 @@
+{
+  "id": "lifecycle-reset-invalid-target-plain-let-pos",
+  "description": "§6.8.2: `reset` takes a cell; a plain `let` is a bare identifier without `@` — E-RESET-INVALID-TARGET (#1962 review LOW-3: it compiled to nothing).",
+  "language-version": "1.0",
+  "source-test": "compiler/self-host-v2/slice-m4/file-scope-follow-s479.test.js",
+  "spec": "§6.8.2",
+  "rationale": "§6.8.2: \"The target argument MUST be one of the three canonical shapes above. Any other expression shape — literal, function-call result, binary / ternary / unary expression, bare identifier without `@`, member chain rooted at a non-`@` identifier, or computed-index access — is **E-RESET-INVALID-TARGET**\".",
+  "provenance": "dispatch:s479-file-scope-follow",
+  "expect": {
+    "codes": [
+      "E-RESET-INVALID-TARGET"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-reset-bare-name-s479",
+      "fails": {
+        "codes": [
+          "missing:E-RESET-INVALID-TARGET"
+        ]
+      }
+    }
+  }
+}

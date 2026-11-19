@@ -1,0 +1,12 @@
+// §7.6 rule (b) (S479) — `A`'s initializer calls `mid()`, which calls `late()`, which reads `Z`, declared after `A`: E-SCOPE-001.
+${
+    function late() -> int { return Z + 1; }
+    function mid() -> int { return late() * 2; }
+    const A: int = mid();
+    const Z = 5;
+}
+<program>
+    <main>
+        <p>${A}</p>
+    </main>
+</program>

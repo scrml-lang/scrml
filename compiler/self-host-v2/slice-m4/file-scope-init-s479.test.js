@@ -237,9 +237,11 @@ describe("§7.6 rule (b) — what the bootstrap still refuses BY NAME (INTERIM, 
     expect(r.diags[0].message).toContain("client-only state");
   });
 
-  test("an initializer calling a function that uses a binding initialized AFTER it (not initialized yet)", () => {
+  // s479-file-scope-follow (ruling #1962 item 2): no longer by name — E-SCOPE-001, as the direct
+  // read (file-scope-follow-s479.test.js covers the call chains)
+  test("an initializer calling a function that uses a binding initialized AFTER it is E-SCOPE-001", () => {
     const r = one(`\${\n    function late() -> int { return Z + 1; }\n    const A: int = late();\n    const Z = 5;\n}\n<program>\n    <main>\n        <p>\${A}</p>\n    </main>\n</program>\n`);
-    expect(codes(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(r)).toEqual(["E-SCOPE-001"]);
     expect(r.diags[0].message).toContain("`Z`");
   });
 
@@ -260,12 +262,14 @@ describe("§7.6 rule (b) — what the bootstrap still refuses BY NAME (INTERIM, 
     expect(codes(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
 
-  test("a write of a file-scope `let` imported from another file", () => {
+  // s479-file-scope-follow (ruling #1962 item 3): no longer by name — PERMANENT,
+  // E-FILE-SCOPE-LET-FOREIGN-WRITE (file-scope-follow-s479.test.js covers every write shape)
+  test("a write of a file-scope `let` imported from another file is E-FILE-SCOPE-LET-FOREIGN-WRITE", () => {
     const lib = `\${\n    export let shared = 0;\n    export fn readShared() -> int { return 1; }\n}\n`;
     const app = `<program>\n    \${ import { shared } from "./lib.scrml"; }\n    <main>\n        <button onclick={ shared = 3; }>b</button>\n        <p>\${shared}</p>\n    </main>\n</program>\n`;
     const r = run([{ path: "lib.scrml", src: lib }, { path: "app.scrml", src: app }]);
-    expect(codes(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(r.diags.find((d) => d.code === "E-BOOTSTRAP-UNSUPPORTED").message).toContain("another file");
+    expect(codes(r)).toEqual(["E-FILE-SCOPE-LET-FOREIGN-WRITE"]);
+    expect(r.diags[0].message).toContain("lib.scrml");
   });
 
   test("a cell declaration `let <x/>` in a logic block keeps its by-name refusal", () => {

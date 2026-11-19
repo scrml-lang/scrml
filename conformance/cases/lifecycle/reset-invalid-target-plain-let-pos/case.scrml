@@ -1,0 +1,10 @@
+// §6.8.2 — `reset(n)` of a plain file-scope `let` (a bare identifier without `@`) is E-RESET-INVALID-TARGET, not a no-op.
+${
+    let n = 0;
+}
+<program>
+    <main>
+        <button onclick={ reset(n); }>b</button>
+        <p>${n}</p>
+    </main>
+</program>

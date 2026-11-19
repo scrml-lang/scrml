@@ -1,0 +1,7 @@
+// §7.6 (S479) — a write of another file's file-scope `let` through an `as` alias is E-FILE-SCOPE-LET-FOREIGN-WRITE.
+import { shared as s } from "./lib.scrml";
+<program>
+    <main>
+        <button onclick={ s = 3; }>b</button>
+    </main>
+</program>

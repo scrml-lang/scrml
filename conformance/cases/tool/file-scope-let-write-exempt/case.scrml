@@ -1,0 +1,12 @@
+// §7.6 rule (c) (S479) — a `kind="tool"` program is exempt: its functions may write a file-scope `let`.
+<program kind="tool" lang="js">
+    ${
+        let n = 0;
+        function bump() { n = n + 1; }
+    }
+    function main(args: string[]) -> number {
+        bump();
+        n = n + 2;
+        return n - 3;
+    }
+</program>
