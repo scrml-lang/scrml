@@ -22,6 +22,7 @@ import { compileScrml, scanDirectory, findOutputFiles } from "../api.js";
 import { moduleFormatNotices } from "./module-format-notice.js";
 import { stripRedundantCode } from "./diagnostic-format.js";
 import { selectRequestOnion, formatOnionConflict } from "./select-request-onion.js";
+import { routeRecordTargets, routeExportConflict, formatRouteExportConflict } from "./route-export-conflict.js";
 import { noFilesWrittenLine } from "./refusal-gate.js";
 import { STATIC_POLICY_EMIT_SOURCE } from "../static-serve-policy.js";
 import { tenantGateEntryLines } from "../codegen/tenant-startup-check.ts";
@@ -233,6 +234,26 @@ export function discoverServerRoutes(outputDir) {
  * @returns {{ onion: object|null, error: object|null }}
  */
 export function decideOnionBeforeWrite(outputDir, plannedServerUnits) {
+  return selectRequestOnion(serverUnitsAfterWrite(outputDir, plannedServerUnits));
+}
+
+/**
+ * #1998 review r1 F2 — two modules exporting one route name for different routes,
+ * decided BEFORE the write over the same unit set as `decideOnionBeforeWrite` (the
+ * `.server.js` files the dist will hold, in `_server.js` import order). Null when none.
+ *
+ * @param {string} outputDir
+ * @param {Array<{ relPath: string, source: string }>} plannedServerUnits
+ */
+export function decideRouteExportsBeforeWrite(outputDir, plannedServerUnits) {
+  return routeExportConflict(serverUnitsAfterWrite(outputDir, plannedServerUnits));
+}
+
+/**
+ * The server units `discoverServerRoutes(outputDir)` would read after this build writes
+ * `plannedServerUnits`, in its order (the body of `decideOnionBeforeWrite`, factored out).
+ */
+function serverUnitsAfterWrite(outputDir, plannedServerUnits) {
   const posix = (p) => p.replace(/\\/g, "/");
   const plannedPaths = new Set(plannedServerUnits.map((u) => posix(u.relPath)));
   // On a case-INSENSITIVE filesystem (Windows / macOS default) a write to
@@ -261,7 +282,7 @@ export function decideOnionBeforeWrite(outputDir, plannedServerUnits) {
     }
     return sa.length - sb.length;
   };
-  return selectRequestOnion([...surviving, ...planned].sort(bySegments));
+  return [...surviving, ...planned].sort(bySegments);
 }
 
 /**
@@ -340,6 +361,9 @@ export function describeServerUnit(source, relPath) {
     // `_server.js` can import via `./${filename}` regardless of nesting.
     return {
       filename: relPath, routeNames, wsHandlerNames, middlewareNames, middlewareDeclaredIn, protectedDocument,
+      // #1998 review r1 F2 — each route's `{ path, method }`, so two modules exporting one
+      // name for different routes are refused (route-export-conflict.js), not first-wins.
+      routeTargets: routeRecordTargets(source),
       ...(tenantStartupCheck ? { tenantStartupCheck: true } : {}),
     };
   }
@@ -404,6 +428,14 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
     const err = new Error(formatOnionConflict(onionError));
     err.scrmlCode = onionError.code;
     err.scrmlSources = onionError.sources;
+    throw err;
+  }
+  // #1998 review r1 F2 — a route name is imported once (F-BUILD-002 below), so two
+  // modules exporting one name for different routes would leave the second unserved.
+  const routeConflict = routeExportConflict(serverModules);
+  if (routeConflict) {
+    const err = new Error(formatRouteExportConflict(routeConflict));
+    err.scrmlCode = routeConflict.code;
     throw err;
   }
   const onionAliasFor = new Map();
@@ -1296,9 +1328,15 @@ export async function runBuild(args) {
   // a fact compileScrml does not see. (The static target generates no server
   // entry and never raises E-MW-007.)
   let onionRefusal = null;
+  // #1998 review r1 F2 — E-CG-006, two modules exporting one route name for different
+  // routes, decided over the same post-write unit set.
+  let routeRefusal = null;
   const beforeWrite = ({ outputDir: dir, plannedServerUnits }) => {
-    if (opts.target !== "static") onionRefusal = decideOnionBeforeWrite(dir, plannedServerUnits).error;
-    return onionRefusal == null;
+    if (opts.target !== "static") {
+      onionRefusal = decideOnionBeforeWrite(dir, plannedServerUnits).error;
+      routeRefusal = decideRouteExportsBeforeWrite(dir, plannedServerUnits);
+    }
+    return onionRefusal == null && routeRefusal == null;
   };
 
   const result = compileScrml({
@@ -1328,7 +1366,7 @@ export async function runBuild(args) {
   });
 
   if (result.errors.length > 0) {
-    const failCount = result.errors.length + (onionRefusal ? 1 : 0);
+    const failCount = result.errors.length + (onionRefusal ? 1 : 0) + (routeRefusal ? 1 : 0);
     console.error(`\nBuild failed with ${failCount} error(s):`);
     for (const e of result.errors) {
       // Bug 3 fix (S107) — same shape as dev.js error formatter; surface path:line:col.
@@ -1342,6 +1380,7 @@ export async function runBuild(args) {
       console.error(`  [${e.stage}] ${rel}${loc} ${e.code}: ${stripRedundantCode(e.code, e.message)?.slice(0, 120)}`);
     }
     if (onionRefusal) console.error(`  ${formatOnionConflict(onionRefusal)}`);
+    if (routeRefusal) console.error(`  ${formatRouteExportConflict(routeRefusal)}`);
     if (!result.artifactsWritten) console.error(noFilesWrittenLine(outputDir));
     process.exit(1);
   }
@@ -1378,9 +1417,10 @@ export async function runBuild(args) {
 
   // §40.3/§40.8 E-MW-007 — decided before the write (see `beforeWrite` above);
   // reported here, after the warnings, where the post-write check reports it.
-  if (onionRefusal) {
-    console.error(`\nBuild failed with 1 error(s):`);
-    console.error(`  ${formatOnionConflict(onionRefusal)}`);
+  if (onionRefusal || routeRefusal) {
+    console.error(`\nBuild failed with ${(onionRefusal ? 1 : 0) + (routeRefusal ? 1 : 0)} error(s):`);
+    if (onionRefusal) console.error(`  ${formatOnionConflict(onionRefusal)}`);
+    if (routeRefusal) console.error(`  ${formatRouteExportConflict(routeRefusal)}`);
     console.error(noFilesWrittenLine(outputDir));
     process.exitCode = 1;
     return;

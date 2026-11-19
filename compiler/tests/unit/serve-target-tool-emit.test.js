@@ -96,7 +96,7 @@ describe("§A serve-harness: Bun.serve mounting <endpoint> + SSE routes (no html
     // The mounted routes: the §61 endpoint POST /fsp + the §37 SSE GET /fsp/deltas.
     expect(toolJs).toContain('path: "/fsp"');
     expect(toolJs).toContain('path: "/fsp/deltas"');
-    expect(toolJs).toMatch(/export const routes = \[[^\]]*__ri_route_endpoint/);
+    expect(toolJs).toMatch(/export const routes = \[[^\]]*_scrml_route_endpoint/);
     expect(toolJs).toMatch(/export const routes = \[[^\]]*fspDeltas/);
 
     // No channels → no websocket handler in the harness.

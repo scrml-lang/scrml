@@ -2392,9 +2392,8 @@ export function servedEndpointCorsRows(fileAST: any): EndpointCorsRow[] {
  * declare (fail closed: 405). Returns null when the app mounts no endpoint, so a
  * program without `<endpoint>` emits exactly what it did before.
  */
-export function appEndpointCors(files: any[]): AppEndpointCors | null {
+export function appEndpointCors(files: any[], entryFilePaths: readonly string[] | null = null): AppEndpointCors | null {
   const byKey = new Map<string, EndpointCorsRow>();
-  let corsMaxAge: string | null = null;
   for (const f of files) {
     if (!f || typeof f !== "object") continue;
     for (const r of servedEndpointCorsRows(f)) {
@@ -2403,12 +2402,52 @@ export function appEndpointCors(files: any[]): AppEndpointCors | null {
       if (prev === undefined) byKey.set(key, { ...r });
       else if (prev.cors !== r.cors) prev.cors = null;
     }
-    const mc = (f as any).middlewareConfig ?? (f as any).ast?.middlewareConfig ?? null;
-    const raw = mc ? ((mc as { corsMaxAge?: string | null }).corsMaxAge ?? null) : null;
-    if (corsMaxAge === null && parseCorsMaxAge(raw) !== null) corsMaxAge = raw;
   }
   if (byKey.size === 0) return null;
-  return { rows: Array.from(byKey.values()), corsMaxAge };
+  return { rows: Array.from(byKey.values()), corsMaxAge: entryCorsMaxAge(files, entryFilePaths) };
+}
+
+/**
+ * §39.2.1 / §40.8 — the endpoint preflight's `Access-Control-Max-Age` source: the
+ * ENTRY `<program>`'s `cors-max-age=` (the app-scope attribute lives on the
+ * application's one top-level `<program>`, §40.8; PA decision S480 on the #1981
+ * review r1 LOW — it was the first file in compilation order that declared one).
+ * `entryFilePaths` are the application's entry files (endpoint-program-rules.ts
+ * `endpointEntryFiles`, route inference's build-root rule); null (a direct emitter
+ * call) reads every file. With one entry its value answers (a well-formed app: its
+ * endpoints all sit in that entry, §61.2). With several (two top-level `<program>`s
+ * in different files — an application the build cannot identify) the entries that
+ * declare endpoints are read: a single value they agree on answers, and different
+ * values answer nothing, so the §39.2.1 default applies — the rule route inference
+ * uses for `loginRedirect=` (never a pick by file order). An entry that declares no
+ * `cors-max-age=` (or one §39.2.1 does not read) counts as declaring the DEFAULT, so
+ * `600` in one entry and nothing in another disagree and the default answers (PA
+ * decision S480, #1998 review r1): the silent entry's own preflight would have used the
+ * default, and the value chosen must not depend on which entry happened to speak.
+ */
+function entryCorsMaxAge(files: any[], entryFilePaths: readonly string[] | null): string | null {
+  const wanted = entryFilePaths === null ? null : new Set(entryFilePaths);
+  let sources = files.filter((f) => {
+    if (!f || typeof f !== "object") return false;
+    const fp = (f as any).filePath ?? (f as any).ast?.filePath;
+    return wanted === null || wanted.has(fp);
+  });
+  // Several entries: the ones whose `<program>` declares the endpoints answer (an
+  // entry with no endpoint has no say over their preflight), when there are any.
+  if (sources.length > 1) {
+    const mounting = sources.filter((f) => servedEndpointCorsRows(f).length > 0);
+    if (mounting.length > 0) sources = mounting;
+  }
+  // null stands for "the default" (no `cors-max-age=`, or a value §39.2.1 does not read).
+  const values = new Set<string | null>();
+  for (const f of sources) {
+    const mc = (f as any).middlewareConfig ?? (f as any).ast?.middlewareConfig ?? null;
+    const raw = mc ? ((mc as { corsMaxAge?: string | null }).corsMaxAge ?? null) : null;
+    // compared as seconds, so `600` and `0600` agree
+    const sec = parseCorsMaxAge(raw);
+    values.add(sec !== null ? String(sec) : null);
+  }
+  return values.size === 1 ? Array.from(values)[0] : null;
 }
 
 /**
@@ -2421,6 +2460,11 @@ export function appEndpointCors(files: any[]): AppEndpointCors | null {
  * digits), so the name is injective over every path string.
  */
 function endpointPreflightRouteName(path: string): string {
+  return `_scrml_route_endpoint_preflight_${endpointPathIdent(path)}`;
+}
+
+/** The injective identifier spelling of an endpoint path (see endpointPreflightRouteName). */
+function endpointPathIdent(path: string): string {
   let s = "";
   for (const ch of path) {
     if (/[A-Za-z0-9]/.test(ch)) s += ch;
@@ -2429,7 +2473,32 @@ function endpointPreflightRouteName(path: string): string {
       s += cp < 0x100 ? "_" + cp.toString(16).padStart(2, "0") : "_u" + cp.toString(16).padStart(6, "0");
     }
   }
-  return `__ri_route_endpoint_preflight_${s}`;
+  return s;
+}
+
+/**
+ * The export name of an `<endpoint>`'s route record, from its METHOD and PATH
+ * (`POST /op` → `_scrml_route_endpoint_POST__2fop`). It was the endpoint's AST node
+ * id, which is counted per FILE: two files' endpoints exported one name, and a host
+ * that de-duplicates imports by name (build.js F-BUILD-002) mounted the first and
+ * dropped the other (g-impl1-endpoint-route-name-collides-across-files-s480). §61.7
+ * makes a path and method one handler app-wide (E-ENDPOINT-ROUTE-DUPLICATE,
+ * endpoint-program-rules.ts), so this name is unique across the app's modules. The
+ * method is uppercase and `preflight` is not, so it never equals a preflight name.
+ *
+ * Both names are in the compiler's `_scrml_` namespace, which no author name can
+ * enter (§47.1.1: "A user-authored scrml program SHALL NOT **declare** a binding
+ * whose name begins with `_scrml_`", E-NAME-COLLIDES-RESERVED-PREFIX). They were
+ * `__ri_route_endpoint_…`, the namespace of the server-function routes
+ * (`__ri_route_<fnName>_<n>`, route-inference.ts `generateRouteName`), so a server
+ * function named `endpoint_POST__2fx` as the 21st route exported the name of
+ * endpoint `POST /x!` and the first importer won (#1998 review r1 F2). A channel's
+ * upgrade route is `_scrml_route_ws_<name>` (emit-channel.ts) — another prefix.
+ */
+function endpointRouteName(method: string, path: string): string {
+  // (the method is spelled through the same encoder, so even an unrecognized one —
+  // already E-ENDPOINT-METHOD-INVALID — yields an identifier)
+  return `_scrml_route_endpoint_${endpointPathIdent(method)}_${endpointPathIdent(path)}`;
 }
 
 /**
@@ -7030,7 +7099,7 @@ function generateServerJsImpl(
       if (!_epPath || !_epMethod) continue;
       const _epId = _epDecl.id;
       const _epHandler = `_scrml_endpoint_${_epId}`;
-      const _epRoute = `__ri_route_endpoint_${_epId}`;
+      const _epRoute = endpointRouteName(_epMethod, _epPath);
       const _epArms: any[] = Array.isArray(_epDecl.arms) ? _epDecl.arms : [];
 
       // Register every arm-body server-fn call target as a peer so the loop below

@@ -1,0 +1,13 @@
+<program>
+    let <count:int=0/>
+    function step() {
+        const label = "unused";
+        let last = 0;
+        last = @count;
+        for (const item of [1, 2, 3]) {
+            @count = @count + 1;
+        }
+    }
+    <p id="s">${@count}</p>
+    <button id="b" onclick=step()>step</button>
+</program>

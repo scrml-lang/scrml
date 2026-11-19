@@ -23,7 +23,8 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { loadM2, frontEnd } from "./harness.js";
+import { loadM2 } from "./harness.js";
+import { frontEndNoUnusedLint as frontEnd } from "../slice-m2/no-unused-lint.js";  // s480: fixtures hold incidental unread locals — W-UNUSED-BINDING is tested in slice-m4/unused-binding-s480.test.js
 
 const ROOT = resolve(import.meta.dir, "..", "..", "..");
 const SAMPLES = join(ROOT, "docs", "changes", "s477-boot-kind-tool", "samples");
@@ -279,7 +280,7 @@ describe("C — §64.1 the emitted module, run with bun", () => {
   }, 300000);
 
   test("E-FOREIGN-006 (crossing shadow) and E-FOREIGN-007 (unbuildable slice) at compile time, nothing written", async () => {
-    const sh = await build("shadow", tool('    function main(args: string[]) -> number {\n        const n = args.length;\n        const o = _={ in: { n }\n            const n = 1;\n            return n;\n        }=;\n        return 0;\n    }'));
+    const sh = await build("shadow", tool('    function main(args: string[]) -> number {\n        const n = args.length;\n        const _o = _={ in: { n }\n            const n = 1;\n            return n;\n        }=;\n        return 0;\n    }'));
     expect(sh.r.ok).toBe(false);
     expect(sh.r.diagnostics.map((d) => d.code)).toEqual(["E-FOREIGN-006"]);
     expect(sh.r.diagnostics[0].message).toContain("`n`");

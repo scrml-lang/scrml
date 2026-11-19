@@ -63,13 +63,16 @@ const DB_APP = (db) => `<program db="${db}">
 </program>
 `;
 
-// No database anywhere — but the same `string` payload binding.
-const NO_DB_APP = `type M:enum = { Ping, Dispatch(prompt: string, project: string) }
+// No database anywhere — but the same `string` payload binding. (§61.2, S480: an
+// `<endpoint>` is a direct child of the top-level `<program>`.)
+const NO_DB_APP = `<program>
+type M:enum = { Ping, Dispatch(prompt: string, project: string) }
 fn handleDispatch(p: string, q: string) -> string { p }
 <endpoint path="/x" method="POST" accepts=M>
   <Ping : { ok: true }>
   <Dispatch(prompt, project) : { echo: handleDispatch(prompt, project) }>
 </endpoint>
+</program>
 `;
 
 const PRIMITIVES = ["string", "number", "boolean", "integer", "date", "timestamp", "asIs", "not"];

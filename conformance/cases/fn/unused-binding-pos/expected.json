@@ -1,0 +1,33 @@
+{
+  "id": "fn-unused-binding-pos",
+  "description": "§7.3.5 — three unread local bindings in one function body, each W-UNUSED-BINDING (a Warning): an unread `const`, a write-only `let` (assigned, never read), and an unread iterate-head binder. The program compiles; the warnings do not change it.",
+  "language-version": "1.0",
+  "spec": "§7.3.5, §49.3.5",
+  "provenance": "ruling:user-voice-scrml.md \"⭐ RULED — unused-binding lint code: W-UNUSED-BINDING (S479, 2026-11-18)\" · ruling:user-voice-scrml.md S422 \"CALL 3 — unused-binding is a LINT across all binding forms, hard error later if it proves out\"",
+  "rationale": "§7.3.5: \"Any local binding — `let`, `const` or keywordless (§50.8.5) — that is not read before its scope ends SHALL be reported as W-UNUSED-BINDING, a Warning\"; \"A binding that is only assigned is not read, so it is reported\"; the iterate-head binder is covered (§49.3.5: \"A keywordless binder … is `const`\"). One report per binding.",
+  "expect": {
+    "codes": [
+      "W-UNUSED-BINDING"
+    ],
+    "severity": {
+      "W-UNUSED-BINDING": "warning"
+    },
+    "codeCounts": {
+      "W-UNUSED-BINDING": 3
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-w-unused-binding-s480",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'W-UNUSED-BINDING' fired 0 time(s), expected exactly 3",
+          "emitted:E-SCOPE-001=1",
+          "emitted:E-STATE-UNDECLARED=3",
+          "missing:W-UNUSED-BINDING",
+          "severity:code 'W-UNUSED-BINDING' did not fire (expected severity warning)"
+        ]
+      }
+    }
+  }
+}

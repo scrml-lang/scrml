@@ -23,7 +23,7 @@
 import { describe, test, expect, beforeAll } from "bun:test";
 import { join } from "node:path";
 import { loadM2, M2_MODULES } from "./harness.js";
-import { frontEnd } from "./lowered.js";
+import { frontEndNoUnusedLint as frontEnd } from "./no-unused-lint.js";  // s480: fixtures hold incidental unread locals — W-UNUSED-BINDING is tested in slice-m4/unused-binding-s480.test.js
 import { buildBundleChunks, SELF_HOST_V2 } from "../slice-m1/harness.js";
 
 let mods;
