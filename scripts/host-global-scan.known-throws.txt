@@ -113,6 +113,7 @@
 [esm] conformance/cases/reactive/no-write-own-init-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved
 [esm] conformance/cases/reactive/no-write-own-init-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
 [esm] conformance/cases/reactive/no-write-unproven-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/reactive/server-copy-markup-and-server-rt/case.scrml  # emit-client-esm: The keyword 'let' is reserved (a §66-dialect case impl#1 does not compile — impl1 xfail, S479 s479-waiting-helper-server-copy)
 [esm] conformance/cases/reactive/tape-bound-append-rt/case.scrml  # emit-client-esm: The keyword 'let' is reserved (a §66-dialect case impl#1 does not compile — impl1 xfail, S477 #1830)
 [esm] conformance/cases/reactive/tape-bound-append-trap-rt/case.scrml  # emit-client-esm: The keyword 'let' is reserved (a §66-dialect case impl#1 does not compile — impl1 xfail, S477 #1830)
 [esm] conformance/cases/reactive/tape-insert-rt/case.scrml  # emit-client-esm: The keyword 'let' is reserved (a §66-dialect case impl#1 does not compile — impl1 xfail, S477 #1830)

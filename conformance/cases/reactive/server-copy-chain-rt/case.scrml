@@ -1,0 +1,25 @@
+// §12.2 Trigger 5 + §19.9.10 + §13.4 — a CHAIN of waiting client helpers called from the server: `k` calls `h`, `h` calls the db-touching `down` (handled), and both helpers have a client caller (the pending cell `v` calls `k`), so both stay client-placed. The server function `top` calls `k` too: there `k` runs in place, and so does `h` inside it — each needs its server copy, whose call of `down` is server→server.
+<program db="./app.db">
+    type User:struct = { id: int, name: string }
+    function down(n: int) -> int {
+        const u: User = ?{`SELECT id, name FROM users WHERE id = 1`}.get() !{ _ :> { return 0; } };
+        return u.id + n;
+    }
+    function h(n: int) -> int {
+        const d = down(n) !{ _ :> 0 };
+        return d + 1;
+    }
+    function k(n: int) -> int {
+        return h(n) * 10;
+    }
+    function top(n: int) -> int {
+        const u: User = ?{`SELECT id, name FROM users WHERE id = 1`}.get() !{ _ :> { return 0; } };
+        return k(n) + u.id;
+    }
+    <v:(not to int)=(k(1))/>
+    <w:(not to int)=(top(1) !{ _ :> not })/>
+    <main>
+        <p id="v" if=@v>${@v}</p>
+        <p id="w" if=@w>${@w}</p>
+    </main>
+</program>

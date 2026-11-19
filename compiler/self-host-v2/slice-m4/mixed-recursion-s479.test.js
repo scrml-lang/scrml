@@ -44,7 +44,7 @@ const errs = (r) => r.diags.filter((d) => d.severity === "Error");
 const codes = (r) => errs(r).map((d) => d.code);
 
 describe("a pending cell's load is a client referrer (§12.2 Trigger 5, §19.9.10 item 2)", () => {
-  test("the #1966 probe (handled): `step` stays client-placed — no false E-ERROR-013, no ill-formed Core; the one refusal is the named server-copy INTERIM", () => {
+  test("the #1966 probe (handled): `step` stays client-placed — no false E-ERROR-013, no ill-formed Core; `down`'s call runs `step`'s server copy (s479-waiting-helper-server-copy)", () => {
     const r = run(P(`    function step(n: int) -> int {
         if (n <= 0) { return 0; }
         const d = down(n - 1) !{ _ :> 0 };
@@ -57,10 +57,9 @@ ${DOWN_BACK}
     expect(placeOf(r, "down")).toBe("Server");
     expect(codes(r)).not.toContain("E-ERROR-013");
     expect(codes(r)).not.toContain("E-BOOTSTRAP-CORE-ILL-FORMED");
-    expect(codes(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    const d = errs(r)[0];
-    expect(d.message).toContain("a second, server-side copy of `step()`");
-    expect(d.message).toContain("g-boot-waiting-helper-server-copy-s479");
+    expect(codes(r)).toEqual([]);
+    const cp = r.typed.tables.server.copies.map((c) => c.orig.hint);
+    expect(cp).toEqual(["step"]);
   });
 
   test("the #1966 probe (unhandled): `step`'s call of `down` is a CLIENT call — E-ERROR-002, naming the pending cell as the cause (§19.9.10 F5)", () => {
@@ -96,7 +95,8 @@ ${DOWN_BACK}
     expect(placeOf(r, "h")).toBe("Ambient");
     expect(inherited(r, "h")).toBe(false);
     expect(codes(r)).not.toContain("E-ERROR-013");
-    expect(codes(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(r)).toEqual([]);
+    expect(r.typed.tables.server.copies.map((c) => c.orig.hint)).toEqual(["h"]);
   });
 });
 

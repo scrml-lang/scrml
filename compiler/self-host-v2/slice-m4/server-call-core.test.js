@@ -187,11 +187,11 @@ describe("S2 — §19.9.10 F5 (a): \"remote\" is a whole-program placement fact"
     expect(errCodes(P(NOTES, `        <p>\${wordCount("n1")}</p>`))).toEqual(["E-VALUE-SERVER-CALL"]);
   });
 
-  test("a server function calling a client function that waits → refused (its server-side copy is not built — s468 U1c emits a function per side only as it is)", () => {
+  test("a server function calling a client function that waits → refused while that function writes a cell (client-placed: E-ROUTE-002); s479 builds the server copy only of an ambient one", () => {
     const src = P(NOTES + "\n" + RECOUNT + `\n    function srv() -> int {\n        const r = ${SQ}\`SELECT 1\`}.get() !{ _ :> not };\n        recount();\n        return 1;\n    }`);
-    const d = run(src).diags.find((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED");
-    expect(d).toBeDefined();
-    expect(d.message).toContain("a second, server-side copy of `recount()`");
+    const ds = run(src).diags.filter((x) => x.severity === "Error");
+    expect(ds.map((d) => d.code)).toContain("E-ROUTE-002");
+    expect(run(src).typed.tables.server.copies).toEqual([]);
   });
 });
 

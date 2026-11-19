@@ -553,9 +553,40 @@ ${
     // s475 (S5a): `reqReads` — the nids of the `<request>`s classified READ (§6.7.7.1 rule 1,
     // requestReads); every other request is WRITE.
     // s477: `tool` — the entry program is a `kind="tool"` (§64) and its `main` (toolFact).
-    export type ServerFacts:struct = { servers: int[], sqls: SqlInfo[], dbs: Db[], places: PlaceFact[], inherited: int[], plan: SuspendPlan, loads: DbLoad[], envelopes: Envelope[], txs: TxAt[], reqReads: int[], tool: CoreTool | not, endpoints: CoreEndpoint[], channels: CoreChannel[] }
+    // s479 (s479-waiting-helper-server-copy): `copies` — the SERVER COPIES (copyPass): a client-placed
+    // helper that waits and that a server-side body calls runs there in place (§19.9.10 "Not
+    // affected: A server→server call … the callee is inlined (§13.4), no request is made, and
+    // nothing on the wire can fail"), while §12.2 Trigger 5 keeps it client-placed for its client
+    // callers ("A function with at least one client-classified caller SHALL remain ambient") — two
+    // bodies (§13.4 "the compiler SHALL generate TWO representations"). `onServer` — never set by
+    // analyze: lower's view of the tables while it lowers a server-side body (serverView).
+    export type ServerFacts:struct = { servers: int[], sqls: SqlInfo[], dbs: Db[], places: PlaceFact[], inherited: int[], plan: SuspendPlan, loads: DbLoad[], envelopes: Envelope[], txs: TxAt[], reqReads: int[], tool: CoreTool | not, endpoints: CoreEndpoint[], channels: CoreChannel[], copies: SrvCopy[], onServer: boolean }
 
-    export fn noServerFacts() -> ServerFacts { return { servers: [], sqls: [], dbs: [], places: [], inherited: [], plan: noPlan(), loads: [], envelopes: [], txs: [], reqReads: [], tool: not, endpoints: [], channels: [] } }
+    // s479 — one server copy: `orig` the client-placed helper, `copy` the Sym the copy is lowered
+    // under (minted here — never a source name), `plan` its body's SERVER-side suspension plan
+    // (planBlock, server: true; keyed by the same nids as the original's client plan, so it is
+    // held apart and lower reads it only while lowering the copy).
+    export type SrvCopy:struct = { orig: Sym, copy: Sym, plan: SuspendPlan }
+
+    export fn noServerFacts() -> ServerFacts { return { servers: [], sqls: [], dbs: [], places: [], inherited: [], plan: noPlan(), loads: [], envelopes: [], txs: [], reqReads: [], tool: not, endpoints: [], channels: [], copies: [], onServer: false } }
+
+    // s479 — the Sym a call of `s` names in the body being lowered: on the server side (lower's
+    // serverView), a helper with a server copy is called through its copy; anywhere else, `s`.
+    export fn sideCallee(t: Tables, s: Sym) -> Sym {
+        if (!t.server.onServer) return s
+        for (const c of t.server.copies) {
+            if (c.orig.id == s.id) return c.copy
+        }
+        return s
+    }
+
+    // s479 — the server copy of `sym`, if it has one.
+    export fn copyOf(t: Tables, sym: int) -> SrvCopy | not {
+        for (const c of t.server.copies) {
+            if (c.orig.id == sym) return c
+        }
+        return not
+    }
 
     // s454 (U1b): is a call made in function `caller` (-1: a handler / effect body)
     // a CLIENT call — the caller is not server-placed, by its own body or by
@@ -42945,7 +42976,7 @@ ${
         st = actionServerDiags(g, t, all, places, rd, st)
         const rl: RLoads = dbLoads(g, servers, st)
         st = rl.st
-        return { facts: { servers: servers, sqls: sqls, dbs: owned, places: places, inherited: sum.inherited, plan: noPlan(), loads: rl.loads, envelopes: ep.envs, txs: tp0.txs, reqReads: [], tool: toolFact(g), endpoints: [], channels: [] }, doms: doms, st: st }
+        return { facts: { servers: servers, sqls: sqls, dbs: owned, places: places, inherited: sum.inherited, plan: noPlan(), loads: rl.loads, envelopes: ep.envs, txs: tp0.txs, reqReads: [], tool: toolFact(g), endpoints: [], channels: [], copies: [], onServer: false }, doms: doms, st: st }
     }
 
     // s473 (ruled refusals) — §8.9.2 amendment (S473 review-surfaced 2): "A
@@ -43076,23 +43107,123 @@ ${
 
     // s454 (U1b) — a function that runs on the server (wholly, or by
     // inheritance) calling a client function that WAITS (it makes a client
-    // call of a server function): on the server that callee would have to run
-    // its server calls in place, which is the per-side emission of an ambient
-    // function. s468 (U1c): U1c emits an ambient function on each side that
-    // reaches it (§13.4 "TWO representations") — but THIS one's two
-    // representations differ in their bodies (its server calls are client
-    // calls on one side and in-place calls on the other), and Core holds one
-    // body per function. Still refused, fail closed (a later slice: a binder-
-    // minted server copy, lowered under the server plan).
+    // call of a server function): on the server that callee runs its server
+    // calls in place. s479 (s479-waiting-helper-server-copy): an AMBIENT one
+    // gets a server copy (copyPass) — its two representations (§13.4 "TWO
+    // representations") differ in their bodies, so the copy is lowered under
+    // its own server plan. Any other placement (a client-only helper — already
+    // E-ROUTE-002 from a server-placed caller) is still refused, fail closed.
     fn waitingCallees(f: FnFacts, all: FnFacts[], ps: PlaceFact[], sum: Summary, st0: AS) -> AS {
         let st: AS = st0
         for (const r of fnRefs(all, f)) {
-            if (placeOf(ps, r.sym) != PlaceK.Server && sum.inherited.indexOf(r.sym) < 0 && !r.asValue) {
+            if (placeOf(ps, r.sym) != PlaceK.Server && placeOf(ps, r.sym) != PlaceK.Ambient && sum.inherited.indexOf(r.sym) < 0 && !r.asValue) {
                 const w: Reach | not = waitsOf(sum, r.sym)
-                if (w is given) st = addDiag(st, r.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` runs on the server and calls `" + r.name + "`, a client function that waits for the server (`" + w.chain.join(" → ") + "`) — on the server that call would be made in place, which needs a second, server-side copy of `" + r.name + "` whose server calls are made in place (not in the bootstrap: Core holds one body per function — the server artifact emits a shared function as it is, which is right only for one that waits on nothing; INTERIM, g-boot-waiting-helper-server-copy-s479). Until then call the server function directly")
+                if (w is given) st = addDiag(st, r.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` runs on the server and calls `" + r.name + "`, a client function that waits for the server (`" + w.chain.join(" → ") + "`) and is not ambient — its server-side copy, whose server calls are made in place, is built only for an ambient function (fail closed). Call the server function directly")
             }
         }
         return st
+    }
+
+    // =========================================================================
+    // s479 (s479-waiting-helper-server-copy) — THE SERVER COPIES.
+    //   §12.2 Trigger 5: "A function with at least one client-classified caller
+    //   SHALL remain ambient (client-classified)."
+    //   §19.9.10 "Not affected": "A call whose caller is itself server-placed
+    //   runs in the same server handler: the callee is inlined (§13.4), no
+    //   request is made, and nothing on the wire can fail. Its failure set is
+    //   the callee's own — none for a function not declared `!`."
+    //   §13.4: "the compiler SHALL generate TWO representations of B … These
+    //   are independent code paths."
+    // So an AMBIENT helper that waits (its body makes client calls of server
+    // functions — the summary's `waits`) and that a server-side body calls (a
+    // server-placed function, one server-placed by inheritance, or another
+    // copy — transitively) has a second body: the same source, run on the
+    // server, its server calls made in place. Each gets a minted Sym and its
+    // own SERVER-side suspension plan (planBlock with `server`); lower lowers
+    // the source body again under that plan (lower.scrml serverView) and
+    // retargets every server-side call of the helper to the copy, which Core
+    // holds as a server-only Fn (no route — no client call names it).
+    // Diagnostics are the original's: the copy's planning adds only a report
+    // the original's does not already make at the same site (fail closed — a
+    // refusal is never lost). A `!` copy whose body reaches a query runs in its
+    // own transaction envelope (§8.9.2 — envelopeOf's calledInPlace branch
+    // built it for the original's Sym; it moves to the copy); without one it is
+    // refused by name.
+    // =========================================================================
+    type RCopies:struct = { copies: SrvCopy[], envs: Envelope[], st: AS }
+
+    fn copyPass(g: Globals, t: Tables, s: Summary, envs0: Envelope[], st0: AS) -> RCopies {
+        let st: AS = st0
+        const all: FnFacts[] = fnFactsOf(s)
+        let copies: SrvCopy[] = []
+        let todo: FnFacts[] = []
+        for (const f of all) {
+            if (!nestedSym(g, f.sym) && (placeOf(s.places, f.sym) == PlaceK.Server || s.inherited.indexOf(f.sym) >= 0)) todo = todo.concat([f])
+        }
+        let envs: Envelope[] = envs0
+        while (todo.length > 0) {
+            const f: FnFacts = todo[0]
+            todo = todo.slice(1)
+            for (const r of fnRefs(all, f)) {
+                const rf: FnFacts | not = factsOf(all, r.sym)
+                if (rf is given && !r.asValue && !nestedSym(g, r.sym) && placeOf(s.places, r.sym) == PlaceK.Ambient && s.inherited.indexOf(r.sym) < 0 && waitsOf(s, r.sym) is given && !hasCopy(copies, r.sym)) {
+                    const fs: FnSrc | not = fnSrcOf(g, r.sym)
+                    if (fs is given) {
+                        const ms: RSym = mint(st, fs.info.name)
+                        st = ms.st
+                        const before: Diag[] = st.diags
+                        const cx: PCx = { g: g, t: t, s: s, file: fs.info.file, inFn: true, server: true }
+                        let ps: PS = planBlock(cx, fs.f.body, { st: st, plan: noPlan() })
+                        let waiting: int[] = []
+                        if (ps.plan.at.length > 0) waiting = [r.sym]
+                        const plan: SuspendPlan = { at: ps.plan.at, temps: ps.plan.temps, joins: ps.plan.joins, waiting: waiting, rets: ps.plan.rets }
+                        st = keepNewDiags(ps.st, before)
+                        copies = copies.concat([{ orig: { id: r.sym, hint: fs.info.name }, copy: ms.s, plan: plan }])
+                        // the transaction envelope of a `!` copy that reaches a query (§8.9.2 "Amendment S474" item 1)
+                        if (rf.failable && swaitsOf(s, r.sym) is given) {
+                            let moved: boolean = false
+                            let next: Envelope[] = []
+                            for (const e of envs) {
+                                if (e.fn.id == r.sym) {
+                                    next = next.concat([{ fn: ms.s, db: e.db, standalone: e.standalone, writes: e.writes }])
+                                    moved = true
+                                } else {
+                                    next = next.concat([e])
+                                }
+                            }
+                            envs = next
+                            if (!moved) st = addDiag(st, r.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` runs on the server and calls `" + r.name + "`, a client `!` function that waits for the server — on the server it runs in place, and its queries need its own transaction envelope (§8.9.2), which the bootstrap builds only for a `!` function a server-placed function calls directly (INTERIM, g-boot-server-copy-bang-envelope-s479). Until then call it from a server-placed function directly, or call the server function itself")
+                        }
+                        todo = todo.concat([rf])
+                    }
+                }
+            }
+        }
+        return { copies: copies, envs: envs, st: st }
+    }
+
+    fn hasCopy(cs: SrvCopy[], sym: int) -> boolean {
+        for (const c of cs) {
+            if (c.orig.id == sym) return true
+        }
+        return false
+    }
+
+    // The diagnostics of `st` after the copy's planning, keeping each new one only when the original's
+    // report at the same site (code, file, span) is not already in `before` — one report per site.
+    fn keepNewDiags(st: AS, before: Diag[]) -> AS {
+        let ds: Diag[] = before
+        let i: int = before.length
+        while (i < st.diags.length) {
+            const d: Diag = st.diags[i]
+            let dup: boolean = false
+            for (const b of before) {
+                if (b.code == d.code && b.file == d.file && b.span.start == d.span.start && b.span.end == d.span.end) dup = true
+            }
+            if (!dup) ds = ds.concat([d])
+            i = i + 1
+        }
+        return { facts: st.facts, diags: ds, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets }
     }
 
     // s473 D29 — `at` lies inside the text of a `?{}` that writes (not a SELECT / WITH … SELECT,
@@ -51784,18 +51915,20 @@ ${
             }
         }
         const pl: PS = planPass(ra.g, typedT, sum, dropTransportDiags(cp.st, quiet))
+        // s479 (s479-waiting-helper-server-copy): the server copies of the waiting helpers server-side bodies call
+        const cps: RCopies = copyPass(ra.g, typedT, sum, pp.facts.envelopes, pl.st)
         // s478 (s478-boot-endpoint): the §61 `<endpoint>` declarations
         const eps: REps = endpointPass(ra.g, files)
         // s478 (s478-boot-channel): the §38 `<channel>` declarations
         const chs: RChans = channelPass(ra.g, files, pp.facts.servers, pp.facts.inherited)
         const sf: ServerFacts = { servers: pp.facts.servers, sqls: pp.facts.sqls, dbs: pp.facts.dbs, places: pp.facts.places,
-                                  inherited: pp.facts.inherited, plan: pl.plan, loads: pp.facts.loads, envelopes: pp.facts.envelopes, txs: pp.facts.txs,
-                                  reqReads: requestReads(typedT, sum, pl.plan), tool: pp.facts.tool, endpoints: eps.eps, channels: chs.chans }
+                                  inherited: pp.facts.inherited, plan: pl.plan, loads: pp.facts.loads, envelopes: cps.envs, txs: pp.facts.txs,
+                                  reqReads: requestReads(typedT, sum, pl.plan), tool: pp.facts.tool, endpoints: eps.eps, channels: chs.chans, copies: cps.copies, onServer: false }
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
                             novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, timings: bound.timings, server: sf, css: css.facts, consts: bound.consts, requests: bound.requests, taliases: bound.taliases, waits: waitingFns(sum), rows: bound.rows }
-        const base0: Diag[] = chScopeQuiet(domScopeDropped(pl.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags).concat(hostPlacedDiags(fns, pp.facts.servers)).concat(hostServerDiags(ra.g, pp.facts.servers)).concat(nestedFnPass(ra.g, t)).concat(eps.diags), chs.quiet, chs.calls).concat(chs.diags)
+        const base0: Diag[] = chScopeQuiet(domScopeDropped(cps.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags).concat(hostPlacedDiags(fns, pp.facts.servers)).concat(hostServerDiags(ra.g, pp.facts.servers)).concat(nestedFnPass(ra.g, t)).concat(eps.diags), chs.quiet, chs.calls).concat(chs.diags)
         // s471: the linear pass (§35) — after the typer (§35.5: "after type resolution and
         // route inference"; a non-exhaustive `match`'s E-TYPE-020 is in `base0`, §35.4.3)
         const base: Diag[] = base0.concat(linPass(ra.g, t, base0))
@@ -51810,7 +51943,7 @@ ${
         let unread: Diag[] = []
         if (!hasErrorDiag(judged) && !parseFailed(files)) unread = unreadCells(t)
         return { tp: { files: files, tables: t, diags: judged.concat(unread),
-                       infos: gatedInfos(vp.gated) }, plans: cp.plans, nsAt: pl.st.nsAt, carriers: carrierNids, pend: pendingCells(ra.g, t, pp.facts.places, sum), retype: retype }
+                       infos: gatedInfos(vp.gated) }, plans: cp.plans, nsAt: cps.st.nsAt, carriers: carrierNids, pend: pendingCells(ra.g, t, pp.facts.places, sum), retype: retype }
     }
 
     // s478 — did any file draw an Error-severity parse diagnostic (FileAst.errs)?
