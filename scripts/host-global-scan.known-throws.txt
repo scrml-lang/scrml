@@ -44,6 +44,8 @@
 [esm] conformance/cases/fn/arrow-body-reject/case.scrml  # emit-client-esm: Unexpected token
 [esm] conformance/cases/fn/nested-redeclare-local-neg/case.scrml  # emit-client-esm: Identifier 'step' has already been declared (an expect-reject case impl#1 miscompiles — impl1 xfail, S477 #1831)
 [esm] conformance/cases/fn/scope-redeclare-neg/case.scrml  # emit-client-esm: Identifier 'x' has already been declared
+[esm] conformance/cases/fn/unused-binding-arm-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved (impl#1 refuses the `let <count:int=0/>` decl — E-SCOPE-001 / E-STATE-UNDECLARED — then emits on the errored source, S480)
+[esm] conformance/cases/fn/unused-binding-arm-pos/case.scrml  # emit-client-esm: Argument name clash (impl#1 refuses the `let <count:int=0/>` decl, then emits on the errored source; `.Rect(_, _)` lowers to two `_` parameters, S480)
 [esm] conformance/cases/fn/unused-binding-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved (impl#1 refuses the `let <count:int=0/>` decl — E-SCOPE-001 / E-STATE-UNDECLARED — then emits on the errored source, S480)
 [esm] conformance/cases/fn/unused-binding-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved (impl#1 refuses the `let <count:int=0/>` decl — E-SCOPE-001 / E-STATE-UNDECLARED — then emits on the errored source, S480)
 [esm] conformance/cases/forms/errors-top-level-renders/case.scrml  # emit-client-esm: The keyword 'let' is reserved

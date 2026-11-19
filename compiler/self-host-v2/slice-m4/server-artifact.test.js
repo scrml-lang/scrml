@@ -314,7 +314,7 @@ describe("§8.1 — a value interpolated in SQL never appears in the SQL text se
     function q(t: string) -> int {
         const r: Cnt = ${SQ}\`${sql}\`}.get() !{ _ :> { return 0; } };
         return r.n;
-    }`, `        <button id="go" onclick={ @_n = q("a") !{ .Transport(t) :> return }; }>go</button>`));
+    }`, `        <button id="go" onclick={ @_n = q("a") !{ .Transport(_) :> return }; }>go</button>`));
     expect(at("SELECT COUNT(*) AS n FROM users WHERE name LIKE '%\${t}%'")).toEqual(["E-SQL-SLOT-IN-LITERAL"]);   // s473: the S468 code (§8.1)
     expect(at("SELECT COUNT(*) AS n FROM users WHERE \"\${t}\" = 1")).toEqual(["E-SQL-SLOT-IN-LITERAL"]);
     expect(at("SELECT COUNT(*) AS n FROM users -- \${t}\n")).toEqual(["E-SQL-SLOT-IN-LITERAL"]);

@@ -12,14 +12,14 @@
     function describe(e: LoadError) -> string {
         return match e {
             .NotFound(id) :> "missing " + id,
-            .Busy(n, why) :> why,
+            .Busy(_, why) :> why,
             .Gone :> "gone"
         };
     }
     function note(e: LoadError) {
         match e {
             .NotFound(id) :> @log = "nf " + id,
-            .Busy(n, why) :> {
+            .Busy(_, why) :> {
                 @log = "busy " + why;
             },
             .Gone :> @log = "gone"

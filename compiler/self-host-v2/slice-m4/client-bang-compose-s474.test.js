@@ -19,7 +19,7 @@
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { mods, compile, codes, check, realDb, serve, post, pathOf, bridge, spyDriver } from "./server-artifact-harness.js";
-import { frontEnd } from "./harness.js";
+import { frontEndNoUnusedLint as frontEnd } from "../slice-m2/no-unused-lint.js";  // s480: fixtures hold incidental unread arm binders — W-UNUSED-BINDING is tested in slice-m4/unused-binding-s480.test.js
 import { loadProgram, click, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
 
 beforeAll(() => { mods(); warmLoadProgram(); }, { timeout: 300000 });

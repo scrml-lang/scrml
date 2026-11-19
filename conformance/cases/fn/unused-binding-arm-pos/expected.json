@@ -1,0 +1,35 @@
+{
+  "id": "fn-unused-binding-arm-pos",
+  "description": "§7.3.5 (S480) — five unread arm binders, each W-UNUSED-BINDING (a Warning): `r` and `h` of a value `match`'s arms, `why` of a `!{}` arm, the whole-error binder `err` of `_ err`, and `r` of a `<match>` arm. The program compiles; the warnings do not change it.",
+  "language-version": "1.0",
+  "spec": "§7.3.5, §18.7, §18.6.1",
+  "provenance": "ruling:user-voice-scrml.md-S480-unused-binding-six (item 2: \"Unread `match` / `!{}` / `<match>` arm binders ARE reported\" — RULED yes)",
+  "rationale": "§7.3.5: \"Each binder of a `match` arm or a `!{}` arm (`.V(x)`, `.Ok(v)`, a whole-error `_ err`) and of a `<match>` arm (§18.7) that nothing in the arm reads SHALL be reported as W-UNUSED-BINDING.\" One report per binder; `.Rect(_, _)` binds nothing.",
+  "expect": {
+    "codes": [
+      "W-UNUSED-BINDING"
+    ],
+    "severity": {
+      "W-UNUSED-BINDING": "warning"
+    },
+    "codeCounts": {
+      "W-UNUSED-BINDING": 5
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-w-unused-binding-s480",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'W-UNUSED-BINDING' fired 0 time(s), expected exactly 5",
+          "emitted:E-ATTR-001=1",
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-SCOPE-001=1",
+          "emitted:E-STATE-UNDECLARED=3",
+          "missing:W-UNUSED-BINDING",
+          "severity:code 'W-UNUSED-BINDING' did not fire (expected severity warning)"
+        ]
+      }
+    }
+  }
+}

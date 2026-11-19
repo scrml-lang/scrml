@@ -13,7 +13,8 @@
 //      (E-INDEX-OUT-OF-RANGE-RT); `charAt(-1)` is `""`, `at(-1)` is `not`; index reads trap.
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
-import { loadM2, frontEnd } from "./harness.js";
+import { loadM2 } from "./harness.js";
+import { frontEndNoUnusedLint as frontEnd } from "../slice-m2/no-unused-lint.js";  // s480: fixtures hold incidental unread arm binders — W-UNUSED-BINDING is tested in slice-m4/unused-binding-s480.test.js
 import { loadProgram, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
 import * as rt from "../slice-m1/runtime/runtime.js";
 import * as srt from "../slice-m1/runtime/server-runtime.js";

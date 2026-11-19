@@ -20,7 +20,8 @@ import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { loadM2, frontEnd } from "./harness.js";
+import { loadM2 } from "./harness.js";
+import { frontEndNoUnusedLint as frontEnd } from "../slice-m2/no-unused-lint.js";  // s480: fixtures hold incidental unread arm binders — W-UNUSED-BINDING is tested in slice-m4/unused-binding-s480.test.js
 import { loadProgram, printCore, click, expectNoPageErrors, takePageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
 
 let mods;
