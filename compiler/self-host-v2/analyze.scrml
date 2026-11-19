@@ -12333,8 +12333,8 @@ ${
         if (n == "reverse") return PrimOp.Reverse
         // s480 (S479 item 13) — `join(sep)` joins each element's ONE honest text (§20.7.2):
         // a `string`, `int`, `number`, `bool` or unit enum element. The runtime's joinStr
-        // concatenates each element as JavaScript string concatenation does, which IS that
-        // text for every one of them (a unit variant is its declared name at runtime).
+        // writes each element by textOf, which IS that text for every one of them (a unit
+        // variant is its declared name at runtime) and fails closed on anything else.
         if (n == "join" && hasOneText(types, el)) return PrimOp.Join
         if (n == "includes") return PrimOp.TapeIncludes      // s475 (§66.12.1): an element's membership, a `bool`
         if (n == "concat") return PrimOp.TapeConcat          // s477 (§66.12.1): `a.concat(b)` — a NEW tape; ONE tape argument
@@ -23567,7 +23567,7 @@ ${
     fn resolveForStep(env: Env, x: AExpr, what: string, st0: AS) -> AS {
         const v: AExpr | not = assignValue(x)
         if (v is given) {
-            if (handledOf(v.k) is given) return addDiag(resolveExpr(env, v, not, st0), env.file, x.span, "E-BOOTSTRAP-UNSUPPORTED", "a handled failable in a counted head's `" + what + "` is not in the bootstrap yet — handle it in the loop body")
+            if (handledOf(v.k) is given) return addDiag(resolveExpr(env, v, not, st0).st, env.file, x.span, "E-BOOTSTRAP-UNSUPPORTED", "a handled failable in a counted head's `" + what + "` is not in the bootstrap yet — handle it in the loop body")
         }
         const st: AS = resolveStmtExpr(env, x, st0)
         if (st.diags.length > st0.diags.length) return st
@@ -35788,6 +35788,13 @@ ${
                 return report(ts, env, c.span, "E-COND-NOT-BOOLEAN", what + " is a bare `bool | not` — ambiguous: say `x is given` (is it present?) or `x == true` (is it true?) (ruled S442)")
             }
             return markPresence(ts, c.nid)
+        }
+        // s480 (#2006 r1): a `T | not` place read where an enclosing test already
+        // narrowed it reads as `T` (§42.4 statement 4) — "compare explicitly" would
+        // mislead: the test is redundant, and `x is given` is what it meant.
+        const nk: string = nKey(env, c)
+        if (nk != "" && env.narrowed.indexOf(nk) >= 0) {
+            return report(ts, env, c.span, "E-COND-NOT-BOOLEAN", what + " needs a `bool`, and this value is `" + typeName(t) + "`: an enclosing test already narrowed it present, so it reads as `" + typeName(t) + "` here, not as a presence test (§42.4) — drop the redundant test, or write `x is given` (ruled S440 #4 = (c))")
         }
         return report(ts, env, c.span, "E-COND-NOT-BOOLEAN", what + " needs a `bool` (or a `T | not` presence test), and this value is `" + typeName(t) + "` — a condition has no truthiness; compare explicitly (`n > 0`, `s != \"\"`, `xs.length > 0`) (ruled S440 #4 = (c))")
     }

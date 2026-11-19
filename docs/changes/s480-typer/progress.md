@@ -20,3 +20,12 @@ Ruled items (user-voice-scrml.md S479 "⭐ RULED — the rest of S478 hand-off �
       byte-identical artifacts except tapes/join-primitives (new); s34-census / types-gate / snippet-gate / claim-gate /
       corpus-compile-floor / gen-md-shim / severity --check all pass.
 - [ ] PR.
+
+## r1 fix round (#2006 review LAND-W-F/U)
+- [x] host-global: pinned `[esm] linear/bare-arrow-binding-called-pos` (impl#1 xfail throw) in scripts/host-global-scan.known-throws.txt.
+- [x] §42.3.5 provenance: records the newly-rejecting edge (counted head re-testing an already-narrowed place →
+      E-COND-NOT-BOOLEAN, §42.4 st.4); corpus 0 of 3216 files have a counted head whose middle clause is a bare place.
+      Message for a narrowed place now names the redundant test (analyze.scrml condKnown). Tests pinned.
+- [x] runtime joinStr writes each element via textOf (fail closed); unit test.
+- [x] resolveForStep: `addDiag(resolveExpr(...))` passed an RX where an AS goes → `.st` (crash `st.diags.concat` → diagnostic). Test.
+- [ ] shared-graph-walks-s480 kr24 flake (item 5).

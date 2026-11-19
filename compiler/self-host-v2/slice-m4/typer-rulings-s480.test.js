@@ -19,6 +19,7 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, click, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
+import { joinStr } from "../slice-m1/runtime/runtime.js";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 300000 });
@@ -115,6 +116,15 @@ describe("item 13 — `.join(sep)` on a primitive / unit-enum tape joins each el
     });
   }
 
+  test("runtime joinStr (#2006 r1): each element by textOf — the same text for every admitted type, fail closed on any other", () => {
+    expect(joinStr(["a", 3, -12, 0.1 + 0.2, 1e21, -0, NaN, Infinity, -Infinity, true, false, "Green"], ",")).toBe(
+      "a,3,-12,0.30000000000000004,1e+21,0,NaN,Infinity,-Infinity,true,false,Green");
+    expect(joinStr([], ",")).toBe("");
+    expect(() => joinStr([{ name: "a" }], ",")).toThrow("has no text");
+    expect(() => joinStr(["a", [1]], ",")).toThrow("has no text");
+    expect(() => joinStr(["a", null], ",")).toThrow("has no text");
+  });
+
   test("the capable form for a struct tape: map to text, then join", async () => {
     await run(go(`const xs: User[] = [{ name: "a" }, { name: "b" }]; @out = xs.map(u => u.name).join(";");`));
     click($("#b"));
@@ -158,6 +168,32 @@ describe("item 11 — a presence-test `for` head narrows its body (§42.4 statem
 
   test("after the loop the place is not narrowed (the head's false side; a `break` leaves from anywhere)", () => {
     expect(codes(go(`for (@user) { @out = @user.name; break; } @out = @user.name;`))).toEqual(["E-TYPE-046"]);
+  });
+
+  test("a counted head re-testing a place an enclosing test already narrowed is E-COND-NOT-BOOLEAN (§42.4 statement 4; newly rejecting, as `for (@user)` / `if (@user)` there)", () => {
+    for (const body of [
+      `if (@user is given) { for (let i = 0; @user; i = i + 1) { @out = "x"; } }`,
+      `if (@user is given) { for (@user) { @out = "x"; break; } }`,
+      `if (@user is given) { if (@user) { @out = "x"; } }`,
+    ]) {
+      const e = errs(fe(go(body)));
+      expect(e.map((d) => d.code)).toEqual(["E-COND-NOT-BOOLEAN"]);
+      // #2006 r1: the message names the redundant test, not "compare explicitly"
+      expect(e[0].message).toContain("already narrowed it present");
+      expect(e[0].message).toContain("`x is given`");
+      expect(e[0].message).not.toContain("compare explicitly");
+    }
+  });
+
+  test("an un-narrowed `T | not` place in a counted head stays a presence test", () => {
+    expect(codes(go(`for (let i = 0; @user; i = i + 1) { @out = "x"; break; }`))).toEqual([]);
+  });
+
+  test("a handled failable in a counted head's step is E-BOOTSTRAP-UNSUPPORTED, not a compiler crash (#2006 r1: resolveForStep)", () => {
+    const src = prog(`server function ping() -> string { return "pong"; }
+function go() { let p: string = ""; for (let i = 0; i < 2; p = ping() !{ _ :> "d" }) { i = i + 1; } @out = p; }`);
+    const e = errs(fe(src));
+    expect(e.some((d) => d.code === "E-BOOTSTRAP-UNSUPPORTED" && d.message.includes("a handled failable in a counted head's `step`"))).toBe(true);
   });
 
   test("a `bool | not` head is still E-COND-NOT-BOOLEAN, not a presence test (§42.4 statement 3)", () => {
