@@ -128,9 +128,12 @@ describe("LOW-8 — `<match>` without `for=`: one report per fault", () => {
     const c = codes(HM(`let <q:Nope=.B/>\n<div><match on=@q><A>"a"</><B>"b"</></match></div>`));
     expect(c).toContain("E-TYPE-UNKNOWN");
     expect(c).not.toContain("E-BOOTSTRAP-UNSUPPORTED");
+    expect(c).not.toContain("E-TYPE-024");
   });
-  test("an int cell still gets the named refusal", () => {
-    expect(codes(HM(`let <q:int=1/>\n<div><match on=@q><A>"a"</><B>"b"</></match></div>`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+  // S479 (hand-off §3.A item 4) — §18.0.1 "Amended S479": an omitted `for=` over a known non-enum
+  // `on=` is E-TYPE-024 (it was refused by name).
+  test("an int cell gets E-TYPE-024 (S479)", () => {
+    expect(codes(HM(`let <q:int=1/>\n<div><match on=@q><A>"a"</><B>"b"</></match></div>`))).toContain("E-TYPE-024");
   });
 });
 

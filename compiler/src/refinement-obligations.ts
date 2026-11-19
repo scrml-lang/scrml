@@ -28,6 +28,7 @@
  */
 
 import { placeholderName, isCompilerPlaceholderName } from "./placeholder-nonce.ts";
+import { markSharedTypes, isSharedTypeObject } from "./shared-type-objects.ts";
 
 /**
  * What the runtime judge checks. Plain data (survives the codegen deep-clones).
@@ -115,8 +116,23 @@ const PRIMS = new Set(["number", "integer", "int", "string", "boolean", "bool", 
 
 // Memo per resolved type object: a type reached along many paths is judged once.
 // Only results computed with no recursion cut below them are memoized.
+//
+// Both memos live for the PROCESS: when the key is a process-lifetime type object
+// (the built-in `string`, …), the stored judge is handed to every later compile too,
+// so it is marked shared at creation (shared-type-objects.ts) — an annotating AST
+// walk (codegen's `_dbVar` tagging) then stops at it instead of writing one compile's
+// facts onto it (g-impl1-dbvar-tag-mutates-shared-type-s479: a tagged judge changed
+// the JSON hashed into a later compile's judge id).
 const _judgeMemo = new WeakMap<object, JudgeType | null>();
 const _shapeMemo = new WeakMap<object, JudgeType>();
+
+function memoJudge(key: object, j: JudgeType | null): void {
+  _judgeMemo.set(key, isSharedTypeObject(key) ? markSharedTypes(j) : j);
+}
+
+function memoShape(key: object, j: JudgeType): void {
+  _shapeMemo.set(key, isSharedTypeObject(key) ? markSharedTypes(j) : j);
+}
 
 /**
  * The judge for declared type `t`, or null when `t` carries no refinement
@@ -128,7 +144,7 @@ export function judgeTypeOf(t: AnyType, seen: Set<unknown> = new Set()): JudgeTy
   if (_judgeMemo.has(t)) return _judgeMemo.get(t)!;
   const cuts = { n: 0 };
   const j = judgeTypeOfInner(t, seen, cuts);
-  if (cuts.n === 0) _judgeMemo.set(t, j);
+  if (cuts.n === 0) memoJudge(t, j);
   return j;
 }
 
@@ -138,7 +154,7 @@ function judgeTypeOfInner(t: NonNullable<AnyType>, seen: Set<unknown>, cuts: { n
     if (_judgeMemo.has(x)) return _judgeMemo.get(x)!;
     const c = { n: 0 };
     const r = judgeTypeOfInner(x, seen, c);
-    if (c.n === 0) _judgeMemo.set(x, r);
+    if (c.n === 0) memoJudge(x, r);
     cuts.n += c.n;
     return r;
   };
@@ -274,7 +290,7 @@ function shapeJudgeOf(m: NonNullable<AnyType>, seen: Set<unknown>, cuts: { n: nu
     default:
       r = { k: "unjudgeable", what: m.kind === "unknown" ? "an unresolved type" : `a member of kind '${String(m.kind)}'` };
   }
-  _shapeMemo.set(m, r);
+  memoShape(m, r);
   return r;
 }
 

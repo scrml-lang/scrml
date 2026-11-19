@@ -2877,9 +2877,9 @@ ${
     // program's items). Two checks:
     //   - its attributes, against §40.8's closed per-route set (pageAttrDiags);
     //   - a SECOND `<page>` in the file. §40.8 (amended S478, open-Qs ruling
-    //     item 60): "Two `<page>`s in one `<program>` are an error: a route has
-    //     one page". The ruling names no code — refused by name until one is
-    //     chosen (owner question; recommendation E-PAGE-DUPLICATE).
+    //     item 60; code ruled S479 hand-off §3.A item 4): "Two `<page>`s in one
+    //     `<program>` are an error … SHALL be `E-PAGE-DUPLICATE`, reported at the
+    //     second `<page>`'s opener" (and at each later one).
     fn pageDiags(f: FileAst, st0: AS) -> AS {
         let st: AS = st0
         let seen = 0
@@ -2887,7 +2887,7 @@ ${
             seen = seen + 1
             st = pageAttrDiags(f.path, pg, st)
             if (seen > 1) {
-                st = addDiag(st, f.path, pg.span, "E-BOOTSTRAP-UNSUPPORTED", "a second `<page>` in one file — two `<page>`s in one `<program>` are an error (§40.8, amended S478): a route has one page, and a second page is a second route file. Merge them into one `<page>`. (The SPEC names no code for it yet — an owner question; refused by name meanwhile)")
+                st = addDiag(st, f.path, pg.span, "E-PAGE-DUPLICATE", "a second `<page>` in one `<program>` — a route has one page (its URL is its file's location), so a second page is a second route file (§40.8). Merge the two into one `<page>`, or move this one into its own file under `pages/`")
             }
         }
         return st
@@ -28064,8 +28064,11 @@ ${
     // variant, its positional binders and their arity E-TYPE-021), with the same
     // duplicate (E-TYPE-023), arm-after-wildcard (E-SYNTAX-010) and unreachable-
     // wildcard (W-MATCH-001) rules; the codes §18.0.1 names for the block form:
-    //   - "`for=Type` — REQUIRED. The enum type the match is over." The SPEC names
-    //     no code for a missing one: refused by name (fail closed).
+    //   - "`for=Type` — REQUIRED. The enum type the match is over." Amended S478:
+    //     `for=` MAY be omitted when `on=` is proven one enum type (phase A). Where
+    //     it stays required and is omitted, §18.0.1 "Amended S479 — the codes for a
+    //     `for=` that is still required": a known non-enum `on=` is E-TYPE-024, any
+    //     other unproven `on=` is E-MATCH-FOR-REQUIRED (matchEnumFromOn).
     //   - "`on=expr` — REQUIRED when the matched-on value is not auto-implied" —
     //     implied ONLY by an `<engine for=Type>` in scope, which the bootstrap does
     //     not build (`<engine>` is refused, §66.13.3), so a missing `on=` is
@@ -28102,21 +28105,25 @@ ${
             }
         }
         let es: Sym | not = not
+        let noFor: RMatchEnum | not = not
         if (forA is not) {
             // S478 open-Qs ruling item 12 (a) — §18.0.1 (amended S478): "`for=` MAY be
             // omitted when `on=` is provably of one enum type; the match is then over
             // that type." Proven here: `on=@cell`, a cell of this program whose type
-            // (phase A) is an enum. Any other `on=` is not proven by the bootstrap —
-            // refused by name (INTERIM, fail closed); `on=@cell` of a non-enum type is
-            // the `for=` path's own refusal for that type.
+            // (phase A) is an enum. S479 (hand-off §3.A item 4), §18.0.1: where `for=`
+            // stays required and is omitted, a known non-enum `on=` is E-TYPE-024 and an
+            // `on=` the compiler cannot prove to be of one enum type is
+            // E-MATCH-FOR-REQUIRED (matchEnumFromOn).
             const ie: RMatchEnum = matchEnumFromOn(env, onA)
             if (ie.es is given) {
                 es = ie.es
             } else if (ie.code != "" && !(ie.typeless && fileHasCode(st, env.file, "E-TYPE-UNKNOWN"))) {
                 // fix round 1 of #1945 (review LOW-8): no second report on a `<match>` with no
                 // `on=` (E-MATCH-ON-REQUIRED is its report), nor a "not an enum" on a cell whose
-                // declared type did not resolve (E-TYPE-UNKNOWN is; `string` is the recovery type)
-                st = addDiag(st, env.file, e.span, ie.code, ie.why)
+                // declared type did not resolve (E-TYPE-UNKNOWN is; `string` is the recovery type).
+                // S479: reported once `on=` is resolved — not when `on=` itself is an error
+                // (an undeclared `@name`: §42.4 statement 6, "no second report").
+                noFor = ie
             }
         } else {
             const tn: string = bareName(forA.value)
@@ -28148,7 +28155,10 @@ ${
             if (ox is not) {
                 st = addDiag(st, env.file, onA.span, "E-BOOTSTRAP-UNSUPPORTED", "`on=` on `<match>` takes the matched-on expression — `on=@cell` or `on=(expr)` (§18.0.1); a quoted, valueless or braced `on=` names no value")
             } else {
+                const before: int = errorCount(st)
                 st = resolveExpr(withWhole(env, -1), ox, not, st).st
+                const nf: RMatchEnum | not = noFor
+                if (nf is given && errorCount(st) == before) st = addDiag(st, env.file, e.span, nf.code, nf.why)
             }
         }
         const esk: Sym | not = es
@@ -28195,8 +28205,22 @@ ${
 
     // S478 (open-Qs ruling item 12) — the enum a `<match>` with no `for=` is over,
     // read from its `on=` (resolveMatchBlock): `es` when proven, else the code and
-    // message of the refusal.
+    // message of the refusal. S479 (hand-off §3.A item 4): a known non-enum `on=` (a
+    // program cell of a non-enum type, or a literal that is never an enum value) is
+    // E-TYPE-024; an `on=` this compiler cannot prove to be of one enum type is
+    // E-MATCH-FOR-REQUIRED. INTERIM: the proof is read here, before typing, so only
+    // `on=@cell` is proven (g-boot-match-for-inference-residue-s478 — capable form:
+    // decide the arms' enum in the typer; widening it is newly-accepting). A
+    // `T | not` cell stays refused by name, as with `for=` (typeMatchBlock: §18.0.1
+    // defines no absence arm). A valueless / quoted / braced `on=` is reported by
+    // resolveMatchBlock's own `on=` check — no second report here.
     type RMatchEnum:struct = { es: Sym | not, code: string, why: string, typeless: boolean }
+
+    fn errorCount(st: AS) -> int {
+        let n = 0
+        for (const d of st.diags) { if (d.severity == Severity.Error) n = n + 1 }
+        return n
+    }
 
     fn fileHasCode(st: AS, file: string, code: string) -> boolean {
         for (const d of st.diags) { if (d.file == file && d.code == code) return true }
@@ -28204,15 +28228,17 @@ ${
     }
 
     fn matchEnumFromOn(env: Env, onA: AAttr | not) -> RMatchEnum {
-        const unproven: string = "`<match>` without `for=` — §18.0.1 (amended S478) lets `for=` be omitted when `on=` is provably of one enum type; the bootstrap proves it only for `on=@cell`, a cell of this program declared with an enum type — write `<match for=Type on=…>`"
+        const unproven: string = "`<match>` without `for=` — `for=` may be omitted only when `on=` is provably of one enum type (§18.0.1), and this compiler proves it only for `on=@cell`, a cell of this program declared with an enum type; here `for=` stays required — write `<match for=Type on=…>`"
         if (onA is not) return { es: not, code: "", why: "", typeless: false }
         const ox: AExpr | not = valueExpr(onA.value)
-        if (ox is not) return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: unproven, typeless: false }
+        if (ox is not) return { es: not, code: "", why: "", typeless: false }
+        const lit: string = nonEnumLiteral(ox)
+        if (lit != "") return { es: not, code: "E-TYPE-024", why: "`<match on=…>` without `for=` — `on=` is " + lit + ", never an enum value: a block-form `<match>` is over an enum type (§18.0.1, §18.8.2)", typeless: false }
         const n: string = atName(ox)
-        if (n == "") return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: unproven, typeless: false }
+        if (n == "") return { es: not, code: "E-MATCH-FOR-REQUIRED", why: unproven, typeless: false }
         // an `as=` handle of that name in scope is not the cell
         for (const h of env.handles) {
-            if (h.name == n) return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: unproven, typeless: false }
+            if (h.name == n) return { es: not, code: "E-MATCH-FOR-REQUIRED", why: unproven, typeless: false }
         }
         for (const d of env.g.decls) {
             if (d.isProgram && d.file == env.file) {
@@ -28220,12 +28246,48 @@ ${
                     if (fi.sym.hint == n) {
                         const es: Sym | not = isEnumType(env.g.types, fi.ty)
                         if (es is given) return { es: es, code: "", why: "", typeless: false }
-                        return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: "`<match on=@" + n + ">` without `for=` — `@" + n + "` is `" + typeName(fi.ty) + "`, not an enum: a block-form `<match>` is over an enum type (§18.0.1)", typeless: fi.ty is Type.Str }
+                        if (maybeInner(fi.ty) is given) return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: "`<match on=@" + n + ">` over a `T | not` value (`" + typeName(fi.ty) + "`) — §18.0.1 defines no absence arm for the block form; discriminate the value first (`<div if=@" + n + ">…</div>`, §14.12.3) or match a value that is always present", typeless: false }
+                        return { es: not, code: "E-TYPE-024", why: "`<match on=@" + n + ">` without `for=` — `@" + n + "` is `" + typeName(fi.ty) + "`, not an enum: a block-form `<match>` is over an enum type (§18.0.1, §18.8.2)", typeless: fi.ty is Type.Str }
                     }
                 }
             }
         }
-        return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: unproven, typeless: false }
+        return { es: not, code: "E-MATCH-FOR-REQUIRED", why: unproven, typeless: false }
+    }
+
+    // S479 — an `on=` literal that is never an enum value (matchEnumFromOn): its kind
+    // as the message names it, or "" (anything else, a variant literal included —
+    // `.V` names no enum by itself).
+    fn nonEnumLiteral(e: AExpr) -> string {
+        const k: AExprK = e.k
+        return match k {
+            .Num(raw: r) :> "a number"
+            .Str(v: s) :> "a string"
+            .Template(quasis: qs) :> "a string"
+            .Bool(v: b) :> "a boolean"
+            .NotLit :> "`not`"
+            .ArrayLit(elems: es) :> "a tape literal"
+            .ObjectLit(props: ps) :> "an object literal"
+            .Lambda(params: lp) :> "a function"
+            .BlockLambda(params: lp) :> "a function"
+            .At(name: n) :> ""
+            .Name(name: n) :> ""
+            .AtItem :> ""
+            .Recovered :> ""
+            .Variant(name: n) :> ""
+            .Member(obj: o) :> ""
+            .Call(callee: c) :> ""
+            .Unary(op: o) :> ""
+            .Binary(op: o) :> ""
+            .Ternary(test: t) :> ""
+            .Assign(target: t) :> ""
+            .Spread(e: sx) :> ""
+            .Index(obj: ix) :> ""
+            .Sql(q: q) :> ""
+            .Handled(h: x) :> ""
+            .HashRef(id: hr0) :> ""
+            .Foreign(f: fb0) :> ""
+        }
     }
 
     // One arm: `idx` its variant (-1 the wildcard), `ok` — an arm that names a
@@ -42831,7 +42893,7 @@ ${
         for (const r of fnRefs(all, f)) {
             if (placeOf(ps, r.sym) != PlaceK.Server && sum.inherited.indexOf(r.sym) < 0 && !r.asValue) {
                 const w: Reach | not = waitsOf(sum, r.sym)
-                if (w is given) st = addDiag(st, r.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` runs on the server and calls `" + r.name + "`, a client function that waits for the server (`" + w.chain.join(" → ") + "`) — on the server that call would be made in place, which needs a second, server-side copy of `" + r.name + "` whose server calls are made in place (not in the bootstrap: Core holds one body per function — the server artifact emits a shared function as it is, which is right only for one that waits on nothing). Until then call the server function directly")
+                if (w is given) st = addDiag(st, r.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` runs on the server and calls `" + r.name + "`, a client function that waits for the server (`" + w.chain.join(" → ") + "`) — on the server that call would be made in place, which needs a second, server-side copy of `" + r.name + "` whose server calls are made in place (not in the bootstrap: Core holds one body per function — the server artifact emits a shared function as it is, which is right only for one that waits on nothing; INTERIM, g-boot-waiting-helper-server-copy-s479). Until then call the server function directly")
             }
         }
         return st
@@ -46105,6 +46167,20 @@ ${
         }
         for (const p of valuePositions(g, t, [])) {
             for (const r of scanValue({ t: t, file: p.file }, p.v, emptyScan()).refs) { out = out.concat([{ sym: r.sym, what: p.what, file: r.file, span: r.span }]) }
+        }
+        // s479 (g-boot-mixed-recursion-escalation-s479) — a `<request>` body, the author's or
+        // the compiler-written half of a pending cell (§13.9.2), is CLIENT code: §19.9.10 scope
+        // item 2 "The call is evaluated on the client: … in a lifecycle body … or a `<request>`
+        // body". A function its load calls therefore has a client-classified caller and "SHALL
+        // remain ambient (client-classified)" (§12.2 Trigger 5). Before s479 a request body was
+        // no referrer at all, so a helper the load called that a server function ALSO called
+        // (`step` ↔ `down`) was placed by inheritance — then its server calls were judged
+        // server→server (a false E-ERROR-013) and the load called it as a server function
+        // that is not one (C-R2 / C-S3: E-BOOTSTRAP-CORE-ILL-FORMED).
+        for (const rq of t.requests) {
+            let what: string = "the `<request>` body that loads `@" + rq.targetName + "`"
+            if (rq.pend >= 0) what = "the initializer of `@" + rq.targetName + "`"
+            for (const r of scanBlock({ t: t, file: rq.file }, rq.req.body, emptyScan()).refs) { out = out.concat([{ sym: r.sym, what: what, file: r.file, span: r.span }]) }
         }
         return out
     }

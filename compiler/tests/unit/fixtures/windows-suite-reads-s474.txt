@@ -4075,8 +4075,6 @@ conformance/cases/error/construct-variant-payload-arity-return-neg/case.scrml
 conformance/cases/error/construct-variant-payload-arity-return-neg/expected.json
 conformance/cases/error/construct-variant-payload-arity-trailing-comma-ok/case.scrml
 conformance/cases/error/construct-variant-payload-arity-trailing-comma-ok/expected.json
-conformance/cases/error/error-008-message-pos/case.scrml
-conformance/cases/error/error-008-message-pos/expected.json
 conformance/cases/error/error-008-neg/case.scrml
 conformance/cases/error/error-008-neg/expected.json
 conformance/cases/error/failable-fn-value-passed-handled-neg/case.scrml
@@ -5602,8 +5600,6 @@ conformance/cases/reactive/derived-write-reassign/case.scrml
 conformance/cases/reactive/derived-write-reassign/expected.json
 conformance/cases/reactive/dg-001-cyclic-neg/case.scrml
 conformance/cases/reactive/dg-001-cyclic-neg/expected.json
-conformance/cases/reactive/dg-001-cyclic-pos/case.scrml
-conformance/cases/reactive/dg-001-cyclic-pos/expected.json
 conformance/cases/reactive/dg-002-no-readers-neg/case.scrml
 conformance/cases/reactive/dg-002-no-readers-neg/expected.json
 conformance/cases/reactive/dg-002-no-readers-pos/case.scrml

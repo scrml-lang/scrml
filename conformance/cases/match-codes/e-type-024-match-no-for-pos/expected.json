@@ -1,0 +1,29 @@
+{
+  "id": "match-codes-e-type-024-match-no-for-pos",
+  "description": "§18.0.1 (amended S479) — a block `<match>` that omits `for=` over an `on=` of a known non-enum type (`int`) is E-TYPE-024: a match is over an enum, and `for=` stays required.",
+  "language-version": "1.0",
+  "spec": "§18.0.1",
+  "provenance": "ruling:user-voice-scrml.md S479 \"⭐ RULED — S478 hand-off §3.A and §3.B, PA recs adopted\" item 4",
+  "rationale": "§18.0.1: \"A `<match>` that omits `for=` where it stays required SHALL be: **`E-TYPE-024`** when the type of `on=` is known and is not an enum\".",
+  "expect": {
+    "codes": [
+      "E-TYPE-024"
+    ],
+    "notCodes": [
+      "E-MATCH-FOR-REQUIRED"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-ruled-codes-s479",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-SCOPE-001=1",
+          "emitted:E-STATE-UNDECLARED=3",
+          "missing:E-TYPE-024"
+        ]
+      }
+    }
+  }
+}
