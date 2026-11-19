@@ -399,6 +399,12 @@ export const STRUCTURAL_ELEMENT_PLACEMENT = {
   onTimeout:    "an `<onTimeout>` element belongs inside an engine state-child (§51.0.M)",
   onIdle:       "an `<onIdle>` element belongs at engine root, sibling of state-children (§51.0.R)",
   onchange:     "an `<onchange>` element belongs inside a `<channel watches=<table>>` body (§38.13.3)",
+  // §61.2 (ruling:user-voice-scrml.md-S478-open-Qs-item-36; built in impl#1 by
+  // ruling:user-voice-scrml.md-S480-four-recs item 1): "An `<endpoint>` declaration
+  // SHALL be a direct child of the top-level `<program>` (the entry file's
+  // `<program>`, §40.8)." The markup loci are judged by the post-build walk in
+  // buildAST, the non-entry file by compiler/src/endpoint-program-rules.ts.
+  endpoint:     "an `<endpoint>` declaration belongs as a direct child of the top-level `<program>` (§61.2): a route belongs to the served program, not to a page, a channel, a nested program, an element or a logic block",
   // §65.9 — the scrml-native CSS structural elements. Both are PROGRAM-SCOPE:
   // an immediate child of `<program>` (a sibling of `<page>` / `<channel>`) for
   // v1; page-scope override is deferred to v1.next. Use outside that locus (file
@@ -22758,10 +22764,38 @@ export function attachHandlerStatementListsInTree(nodes, filePath, options = {})
 }
 
 // §61.7 / §39.2.1 — one serialized origin, the non-`*` value of an `<endpoint>`'s
-// `cors=`: `scheme://host[:port]` (RFC 6454 §6.1 / RFC 3986 scheme), where host is a
-// DNS-style name or a bracketed IPv6 literal. No path, query, userinfo or whitespace.
+// `cors=`: `scheme://host[:port]`, written the way a browser sends it in `Origin`
+// (RFC 6454 §6.2 / the WHATWG origin serialization), because the value is compared
+// with that header byte for byte: a lowercase scheme and host, host labels that are
+// not empty (`a..b`), or a bracketed lowercase IPv6 literal, and a port only when it
+// is not the scheme's default, written without leading zeros and at most 65535. No
+// path, query, userinfo or whitespace. A value outside this shape names an origin no
+// browser can send, so the endpoint would never answer one (#1981 review r1 NIT).
 const ENDPOINT_CORS_ORIGIN_RE =
-  /^[A-Za-z][A-Za-z0-9+.-]*:\/\/(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?)(?::[0-9]{1,5})?$/;
+  /^([a-z][a-z0-9+.-]*):\/\/(?:\[[0-9a-f:.]+\]|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::(0|[1-9][0-9]{0,4}))?$/;
+// The WHATWG special schemes and their default ports (an explicit default port is
+// dropped from the serialized origin, so `https://a.example:443` is never sent).
+const ENDPOINT_CORS_DEFAULT_PORT = { http: "80", https: "443", ws: "80", wss: "443", ftp: "21" };
+
+/** §61.7 — is `value` one origin, serialized as a browser sends it? */
+function isEndpointCorsOrigin(value) {
+  const m = ENDPOINT_CORS_ORIGIN_RE.exec(value);
+  if (!m) return false;
+  const scheme = m[1];
+  const port = m[2];
+  if (port !== undefined && Number(port) > 65535) return false;
+  if (Object.prototype.hasOwnProperty.call(ENDPOINT_CORS_DEFAULT_PORT, scheme)) {
+    if (port !== undefined && port === ENDPOINT_CORS_DEFAULT_PORT[scheme]) return false;
+    // A special scheme's origin has a serializer: the value must be its own
+    // serialization (an IPv4 host in canonical form, an IPv6 literal compressed).
+    try {
+      if (new URL(value).origin !== value) return false;
+    } catch (_e) {
+      return false;
+    }
+  }
+  return true;
+}
 
 function buildBlock(block, filePath, parentContextKind, counter, errors, parentStateName = null) {
   // Uniform-opener normalization: rewrite block.type when the BS classification
@@ -23596,19 +23630,28 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // serialized origin — `scheme://host[:port]`, no path, no whitespace (a
         // newline in it made every response of the endpoint fail in
         // `Headers.set`). The endpoint is then compiled with no CORS (fail closed).
-        if (/(?:^|\s)cors\s*=/.test(header)) {
-          const corsWhy = cors === null
-            ? "is not a string literal"
-            : (cors === "*" || ENDPOINT_CORS_ORIGIN_RE.test(cors))
-              ? null
-              : (cors === "" ? "is empty" : `is ${JSON.stringify(cors)}, which is neither \`"*"\` nor one origin`);
+        // The attribute names are counted on the header with every quoted value
+        // emptied, so a `cors=` written inside another attribute's string is not one.
+        const corsCount = (header.replace(/"[^"]*"|'[^']*'/g, '""').match(/(?:^|\s)cors\s*=/g) || []).length;
+        if (corsCount > 0) {
+          // §61.2 `endpoint-attrs ::= path-attr method-attr accepts-attr cors-attr?` —
+          // at most one `cors=`. A second one was read first-wins, silently (#1981
+          // review r1 NIT); it is refused, and the endpoint takes no `cors=`.
+          const corsWhy = corsCount > 1
+            ? `is written ${corsCount} times (an \`<endpoint>\` carries at most one \`cors=\`, §61.2)`
+            : cors === null
+              ? "is not a string literal"
+              : (cors === "*" || isEndpointCorsOrigin(cors))
+                ? null
+                : (cors === "" ? "is empty" : `is ${JSON.stringify(cors)}, which is neither \`"*"\` nor one origin as a browser sends it`);
           if (corsWhy !== null) {
             errors.push(new TABError(
               "E-ENDPOINT-CORS-INVALID",
               `E-ENDPOINT-CORS-INVALID: \`cors=\` on \`<endpoint>\` ${corsWhy}. Per SPEC §61.7 an ` +
               `\`<endpoint>\`'s \`cors=\` is a string literal with the values of the §39.2.1 program ` +
               `attribute: \`"*"\`, or one origin — \`scheme://host\` with an optional \`:port\` and no ` +
-              `path, e.g. \`cors="https://example.com"\`.`,
+              `path, written as a browser sends it in \`Origin\` (lowercase, no default port), ` +
+              `e.g. \`cors="https://example.com"\`.`,
               span,
             ));
             cors = null;
@@ -27555,6 +27598,76 @@ function _buildASTImpl(bsOutput, tokenizerOverrides) {
       }
     }
     for (const topNode of nodes) checkThemePlacement(topNode);
+  }
+
+  // ---------------------------------------------------------------------------
+  // §61.2 — `<endpoint>` placement, the markup loci (ruling:user-voice-scrml.md-
+  // S478-open-Qs-item-36; built in impl#1 by ruling:user-voice-scrml.md-S480-four-
+  // recs item 1). "An `<endpoint>` declaration SHALL be a direct child of the
+  // top-level `<program>` (the entry file's `<program>`, §40.8). An `<endpoint>`
+  // anywhere else — inside a `<page>`, a `<channel>`, a nested `<program>`, an
+  // element, a `${ … }` logic block, outside any `<program>`, or in a file that is
+  // not the program's entry — is `E-STRUCTURAL-ELEMENT-MISPLACED` (§4.15)."
+  //
+  // This walk judges what one file shows: the endpoint's parent node. A program is
+  // top-level when it has no `<program>` / `<page>` ancestor, whatever markup wraps
+  // it (§4.12, program-role.ts). The `${ … }` locus is refused by parseLogicBody
+  // (STRUCTURAL_ELEMENT_PLACEMENT.endpoint); the two BUILD facts — a file that is
+  // not the entry, and a route file whose program is nested under the application
+  // program — are judged by compiler/src/endpoint-program-rules.ts. Messages
+  // mirror the bootstrap (compiler/self-host-v2/parse.scrml `endpointItem`,
+  // analyze.scrml markup walk). Every property is walked (an `<endpoint>` the
+  // codegen walk can still reach must not escape the rule by its container).
+  {
+    const ENDPOINT_MOVE =
+      "an `<endpoint>` is grammatical only as a direct child of the top-level `<program>` (§61.2, §4.15)";
+    const seenEp = new WeakSet();
+    const nestedProgram = new WeakSet(); // programs with a `<program>` / `<page>` ancestor
+    const isTag = (n, tag) => !!n && n.kind === "markup" && n.tag === tag;
+    function walkEndpointPlacement(node, parent, underProgramOrPage) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) {
+        for (const c of node) walkEndpointPlacement(c, parent, underProgramOrPage);
+        return;
+      }
+      if (seenEp.has(node)) return;
+      seenEp.add(node);
+      const isNode = typeof node.kind === "string";
+      if (node.kind === "endpoint-decl") {
+        let why = null;
+        if (parent === null) {
+          why = "outside a `<program>` — " + ENDPOINT_MOVE + ": a route belongs to the served program, not to an imported module; move it into the entry file's `<program>` body";
+        } else if (isTag(parent, "program")) {
+          if (nestedProgram.has(parent)) {
+            why = "inside a nested `<program>` — " + ENDPOINT_MOVE + ": a nested program is an execution context (a worker, sidecar or scoped-db program, §4.12), not the served program; move it into the top-level `<program>` body";
+          }
+        } else if (isTag(parent, "page")) {
+          why = "inside a `<page>` — " + ENDPOINT_MOVE + ": a route belongs to the served program, not to a page; move it into the `<program>` body";
+        } else if (isTag(parent, "channel")) {
+          why = "inside a `<channel>` — " + ENDPOINT_MOVE + ": a route belongs to the served program, not to a channel; move it into the `<program>` body";
+        } else {
+          const shown = parent.kind === "markup" && typeof parent.tag === "string" ? `\`<${parent.tag}>\`` : "markup";
+          why = `inside ${shown} — ` + ENDPOINT_MOVE + "; move it out of the enclosing element, into the `<program>` body";
+        }
+        if (why !== null) {
+          errors.push(new TABError(
+            "E-STRUCTURAL-ELEMENT-MISPLACED",
+            `E-STRUCTURAL-ELEMENT-MISPLACED: \`<endpoint>\` ${why}.`,
+            node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+          ));
+        }
+        return; // an endpoint's arms hold no endpoint
+      }
+      if (isTag(node, "program") && underProgramOrPage) nestedProgram.add(node);
+      const nextParent = isNode ? node : parent;
+      const nextUnder = underProgramOrPage || isTag(node, "program") || isTag(node, "page");
+      for (const k of Object.keys(node)) {
+        if (k === "span") continue;
+        const v = node[k];
+        if (v && typeof v === "object") walkEndpointPlacement(v, nextParent, nextUnder);
+      }
+    }
+    for (const topNode of nodes) walkEndpointPlacement(topNode, null, false);
   }
 
   // ---------------------------------------------------------------------------

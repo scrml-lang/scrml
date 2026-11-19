@@ -57,7 +57,7 @@ import { join } from "path";
 import { compileScrml } from "../../src/api.js";
 
 const TMP = mkdtempSync(join(tmpdir(), "endpoint-conformance-"));
-// scrml emits ES modules (`export const __ri_route_endpoint_N = …`). `node --check` picks the
+// scrml emits ES modules (`export const __ri_route_endpoint_POST__2ffsp = …`). `node --check` picks the
 // module kind from the nearest package.json, and there is none above os.tmpdir(), so it would
 // parse an ESM artifact under CommonJS rules and report `export` as a SyntaxError — a red gate
 // for a reason no change caused. Declare the module type the artifacts are actually emitted in.
@@ -211,10 +211,10 @@ describe("(D) route registration at the verbatim path=/method= + node --check (�
     const r = compile(FSP_ENDPOINT);
     const sjs = serverJs(r);
     // The route record SHAPE the WinterCG aggregate auto-collects.
-    expect(sjs).toMatch(/export const __ri_route_endpoint_\d+ = \{\s*\n\s*path: "\/fsp",\s*\n\s*method: "POST",/);
+    expect(sjs).toMatch(/export const __ri_route_endpoint_POST__2ffsp = \{\s*\n\s*path: "\/fsp",\s*\n\s*method: "POST",/);
     // S479 (§61.7): plus one OPTIONS record at the endpoint's path — its preflight
     // answer (405 without the endpoint's own `cors=`; endpoint-cors-served.test.js).
-    expect(sjs).toMatch(/export const routes = \[__ri_route_endpoint_\d+, __ri_route_endpoint_preflight__2ffsp\];/);
+    expect(sjs).toMatch(/export const routes = \[__ri_route_endpoint_POST__2ffsp, __ri_route_endpoint_preflight__2ffsp\];/);
     // The imported aggregate confirms the live record (not just the text).
     expect(Array.isArray(SRV.routes)).toBe(true);
     expect(SRV.routes.length).toBe(2);

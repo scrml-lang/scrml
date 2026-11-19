@@ -23,12 +23,15 @@ let n = 0;
 beforeAll(() => { if (!existsSync(TMP_ROOT)) mkdirSync(TMP_ROOT, { recursive: true }); });
 afterAll(() => { if (existsSync(TMP_ROOT)) rmSync(TMP_ROOT, { recursive: true, force: true }); });
 
-const EP = `type M:enum = { Ping, Dispatch(prompt: string, project: string) }
+// §61.2 — an `<endpoint>` is a direct child of the top-level `<program>` (S480).
+const EP = `<program>
+type M:enum = { Ping, Dispatch(prompt: string, project: string) }
 fn handleDispatch(p: string, q: string) -> string { p }
 <endpoint path="/x" method="POST" accepts=M>
   <Ping : { ok: true }>
   <Dispatch(prompt, project) : { echo: handleDispatch(prompt, project) }>
-</endpoint>`;
+</endpoint>
+</program>`;
 
 function compile(src, tagBase) {
   const tag = `${tagBase}-${++n}`;

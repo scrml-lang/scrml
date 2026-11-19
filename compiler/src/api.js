@@ -91,6 +91,7 @@ import { runDeferChecks } from "./validators/lint-defer.ts";
 import { runTransactionChecks } from "./validators/lint-transaction.ts";
 import { runRedeclareChecks } from "./validators/lint-redeclare.ts";
 import { runReservedPrefixCheck } from "./validators/reserved-prefix.ts";
+import { checkEndpointProgramRules, endpointEntryFiles } from "./endpoint-program-rules.ts";
 import { takeProtectRegistry, analyzeCompileProtectFlow } from "./codegen/protect-flow.ts";
 import { forbiddenJsDiagnosticsForDefault } from "./native-walker/forbidden-js-native.ts";
 import { shipText, shipStripFallbackWarning } from "./codegen/ship-strip.ts";
@@ -2008,12 +2009,22 @@ function _compileScrmlImpl(options = {}) {
   // nested. Decided ONCE here, over the whole parsed set, before PRECG reads any
   // program role (program-role.ts). The route-file classifier is route
   // inference's own build-root rule (`programRoleBuildFacts`) — swap it there, not here.
+  // §40.8 — the application's entry file paths (S480; the endpoint preflight's
+  // Access-Control-Max-Age comes from the entry `<program>`), handed to codegen.
+  let _appEntryFilePaths = null;
   {
     const _asts = tabResults.map((r) => r?.ast).filter(Boolean);
     const _givenRoot = typeof options.buildRoot === "string" && options.buildRoot !== ""
       ? resolve(options.buildRoot)
       : undefined;
     stampImpliedProgramAncestors(_asts, programRoleBuildFacts(_asts, _givenRoot));
+    // §61.2 / §61.7 (ruling:user-voice-scrml.md-S480-four-recs item 1) — the two
+    // `<endpoint>` rules that need the whole build: an endpoint in a file that is not
+    // the application's entry (E-STRUCTURAL-ELEMENT-MISPLACED), and two endpoints at
+    // one path and method in any files of the app (E-ENDPOINT-ROUTE-DUPLICATE).
+    // The same build-root rule as the implied ancestor above (route inference's).
+    collectErrors("ENDPOINT-RULES", stage("ENDPOINT-RULES", () => checkEndpointProgramRules(_asts, _givenRoot)));
+    _appEntryFilePaths = [...endpointEntryFiles(_asts, _givenRoot)].map((f) => f.filePath);
   }
   const _runPRECG = seams.pick("PRECG", runPRECG);
   for (const tabResult of tabResults) {
@@ -3518,6 +3529,8 @@ function _compileScrmlImpl(options = {}) {
     // §14.8.10 item (1) (S457) — the SAME database scope the stage above used: codegen holds
     // every `?{}` it lowers to the program-body statement allow-list.
     compilationHasDatabase: compilationHasDb,
+    // §40.8 / §39.2.1 (S480) — the entry `<program>` the endpoint Max-Age is read from.
+    appEntryFilePaths: _appEntryFilePaths,
     batchPlan: bpResult.batchPlan,
     batchPlannerErrors: bpResult.errors,
     embedRuntime,

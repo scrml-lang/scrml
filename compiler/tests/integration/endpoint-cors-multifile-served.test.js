@@ -20,6 +20,15 @@
 // Every app here is built with the real `scrml build` CLI and served by the REAL
 // `_server.js` it emits (and by the real `scrml dev` app child), over HTTP, with a
 // foreign `Origin`.
+//
+// S480 (§61.2, ruling:user-voice-scrml.md-S480-four-recs item 1): "An `<endpoint>`
+// declaration SHALL be a direct child of the top-level `<program>` (the entry file's
+// `<program>`, §40.8)." The original HIGH-1 / MED-1 shape — an `<endpoint>` in a
+// module file with no `<program>` — is now refused at compile time (asserted
+// below). The app-scope table still matters where a build holds two top-level
+// `<program>`s in different files (impl#1 accepts each as an entry and serves both
+// from one `_server.js`), so the cases below keep their coverage in that shape: the
+// endpoint file is its own `<program>`.
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync, mkdtempSync } from "fs";
@@ -44,7 +53,7 @@ const PROGRAM_STAR = `<program cors="*">
 </program>
 `;
 
-const apiFile = (endpointAttrs) => `\${
+const apiBody = (endpointAttrs) => `\${
   type Op:enum = {
     Ping
     Echo(say: string)
@@ -55,6 +64,7 @@ const apiFile = (endpointAttrs) => `\${
   <Echo(say) : { said: say }>
 </endpoint>
 `;
+const apiFile = (endpointAttrs) => `<program>\n${apiBody(endpointAttrs)}</program>\n`;
 
 // MED-1: POST /op in app.scrml (no cors=), PUT /op in zapi.scrml with cors=.
 const TWOFILE_APP = `<program>
@@ -69,7 +79,8 @@ const TWOFILE_APP = `<program>
 <p>hi</p>
 </program>
 `;
-const TWOFILE_ZAPI = `\${
+const TWOFILE_ZAPI = `<program>
+\${
   type Op2:enum = {
     Ping
   }
@@ -77,10 +88,21 @@ const TWOFILE_ZAPI = `\${
 <endpoint path="/op" method="PUT" accepts=Op2 cors="${A}">
   <Ping : { pong: true }>
 </endpoint>
+</program>
 `;
 
 let root;
 const procs = [];
+
+/** Build and return the CLI's exit code and output (no throw). */
+function tryBuild(name, files) {
+  const src = join(root, name, "src");
+  const dist = join(root, name, "dist");
+  mkdirSync(src, { recursive: true });
+  for (const [f, text] of Object.entries(files)) writeFileSync(join(src, f), text);
+  const r = Bun.spawnSync(["bun", CLI, "build", src, "-o", dist], { stdout: "pipe", stderr: "pipe" });
+  return { exitCode: r.exitCode, out: r.stdout.toString() + r.stderr.toString(), dist };
+}
 
 function build(name, files) {
   const src = join(root, name, "src");
@@ -167,7 +189,7 @@ afterAll(async () => {
 });
 
 for (const host of ["build", "dev"]) {
-  describe(`HIGH-1 [${host}] — <program cors="*"> in app.scrml, <endpoint> in api.scrml`, () => {
+  describe(`HIGH-1 [${host}] — <program cors="*"> in app.scrml, <endpoint> in api.scrml's <program>`, () => {
     test("a cross-origin preflight to the endpoint is 405 + Allow, no Access-Control-* header", async () => {
       const res = await preflight(hosts.star[host], "POST", EVIL);
       expect(res.status).toBe(405);
@@ -192,7 +214,7 @@ for (const host of ["build", "dev"]) {
     }, TIMEOUT_MS);
   });
 
-  describe(`HIGH-1 [${host}] — per-endpoint cors="${A}" in api.scrml under <program cors="*">`, () => {
+  describe(`HIGH-1 [${host}] — per-endpoint cors="${A}" in api.scrml beside <program cors="*">`, () => {
     test("the preflight answers with the endpoint's origin, never *", async () => {
       const res = await preflight(hosts.starA[host], "POST", A);
       expect(res.status).toBe(204);
@@ -235,6 +257,15 @@ for (const host of ["build", "dev"]) {
     }, TIMEOUT_MS);
   });
 }
+
+describe("§61.2 (S480) — the pre-S480 HIGH-1 shape is refused at compile time", () => {
+  test("an <endpoint> in a module file with no <program> beside <program cors=\"*\"> → E-STRUCTURAL-ELEMENT-MISPLACED", () => {
+    const r = tryBuild("star-module", { "app.scrml": PROGRAM_STAR, "api.scrml": apiBody("") });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.out).toContain("E-STRUCTURAL-ELEMENT-MISPLACED");
+    expect(r.out).toContain("api.scrml");
+  }, TIMEOUT_MS);
+});
 
 // ---------------------------------------------------------------------------
 // LOW-1 — the endpoint CORS helpers emit no literal `undefined`, so a program with
@@ -286,6 +317,23 @@ describe("LOW-2 — E-ENDPOINT-CORS-INVALID", () => {
     ["a trailing slash", ' cors="https://a.example/"'],
     ["the null origin", ' cors="null"'],
     ["a list of origins", ' cors="https://a.example https://b.example"'],
+    // S480 (#1981 review r1 NIT) — values no browser sends in `Origin` (RFC 6454 §6.2 /
+    // the WHATWG origin serialization: lowercase, no default port, a port <= 65535).
+    ["an uppercase scheme", ' cors="HTTPS://a.example"'],
+    ["an uppercase host", ' cors="https://A.Example"'],
+    ["the https default port", ' cors="https://a.example:443"'],
+    ["the http default port", ' cors="http://a.example:80"'],
+    ["a port above 65535", ' cors="https://a.example:65536"'],
+    ["a port with a leading zero", ' cors="https://a.example:0443"'],
+    ["an empty host label", ' cors="https://a..b"'],
+    ["a leading dot in the host", ' cors="https://.a.example"'],
+    ["an uppercase IPv6 literal", " cors='http://[::ABCD]:8080'"],
+    ["a non-canonical IPv6 literal", " cors='http://[0:0:0:0:0:0:0:1]'"],
+    ["a non-canonical IPv4 host", ' cors="http://127.1"'],
+    // S480 (#1981 review r1 NIT) — §61.2 `cors-attr?`: at most one `cors=`. The second
+    // was read first-wins, silently.
+    ["two cors= attributes", ` cors="*" cors="${A}"`],
+    ["two equal cors= attributes", ` cors="${A}" cors="${A}"`],
   ];
   for (const [label, attrs] of bad) {
     test(`${label} → E-ENDPOINT-CORS-INVALID`, () => {
@@ -298,6 +346,10 @@ describe("LOW-2 — E-ENDPOINT-CORS-INVALID", () => {
     ["an https origin", ` cors="${A}"`],
     ["an origin with a port", ' cors="http://localhost:3000"'],
     ["a bracketed IPv6 origin", " cors='http://[::1]:8080'"],
+    ["a non-default https port", ' cors="https://a.example:8443"'],
+    ["an IPv4 origin", ' cors="http://127.0.0.1:3000"'],
+    ["a hyphenated host", ' cors="https://my-app.example"'],
+    ["a non-special scheme (an extension origin)", ' cors="chrome-extension://abcdefghijklmnop"'],
     ["no cors=", ""],
   ];
   for (const [label, attrs] of good) {
@@ -307,6 +359,25 @@ describe("LOW-2 — E-ENDPOINT-CORS-INVALID", () => {
       expect((r.errors ?? []).filter((e) => e.severity !== "warning" && e.severity !== "info" && e.severity !== "lint").map((e) => e.code)).toEqual([]);
     });
   }
+  test("two cors= → the diagnostic names the repetition, and the endpoint takes no cors=", () => {
+    const r = compileOne("low2-twice", endpointProgram(` cors="*" cors="${A}"`));
+    const e = (r.errors ?? []).find((d) => d.code === "E-ENDPOINT-CORS-INVALID");
+    expect(e?.message).toContain("written 2 times");
+  });
+  test("a cors= written inside another attribute's string is not counted", () => {
+    const r = compileOne("low2-instring", `<program>
+\${
+  type Op:enum = {
+    Ping
+  }
+}
+<endpoint path="/op" method="POST" accepts=Op title="x cors=y" cors="${A}">
+  <Ping : { pong: true }>
+</endpoint>
+</program>
+`);
+    expect(codesOf(r)).not.toContain("E-ENDPOINT-CORS-INVALID");
+  });
   test("cors-max-age= on the <endpoint> opener is not read as cors=", () => {
     const r = compileOne("low2-maxage", endpointProgram(' cors-max-age="60"'));
     expect(codesOf(r)).not.toContain("E-ENDPOINT-CORS-INVALID");
