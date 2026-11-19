@@ -298,12 +298,12 @@ describe("§61.7 cors= origin — refused values", () => {
     ["https://a..b", "empty label"],
     ["https://.a.example", "empty label"],
     ["https://a.example..", "empty label"],
-    // the attribute string is `"`-only (§4.18.3): a single-quoted value is not a string literal
-    ["SQ", "is not a string literal"],
+    // (a single-quoted value is refused by the opener reader, E-ATTR-001 — #1998 r2,
+    // endpoint-opener-closed-grammar-served.test.js)
   ];
   for (const [v, why] of refused) {
     test(`cors=${JSON.stringify(v)} → E-ENDPOINT-CORS-INVALID (${why})`, () => {
-      const attr = v === "SQ" ? `cors='${A}'` : `cors="${v}"`;
+      const attr = `cors="${v}"`;
       const errs = compileOne(`co-${Math.random().toString(36).slice(2)}`, program(`${TY()}\n${EPO(`path="/x" method="POST" accepts=Op ${attr}`)}`));
       const e = errs.filter((x) => x.code === "E-ENDPOINT-CORS-INVALID");
       expect(e.length).toBe(1);

@@ -126,22 +126,85 @@ interface ImportGraphEntry {
 /**
  * The files of the build that another file of it imports or re-exports from (posix
  * paths), from the MOD stage's import graph (`absSource` of every import, the resolved
- * `reExportSource` of every re-export). A file importing itself does not count.
+ * `reExportSource` of every re-export). A file importing itself does not count, and
+ * neither does an edge on an import cycle (#1998 review r2 L1): a cycle is
+ * E-IMPORT-002 (§21.3), and the entry's own `<program>` imported back by a module of
+ * the cycle is not "an imported module" — counting it added a misleading
+ * E-STRUCTURAL-ELEMENT-MISPLACED next to the cycle error. An edge u → v is on a cycle
+ * when u and v are in one strongly connected component (Tarjan).
  */
 export function importedFilePaths(importGraph: Iterable<[string, ImportGraphEntry]> | null | undefined): Set<string> {
   const out = new Set<string>();
   if (!importGraph) return out;
+  const edges = new Map<string, string[]>();
   for (const [file, entry] of importGraph) {
     const self = toPosix(String(file));
+    const list = edges.get(self) ?? [];
     const add = (p: unknown) => {
       if (typeof p !== "string" || p === "") return;
       const q = toPosix(p);
-      if (q !== self) out.add(q);
+      if (q !== self) list.push(q);
     };
     for (const imp of entry?.imports ?? []) add(imp?.absSource);
     for (const exp of entry?.exports ?? []) add(exp?.reExportSource);
+    edges.set(self, list);
+  }
+  const comp = stronglyConnected(edges);
+  for (const [u, vs] of edges) {
+    for (const v of vs) {
+      const cu = comp.get(u);
+      if (cu !== undefined && cu === comp.get(v)) continue; // an edge on a cycle
+      out.add(v);
+    }
   }
   return out;
+}
+
+/** Tarjan's strongly connected components, iteratively: node → component id. */
+function stronglyConnected(edges: ReadonlyMap<string, readonly string[]>): Map<string, number> {
+  const index = new Map<string, number>();
+  const low = new Map<string, number>();
+  const onStack = new Set<string>();
+  const stack: string[] = [];
+  const comp = new Map<string, number>();
+  let next = 0;
+  let compId = 0;
+  for (const root of edges.keys()) {
+    if (index.has(root)) continue;
+    const work: Array<{ node: string; i: number }> = [{ node: root, i: 0 }];
+    index.set(root, next); low.set(root, next); next++;
+    stack.push(root); onStack.add(root);
+    while (work.length > 0) {
+      const top = work[work.length - 1];
+      const succ = edges.get(top.node) ?? [];
+      if (top.i < succ.length) {
+        const w = succ[top.i++];
+        if (!index.has(w)) {
+          index.set(w, next); low.set(w, next); next++;
+          stack.push(w); onStack.add(w);
+          work.push({ node: w, i: 0 });
+        } else if (onStack.has(w)) {
+          low.set(top.node, Math.min(low.get(top.node)!, index.get(w)!));
+        }
+        continue;
+      }
+      work.pop();
+      if (work.length > 0) {
+        const parent = work[work.length - 1].node;
+        low.set(parent, Math.min(low.get(parent)!, low.get(top.node)!));
+      }
+      if (low.get(top.node) === index.get(top.node)) {
+        let w: string | undefined;
+        do {
+          w = stack.pop()!;
+          onStack.delete(w);
+          comp.set(w, compId);
+        } while (w !== top.node);
+        compId++;
+      }
+    }
+  }
+  return comp;
 }
 
 function spanOf(node: NodeLike, file: string): Span {
