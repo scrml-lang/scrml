@@ -22,3 +22,10 @@ Rulings (scrml-support/user-voice-scrml.md):
 - MED-1: preflight records are named by PATH (`endpointPreflightRouteName`, `/op` → `__ri_route_endpoint_preflight__2fop`) and answer from the app table; twofile → PUT preflight 204 a.example, POST preflight 405 `Allow: POST, PUT` (build + dev).
 - LOW-1: the emitted helpers use `== null` / `: null` (no literal `undefined`).
 - Byte identity: noep1 (single cors+log+headers+handle) and noep2 (two files, cors, no endpoint) — origin/main vs head `scrml build` outputs identical.
+- Commit 5a3eeffdd (hook PASS: 56603 pass / 0 fail).
+- LOW-2: `E-ENDPOINT-CORS-INVALID` (ast-builder.js `ENDPOINT_CORS_ORIGIN_RE`; SPEC §61.7 sentence, §61.9 entry, §34 row) — unquoted / empty / not `*` and not one `scheme://host[:port]` origin; the endpoint compiles with no cors= (fail closed). Program-level half filed: g-impl1-program-cors-value-unvalidated-s480 (LOW, markers only).
+- NIT-1: §41.13 and runtime.js comment restored to `"tag"`.
+- Test: compiler/tests/integration/endpoint-cors-multifile-served.test.js — 32 pass on this branch; 22 of 32 red on d60825e44 (all HIGH-1/MED-1 build+dev, LOW-1, LOW-2 bad-value cases).
+- `scrml dev` full-process probe (devprobe.sh): multi 405, multi-a a.example, twofile PUT 204 a.example — all correct.
+- Found (pre-existing, origin/main too): endpoint route export `__ri_route_endpoint_<node id>` collides across files; `_server.js` imports one, the other 404s — gap g-impl1-endpoint-route-name-collides-across-files-s480 (MED).
+- Gates: bootstrap conformance before (078f96d34) = after: PASS 707 / FAIL 4 / CRASH 0, identical FAIL list; s34-census --check-new PASS; types-gate unchanged; snippet-gate, claim-gate, gen-md-shim, corpus-compile-floor PASS.

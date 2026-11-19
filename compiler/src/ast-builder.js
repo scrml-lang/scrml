@@ -22757,6 +22757,12 @@ export function attachHandlerStatementListsInTree(nodes, filePath, options = {})
   visit(nodes);
 }
 
+// §61.7 / §39.2.1 — one serialized origin, the non-`*` value of an `<endpoint>`'s
+// `cors=`: `scheme://host[:port]` (RFC 6454 §6.1 / RFC 3986 scheme), where host is a
+// DNS-style name or a bracketed IPv6 literal. No path, query, userinfo or whitespace.
+const ENDPOINT_CORS_ORIGIN_RE =
+  /^[A-Za-z][A-Za-z0-9+.-]*:\/\/(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?)(?::[0-9]{1,5})?$/;
+
 function buildBlock(block, filePath, parentContextKind, counter, errors, parentStateName = null) {
   // Uniform-opener normalization: rewrite block.type when the BS classification
   // is the wrong half of the markup/state split for this lifecycle keyword. The
@@ -23580,7 +23586,34 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // `cors-max-age=` never reads as it. Absent → null: the endpoint takes
         // no cross-origin browser callers and its preflight is answered 405.
         const corsMatch = header.match(new RegExp(`(?:^|\\s)cors\\s*=\\s*${STR.source}`));
-        const cors = corsMatch ? (corsMatch[1] !== undefined ? corsMatch[1] : corsMatch[2]) : null;
+        let cors = corsMatch ? (corsMatch[1] !== undefined ? corsMatch[1] : corsMatch[2]) : null;
+        // §61.7: "An `<endpoint>` MAY carry `cors=`, a string literal with the
+        // values of the §39.2.1 program attribute (`"*"`, or one origin such as
+        // `"https://example.com"`)." — and §61.2 `cors-attr ::= 'cors='
+        // string-literal`. Anything else is E-ENDPOINT-CORS-INVALID: an unquoted
+        // `cors=*` (the string-literal read above misses it, so it used to be
+        // dropped silently), `cors=""`, or a value that is not `*` and not one
+        // serialized origin — `scheme://host[:port]`, no path, no whitespace (a
+        // newline in it made every response of the endpoint fail in
+        // `Headers.set`). The endpoint is then compiled with no CORS (fail closed).
+        if (/(?:^|\s)cors\s*=/.test(header)) {
+          const corsWhy = cors === null
+            ? "is not a string literal"
+            : (cors === "*" || ENDPOINT_CORS_ORIGIN_RE.test(cors))
+              ? null
+              : (cors === "" ? "is empty" : `is ${JSON.stringify(cors)}, which is neither \`"*"\` nor one origin`);
+          if (corsWhy !== null) {
+            errors.push(new TABError(
+              "E-ENDPOINT-CORS-INVALID",
+              `E-ENDPOINT-CORS-INVALID: \`cors=\` on \`<endpoint>\` ${corsWhy}. Per SPEC §61.7 an ` +
+              `\`<endpoint>\`'s \`cors=\` is a string literal with the values of the §39.2.1 program ` +
+              `attribute: \`"*"\`, or one origin — \`scheme://host\` with an optional \`:port\` and no ` +
+              `path, e.g. \`cors="https://example.com"\`.`,
+              span,
+            ));
+            cors = null;
+          }
+        }
 
         // §61.9 — E-ENDPOINT-PATH-MISSING: an `<endpoint>` with no `path=`.
         if (path === null) {

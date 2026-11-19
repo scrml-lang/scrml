@@ -4941,7 +4941,7 @@ export function decodeText(table, text, opts) {
 // S479 ruling (user-voice) §3.A item 5 — §61.3 "A repeated key": "A request body in which one
 // JSON object — the body itself or any object nested in it — names the same key twice is a
 // decode failure — `::Malformed` … Keys are compared after JSON string unescaping, so `"tag"`
-// and `"tag"` are the same key." `JSON.parse` keeps the last of a repeated name silently
+// and `"t\u0061g"` are the same key." `JSON.parse` keeps the last of a repeated name silently
 // (review #1940 (4): `{"tag":"Unit","tag":"I","n":3}` ran `I`, while a first-wins proxy saw
 // `Unit`), so the text is scanned once more after it parses. S479 (#1962 ruling item 5): moved
 // here from server-runtime.js (which re-exports it for the endpoint decode) so the standalone
