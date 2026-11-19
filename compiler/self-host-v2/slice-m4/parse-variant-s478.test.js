@@ -86,6 +86,10 @@ describe("the decode, compiled and RUN (client side)", () => {
     ['{"tag":"Success"}', "invalid:rows"],                    // a missing field
     ['{"tag":"Success","rows":1,"extra":2}', "invalid:extra"], // STRICT KEYS (§61.3)
     ['{"tag":"Empty","rows":1}', "invalid:rows"],             // a unit variant carries no field
+    // S479 (#1962 ruling item 5) — §41.13 "A repeated key": a string input naming one key twice
+    // in one object is ::Malformed (JSON.parse alone kept the last value: rows:2 / Success)
+    ['{"tag":"Success","rows":1,"rows":2}', "malformed"],
+    ['{"tag":"Empty","tag":"Success","rows":1}', "malformed"],
   ];
   test("each input routes to its success arm or its ParseError variant", async () => {
     const r = clean(decoder());
@@ -356,5 +360,27 @@ describe("the runtime half directly (slice-m1/runtime/runtime.js parseVariant)",
     expect(f.error).toEqual({ variant: "UnknownVariant", data: ["Z"] });
     expect(parseVariant(T, PE, '{"x":1}').error).toBe("MissingDiscriminator");
     expect(parseVariant(T, PE, '{"tag":"A","n":1,"m":2}').error.data[0]).toBe("m");
+  });
+  // S479 (#1962 ruling item 5) — §41.13 "A repeated key": "When the input is a string, a JSON
+  // text in which one object — the top-level object or any object nested in it — names the same
+  // key twice is a decode failure — `::Malformed` … keys are compared after JSON string
+  // unescaping". The detector is the §61.3 endpoint's (`jsonRepeatedKey`, shared).
+  test("a string input that repeats a key in one object is Malformed — top level, nested, or spelled with an escape", () => {
+    const mal = (s) => { const f = parseVariant(T, PE, s); expect([s, failed(f)]).toEqual([s, true]); return f.error; };
+    expect(mal('{"tag":"A","n":1,"n":2}').variant).toBe("Malformed");
+    expect(mal('{"tag":"B","tag":"A","n":1}').variant).toBe("Malformed");
+    expect(mal('{"tag":"A","t\\u0061g":"B","n":1}').variant).toBe("Malformed");
+    expect(mal('{"tag":"A","n":1,"x":{"k":1,"k":2}}').variant).toBe("Malformed"); // nested (not InvalidPayload)
+    expect(mal('{"tag":"A","n":1,"n":2}').data[0]).toContain("'n'");
+    // the same key in two DIFFERENT objects is no repeat; an object input has no text to scan
+    expect(parseVariant(T, PE, '{"tag":"A","n":1}')).toEqual({ variant: "A", data: [1] });
+    expect(failed(parseVariant(T, PE, '{"tag":"A","n":1,"x":[{"k":1},{"k":2}]}'))).toBe(true); // x is a foreign key...
+    expect(parseVariant(T, PE, '{"tag":"A","n":1,"x":[{"k":1},{"k":2}]}').error.variant).toBe("InvalidPayload"); // ...not a repeat
+    expect(parseVariant(T, PE, { tag: "A", n: 1 })).toEqual({ variant: "A", data: [1] });
+  });
+  test("the endpoint decode and the standalone parseVariant share one detector", async () => {
+    const rt = await import("../slice-m1/runtime/runtime.js");
+    const srt = await import("../slice-m1/runtime/server-runtime.js");
+    expect(srt.jsonRepeatedKey).toBe(rt.jsonRepeatedKey);
   });
 });

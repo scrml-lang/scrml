@@ -1,0 +1,13 @@
+<program db="./app.db">
+    <schema>
+        users {
+            id: INTEGER PRIMARY KEY
+            email: Text Not Null Unique
+            score: REAL DEFAULT(0)
+        }
+        posts {
+            id: integer primary key
+            user_id: INTEGER NOT NULL REFERENCES users(id)
+        }
+    </>
+</program>

@@ -1,16 +1,25 @@
 {
   "id": "linear-must-use-unread-pos",
-  "description": "A fresh `~`-form binding (`unusedThing = 42`, a bare assignment introducing a new local) falls out of scope never read. Per §35 E-MU-001 fires (§34: Error), naming the binding and offering the `_`-prefix suppression.",
+  "description": "A keywordless declaration (`unusedThing = 42`, §50.8.5 — a `const`) that falls out of scope never read is NOT E-MU-001 and not an error: an unread binding is the S422 unused-binding LINT, the same for every binding form (`let`, `const`, keywordless). E-MU-001 is \"Must-use: return value of `!` function not captured\" (§34). The case keeps its S412-era directory name; what it pins is the S479 ruling.",
   "language-version": "1.0",
-  "spec": "§35",
-  "rationale": "§35 — a must-use binding is one whose VALUE is the point of computing it; letting it fall out of scope unread is, with near-certainty, either a forgotten use or a dead computation. scrml makes that loud rather than silent, and gives an explicit opt-out (`_`-prefix) so the author can SAY \"computed for effect, value deliberately unused\" instead of leaving the reader to guess.",
+  "spec": "§50.8.5",
+  "provenance": "ruling:user-voice-scrml.md-S479-3B (\"⭐ RULED — S478 hand-off §3.A and §3.B, PA recs adopted (S479, 2026-11-18)\", §3.B: \"S422 stands; an unread keywordless binding is the same lint as every other binding form; the E-MU-001 reading is rejected\") · ruling:user-voice-scrml.md S422 \"CALL 3 — unused-binding is a LINT across all binding forms, hard error later if it proves out\"",
+  "rationale": "S422 Call 3: \"Population: ALL binding forms (`let` · `const` · bare)\" — \"you cannot split on 'was the keyword written'\"; \"Severity: LINT now\". A lint never rejects, so the program compiles. The lint itself has no §34 code yet (g-spec-unused-binding-lint-code-s479); when it lands this case gains its warning code in `codes`.",
   "expect": {
-    "codes": [
+    "codes": [],
+    "notCodes": [
       "E-MU-001"
-    ],
-    "notCodes": [],
-    "severity": {
-      "E-MU-001": "error"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-e-mu-001-unread-binding-s479",
+      "fails": {
+        "codes": [
+          "emitted:E-MU-001=1",
+          "forbidden:E-MU-001"
+        ]
+      }
     }
   }
 }

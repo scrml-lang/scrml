@@ -7,30 +7,30 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1881 of 1881 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1903 of 1903 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 684 | 36.4% |
+| PASS | 709 | 37.3% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 4 | 0.2% |
+| FAIL | 1 | 0.1% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 637 | 33.9% |
-| UNSUPPORTED | 556 | 29.6% |
+| NOT-TWINNED | 637 | 33.5% |
+| UNSUPPORTED | 556 | 29.2% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 688; of those, 684 hold (99.4%). Runtime half executed on the bootstrap for 223 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 710; of those, 709 hold (99.9%). Runtime half executed on the bootstrap for 230 case(s).
 
-- **Vacuous** passes: 18 of 684 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **666**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 3 of 4; the other 1 are implemented checks that answered wrong.
+- **Vacuous** passes: 18 of 709 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **691**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 1 of 1; the other 0 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
 UNSUPPORTED by reason: bootstrap-unsupported 556.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **878** — PASS 459 · FAIL 4 · UNSUPPORTED 415. Twin holds 459 (non-vacuous 444). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **882** — PASS 467 · FAIL 1 · UNSUPPORTED 414. Twin holds 467 (non-vacuous 452). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 5 replace a twin's expectations · 13 exclude a case.
 - Superseded-code mappings applied: 8 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -105,7 +105,7 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | attr-executable-sink | 23 | 7 | · | · | · | 11 | 5 | · | · |
 | auth | 65 | 12 | · | · | · | 15 | 38 | · | · |
 | block-grammar | 14 | 11 | · | · | · | 1 | 2 | · | · |
-| body-top | 27 | 19 | · | 1 | · | 1 | 6 | · | · |
+| body-top | 27 | 20 | · | · | · | 1 | 6 | · | · |
 | capability | 12 | 7 | · | · | · | · | 5 | · | · |
 | channel | 49 | 11 | · | · | · | 37 | 1 | · | · |
 | codegen | 4 | 1 | · | · | · | 3 | · | · | · |
@@ -117,10 +117,10 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | each | 25 | · | · | · | · | 25 | · | · | · |
 | element-refusal | 39 | 26 | · | · | · | 11 | 2 | · | · |
 | endpoint | 24 | 24 | · | · | · | · | · | · | · |
-| engine | 92 | 22 | · | · | · | 50 | 20 | · | · |
+| engine | 99 | 29 | · | · | · | 50 | 20 | · | · |
 | enum | 1 | 1 | · | · | · | · | · | · | · |
 | equality | 10 | 6 | · | · | · | 4 | · | · | · |
-| error | 78 | 54 | · | · | · | 5 | 19 | · | · |
+| error | 80 | 56 | · | · | · | 5 | 19 | · | · |
 | error-boundary | 11 | 1 | · | · | · | · | 10 | · | · |
 | files | 1 | 1 | · | · | · | · | · | · | · |
 | fn | 25 | 17 | · | · | · | 1 | 7 | · | · |
@@ -130,12 +130,12 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | hostmethod | 1 | 1 | · | · | · | · | · | · | · |
 | input | 2 | · | · | · | · | · | 2 | · | · |
 | lifecycle | 68 | 34 | · | · | · | 22 | 12 | · | · |
-| linear | 15 | 5 | · | · | · | · | 10 | · | · |
+| linear | 15 | 6 | · | · | · | · | 9 | · | · |
 | loop | 8 | 3 | · | · | · | 3 | 2 | · | · |
 | maps | 13 | · | · | · | · | 13 | · | · | · |
 | markup-handler | 89 | 36 | · | · | · | 40 | 13 | · | · |
 | match-block | 23 | 12 | · | · | · | 6 | 5 | · | · |
-| match-codes | 25 | 16 | · | · | · | · | 9 | · | · |
+| match-codes | 30 | 21 | · | · | · | · | 9 | · | · |
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
 | match-leave | 46 | 19 | · | · | · | 12 | 15 | · | · |
 | md | 18 | 1 | · | · | · | 3 | 14 | · | · |
@@ -145,47 +145,33 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | navigate | 3 | · | · | · | · | · | 3 | · | · |
 | outlet | 7 | · | · | · | · | 1 | 6 | · | · |
 | own-value-type | 12 | 12 | · | · | · | · | · | · | · |
-| page | 1 | · | · | · | · | 1 | · | · | · |
+| page | 3 | 2 | · | · | · | 1 | · | · | · |
 | parse-syntax | 4 | 2 | · | · | · | 2 | · | · | · |
 | parse-variant | 12 | 12 | · | · | · | · | · | · | · |
 | persist | 5 | 5 | · | · | · | · | · | · | · |
 | print | 1 | 1 | · | · | · | · | · | · | · |
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
 | raw-content | 9 | 8 | · | · | · | 1 | · | · | · |
-| reactive | 127 | 74 | · | · | · | 44 | 9 | · | · |
+| reactive | 132 | 78 | · | · | · | 44 | 10 | · | · |
 | refinement | 57 | 18 | · | · | · | 23 | 16 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | 5 | · | · | · | · | 5 | · | · |
 | schema-for | 15 | · | · | · | · | · | 15 | · | · |
 | server-db | 92 | 15 | · | · | · | 17 | 60 | · | · |
 | server-fn | 27 | 13 | · | · | · | 7 | 7 | · | · |
-| sql | 20 | 5 | · | 1 | · | 9 | 5 | · | · |
+| sql | 21 | 7 | · | · | · | 9 | 5 | · | · |
 | ssr | 14 | · | · | · | · | 14 | · | · | · |
 | style | 27 | 2 | · | · | · | 24 | 1 | · | · |
 | table-for | 14 | · | · | · | · | 11 | 3 | · | · |
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
 | tool | 11 | 11 | · | · | · | · | · | · | · |
-| type-state-codes | 32 | 9 | · | 2 | · | 6 | 15 | · | · |
+| type-state-codes | 32 | 10 | · | 1 | · | 6 | 15 | · | · |
 
-### FAIL (4)
+### FAIL (1)
 
-- `body-top/declaration-trailing-tokens-rejected` (twin · parse-reject)
-  - count: E-STMT-MISSING-SEMICOLON fired 1 time(s), expected exactly 2
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `extra` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-TYPE: expected a type, found `"a"`
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `|` (other statements at logic-block level are not in the bootstrap)
-- `sql/query-not-readable-neg` (twin · parse-reject; not in the bootstrap: E-SQL-QUERY-NOT-READABLE)
-  - missing E-SQL-QUERY-NOT-READABLE
-  - count: E-SQL-QUERY-NOT-READABLE fired 0 time(s), expected exactly 1
-  - E-SQL-003: the content of `?{ … }` must be a backtick SQL template (`?{`SELECT …`}`) — found `SELECT` (§8.1). The SQL text is fixed at compile time; a runtime value is bound with `${…}` inside the template (§8.2), never assembled into the SQL
 - `type-state-codes/e-type-004-struct-field-access-pos` (twin · codes; not in the bootstrap: E-TYPE-004)
   - missing E-TYPE-004
   - severity: E-TYPE-004 did not fire (expected error)
-- `type-state-codes/e-type-045-prefix-not-negation-pos` (twin · parse-reject; not in the bootstrap: E-TYPE-045)
-  - missing E-TYPE-045
-  - severity: E-TYPE-045 did not fire (expected error)
-  - E-PARSE-EXPECTED: expected `)`, found `@`
-  - E-PARSE-TRAILING: unexpected `@` after the expression
 
 ### CRASH (0)
 
@@ -195,7 +181,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (684)
+### PASS / CODES-ONLY (709)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -229,6 +215,7 @@ none
 - `block-grammar/style-001-interp-body-pos` — PASS
 - `body-top/bare-write-is-legal` — PASS · TWIN
 - `body-top/code-line-after-declaration-runs` — PASS · TWIN
+- `body-top/declaration-trailing-tokens-rejected` — PASS · TWIN
 - `body-top/declared-prose-renders` — PASS · TWIN
 - `body-top/js-construct-await` — PASS
 - `body-top/js-construct-class` — PASS
@@ -410,6 +397,7 @@ none
 - `endpoint/path-reserved-scrml-local-bare` — PASS
 - `endpoint/self-closing-arm-exhaustive` — PASS
 - `endpoint/wildcard-exhaustive` — PASS
+- `engine/e-engine-rule-quoted-pos` — PASS
 - `engine/engine-var-duplicate-neg` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `engine/engine-var-duplicate-pos` — PASS · TWIN
 - `engine/initial-invalid-variant-neg` — PASS · TWIN (also emitted, unasserted: E-DG-002)
@@ -427,11 +415,17 @@ none
 - `engine/rule-violation-neg` — PASS · TWIN
 - `engine/rule-violation-pos` — PASS · TWIN
 - `engine/self-write-neg` — PASS · TWIN
+- `engine/self-write-outside-state-child-neg` — PASS · TWIN
 - `engine/self-write-pos` — PASS · TWIN
 - `engine/state-child-invalid-variant-neg` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `engine/state-child-invalid-variant-pos` — PASS · TWIN
 - `engine/state-child-missing-neg` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `engine/state-child-missing-pos` — PASS · TWIN
+- `engine/timed-debounce-held-until-commit-rt` — PASS
+- `engine/timed-held-write-unreachable-neg` — PASS
+- `engine/timed-held-write-unreachable-pos` — PASS
+- `engine/timed-throttle-leading-violation-rt` — PASS
+- `engine/timed-throttle-trailing-judged-at-commit-rt` — PASS
 - `enum/variant-name-lowercase-reject` — PASS · TWIN
 - `equality/cross-type-primitive-reject` — PASS · TWIN
 - `equality/eq-not-reject` — PASS · TWIN
@@ -447,6 +441,7 @@ none
 - `error/construct-variant-payload-arity-ok` — PASS · TWIN
 - `error/construct-variant-payload-arity-return-neg` — PASS · TWIN
 - `error/construct-variant-payload-arity-trailing-comma-ok` — PASS · TWIN
+- `error/e-tx-client-placed-pos` — PASS
 - `error/error-008-neg` — PASS · TWIN
 - `error/fail-bare-variant-payload-arity-neg` — PASS · TWIN
 - `error/fail-bare-variant-reaches-handler` — PASS · TWIN (also emitted, unasserted: E-DG-002)
@@ -494,6 +489,7 @@ none
 - `error/transaction-non-failable-fn-neg` — PASS (also emitted, unasserted: E-ERROR-002)
 - `error/transaction-top-level-neg` — PASS
 - `error/try-not-in-scrml` — PASS · TWIN
+- `error/w-tx-exit-rolls-back-pos` — PASS (also emitted, unasserted: E-DG-002)
 - `files/multifile-import` — PASS · TWIN
 - `fn/arrow-body-reject` — PASS · TWIN
 - `fn/async-decl-reject` — PASS · TWIN
@@ -575,6 +571,7 @@ none
 - `linear/lin-003-branch-asymmetry-neg` — PASS · TWIN
 - `linear/lin-003-branch-asymmetry-pos` — PASS · TWIN
 - `linear/must-use-unread-neg` — PASS · TWIN · VACUOUS
+- `linear/must-use-unread-pos` — PASS · TWIN · VACUOUS
 - `loop/loop-001-break-outside` — PASS · TWIN
 - `loop/loop-002-continue-outside` — PASS · TWIN
 - `loop/loop-006-neg` — PASS · TWIN
@@ -633,11 +630,16 @@ none
 - `match-codes/e-match-arm-markup-in-value-pos` — PASS · TWIN
 - `match-codes/e-match-block-in-lift-neg` — PASS · TWIN
 - `match-codes/e-match-block-in-lift-pos` — PASS · TWIN
+- `match-codes/e-match-for-required-pos` — PASS
+- `match-codes/e-scope-redeclare-arm-binder-element-pos` — PASS · TWIN
+- `match-codes/e-scope-redeclare-arm-binder-neg` — PASS · TWIN
+- `match-codes/e-scope-redeclare-arm-binder-value-pos` — PASS · TWIN
 - `match-codes/e-syntax-010-else-last-neg` — PASS · TWIN
 - `match-codes/e-syntax-010-else-not-last-pos` — PASS · TWIN
 - `match-codes/e-syntax-011-guard-clause-pos` — PASS · TWIN
 - `match-codes/e-syntax-011-plain-pattern-neg` — PASS · TWIN
 - `match-codes/e-type-024-enum-subject-neg` — PASS · TWIN
+- `match-codes/e-type-024-match-no-for-pos` — PASS
 - `match-codes/e-type-024-struct-subject-pos` — PASS · TWIN
 - `match-codes/e-type-025-enum-subject-neg` — PASS · TWIN · VACUOUS
 - `match-codes/e-type-026-match-in-logic-neg` — PASS · TWIN · VACUOUS
@@ -701,6 +703,8 @@ none
 - `own-value-type/not-inferable-unproven-call-neg` — PASS
 - `own-value-type/unproven-annotation-neg` — PASS
 - `own-value-type/unproven-annotation-pos` — PASS
+- `page/e-page-duplicate-neg` — PASS
+- `page/e-page-duplicate-pos` — PASS
 - `parse-syntax/e-syntax-042-not-value-position-neg` — PASS · TWIN · VACUOUS
 - `parse-syntax/e-syntax-042-null-value-position-pos` — PASS · TWIN
 - `parse-variant/alias-of-struct-neg` — PASS · TWIN
@@ -729,6 +733,7 @@ none
 - `raw-content/match-arm-raw-body-displays-as-text` — PASS · TWIN
 - `raw-content/nested-code-with-attribute-is-text` — PASS
 - `raw-content/pre-code-wrapper-stays-element` — PASS
+- `reactive/client-recursion-calling-server-rt` — PASS
 - `reactive/counter-increment` — PASS · TWIN
 - `reactive/debounce-trailing-commit` — PASS · TWIN
 - `reactive/debounce-valid-neg` — PASS · TWIN
@@ -741,6 +746,8 @@ none
 - `reactive/if-top-level-absent` — PASS · TWIN
 - `reactive/if-wiring-bearing-subtree-absent` — PASS · TWIN
 - `reactive/if-wiring-bearing-subtree-mounts` — PASS · TWIN
+- `reactive/mixed-recursion-3cycle-rt` — PASS
+- `reactive/mixed-recursion-inherited-rt` — PASS
 - `reactive/multi-cell-interp` — PASS · TWIN
 - `reactive/name-collides-state-neg` — PASS · TWIN
 - `reactive/name-collides-state-pos` — PASS · TWIN
@@ -801,6 +808,7 @@ none
 - `reactive/throttle-leading` — PASS · TWIN
 - `reactive/throttle-trailing-commit` — PASS · TWIN
 - `reactive/toggle-show` — PASS · TWIN
+- `reactive/w-timed-read-modify-write-pos` — PASS
 - `reactive/write-not-in-logic-context-neg` — PASS · TWIN · VACUOUS
 - `reactive/write-not-in-logic-context-pos` — PASS · TWIN
 - `refinement/base-type-literal-pos` — PASS · TWIN
@@ -855,9 +863,11 @@ none
 - `server-fn/session-value-in-tool-neg` — PASS (also emitted, unasserted: E-PRINT-NON-PRIMITIVE)
 - `server-fn/value-server-call-interp-neg` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
 - `sql/bare-identifier-body-e-sql-003-neg` — PASS · TWIN
+- `sql/e-file-scope-server-only-reach-pos` — PASS
 - `sql/multiple-statements-neg` — PASS · TWIN
 - `sql/one-statement-trailing-semicolon-pos` — PASS · TWIN
 - `sql/prepare-tool-in-block-e-sql-006-neg` — PASS (also emitted, unasserted: E-ERROR-002, E-PRINT-NON-PRIMITIVE)
+- `sql/query-not-readable-neg` — PASS · TWIN
 - `sql/runtime-expr-body-e-sql-003-neg` — PASS · TWIN
 - `style/program-scope-overlap-soft` — PASS
 - `style/style-001-style-block-pos` — PASS
@@ -877,7 +887,8 @@ none
 - `type-state-codes/e-type-004-struct-field-access-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-041-not-assign-mismatch-neg` — PASS · TWIN
 - `type-state-codes/e-type-041-not-assign-mismatch-pos` — PASS · TWIN
-- `type-state-codes/e-type-045-prefix-not-negation-neg` — PASS · TWIN · VACUOUS
+- `type-state-codes/e-type-045-prefix-not-negation-neg` — PASS · TWIN
+- `type-state-codes/e-type-045-prefix-not-negation-pos` — PASS · TWIN
 - `type-state-codes/e-type-081-partial-match-render-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-any-forbidden-pos` — PASS · TWIN
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
@@ -1100,7 +1111,6 @@ none
 - `linear/lin-005-shadow-lin-pos` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
 - `linear/lin-006-deferred-ctx-neg` — twin · bootstrap-unsupported: a `<request>` assigns a cell of this program, written `@name` (§6.7.7 "`@variable = expr`") — `@userId` is not one in the bootstrap
 - `linear/lin-006-deferred-ctx-pos` — bootstrap-unsupported: a `<request>` assigns a cell of this program, written `@name` (§6.7.7 "`@variable = expr`") — `@userId` is not one in the bootstrap
-- `linear/must-use-unread-pos` — twin · bootstrap-unsupported: `unusedThing = …` declares `unusedThing` (the keywordless declaration, §50.8.5) and nothing reads it before its scope ends. Whether an unread binding is E-MU-001 is not settled — §34's E-MU-001 row is
 - `loop/loop-005-break-pos` — twin · bootstrap-unsupported: a `break` in the body of a block-bodied callback is not in the bootstrap (INTERIM — the language allows it; this compiler builds a callback body of `const` / `let` locals, assignments to the body's ow
 - `loop/loop-005-neg` — twin · bootstrap-unsupported: the initializer of the file-scope `let` `f` holds a function value — the bootstrap does not judge a function value's body per artifact at module initialization yet (INTERIM, g-boot-file-scope-init-res
 - `markup-handler/s437-r4-arrow-block-seq-dollar-engine-neg` — twin · bootstrap-unsupported: an arrow function stands where the bootstrap does not build a function value — a function value may be bound (`const f = …` / `let f = …`, or `f = …` to such a local), passed as an argument of a scrml
@@ -1282,6 +1292,7 @@ none
 - `protect/strip-info-select-star` — bootstrap-unsupported: `<db protect=…>` keeps the named columns off the client (§14.8.9), which is not in the bootstrap — a confidentiality control is refused, never ignored
 - `protect/w-protect-005-null-body-static` — bootstrap-unsupported: `<db protect=…>` keeps the named columns off the client (§14.8.9), which is not in the bootstrap — a confidentiality control is refused, never ignored
 - `reactive/debounce-on-server` — twin · bootstrap-unsupported: `server` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
+- `reactive/mixed-recursion-client-caller-rt` — bootstrap-unsupported: `down()` runs on the server and calls `step()`, a client function that waits for the server (`step() → down()`) — on the server that call would be made in place, which needs a second, server-side copy
 - `reactive/narrowing-ends-destructured-callee-reject` — twin · bootstrap-unsupported: `clear` (a function named without a call) stands where the bootstrap does not build a function value — a function value may be bound (`const f = …` / `let f = …`, or `f = …` to such a local), passed a
 - `reactive/narrowing-survives-builtin-call-pos` — twin · bootstrap-unsupported: `.max(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.reverse()` /
 - `reactive/optional-member-access-block-arrow-reject` — twin · bootstrap-unsupported: a write to something the callback body did not declare (a cell, a captured local, or a part of a value) in the body of a block-bodied callback is not in the bootstrap (INTERIM — the language allows it

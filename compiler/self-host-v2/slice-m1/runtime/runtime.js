@@ -260,14 +260,26 @@ export class Cell {
 //     trailing write emits with the held value." `last` starts at 0, so the
 //     first write ever is a leading emit.
 // The compiler refuses every composition whose rule this does not build
-// (analyze timingPass: a server-origin writer, `persist=`, a reset) — so no
-// write here is server-origin, and no reset reaches a pending timer.
-// Reads see the committed value (§6.13.4). The timer is owned by `scope`.
+// (analyze timingPass: a server-origin writer, `persist=`, a reset, an engine's
+// `<onIdle>`) — so no write here is server-origin, and no reset reaches a
+// pending timer. Reads see the committed value (§6.13.4). The timer is owned by
+// `scope`.
+// S479 — an ENGINE cell (a `rule=` graph field) passes its edge table (`table`).
+// §6.13.5: "A `debounced=` / `throttled=` engine cell transitions at commit … `rule=`
+// (§51.0.F) is judged at the commit, against the variant the cell holds then … A held
+// write that a later write in the same window supersedes never commits, so it is never
+// judged. A committed write that violates `rule=` is the runtime
+// `E-ENGINE-INVALID-TRANSITION`: the cell keeps its prior value … the violation is a
+// trap (§19.17) of the unit the commit runs in — the event handler for a commit that
+// lands at once (a throttle's leading write), the timer for a trailing commit, where it
+// is reported to the logging surface." So `transition` skips its write-time check on
+// such a cell (timedEdgeJudged) and `commit` runs `checkEdge` first: a leading commit
+// throws into the handler, a trailing one is reported (never thrown into a timer frame).
 // ---------------------------------------------------------------------------
-export function timed(scope, c, kind, ms) {
+export function timed(scope, c, kind, ms, table = null) {
   requireScope(scope, "a timed cell");
   if (kind !== "debounce" && kind !== "throttle") throw new Error(`timed: unknown timing rule ${JSON.stringify(kind)} (§6.13)`);
-  const t = { kind, ms, timer: null, held: undefined, last: 0, disposed: false };
+  const t = { kind, ms, table, timer: null, held: undefined, last: 0, disposed: false };
   c.timing = t;
   scope.own(() => {
     t.disposed = true;
@@ -275,6 +287,35 @@ export function timed(scope, c, kind, ms) {
     t.timer = null;
   });
   return c;
+}
+
+/** Is `c` a timed engine cell, whose `rule=` edge is judged at commit (§6.13.5)? */
+function timedEdgeJudged(c) {
+  return c.timing !== null && c.timing.table !== null;
+}
+
+/**
+ * The commit gate (§6.13.5): on an engine cell, the `rule=` edge from the variant the cell
+ * holds NOW is judged before a held value commits — a violation leaves the cell at its prior
+ * value and throws (E-ENGINE-INVALID-TRANSITION). A non-engine cell always passes.
+ */
+function admitTimed(c, t, v) {
+  if (t.table !== null) checkEdge(c, t.table, v);
+}
+
+/**
+ * A trailing commit's gate runs in a timer: a refused edge is reported, never thrown into the
+ * timer frame (§19.17), and returns false. Only the REFUSAL is caught here — once the edge is
+ * admitted, the write itself (and any effect it runs) is the caller's, exactly as before.
+ */
+function admitFromTimer(c, t, v) {
+  try {
+    admitTimed(c, t, v);
+    return true;
+  } catch (err) {
+    reportLater(err);
+    return false;
+  }
 }
 
 function timedWrite(c, v) {
@@ -287,14 +328,15 @@ function timedWrite(c, v) {
       t.timer = null;
       const h = t.held;
       t.held = undefined;
-      if (!t.disposed) c.write(h);
+      if (!t.disposed && admitFromTimer(c, t, h)) c.write(h);
     }, t.ms);
     return;
   }
   const now = Date.now();
   if (t.timer === null && now - t.last >= t.ms) {
-    t.last = now;                                   // leading emit
-    c.write(v);
+    admitTimed(c, t, v);                            // a refused edge throws into the handler, opening no window
+    t.last = now;                                   // leading emit: the window opens BEFORE the write, so an
+    c.write(v);                                     // effect that throws during it cannot keep the window shut
     return;
   }
   t.held = v;                                       // suppressed: the latest is held
@@ -303,8 +345,12 @@ function timedWrite(c, v) {
       t.timer = null;
       const h = t.held;
       t.held = undefined;
-      t.last = Date.now();                          // the trailing emit opens the next window
-      if (!t.disposed) c.write(h);
+      // the trailing emit opens the next window — if its edge is admitted (before the write,
+      // so an effect that throws during the write still leaves the window open)
+      if (!t.disposed && admitFromTimer(c, t, h)) {
+        t.last = Date.now();
+        c.write(h);
+      }
     }, Math.max(0, t.ms - (now - t.last)));
   }
 }
@@ -1625,9 +1671,12 @@ function variantTag(v) {
   return v !== null && typeof v === "object" && typeof v.variant === "string" ? v.variant : v;
 }
 
-/** A graph write with a runtime edge check (§6.3). A self-write is a no-op (§51.0.F.1). */
+/**
+ * A graph write with a runtime edge check (§6.3). A self-write is a no-op (§51.0.F.1).
+ * On a timed engine cell the check runs when the held write commits, not here (§6.13.5).
+ */
 export function transition(target, table, to) {
-  checkEdge(target, table, to);
+  if (!timedEdgeJudged(target)) checkEdge(target, table, to);
   asOp(target, "transition", to, () => target.set(to));
 }
 
@@ -4889,6 +4938,60 @@ export function decodeText(table, text, opts) {
 // The `reason` texts are implementation freedom (the conformance cases assert the variant and
 // `field`, never `reason`).
 // -----------------------------------------------------------------------------
+// S479 ruling (user-voice) §3.A item 5 — §61.3 "A repeated key": "A request body in which one
+// JSON object — the body itself or any object nested in it — names the same key twice is a
+// decode failure — `::Malformed` … Keys are compared after JSON string unescaping, so `"tag"`
+// and `"t\u0061g"` are the same key." `JSON.parse` keeps the last of a repeated name silently
+// (review #1940 (4): `{"tag":"Unit","tag":"I","n":3}` ran `I`, while a first-wins proxy saw
+// `Unit`), so the text is scanned once more after it parses. S479 (#1962 ruling item 5): moved
+// here from server-runtime.js (which re-exports it for the endpoint decode) so the standalone
+// §41.13 `parseVariant` below refuses a repeated key in a string input as well.
+//
+// `text` is JSON that `JSON.parse` accepted, so the scan only tracks structure: string literals
+// (skipped by their escapes; a `\` escapes exactly the next character, so `\"` never ends a
+// string and `\\"` does), `{ [ } ] , :`. Each open object holds the set of its keys; a string
+// read where an object expects a key (after `{` or after a `,` inside that object) is a key. A
+// key with no `\` is its own text; one with escapes is decoded by `JSON.parse` of the literal,
+// so every spelling of a name (`a`, `\/`, a surrogate pair) compares by its value. The
+// stack is explicit, so a deeply nested body cannot overflow the call stack here. Returns the
+// first repeated key, or `undefined`.
+export function jsonRepeatedKey(text) {
+  const stack = []; // per open container: a Set of keys (an object) or null (an array)
+  let expectKey = false;
+  let i = 0;
+  const n = text.length;
+  while (i < n) {
+    const c = text.charCodeAt(i);
+    if (c === 0x22) {
+      const start = i;
+      let escaped = false;
+      i++;
+      while (i < n) {
+        const d = text.charCodeAt(i);
+        if (d === 0x5c) { escaped = true; i += 2; continue; }
+        if (d === 0x22) break;
+        i++;
+      }
+      i++; // past the closing quote
+      if (expectKey) {
+        const keys = stack[stack.length - 1];
+        const key = escaped ? JSON.parse(text.slice(start, i)) : text.slice(start + 1, i - 1);
+        if (keys.has(key)) return key;
+        keys.add(key);
+        expectKey = false;
+      }
+      continue;
+    }
+    if (c === 0x7b) { stack.push(new Set()); expectKey = true; }
+    else if (c === 0x5b) { stack.push(null); expectKey = false; }
+    else if (c === 0x7d || c === 0x5d) { stack.pop(); expectKey = false; }
+    else if (c === 0x2c) expectKey = stack.length > 0 && stack[stack.length - 1] !== null;
+    else if (c === 0x3a) expectKey = false;
+    i++;
+  }
+  return undefined;
+}
+
 const pvOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 const pvClip = (s) => (s.length > 64 ? s.slice(0, 64) + "…" : s);
 
@@ -4911,6 +5014,11 @@ export function parseVariant(table, errTable, json) {
   let v = json;
   if (typeof json === "string") {
     try { v = JSON.parse(json); } catch (e) { return pvError(errTable, "Malformed", { reason: `not JSON: ${message(e)}` }); }
+    // §41.13 "A repeated key" (S479, #1962 ruling item 5): "When the input is a string, a JSON
+    // text in which one object … names the same key twice is a decode failure — `::Malformed`"
+    // — the §61.3 endpoint rule, by the same detector.
+    const rep = jsonRepeatedKey(json);
+    if (rep !== undefined) return pvError(errTable, "Malformed", { reason: `the JSON text repeats the key '${pvClip(rep)}' in one object` });
   }
   if (v === null || typeof v !== "object" || Array.isArray(v)) return pvError(errTable, "Malformed", { reason: "expected a JSON object (or the JSON text of one) at the parseVariant boundary" });
   if (!pvOwn(v, "tag") || typeof v.tag !== "string") return pvError(errTable, "MissingDiscriminator", {});

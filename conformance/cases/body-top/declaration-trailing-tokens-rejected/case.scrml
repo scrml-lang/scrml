@@ -1,7 +1,7 @@
 <program>
 <count> = 1
 type N = number extra
-export type T = "a" | "b" more words
-console.log("after")
+export type T = number | not more words
+@count = 2;
 <p id="z">${@count}</p>
 </program>
