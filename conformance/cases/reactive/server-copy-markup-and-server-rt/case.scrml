@@ -1,0 +1,23 @@
+// §12.2 Trigger 5 + §19.9.10 + §13.4 — one waiting helper `twice`, called from client MARKUP (a button's handler) and from a server function `total`. The handler is a client caller, so `twice` stays client-placed and its call of the db-touching `count` is a client call (handled); `total` runs `twice` in place on the server, where that call is server→server.
+<program db="./app.db">
+    type User:struct = { id: int, name: string }
+    function count(n: int) -> int {
+        const u: User = ?{`SELECT id, name FROM users WHERE id = 1`}.get() !{ _ :> { return 0; } };
+        return u.id + n;
+    }
+    function twice(n: int) -> int {
+        const c = count(n) !{ _ :> 0 };
+        return c * 2;
+    }
+    function total(n: int) -> int {
+        const u: User = ?{`SELECT id, name FROM users WHERE id = 1`}.get() !{ _ :> { return 0; } };
+        return twice(n) + 100 * u.id;
+    }
+    let <x:int=0/>
+    <t:(not to int)=(total(4) !{ _ :> not })/>
+    <main>
+        <button id="go" onclick={ @x = twice(2); }>go</button>
+        <p id="x">${@x}</p>
+        <p id="t" if=@t>${@t}</p>
+    </main>
+</program>

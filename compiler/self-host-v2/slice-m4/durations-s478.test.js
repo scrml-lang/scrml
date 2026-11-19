@@ -140,14 +140,12 @@ describe("r1 fix round (review s478-1875)", () => {
     expect(prog("<program debounced=300ms>")).toEqual(["W-ATTR-001"]);
   });
   // F5 — S479 (ruling §3.B item 8, §6.13.5): a timed engine transitions at commit — it compiles
-  // (slice-m4/timed-engine-s479.test.js); only an engine with an `<onIdle>` watchdog stays refused
-  // (no SPEC sentence on how the watchdog's fire composes with the timing rule).
-  test("F5 debounced= on an engine compiles (S479); with an <onIdle> it is refused by name", () => {
+  // (slice-m4/timed-engine-s479.test.js); with an `<onIdle>` watchdog too (S479, ruling "three
+  // open S479 questions" item 2 — slice-m4/timed-onidle-s479.test.js).
+  test("F5 debounced= on an engine compiles (S479), with or without an <onIdle>", () => {
     const eng = (idle) => P(`type Phase:enum = { Active, Idle }\n<phase:Phase=.Active single debounced=300ms>\n<Active rule=.Idle></>\n<Idle rule=.Active></>\n${idle}</>`, `<p>\${@phase}</p>`);
     expect(errs(eng(""))).toEqual([]);
-    const e = errs(eng(`<onIdle after=5m to=.Idle/>\n`));
-    expect(e.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(e[0].message).toContain("`<onIdle>` watchdog");
+    expect(errs(eng(`<onIdle after=5m to=.Idle/>\n`))).toEqual([]);
   });
 });
 

@@ -233,3 +233,86 @@ describe("s479-import-shadow r1 — crash-free on malformed input", () => {
     expect(lintText("${ const r = /\\{/\n fn a() {}\n fn a() {} }").violations.length).toBe(1);
   });
 });
+
+// S480 (g-lint-dup-fn-latent-s479, review:#1977-r1) — three latent defects of the build guard.
+// M1: SPEC §4.12 "A `<program>` is **top-level** if it has no `<program>` or `<page>` ancestor, whatever
+// markup wraps it. It is **nested** if it has one"; §4.12.1 "A nested `<program>` is a completely isolated
+// compilation unit. It does NOT inherit any lexical bindings from its parent". A nested program's body was
+// read as the parent's file scope — a false refusal, and the lint is a BUILD gate.
+describe("S480 M1 — a nested `<program>` body is its own scope, not the parent's", () => {
+  test("not flagged: a nested program declaring the parent's names (directly, through markup, in a `<page>`)", () => {
+    expect(lintText("<program>\n    fn a() { return 1 }\n    <program name=\"w\">\n        fn a() { return 2 }\n    </program>\n</program>\n").violations).toEqual([]);
+    expect(lintText("<program>\n    fn a() {}\n    <div><program name=\"w\">\n        fn a() {}\n    </program></div>\n</program>\n").violations).toEqual([]);
+    expect(lintText("<program>\n    import { q } from \"./x.scrml\"\n    <page route=\"/\">\n        <program name=\"w\">\n            const q = 1\n            <k:int=0/>\n        </program>\n    </page>\n    <k:int=1/>\n</program>\n").violations).toEqual([]);
+  });
+  test("not flagged: two sibling nested programs with the same names (each is its own unit)", () => {
+    expect(lintText("<program>\n    <program name=\"a\">\n        fn run() {}\n    </program>\n    <program name=\"b\">\n        fn run() {}\n    </program>\n</program>\n").violations).toEqual([]);
+  });
+  test("still flagged: a collision INSIDE a nested program, at its own scope", () => {
+    const r = lintText("<program>\n    fn a() {}\n    <program name=\"w\">\n        import { b } from \"./x.scrml\"\n        fn b() {}\n        fn c() {}\n        fn c() {}\n    </program>\n    fn d() {}\n    fn d() {}\n</program>\n");
+    expect(r.violations.map((v) => v.line)).toEqual([10, 5, 7]);
+    expect(r.violations[0].message).not.toContain("nested");
+    expect(r.violations[1].message).toContain("has the name of an import");
+    for (const v of r.violations.slice(1)) expect(v.message).toContain("in a nested `<program>`");
+  });
+  test("still flagged: the parent's collision after a nested program (the parent's depth survives it)", () => {
+    const r = lintText("<program>\n    fn a() {}\n    if (c) { <program name=\"w\">\n        fn z() {}\n    </program> }\n    fn a() {}\n</program>\n");
+    expect(r.violations.map((v) => v.line)).toEqual([6]);
+  });
+  test("a `<program>` wrapped in markup with no program / page ancestor is the TOP-LEVEL one: file scope", () => {
+    expect(lintText("<div>\n<program>\n    fn a() {}\n    fn a() {}\n</program>\n</div>\n").violations.map((v) => v.line)).toEqual([4]);
+  });
+});
+
+// M2: markup after a value at a code-default body's top (`if (c) <p>…</p>`, `renders <p>…</p>`) was read
+// as a less-than, so the `</` of its closer ended the body and every later collision was missed. The
+// rule now is the bootstrap lexer's (lex.scrml markupOpensAt / LexStop.CodeBody: a tag at depth 0 ends a
+// bare run, with no left-operand test).
+describe("S480 M2 — markup after a value at a body top is markup (the bootstrap lexer's rule)", () => {
+  test("still flagged: a collision after `if (c) <p>…</p>`", () => {
+    const r = lintText("<program>\n    const c = true\n    if (c) <p>hi</p>\n    fn b() { return 1 }\n    fn b() { return 2 }\n    <div>${b()}</div>\n</program>\n");
+    expect(r.violations.map((v) => v.line)).toEqual([5]);
+  });
+  test("still flagged: a collision after `renders <p>…</p>` and `pinned <a…/>` (a cell)", () => {
+    expect(lintText("<program>\n    <card title:string=\"t\"/>\n    renders <p>${title}</p>\n    fn f() {}\n    fn f() {}\n</program>\n").violations.map((v) => v.line)).toEqual([5]);
+    expect(lintText("<program>\n    pinned <a:int=(@b + 1)/>\n    fn a() {}\n</program>\n").violations.map((v) => v.line)).toEqual([3]);
+  });
+  test("not markup: a generic in a `fn` declaration header (LexStop.Statement), a comparison with a space", () => {
+    expect(lintText("<program>\n    fn id<T>(x: T) -> T { return x }\n    fn z() {}\n    fn z() {}\n</program>\n").violations.map((v) => v.line)).toEqual([4]);
+    expect(lintText("<program>\n    const a = b < c\n    fn z() {}\n    fn z() {}\n</program>\n").violations.map((v) => v.line)).toEqual([4]);
+  });
+  test("an item-start cell whose name starts with `_` is still a cell (`let <_done:int=0/>`)", () => {
+    expect(lintText("<program>\n    let <_done:int=0/>\n    fn _done() {}\n</program>\n").violations.map((v) => v.line)).toEqual([3]);
+  });
+});
+
+// L1: every region was lexed as `lex(src.slice(off))` — the rest of the file, per region: O(regions ×
+// file). A 350 KB program body took 85 s on main. The lexer is now pulled lazily per region (lexAt).
+describe("S480 L1 — linear time (the lexer is pulled per region, not re-run over the rest of the file)", () => {
+  test("lexAt(src, off) yields exactly lex(src.slice(off))'s tokens, at absolute offsets", async () => {
+    const { lex } = await import("../../native-parser/lex.js");
+    const { lexAt } = await import("../../../scripts/lint-duplicate-fn.js");
+    const src = readFileSync(join(TREE, "lex.scrml"), "utf8");
+    for (const off of [0, 1, 777, Math.floor(src.length / 3), Math.floor(src.length / 2), src.length - 40]) {
+      const want = lex(src.slice(off)).map((t) => `${t.kind}|${t.text}|${off + t.span.start}|${off + t.span.end}`);
+      const next = lexAt(src, off);
+      const got = [];
+      for (let k = 0; k < want.length; k++) { const t = next(); got.push(`${t.kind}|${t.text}|${t.start}|${t.end}`); }
+      expect(got).toEqual(want);
+    }
+  });
+  test("large files (a ~170 KB program body, ~190 KB of `${}` blocks, ~170 KB with `<script>`s) lint in well under 2 s each", () => {
+    const N = 4000;
+    const shapes = [
+      "<program>\n" + Array.from({ length: N }, (_, i) => `fn f${i}() { const x = ${i} }\n<p>x ${i}</p>`).join("\n") + "\nfn f7() {}\n</program>\n",
+      Array.from({ length: N }, (_, i) => `\${ fn f${i}() { const x = ${i} } }\n<p>x ${i}</p>`).join("\n") + "\n${ fn f7() {} }\n",
+      "<program>\n" + Array.from({ length: N }, (_, i) => `fn f${i}() {}\n<script>var a=${i}</script>`).join("\n") + "\nfn f7() {}\n</program>\n",
+    ];
+    for (const src of shapes) {
+      const t0 = performance.now();
+      const r = lintText(src);
+      expect(performance.now() - t0).toBeLessThan(2000);
+      expect(r.violations.length).toBe(1); // the trailing `fn f7`: the whole file was read
+    }
+  });
+});

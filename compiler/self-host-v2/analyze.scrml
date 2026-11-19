@@ -553,9 +553,40 @@ ${
     // s475 (S5a): `reqReads` — the nids of the `<request>`s classified READ (§6.7.7.1 rule 1,
     // requestReads); every other request is WRITE.
     // s477: `tool` — the entry program is a `kind="tool"` (§64) and its `main` (toolFact).
-    export type ServerFacts:struct = { servers: int[], sqls: SqlInfo[], dbs: Db[], places: PlaceFact[], inherited: int[], plan: SuspendPlan, loads: DbLoad[], envelopes: Envelope[], txs: TxAt[], reqReads: int[], tool: CoreTool | not, endpoints: CoreEndpoint[], channels: CoreChannel[] }
+    // s479 (s479-waiting-helper-server-copy): `copies` — the SERVER COPIES (copyPass): a client-placed
+    // helper that waits and that a server-side body calls runs there in place (§19.9.10 "Not
+    // affected: A server→server call … the callee is inlined (§13.4), no request is made, and
+    // nothing on the wire can fail"), while §12.2 Trigger 5 keeps it client-placed for its client
+    // callers ("A function with at least one client-classified caller SHALL remain ambient") — two
+    // bodies (§13.4 "the compiler SHALL generate TWO representations"). `onServer` — never set by
+    // analyze: lower's view of the tables while it lowers a server-side body (serverView).
+    export type ServerFacts:struct = { servers: int[], sqls: SqlInfo[], dbs: Db[], places: PlaceFact[], inherited: int[], plan: SuspendPlan, loads: DbLoad[], envelopes: Envelope[], txs: TxAt[], reqReads: int[], tool: CoreTool | not, endpoints: CoreEndpoint[], channels: CoreChannel[], copies: SrvCopy[], onServer: boolean }
 
-    export fn noServerFacts() -> ServerFacts { return { servers: [], sqls: [], dbs: [], places: [], inherited: [], plan: noPlan(), loads: [], envelopes: [], txs: [], reqReads: [], tool: not, endpoints: [], channels: [] } }
+    // s479 — one server copy: `orig` the client-placed helper, `copy` the Sym the copy is lowered
+    // under (minted here — never a source name), `plan` its body's SERVER-side suspension plan
+    // (planBlock, server: true; keyed by the same nids as the original's client plan, so it is
+    // held apart and lower reads it only while lowering the copy).
+    export type SrvCopy:struct = { orig: Sym, copy: Sym, plan: SuspendPlan }
+
+    export fn noServerFacts() -> ServerFacts { return { servers: [], sqls: [], dbs: [], places: [], inherited: [], plan: noPlan(), loads: [], envelopes: [], txs: [], reqReads: [], tool: not, endpoints: [], channels: [], copies: [], onServer: false } }
+
+    // s479 — the Sym a call of `s` names in the body being lowered: on the server side (lower's
+    // serverView), a helper with a server copy is called through its copy; anywhere else, `s`.
+    export fn sideCallee(t: Tables, s: Sym) -> Sym {
+        if (!t.server.onServer) return s
+        for (const c of t.server.copies) {
+            if (c.orig.id == s.id) return c.copy
+        }
+        return s
+    }
+
+    // s479 — the server copy of `sym`, if it has one.
+    export fn copyOf(t: Tables, sym: int) -> SrvCopy | not {
+        for (const c of t.server.copies) {
+            if (c.orig.id == sym) return c
+        }
+        return not
+    }
 
     // s454 (U1b): is a call made in function `caller` (-1: a handler / effect body)
     // a CLIENT call — the caller is not server-placed, by its own body or by
@@ -6663,6 +6694,82 @@ ${
         return false
     }
 
+    // s480 (review:#1991 F3) — containsHost's answer for EVERY named type at once: the ids of the
+    // named types that contain a declared `:host` type at any depth (the handles themselves
+    // included). One pass over the type graph — an edge from each type to the named type each of
+    // its fields (struct fields, variant payloads) names through `| not` and `[]`, then the
+    // handles' reverse reach — so a pass that asks about every field (hostTypeDataDiags) costs
+    // O(types x edges), not one whole-graph walk per field (200 mutually reachable structs took
+    // 1.2 s, 400 took 8.5 s). containsHostIn reads it; the verdict is containsHost's.
+    fn hostyIds(ts: TypeInfo[]) -> int[] {
+        let efrom: int[] = []
+        let eto: int[] = []
+        let hosty: int[] = []
+        for (const ti of ts) {
+            const id: int = typeDefSym(ti.def).id
+            if (isHostDef(ti.def) && hosty.indexOf(id) < 0) hosty = hosty.concat([id])
+            const fs: FieldDef[] | not = structFieldDefs(ti.def)
+            if (fs is given) {
+                for (const f of fs) {
+                    const r: int | not = hostRefId(f.ty)
+                    if (r is given) {
+                        efrom = efrom.concat([id])
+                        eto = eto.concat([r])
+                    }
+                }
+            }
+            for (const v of enumVariants(ti.def)) {
+                for (const f of v.fields) {
+                    const r: int | not = hostRefId(f.ty)
+                    if (r is given) {
+                        efrom = efrom.concat([id])
+                        eto = eto.concat([r])
+                    }
+                }
+            }
+        }
+        let head: int = 0
+        while (head < hosty.length) {
+            const j: int = hosty[head]
+            head = head + 1
+            let k: int = 0
+            while (k < eto.length) {
+                if (eto[k] == j && hosty.indexOf(efrom[k]) < 0) hosty = hosty.concat([efrom[k]])
+                k = k + 1
+            }
+        }
+        return hosty
+    }
+
+    // The id of the named type `t` names through `| not` and `[]` (an Appendix H interface id is negative), or `not`.
+    fn hostRefId(t0: Type) -> int | not {
+        let t: Type = t0
+        let steps: int = 0
+        while (steps < 64) {
+            const mi: Type | not = maybeInner(t)
+            const el: Type | not = seqElemOf(t)
+            const s: Sym | not = namedOf(t)
+            if (mi is given) {
+                t = mi
+            } else if (el is given) {
+                t = el
+            } else if (s is given) {
+                return s.id
+            } else {
+                return not
+            }
+            steps = steps + 1
+        }
+        return not
+    }
+
+    // containsHost(ts, t), read off hostyIds(ts).
+    fn containsHostIn(hosty: int[], t: Type) -> boolean {
+        const r: int | not = hostRefId(t)
+        if (r is not) return false
+        return hosty.indexOf(r) >= 0
+    }
+
     fn seqElemOf(t: Type) -> Type | not {
         return match t {
             .Seq(elem: e) :> e
@@ -7260,16 +7367,17 @@ ${
     // are refused by name — fail closed.
     fn hostTypeDataDiags(types: TypeInfo[], st0: AS) -> AS {
         let st: AS = st0
+        const hosty: int[] = hostyIds(types)
         for (const ti of types) {
             const fs: FieldDef[] | not = structFieldDefs(ti.def)
             if (fs is given) {
                 for (const f of fs) {
-                    if (containsHost(types, f.ty)) st = addDiag(st, ti.file, ti.span, "E-HOST-HANDLE-NOT-DATA", "the struct `" + ti.name + "` has the field `" + f.sym.hint + "` of type `" + typeName(f.ty) + "`, which contains a declared `:host` handle type — a struct field SHALL NOT be of a type that contains one (§21.3.3 rule 15: a handle is not data)")
+                    if (containsHostIn(hosty, f.ty)) st = addDiag(st, ti.file, ti.span, "E-HOST-HANDLE-NOT-DATA", "the struct `" + ti.name + "` has the field `" + f.sym.hint + "` of type `" + typeName(f.ty) + "`, which contains a declared `:host` handle type — a struct field SHALL NOT be of a type that contains one (§21.3.3 rule 15: a handle is not data)")
                 }
             }
             for (const v of enumVariants(ti.def)) {
                 for (const f of v.fields) {
-                    if (containsHost(types, f.ty)) st = addDiag(st, ti.file, ti.span, "E-BOOTSTRAP-UNSUPPORTED", "the variant `" + ti.name + "." + v.sym.hint + "` has a payload field of type `" + typeName(f.ty) + "`, which contains a declared `:host` handle type — an enum payload holding a host handle is not in the bootstrap (§21.3.3 rule 15 refuses it at every data boundary; those checks are not built here)")
+                    if (containsHostIn(hosty, f.ty)) st = addDiag(st, ti.file, ti.span, "E-BOOTSTRAP-UNSUPPORTED", "the variant `" + ti.name + "." + v.sym.hint + "` has a payload field of type `" + typeName(f.ty) + "`, which contains a declared `:host` handle type — an enum payload holding a host handle is not in the bootstrap (§21.3.3 rule 15 refuses it at every data boundary; those checks are not built here)")
                 }
             }
         }
@@ -7281,6 +7389,7 @@ ${
     // parameter or result". Judged after placement, on each SERVER-placed function.
     fn hostServerDiags(g: Globals, servers: int[]) -> Diag[] {
         let out: Diag[] = []
+        const hosty: int[] = hostyIds(g.types)
         for (const fs of g.fns) {
             if (servers.indexOf(fs.info.sym.id) >= 0) {
                 const te: TypeEnv = teAt(g.te, fs.info.file)
@@ -7288,7 +7397,7 @@ ${
                     const at: AType | not = p.ty
                     if (at is given) {
                         const rt: RType = resolveTypeFn(te, at, emptyAS())
-                        if (!rt.unresolved && containsHost(g.types, rt.t)) out = out.concat([newDiag("E-HOST-HANDLE-NOT-DATA", "the server function `" + fs.info.name + "` takes `" + p.name + ": " + typeName(rt.t) + "`, which contains a declared `:host` handle type — a host handle SHALL NOT cross to the server (§21.3.3 rule 15)", fs.info.file, p.span)])
+                        if (!rt.unresolved && containsHostIn(hosty, rt.t)) out = out.concat([newDiag("E-HOST-HANDLE-NOT-DATA", "the server function `" + fs.info.name + "` takes `" + p.name + ": " + typeName(rt.t) + "`, which contains a declared `:host` handle type — a host handle SHALL NOT cross to the server (§21.3.3 rule 15)", fs.info.file, p.span)])
                         // s478 (s478-boot-fn-type) — §12.5: "A parameter whose type is NOT JSON-serializable
                         // — … (function, markup … ) — SHALL be a compile error (E-ROUTE-004: non-serializable
                         // parameter type to server function)"; §14.3: "a closure cannot be serialized"
@@ -7297,7 +7406,7 @@ ${
                 }
                 const r: Type | not = fs.info.ret
                 if (r is given) {
-                    if (containsHost(g.types, r)) out = out.concat([newDiag("E-HOST-HANDLE-NOT-DATA", "the server function `" + fs.info.name + "` returns `" + typeName(r) + "`, which contains a declared `:host` handle type — a host handle SHALL NOT cross from the server (§21.3.3 rule 15)", fs.info.file, fs.info.span)])
+                    if (containsHostIn(hosty, r)) out = out.concat([newDiag("E-HOST-HANDLE-NOT-DATA", "the server function `" + fs.info.name + "` returns `" + typeName(r) + "`, which contains a declared `:host` handle type — a host handle SHALL NOT cross from the server (§21.3.3 rule 15)", fs.info.file, fs.info.span)])
                     // s478-ruled-fn-types — §12.5.3 "A function-typed result is E-ROUTE-003 (S478)": "Return
                     // types that are not JSON-serializable SHALL be a compile error (E-ROUTE-003 …). The
                     // non-serializable kinds are: a **function** …" (impl#1 reports E-ROUTE-003 for this
@@ -7317,9 +7426,10 @@ ${
     // A cell (a declaration's field) whose type contains a declared `:host` type.
     fn hostCellDiags(g: Globals, st0: AS) -> AS {
         let st: AS = st0
+        const hosty: int[] = hostyIds(g.types)
         for (const ds of g.decls) {
             for (const f of ds.info.fields) {
-                if (containsHost(g.types, f.ty)) st = addDiag(st, ds.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "the cell `" + f.sym.hint + "` holds `" + typeName(f.ty) + "`, which contains a declared `:host` handle type — a cell holding a host handle is not in the bootstrap (§21.3.3 rule 15 admits a client cell but refuses a `persist=` / `server` cell; the bootstrap does not build that split). Hold the handle in a local")
+                if (containsHostIn(hosty, f.ty)) st = addDiag(st, ds.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "the cell `" + f.sym.hint + "` holds `" + typeName(f.ty) + "`, which contains a declared `:host` handle type — a cell holding a host handle is not in the bootstrap (§21.3.3 rule 15 admits a client cell but refuses a `persist=` / `server` cell; the bootstrap does not build that split). Hold the handle in a local")
             }
         }
         return st
@@ -8468,17 +8578,30 @@ ${
 
     // A path from `at` back to `start` through cells numbered above `start`
     // (so each cycle is found once, at its first member); [] when none.
+    // s480 (review:#1991 survey) — `dead`: the cells already searched from and found NOT to lead
+    // back to `start` (threaded through the whole search, DPathWalk); one is not searched again.
+    // A derived DAG with sharing (`a_i = a_{i+1} + b_{i+1}`, `b_i = a_{i+1} + b_{i+1}`) was searched
+    // once per PATH from every cell — 24 levels took 8.2 s, doubling per level. The path found is
+    // the same one (a dead cell's every continuation was already tried).
+    type DPathWalk:struct = { path: int[], dead: int[] }
+
     fn derivedPath(es: DEdge[], start: int, at: int, seen: int[]) -> int[] {
+        return derivedPathW(es, start, at, seen, []).path
+    }
+
+    fn derivedPathW(es: DEdge[], start: int, at: int, seen: int[], dead0: int[]) -> DPathWalk {
+        let dead: int[] = dead0
         for (const e of es) {
             if (e.from == at) {
-                if (e.to == start) return seen.concat([at])
-                if (e.to > start && seen.indexOf(e.to) < 0 && e.to != at) {
-                    const p: int[] = derivedPath(es, start, e.to, seen.concat([at]))
-                    if (p.length > 0) return p
+                if (e.to == start) return { path: seen.concat([at]), dead: dead }
+                if (e.to > start && seen.indexOf(e.to) < 0 && e.to != at && dead.indexOf(e.to) < 0) {
+                    const p: DPathWalk = derivedPathW(es, start, e.to, seen.concat([at]), dead)
+                    if (p.path.length > 0) return p
+                    dead = p.dead
                 }
             }
         }
-        return []
+        return { path: [], dead: dead.concat([at]) }
     }
 
     // r2 F4 — does a body read the clock (`Date.now()`) ITSELF? The effect
@@ -10931,6 +11054,7 @@ ${
         const scan: BodyScan = scanExpr({ t: t, file: kc.file }, kc.init, emptyScan())
         const what: string = bindingWhat(kc)
         const initDefer: ASpan[] = deferredSpansInExpr(kc.init)
+        const inTool: boolean = fileIsTool(g, g.entry)
         // s479 r1 (#1975 review F2): a later binding reached only through a function value —
         // the first such, refused by name after every ref is judged (a proven reach wins)
         let lamLate: Diag | not = not
@@ -10943,7 +11067,20 @@ ${
             if (j >= 0) {
                 const c: Callable = sum.nodes[j]
                 if (c.kind != CallableK.KFn) return [newDiag("E-BOOTSTRAP-UNSUPPORTED", "the initializer of " + what + " runs " + c.label + " — a declaration's construction or formula at module initialization (§7.6 rule (b)) is not in the bootstrap (INTERIM, g-boot-file-scope-init-residue-s479)", r.file, r.span)]
-                if (servers[j].length > 0) {
+                // s480 (ruling user-voice-scrml.md S479 "three open S479 questions" item 1) — §7.6
+                // rule (a), in a tool (§64): "in a tool, refuse an initializer only when it reaches
+                // something that suspends (`?{}`, `_{}`, a waiting call). Run synchronous initializers
+                // at module load, as for any other program." Every tool `function` is server-placed
+                // (FnFacts.tool), so `servers` says nothing there: a tool judges `swaits` (a `?{}` or
+                // a `_{}` of its own, closed over the functions it calls — the server-side wait).
+                if (inTool) {
+                    const qa: FxAtom | not = witnessOf(sum.swaits[j])
+                    if (qa is given) {
+                        let via: string = ""
+                        if (qa.root != j) via = ", which reaches `" + sum.nodes[qa.root].label + "`,"
+                        return [newDiag("E-FILE-SCOPE-SERVER-ONLY-REACH", "the initializer of " + what + " calls `" + c.label + "`" + via + " which suspends (a `?{}` query or a `_{}` host block, awaited) — a tool's file-scope initializer runs at module load, which is synchronous and cannot wait (§7.6 rule (a), §64.5.1). Compute the value in `main` (or a function it calls) and pass it where it is needed", r.file, r.span)]
+                    }
+                } else if (servers[j].length > 0) {
                     const sa: FxAtom = servers[j][0]
                     let via: string = ""
                     if (sa.root != j) via = ", which reaches `" + sum.nodes[sa.root].label + "`,"
@@ -16086,8 +16223,9 @@ ${
     // message), its type, and its OWN grants (the FieldDef's — never the
     // owning struct's `replace`). `inner`: the tape is held by an ELEMENT of a
     // replaced tape (`@g[…]`, `@b.rows[…].kids` — RULED S472, rule 1 recursion),
-    // not a field of the written struct itself.
-    type TapeHit:struct = { path: string, ty: Type, grants: GrantSet, inner: boolean }
+    // not a field of the written struct itself. `lit`: the field's owner is an object
+    // literal of the written value (so `name: <path>` can be written in it).
+    type TapeHit:struct = { path: string, ty: Type, grants: GrantSet, inner: boolean, lit: boolean }
 
     // §66.12.6 rule 4: the tape fields a whole value `v` of type `ty`, written
     // at the place spelled `key` ("" when it has no spelling), REPLACES. Every
@@ -16103,29 +16241,68 @@ ${
     // (innerTapeHits); the replaced tape's OWN grant is judged where it is
     // written (the caller). An ENUM is not walked: a variant payload is a value,
     // not a tape position — grants do not apply inside it (RULED S469, "Not a
-    // tape position"), so a whole enum write replaces no tape. `seen` stops a
-    // recursive struct.
-    fn structTapeWrites(types: TypeInfo[], ty: Type, v: AExpr | not, key: string, label: string, seen: int[]) -> TapeHit[] {
+    // tape position"), so a whole enum write replaces no tape.
+    //
+    // s480 (g-boot-tape-grant-walk-exponential-s480, review:#1991): the walk keeps
+    // `done` — the walk states (named type, inside
+    // an element or not) already expanded with NO value to compare (`v` is not an
+    // object literal: every field is replaced, so what is reached is a function of
+    // the type alone). A state met again is not re-expanded: on a struct graph with
+    // sharing (`D0 { f0: D1, f1: D1 }`, `D1 { … D2 … }`, …) the walk was every PATH —
+    // 2^depth expansions and as many diagnostics for one write — and is now linear in
+    // the type graph. Each offending tape FIELD is reported once, at the first path
+    // that reaches it (the order of first reach is the plain walk's); a graph without
+    // sharing never meets a state twice, so its hits are unchanged.
+    //
+    // s480 r1 (review:#1994 HIGH-1, g-boot-tape-walk-literal-cycle-cut-s480): there is NO
+    // path `seen` cut. It cut the edge back to a struct on the stack, which is sound only
+    // when that struct was expanded with no value (its own expansion covers the edge);
+    // against an object-literal-bearing ancestor the literal keeps fields the cut edge
+    // replaces (`@r = { y: { t: @r.y.t, s: x } }`, `S { y: Y }`: `x` replaces
+    // `@r.y.s.y.t`), and a state the cut path marked `done` then hid a second path.
+    // Termination without it: a no-value state is in `done` before its fields are walked,
+    // so a cycle of them stops at the first repeat; a literal state descends into a
+    // sub-expression of the literal, so a run of them is bounded by the literal's depth.
+    //
+    // s480 r2 (review:#1994 LOW-a): `fields` — the tape field DECLARATIONS (`owner:idx`) already
+    // hit. A declaration reached again (a recursive `T { kids: T[…] }` reaches `kids` as a field
+    // and again as a tape its elements hold; a struct shared by a field and by a tape's elements)
+    // is the same tape type with the same grants: it is not hit again, so each offending field
+    // declaration is reported once, at the first path that reaches it. Its element walk is not
+    // repeated either: tapeWalkInner of the same tape type reaches nothing the first one did not.
+    type TapeWalk:struct = { hits: TapeHit[], done: int[], fields: string[] }
+
+    fn structTapeWrites(types: TypeInfo[], ty: Type, v: AExpr | not, key: string, label: string) -> TapeHit[] {
+        return tapeWalkStruct(types, ty, v, key, label, false, { hits: [], done: [], fields: [] }).hits
+    }
+
+    fn tapeWalkStruct(types: TypeInfo[], ty: Type, v: AExpr | not, key: string, label: string, inner: boolean, w0: TapeWalk) -> TapeWalk {
         if (v is given) {
-            if (key != "" && placeKey(v) == key) return []
+            if (key != "" && placeKey(v) == key) return w0
         }
-        if (tapeGrants(ty) is given) return innerTapeHits(types, ty, label, seen)
+        if (tapeGrants(ty) is given) return tapeWalkInner(types, ty, label, w0)
         const s: Sym | not = namedOf(unMaybe(ty))
-        if (s is not) return []
-        if (seen.indexOf(s.id) >= 0) return []
+        if (s is not) return w0
         const ti: TypeInfo | not = typeInfoOf(types, s)
-        if (ti is not) return []
+        if (ti is not) return w0
         const fs: FieldDef[] | not = structFieldDefs(ti.def)
-        if (fs is not) return []
+        if (fs is not) return w0
         let props: AProp[] = []
         if (v is given) props = propsOf(v)
+        let w: TapeWalk = w0
+        if (props.length == 0) {
+            let state: int = s.id * 2
+            if (inner) state = state + 1
+            if (w.done.indexOf(state) >= 0) return w0
+            w = { hits: w.hits, done: w.done.concat([state]), fields: w.fields }
+        }
         // a spread of the place itself keeps the fields no LATER property names —
         // only when it is the last spread (`{ ...@b, ...other }`: `other` may override)
         let selfSpread = false
         for (const pr of props) {
             if (pr.spread) selfSpread = key != "" && placeKey(pr.value) == key
         }
-        let out: TapeHit[] = []
+        let fi = 0
         for (const fd of fs) {
             const name: string = fd.sym.hint
             const sub: string = memberKey(key, name)
@@ -16141,14 +16318,18 @@ ${
             }
             if (!kept) {
                 if (tapeGrants(fd.ty) is given) {
-                    out = out.concat([{ path: at, ty: fd.ty, grants: fd.grants, inner: false }])
-                    out = out.concat(innerTapeHits(types, fd.ty, at, seen.concat([s.id])))
+                    const fk: string = s.id + ":" + fi
+                    if (w.fields.indexOf(fk) < 0) {
+                        w = { hits: w.hits.concat([{ path: at, ty: fd.ty, grants: fd.grants, inner: inner, lit: props.length > 0 }]), done: w.done, fields: w.fields.concat([fk]) }
+                        w = tapeWalkInner(types, fd.ty, at, w)
+                    }
                 } else {
-                    out = out.concat(structTapeWrites(types, fd.ty, fv, sub, at, seen.concat([s.id])))
+                    w = tapeWalkStruct(types, fd.ty, fv, sub, at, inner, w)
                 }
             }
+            fi = fi + 1
         }
-        return out
+        return w
     }
 
     // s472-boot-map-grants (RULED S472 "five PA recs" item 1): every tape the
@@ -16156,22 +16337,24 @@ ${
     // tape (and what ITS elements hold), and each tape field reached through an
     // element struct (and what its elements hold). A whole write of `tape` that
     // does not keep its elements replaces each of them, so each needs its own
-    // `replace` (§66.12.6 rule 1, "in each position that can hold one"). `seen`
-    // stops a recursive struct; an enum element is not walked (RULED S469).
-    fn innerTapeHits(types: TypeInfo[], tape: Type, label: string, seen: int[]) -> TapeHit[] {
+    // `replace` (§66.12.6 rule 1, "in each position that can hold one"). An enum
+    // element is not walked (RULED S469).
+    // s480: the element walk shares structTapeWrites' `done` set (tapeWalkInner), which
+    // also stops a recursive struct (s480 r1: no path `seen`).
+    fn innerTapeHits(types: TypeInfo[], tape: Type, label: string) -> TapeHit[] {
+        return tapeWalkInner(types, tape, label, { hits: [], done: [], fields: [] }).hits
+    }
+
+    fn tapeWalkInner(types: TypeInfo[], tape: Type, label: string, w0: TapeWalk) -> TapeWalk {
         const el: Type | not = seqElem(unMaybe(tape))
-        if (el is not) return []
+        if (el is not) return w0
         const at: string = label + "[…]"
         const tg: GrantSet | not = tapeGrants(el)
-        let out: TapeHit[] = []
         if (tg is given) {
-            out = out.concat([{ path: at, ty: el, grants: tg, inner: true }])
-            return out.concat(innerTapeHits(types, el, at, seen))
+            const w: TapeWalk = { hits: w0.hits.concat([{ path: at, ty: el, grants: tg, inner: true, lit: false }]), done: w0.done, fields: w0.fields }
+            return tapeWalkInner(types, el, at, w)
         }
-        for (const h of structTapeWrites(types, el, not, "", at, seen)) {
-            out = out.concat([{ path: h.path, ty: h.ty, grants: h.grants, inner: true }])
-        }
-        return out
+        return tapeWalkStruct(types, el, not, "", at, true, w0)
     }
 
     // s472-boot-map-grants — a write of a whole TAPE (`label = value`, the place
@@ -16199,7 +16382,7 @@ ${
 
     // The first tape the elements of `tape` hold whose type does not grant `replace`.
     fn innerTapeProblems(types: TypeInfo[], tape: Type, label: string, what: string) -> TapeDiag[] {
-        for (const h of innerTapeHits(types, tape, label, [])) {
+        for (const h of innerTapeHits(types, tape, label)) {
             if (!grantsAdmit(h.grants, EditKind.Replace)) return [innerTapeDiag(what, h)]
         }
         return []
@@ -16234,11 +16417,11 @@ ${
     // its own grants (`grantsAdmit(…, Replace)`): E-WRITE-NOT-GRANTED.
     fn structTapeProblems(types: TypeInfo[], ty: Type, v: AExpr | not, key: string, label: string) -> TapeDiag[] {
         let out: TapeDiag[] = []
-        for (const h of structTapeWrites(types, ty, v, key, label, [])) {
+        for (const h of structTapeWrites(types, ty, v, key, label)) {
             if (!grantsAdmit(h.grants, EditKind.Replace) && h.inner) {
                 out = out.concat([innerTapeDiag("`" + label + " = …` replaces the tapes inside `" + label + "`", h)])
             } else if (!grantsAdmit(h.grants, EditKind.Replace)) {
-                out = out.concat([{ code: "E-WRITE-NOT-GRANTED", msg: "`" + label + " = …` replaces the tape field `" + h.path + "` (`" + tapeTypeName(h.ty) + "`), whose type does not grant `replace` — a whole-struct write that changes a tape field is a `replace` of THAT field, judged by the field's own grants, not the struct's (§66.12.6 rule 4). Keep the field as it was (`" + lastSegment(h.path) + ": " + h.path + "`), or spread the struct (`{ ..." + label + ", f: v }`)" }])
+                out = out.concat([{ code: "E-WRITE-NOT-GRANTED", msg: "`" + label + " = …` replaces the tape field `" + h.path + "` (`" + tapeTypeName(h.ty) + "`), whose type does not grant `replace` — a whole-struct write that changes a tape field is a `replace` of THAT field, judged by the field's own grants, not the struct's (§66.12.6 rule 4). " + keepFieldHint(label, h) }])
             }
         }
         return out
@@ -16310,6 +16493,32 @@ ${
         return "@" + hint
     }
 
+    // s480 r2 (review:#1994 LOW-b): `name: <path>` is a fix only where an object literal of the
+    // write owns the field, or the field is a direct field of the written place (`{ ...v, xs: @b.xs }`).
+    // Deeper, under a value the write replaces whole (a parameter, a local), the field is kept by
+    // rebuilding down to it: nested literals over spreads of the place.
+    fn keepFieldHint(label: string, h: TapeHit) -> string {
+        const keep: string = "Keep the field as it was (`" + lastSegment(h.path) + ": " + h.path + "`), or spread the struct (`{ ..." + label + ", f: v }`)"
+        if (h.lit || !h.path.startsWith(label + ".")) return keep
+        const segs: string[] = h.path.substring(label.length + 1).split(".")
+        if (segs.length < 2) return keep
+        let inner: string = segs[segs.length - 1] + ": " + h.path
+        if (segs.length > 4) inner = "… " + inner
+        let i: int = segs.length - 2
+        if (segs.length > 4) i = 1
+        while (i >= 0) {
+            let at: string = label
+            let j = 0
+            while (j <= i) {
+                at = at + "." + segs[j]
+                j = j + 1
+            }
+            inner = segs[i] + ": { ..." + at + ", " + inner + " }"
+            i = i - 1
+        }
+        return "Keep the field as it was: it sits inside `" + label + "." + segs[0] + "`, which this write replaces whole, so rebuild down to it from the place, keeping it (`{ ..." + label + ", " + inner + " }`), or write the parts that change in place"
+    }
+
     fn lastSegment(path: string) -> string {
         const i: int = path.lastIndexOf(".")
         if (i < 0) return path
@@ -16320,7 +16529,7 @@ ${
     // statically (`reset`, `reset-on=`: whether the reset changes a tape field
     // depends on its value at run time) — the first such field, or "".
     fn resetTapeProblem(types: TypeInfo[], ty: Type, label: string) -> string {
-        for (const h of structTapeWrites(types, ty, not, "", label, [])) {
+        for (const h of structTapeWrites(types, ty, not, "", label)) {
             if (!grantsAdmit(h.grants, EditKind.Replace)) return h.path
         }
         return ""
@@ -17004,36 +17213,50 @@ ${
 
     // A tape without `replace` inside type `t` (through `| not`, tape elements and struct
     // fields), else "". `top`: `t` is the cell's own type, whose grants fi.grants carries.
+    // s480 (review:#1991 survey) — `done`: the structs already walked and found clean (the
+    // verdict for a struct is a function of the struct alone — no path is in the message, and a
+    // problem ends the walk), so a struct graph with sharing (`D0 { a: D1, b: D1, c: D1, d: D1 }`,
+    // `D1 { … D2 … }`, …) is walked once per struct, not once per path: a channel cell of such a
+    // type, 4 wide and 12 deep, took 2.8 s and grew 16x per level.
+    type ChWalk:struct = { msg: string, done: int[] }
+
     fn chInnerContract(g: Globals, t: Type, seen: int[], top: boolean) -> string {
+        return chInnerWalk(g, t, seen, top, []).msg
+    }
+
+    fn chInnerWalk(g: Globals, t: Type, seen: int[], top: boolean, done: int[]) -> ChWalk {
         return match t {
-            .Seq(elem: e, grants: gs) :> chInnerSeq(g, e, gs, seen, top)
-            .Maybe(inner: i) :> chInnerContract(g, i, seen, top)
-            .Named(sym: s) :> chInnerStruct(g, s, seen)
-            .Int :> ""
-            .Num :> ""
-            .Str :> ""
-            .Bool :> ""
+            .Seq(elem: e, grants: gs) :> chInnerSeq(g, e, gs, seen, top, done)
+            .Maybe(inner: i) :> chInnerWalk(g, i, seen, top, done)
+            .Named(sym: s) :> chInnerStruct(g, s, seen, done)
+            .Int :> { msg: "", done: done }
+            .Num :> { msg: "", done: done }
+            .Str :> { msg: "", done: done }
+            .Bool :> { msg: "", done: done }
             // #1929: no cell holds a function value (analyze refuses it); fail closed regardless
-            .Fn :> "holds a function value (no wire form, §14.3)"
+            .Fn :> { msg: "holds a function value (no wire form, §14.3)", done: done }
         }
     }
 
-    fn chInnerSeq(g: Globals, e: Type, gs: SeqGrants, seen: int[], top: boolean) -> string {
-        if (!top && !gs.replace) return "holds a tape whose type grants no `replace` (§66.12.6 rule 4)"
-        return chInnerContract(g, e, seen, false)
+    fn chInnerSeq(g: Globals, e: Type, gs: SeqGrants, seen: int[], top: boolean, done: int[]) -> ChWalk {
+        if (!top && !gs.replace) return { msg: "holds a tape whose type grants no `replace` (§66.12.6 rule 4)", done: done }
+        return chInnerWalk(g, e, seen, false, done)
     }
 
-    fn chInnerStruct(g: Globals, s: Sym, seen: int[]) -> string {
-        if (seen.indexOf(s.id) >= 0) return ""
+    fn chInnerStruct(g: Globals, s: Sym, seen: int[], done0: int[]) -> ChWalk {
+        if (seen.indexOf(s.id) >= 0) return { msg: "", done: done0 }
+        if (done0.indexOf(s.id) >= 0) return { msg: "", done: done0 }
         const ti: TypeInfo | not = typeInfoOf(g.types, s)
-        if (ti is not) return ""
+        if (ti is not) return { msg: "", done: done0 }
         const fs: FieldDef[] | not = structFieldDefs(ti.def)
-        if (fs is not) return ""
+        if (fs is not) return { msg: "", done: done0 }
+        let done: int[] = done0.concat([s.id])
         for (const fd of fs) {
-            const r: string = chInnerContract(g, fd.ty, seen.concat([s.id]), false)
-            if (r != "") return r
+            const r: ChWalk = chInnerWalk(g, fd.ty, seen.concat([s.id]), false, done)
+            if (r.msg != "") return r
+            done = r.done
         }
-        return ""
+        return { msg: "", done: done }
     }
 
     // ---- END OF THE TAPE GRANT READER (tape-write-forms.test.js: no grant is read outside it) ----
@@ -28778,6 +29001,8 @@ ${
         // server-only resource — a `?{}` query … SHALL be a compile error, `E-FILE-SCOPE-SERVER-ONLY-REACH`"
         // (the server-placed-call limb is judged after placement: fileScopePass)
         const q: AExpr | not = sqlIn(c.init)
+        // s480 (ruling S479 "three open S479 questions" item 1): a tool's `?{}` suspends — still refused, tool-worded
+        if (q is given && fileIsTool(g, g.entry)) return { c: constAs(c, c.annot, true, false), st: addDiag(st0, c.file, q.span, "E-FILE-SCOPE-SERVER-ONLY-REACH", "the initializer of " + what + " runs a query (`?{ … }`), which suspends — a tool's file-scope initializer runs at module load, which is synchronous and cannot wait (§7.6 rule (a), §64.5.1). Run the query in `main` (or a function it calls)") }
         if (q is given) return { c: constAs(c, c.annot, true, false), st: addDiag(st0, c.file, q.span, "E-FILE-SCOPE-SERVER-ONLY-REACH", "the initializer of " + what + " runs a query (`?{ … }`) — a file-scope initializer runs at module initialization, which is synchronous and cannot wait on the server (§7.6 rule (a), as §6.6.19 refuses a derived cell). Run the query in a server function and call it where the value is needed") }
         // s479 — §7.6 rule (b): "Any other non-constant initializer is evaluated at module
         // initialization, once (§7.4.2's one-shot evaluation), in EVERY artifact that reads the
@@ -41606,13 +41831,10 @@ ${
         // S479 (ruling §3.B item 8) — §6.13.5: "A `debounced=` / `throttled=` engine cell
         // transitions at commit … `rule=` (§51.0.F) is judged at the commit, against the
         // variant the cell holds then" — built (runtime `timed` carries the edge table;
-        // `heldWriteCheck` is the static half). INTERIM: an engine with an `<onIdle>`
-        // watchdog stays refused — no SPEC sentence says whether the watchdog's own fire is
-        // a local write the wrapper holds, or commits at once (and cancels a held write).
-        const gr: TransitionGraph | not = f.graph
-        if (gr is given) {
-            if (gr.idle is given) return "an engine with an `<onIdle>` watchdog: §6.13.5 makes a timed engine transition at commit, but no SPEC sentence says whether the watchdog's own fire is held by the timing rule or commits at once (cancelling a held write) — not built; drop one of the two"
-        }
+        // `heldWriteCheck` is the static half). An engine with an `<onIdle>` watchdog is
+        // accepted too (S479, ruling "three open S479 questions" item 2; §51.0.R): "The
+        // watchdog firing applies immediately … It cancels any write still waiting" — the
+        // runtime `idleWatch` fire bypasses the wrapper (`idleFire`).
         if (attrNamed(d.mods, "persist") is given) return "a `persist=` cell: its cross-tab sync is a server-origin write, which SHALL bypass the timing wrapper and cancel a pending local write (§6.13.1, §6.7.7.3 rule 6) — not built; drop one of the two"
         if (dbCellRecord(g, f.nid) is given) return "a `<db>` cell: its load is a server-origin write, which SHALL bypass the timing wrapper (§6.13.1) — not built"
         if (isPendingDecl(g, f.nid)) return "a pending cell: its load is a server-origin write, which SHALL bypass the timing wrapper (§6.13.1) — not built"
@@ -43062,7 +43284,7 @@ ${
         st = actionServerDiags(g, t, all, places, rd, st)
         const rl: RLoads = dbLoads(g, servers, st)
         st = rl.st
-        return { facts: { servers: servers, sqls: sqls, dbs: owned, places: places, inherited: sum.inherited, plan: noPlan(), loads: rl.loads, envelopes: ep.envs, txs: tp0.txs, reqReads: [], tool: toolFact(g), endpoints: [], channels: [] }, doms: doms, st: st }
+        return { facts: { servers: servers, sqls: sqls, dbs: owned, places: places, inherited: sum.inherited, plan: noPlan(), loads: rl.loads, envelopes: ep.envs, txs: tp0.txs, reqReads: [], tool: toolFact(g), endpoints: [], channels: [], copies: [], onServer: false }, doms: doms, st: st }
     }
 
     // s473 (ruled refusals) — §8.9.2 amendment (S473 review-surfaced 2): "A
@@ -43193,23 +43415,123 @@ ${
 
     // s454 (U1b) — a function that runs on the server (wholly, or by
     // inheritance) calling a client function that WAITS (it makes a client
-    // call of a server function): on the server that callee would have to run
-    // its server calls in place, which is the per-side emission of an ambient
-    // function. s468 (U1c): U1c emits an ambient function on each side that
-    // reaches it (§13.4 "TWO representations") — but THIS one's two
-    // representations differ in their bodies (its server calls are client
-    // calls on one side and in-place calls on the other), and Core holds one
-    // body per function. Still refused, fail closed (a later slice: a binder-
-    // minted server copy, lowered under the server plan).
+    // call of a server function): on the server that callee runs its server
+    // calls in place. s479 (s479-waiting-helper-server-copy): an AMBIENT one
+    // gets a server copy (copyPass) — its two representations (§13.4 "TWO
+    // representations") differ in their bodies, so the copy is lowered under
+    // its own server plan. Any other placement (a client-only helper — already
+    // E-ROUTE-002 from a server-placed caller) is still refused, fail closed.
     fn waitingCallees(f: FnFacts, all: FnFacts[], ps: PlaceFact[], sum: Summary, st0: AS) -> AS {
         let st: AS = st0
         for (const r of fnRefs(all, f)) {
-            if (placeOf(ps, r.sym) != PlaceK.Server && sum.inherited.indexOf(r.sym) < 0 && !r.asValue) {
+            if (placeOf(ps, r.sym) != PlaceK.Server && placeOf(ps, r.sym) != PlaceK.Ambient && sum.inherited.indexOf(r.sym) < 0 && !r.asValue) {
                 const w: Reach | not = waitsOf(sum, r.sym)
-                if (w is given) st = addDiag(st, r.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` runs on the server and calls `" + r.name + "`, a client function that waits for the server (`" + w.chain.join(" → ") + "`) — on the server that call would be made in place, which needs a second, server-side copy of `" + r.name + "` whose server calls are made in place (not in the bootstrap: Core holds one body per function — the server artifact emits a shared function as it is, which is right only for one that waits on nothing; INTERIM, g-boot-waiting-helper-server-copy-s479). Until then call the server function directly")
+                if (w is given) st = addDiag(st, r.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` runs on the server and calls `" + r.name + "`, a client function that waits for the server (`" + w.chain.join(" → ") + "`) and is not ambient — its server-side copy, whose server calls are made in place, is built only for an ambient function (fail closed). Call the server function directly")
             }
         }
         return st
+    }
+
+    // =========================================================================
+    // s479 (s479-waiting-helper-server-copy) — THE SERVER COPIES.
+    //   §12.2 Trigger 5: "A function with at least one client-classified caller
+    //   SHALL remain ambient (client-classified)."
+    //   §19.9.10 "Not affected": "A call whose caller is itself server-placed
+    //   runs in the same server handler: the callee is inlined (§13.4), no
+    //   request is made, and nothing on the wire can fail. Its failure set is
+    //   the callee's own — none for a function not declared `!`."
+    //   §13.4: "the compiler SHALL generate TWO representations of B … These
+    //   are independent code paths."
+    // So an AMBIENT helper that waits (its body makes client calls of server
+    // functions — the summary's `waits`) and that a server-side body calls (a
+    // server-placed function, one server-placed by inheritance, or another
+    // copy — transitively) has a second body: the same source, run on the
+    // server, its server calls made in place. Each gets a minted Sym and its
+    // own SERVER-side suspension plan (planBlock with `server`); lower lowers
+    // the source body again under that plan (lower.scrml serverView) and
+    // retargets every server-side call of the helper to the copy, which Core
+    // holds as a server-only Fn (no route — no client call names it).
+    // Diagnostics are the original's: the copy's planning adds only a report
+    // the original's does not already make at the same site (fail closed — a
+    // refusal is never lost). A `!` copy whose body reaches a query runs in its
+    // own transaction envelope (§8.9.2 — envelopeOf's calledInPlace branch
+    // built it for the original's Sym; it moves to the copy); without one it is
+    // refused by name.
+    // =========================================================================
+    type RCopies:struct = { copies: SrvCopy[], envs: Envelope[], st: AS }
+
+    fn copyPass(g: Globals, t: Tables, s: Summary, envs0: Envelope[], st0: AS) -> RCopies {
+        let st: AS = st0
+        const all: FnFacts[] = fnFactsOf(s)
+        let copies: SrvCopy[] = []
+        let todo: FnFacts[] = []
+        for (const f of all) {
+            if (!nestedSym(g, f.sym) && (placeOf(s.places, f.sym) == PlaceK.Server || s.inherited.indexOf(f.sym) >= 0)) todo = todo.concat([f])
+        }
+        let envs: Envelope[] = envs0
+        while (todo.length > 0) {
+            const f: FnFacts = todo[0]
+            todo = todo.slice(1)
+            for (const r of fnRefs(all, f)) {
+                const rf: FnFacts | not = factsOf(all, r.sym)
+                if (rf is given && !r.asValue && !nestedSym(g, r.sym) && placeOf(s.places, r.sym) == PlaceK.Ambient && s.inherited.indexOf(r.sym) < 0 && waitsOf(s, r.sym) is given && !hasCopy(copies, r.sym)) {
+                    const fs: FnSrc | not = fnSrcOf(g, r.sym)
+                    if (fs is given) {
+                        const ms: RSym = mint(st, fs.info.name)
+                        st = ms.st
+                        const before: Diag[] = st.diags
+                        const cx: PCx = { g: g, t: t, s: s, file: fs.info.file, inFn: true, server: true }
+                        let ps: PS = planBlock(cx, fs.f.body, { st: st, plan: noPlan() })
+                        let waiting: int[] = []
+                        if (ps.plan.at.length > 0) waiting = [r.sym]
+                        const plan: SuspendPlan = { at: ps.plan.at, temps: ps.plan.temps, joins: ps.plan.joins, waiting: waiting, rets: ps.plan.rets }
+                        st = keepNewDiags(ps.st, before)
+                        copies = copies.concat([{ orig: { id: r.sym, hint: fs.info.name }, copy: ms.s, plan: plan }])
+                        // the transaction envelope of a `!` copy that reaches a query (§8.9.2 "Amendment S474" item 1)
+                        if (rf.failable && swaitsOf(s, r.sym) is given) {
+                            let moved: boolean = false
+                            let next: Envelope[] = []
+                            for (const e of envs) {
+                                if (e.fn.id == r.sym) {
+                                    next = next.concat([{ fn: ms.s, db: e.db, standalone: e.standalone, writes: e.writes }])
+                                    moved = true
+                                } else {
+                                    next = next.concat([e])
+                                }
+                            }
+                            envs = next
+                            if (!moved) st = addDiag(st, r.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` runs on the server and calls `" + r.name + "`, a client `!` function that waits for the server — on the server it runs in place, and its queries need its own transaction envelope (§8.9.2), which the bootstrap builds only for a `!` function a server-placed function calls directly (INTERIM, g-boot-server-copy-bang-envelope-s479). Until then call it from a server-placed function directly, or call the server function itself")
+                        }
+                        todo = todo.concat([rf])
+                    }
+                }
+            }
+        }
+        return { copies: copies, envs: envs, st: st }
+    }
+
+    fn hasCopy(cs: SrvCopy[], sym: int) -> boolean {
+        for (const c of cs) {
+            if (c.orig.id == sym) return true
+        }
+        return false
+    }
+
+    // The diagnostics of `st` after the copy's planning, keeping each new one only when the original's
+    // report at the same site (code, file, span) is not already in `before` — one report per site.
+    fn keepNewDiags(st: AS, before: Diag[]) -> AS {
+        let ds: Diag[] = before
+        let i: int = before.length
+        while (i < st.diags.length) {
+            const d: Diag = st.diags[i]
+            let dup: boolean = false
+            for (const b of before) {
+                if (b.code == d.code && b.file == d.file && b.span.start == d.span.start && b.span.end == d.span.end) dup = true
+            }
+            if (!dup) ds = ds.concat([d])
+            i = i + 1
+        }
+        return { facts: st.facts, diags: ds, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets, locs: st.locs }
     }
 
     // s473 D29 — `at` lies inside the text of a `?{}` that writes (not a SELECT / WITH … SELECT,
@@ -51904,18 +52226,20 @@ ${
             }
         }
         const pl: PS = planPass(ra.g, typedT, sum, dropTransportDiags(cp.st, quiet))
+        // s479 (s479-waiting-helper-server-copy): the server copies of the waiting helpers server-side bodies call
+        const cps: RCopies = copyPass(ra.g, typedT, sum, pp.facts.envelopes, pl.st)
         // s478 (s478-boot-endpoint): the §61 `<endpoint>` declarations
         const eps: REps = endpointPass(ra.g, files)
         // s478 (s478-boot-channel): the §38 `<channel>` declarations
         const chs: RChans = channelPass(ra.g, files, pp.facts.servers, pp.facts.inherited)
         const sf: ServerFacts = { servers: pp.facts.servers, sqls: pp.facts.sqls, dbs: pp.facts.dbs, places: pp.facts.places,
-                                  inherited: pp.facts.inherited, plan: pl.plan, loads: pp.facts.loads, envelopes: pp.facts.envelopes, txs: pp.facts.txs,
-                                  reqReads: requestReads(typedT, sum, pl.plan), tool: pp.facts.tool, endpoints: eps.eps, channels: chs.chans }
+                                  inherited: pp.facts.inherited, plan: pl.plan, loads: pp.facts.loads, envelopes: cps.envs, txs: pp.facts.txs,
+                                  reqReads: requestReads(typedT, sum, pl.plan), tool: pp.facts.tool, endpoints: eps.eps, channels: chs.chans, copies: cps.copies, onServer: false }
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
                             novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, timings: bound.timings, server: sf, css: css.facts, consts: bound.consts, requests: bound.requests, taliases: bound.taliases, waits: waitingFns(sum), rows: bound.rows }
-        const base0: Diag[] = chScopeQuiet(domScopeDropped(pl.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags).concat(hostPlacedDiags(fns, pp.facts.servers)).concat(hostServerDiags(ra.g, pp.facts.servers)).concat(nestedFnPass(ra.g, t)).concat(eps.diags), chs.quiet, chs.calls).concat(chs.diags)
+        const base0: Diag[] = chScopeQuiet(domScopeDropped(cps.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags).concat(hostPlacedDiags(fns, pp.facts.servers)).concat(hostServerDiags(ra.g, pp.facts.servers)).concat(nestedFnPass(ra.g, t)).concat(eps.diags), chs.quiet, chs.calls).concat(chs.diags)
         // s471: the linear pass (§35) — after the typer (§35.5: "after type resolution and
         // route inference"; a non-exhaustive `match`'s E-TYPE-020 is in `base0`, §35.4.3)
         const base: Diag[] = base0.concat(linPass(ra.g, t, base0))
@@ -51937,7 +52261,7 @@ ${
             unused = unusedBindings(pl.st)
         }
         return { tp: { files: files, tables: t, diags: judged.concat(unread),
-                       infos: gatedInfos(vp.gated) }, plans: cp.plans, nsAt: pl.st.nsAt, carriers: carrierNids, pend: pendingCells(ra.g, t, pp.facts.places, sum), retype: retype, unused: unused }
+                       infos: gatedInfos(vp.gated) }, plans: cp.plans, nsAt: cps.st.nsAt, carriers: carrierNids, pend: pendingCells(ra.g, t, pp.facts.places, sum), retype: retype, unused: unused }
     }
 
     // s478 — did any file draw an Error-severity parse diagnostic (FileAst.errs)?

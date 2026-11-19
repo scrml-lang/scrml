@@ -1,0 +1,66 @@
+{
+  "id": "reactive-server-copy-markup-and-server-rt",
+  "description": "One waiting helper `twice` called from a button's handler (client) and from the server function `total` (in place, through its server copy). t = total(4) = (1 + 4) * 2 + 100 = 110; after the click x = twice(2) = (1 + 2) * 2 = 6. RUNTIME, sqlEngine \"real\".",
+  "language-version": "1.0",
+  "spec": "§12.2, §13.4, §19.9.10",
+  "provenance": "lane:s479-waiting-helper-server-copy (g-boot-waiting-helper-server-copy-s479, filed by #1978).",
+  "rationale": "§12.2 Trigger 5: 'A function with at least one client-classified caller SHALL remain ambient (client-classified).' §19.9.10 'Not affected': 'A call whose caller is itself server-placed runs in the same server handler: the callee is inlined (§13.4), no request is made, and nothing on the wire can fail. Its failure set is the callee's own — none for a function not declared `!`.' §13.4: 'the compiler SHALL generate TWO representations of B … These are independent code paths.'",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "sqlEngine": "real",
+    "serverDb": {
+      "users": [
+        {
+          "id": 1,
+          "name": "a"
+        }
+      ]
+    },
+    "input": [
+      {
+        "wait": "settle"
+      },
+      {
+        "click": "#go"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "state": {
+      "x": 6,
+      "t": 110
+    },
+    "domAnchored": [
+      {
+        "selector": "#x",
+        "text": "6"
+      },
+      {
+        "selector": "#t",
+        "text": "110"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-pending-cells-unbuilt-s477",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=2",
+          "emitted:E-SCOPE-001=2",
+          "emitted:E-STATE-UNDECLARED=3",
+          "emitted:E-TYPE-045=1",
+          "prefix:E-MARKUP-001 (matches forbidden E-*)",
+          "prefix:E-SCOPE-001 (matches forbidden E-*)",
+          "prefix:E-STATE-UNDECLARED (matches forbidden E-*)",
+          "prefix:E-TYPE-045 (matches forbidden E-*)"
+        ],
+        "runtime": "sha256:b7624df35ef5d3f8"
+      }
+    }
+  }
+}
