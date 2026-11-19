@@ -5677,6 +5677,22 @@ function rebaseSet(cell, v) {
 // entry); `send(text, ref)` is told which frame went on the wire, and `superseded(ref)` which queued
 // `replace` a later one superseded — that frame is never sent, so the caller drops its pending
 // entry rather than wait for an echo that cannot come. `close()` returns how many were dropped.
+// S480 r2 (#1987 review NEW-2), §38.4.3 "Over a rate bound": the pacer also keeps the frames it SENT
+// and the relay has not answered (`flight`, in send order; the relay answers a connection's frames in
+// the order it reads them). `answered(applied)` — the oldest unanswered frame was relayed (`applied`)
+// or refused by the relay's fold (dropped, as before). `refused()` — it was refused UNREAD, over a rate
+// bound: applied nowhere and numbered never, so sending it again cannot duplicate it. The pacer slows
+// down (`starve`) and RE-SENDS it, paced, in its original order: it holds every queued frame back
+// until the frames sent after the refused one are answered (none can be recalled), then puts the
+// refused frames back at the HEAD of the queue, oldest first. A refused frame whose order against a
+// frame sent after it CANNOT be kept — that later frame was relayed, and the two do not commute — is
+// dropped (`io.dropped(ref)`), as every rate-refused frame was before: re-sending it would reorder the
+// edits. Two frames commute when they are of different cells and neither cell's write resets another
+// cell (`io.coupled(ref)`, `reset-on=`). A refused frame of a cell whose later `replace` (relayed, or
+// still to be sent) sets its value outright is superseded (`io.superseded(ref)`): the newest value
+// wins, as for a queued one — unless its cell's write resets another cell. `io.resend(ref, text)`
+// gives the text a re-sent frame goes on the wire with (its `__seen` renewed), or null to drop it.
+//   io (optional, S480 r2): dropped(ref), coupled(ref) → bool, resend(ref, text) → text | null
 export function channelPacer(limits, io) {
   const lim = limits !== null && typeof limits === "object" ? limits : {};
   const pos = (v, d) => (Number.isSafeInteger(v) && v >= 1 ? v : d);
@@ -5686,20 +5702,49 @@ export function channelPacer(limits, io) {
   let tokens = cap;
   let at = io.now();
   let q = [];
+  let flight = [];          // sent, unanswered — and refused unread (`retry`), awaiting a re-send
+  let held = false;         // a refused frame waits for the frames sent after it to be answered
   let timer = null;
   let open = false;
+  const coupled = (f) => typeof io.coupled === "function" && io.coupled(f.ref) === true;
+  const commute = (a, b) => a.key !== b.key && !coupled(a) && !coupled(b);
+  const supersedes = (later, f) => later.key === f.key && later.op === "replace" && !coupled(f);
+  function drop(f, superseded) {
+    if (superseded) { if (typeof io.superseded === "function") io.superseded(f.ref); }
+    else if (typeof io.dropped === "function") io.dropped(f.ref);
+  }
   function pump() {
     timer = null;
-    if (!open) return;
+    if (!open || held) return;
     const t = io.now();
     if (t > at) tokens = Math.min(cap, tokens + ((t - at) * rate) / 1000);
     at = t;
     while (q.length > 0 && tokens >= 1) {
       tokens -= 1;
       const f = q.shift();
+      f.retry = false;
+      flight.push(f);
       io.send(f.text, f.ref);
     }
     if (q.length > 0) timer = io.later(pump, Math.max(1, Math.ceil(((1 - tokens) * 1000) / rate)));
+  }
+  // Every frame sent after the refused ones is answered: re-queue the refused ones, oldest first, at
+  // the head of the queue — before every frame queued after them, which none of them was sent after
+  function release() {
+    if (!held || flight.some((f) => !f.retry)) return;
+    const back = [];
+    for (let i = 0; i < flight.length; i++) {
+      const f = flight[i];
+      if (flight.slice(i + 1).some((g) => supersedes(g, f)) || q.some((g) => supersedes(g, f))) { drop(f, true); continue; }
+      const text = typeof io.resend === "function" ? io.resend(f.ref, f.text) : f.text;
+      if (typeof text !== "string") continue;            // the caller dropped it
+      f.text = text;
+      back.push(f);
+    }
+    flight = [];
+    held = false;
+    q = back.concat(q);
+    if (timer === null) pump();
   }
   return {
     // A new connection (idempotent while open): a full bucket, then the queue, if any.
@@ -5710,12 +5755,56 @@ export function channelPacer(limits, io) {
       at = io.now();
       pump();
     },
+    // The connection closed: the frames still queued, and the refused ones awaiting a re-send, are
+    // dropped (§38.10.4); returns how many.
     close() {
       open = false;
       if (timer !== null) { io.cancel(timer); timer = null; }
-      const n = q.length;
+      const n = q.length + flight.filter((f) => f.retry).length;
       q = [];
+      flight = [];
+      held = false;
       return n;
+    },
+    // S479 (s479-channel-follow), §38.4.3: the relay refused a frame of this connection unread, over a
+    // rate bound — "the client SHALL then slow down": its bucket is emptied, so the next frame waits
+    // for a token's refill. Frames still queued keep their order. S480 r1 (#1987 review MED-1): a refused
+    // frame spends no relay token, so the relay's bucket is at 0 or more when it refuses; an emptied
+    // client bucket refilling at 95% of `rate` stays behind the relay's, which refills at `rate`.
+    starve() {
+      tokens = 0;
+      at = io.now();
+    },
+    // S480 r2: the oldest unanswered frame was answered — relayed (`applied`), or refused by the relay's
+    // fold. Returns its `ref` (undefined: no frame was unanswered). A relayed one is checked against
+    // each refused frame sent before it: superseded, dropped (their order cannot be kept), or kept.
+    answered(applied) {
+      const i = flight.findIndex((f) => !f.retry);
+      if (i < 0) return undefined;
+      const f = flight[i];
+      flight.splice(i, 1);
+      if (applied) {
+        flight = flight.filter((r) => {
+          if (!r.retry) return true;
+          if (supersedes(f, r)) { drop(r, true); return false; }
+          if (!commute(r, f)) { drop(r, false); return false; }
+          return true;
+        });
+      }
+      release();
+      return f.ref;
+    },
+    // S480 r2: the oldest unanswered frame was refused unread, over a rate bound: slow down, and re-send
+    // it (above). Returns its `ref` (undefined: no frame was unanswered).
+    refused() {
+      tokens = 0;
+      at = io.now();
+      const f = flight.find((g) => !g.retry);
+      if (f === undefined) return undefined;
+      f.retry = true;
+      held = true;
+      release();
+      return f.ref;
     },
     // Queue one frame of the cell `key` (op `op`); false (not queued) while the connection is not open.
     push(key, op, text, ref) {
@@ -5727,7 +5816,7 @@ export function channelPacer(limits, io) {
           return false;
         });
       }
-      q.push({ key, op, text, ref });
+      q.push({ key, op, text, ref, retry: false });
       if (timer === null) pump();
       return true;
     },
@@ -5801,6 +5890,19 @@ export function channelJudge(c, cur, op, val) {
   return null;
 }
 
+// S479 (s479-channel-follow) — ruling:user-voice-scrml.md S479 "⭐ RULED — the rest of S478 hand-off
+// §3.B", item 5: "`reconnect=` is the initial delay, doubling with ±20% jitter to a 30 s cap; reset on
+// open; `0` disables. A fixed delay reconnects every client in lockstep after a server restart." §38.7:
+// the wait before reconnect attempt `n` (0 for the first after an open) is `min(cap, initial × 2^n)`,
+// scaled by a factor drawn uniformly from [0.8, 1.2]; the cap is 30 s, or the initial delay itself when
+// that is larger (an author's own delay is never shortened). `random` returns a number in [0, 1).
+export const CHANNEL_RECONNECT_CAP_MS = 30000;
+export function channelBackoff(initial, n, random) {
+  const cap = Math.max(CHANNEL_RECONNECT_CAP_MS, initial);
+  const base = Math.min(cap, initial * 2 ** Math.min(n, 30));
+  return Math.round(base * (0.8 + 0.4 * random()));
+}
+
 // The relay's own close codes (§38.4.3) — a close the author must see, not a silent drop.
 const RELAY_CLOSES = new Map([
   [1003, "it sent a binary frame"],
@@ -5821,6 +5923,9 @@ export function channel(scope, desc) {
   const conf = new Map(init);
   const chanCells = new Set(desc.cells.map((c) => c.cell));
   let pending = [];
+  // S480 r2: the `__seen` of this connection's last frame the relay READ (relayed, or refused by its
+  // fold) — the relay's floor for the next one's (§38.4.2 "The frame")
+  let floorSeen = 0;
   // #1941 fix r1 (MED-1): the edits made on a connection that is open (or opening) but whose replay
   // has not been applied — §38.4.2 "held"; re-applied on the rebuilt value and sent after the replay
   let held = [];
@@ -5829,6 +5934,7 @@ export function channel(scope, desc) {
   let stopped = false;      // a truncated frame log: the channel is out of sync for good
   let ws = null;
   let timer = null;
+  let retries = 0;          // reconnect attempts since the last open (§38.7 backoff)
   let disposed = false;
   let applying = false;
   let windowFrom = 0;
@@ -5854,10 +5960,23 @@ export function channel(scope, desc) {
     send: (text, p) => {
       if (ws === null || ws.readyState !== 1) return;
       ws.send(text);
-      if (p !== undefined && p !== null) p.sent = true;
+      if (p !== undefined && p !== null) { p.sent = true; p.retry = false; }
     },
     // a queued `replace` superseded by a later one is never sent: it stops being pending (#1941 × #1942)
     superseded: (p) => { const i = pending.indexOf(p); if (i >= 0) pending.splice(i, 1); },
+    // S480 r2 (#1987 review NEW-2), §38.4.3: a frame refused unread over a rate bound is re-sent, paced
+    // (`channelPacer`). One whose order against a later relayed edit cannot be kept is dropped: it stops
+    // being pending (the caller's received unit rebases the shown value) and is reported.
+    dropped: (p) => {
+      const i = pending.indexOf(p);
+      if (i >= 0) pending.splice(i, 1);
+      refused(`this client's own edit of @${p.c.key}, unread by the relay (over a rate bound, §38.4.3) — not re-sent: a later edit it does not commute with was relayed first`);
+    },
+    // a write of the cell resets another cell (`reset-on=`): its edits do not commute with others
+    coupled: (p) => p !== undefined && p !== null && [...p.c.cell.observers].some((o) => o instanceof ResetOn),
+    // a re-sent frame's `__seen`: at least the relay's floor for this connection (the `__seen` of its
+    // last frame the relay read, `floorSeen`) and at most that of every frame queued after it
+    resend: (p, text) => (p === undefined || p === null ? text : frameText(p, Math.max(p.seen, floorSeen))),
   });
 
   // A relayed frame's shape (§38.4.2 "The relayed frame"): exactly __type, __seq, __key, __op,
@@ -5981,6 +6100,12 @@ export function channel(scope, desc) {
     return { seq: b.__seq, cells };
   }
 
+  // S480 r2: the oldest pending edit the relay has not answered — the first SENT one that is not a
+  // rate-refused edit awaiting its re-send (`retry`); pending order is send order. -1: none.
+  function answerable() {
+    return pending.findIndex((p) => p.sent === true && p.retry !== true);
+  }
+
   // A message on connection `s`: "" or why the stream is broken.
   function receive(text) {
     if (typeof text !== "string") return "a non-text frame";
@@ -6019,29 +6144,53 @@ export function channel(scope, desc) {
     // pending and is not shown (as its own copy refused at the confirmed value would be), and it is
     // reported. It must name that oldest pending edit, or the stream is broken.
     if (v !== null && typeof v === "object" && !Array.isArray(v) && v.__type === "__refused") {
-      if (Object.keys(v).length !== 5 || !hasOwn(v, "__key") || !hasOwn(v, "__op") || !hasOwn(v, "__val") || typeof v.__why !== "string") {
-        return "a __refused that is not exactly {__type, __key, __op, __val, __why}";
+      // S479 (s479-channel-follow), §38.4.3 "Over a rate bound": `{ __type: "__refused", __why }` — the
+      // relay refused this connection's next frame UNREAD (over its connection's or its address's frame
+      // bucket): relayed to no one, numbered never. The relay reads frames in the order they were sent,
+      // so it is this client's oldest pending edit, which must have been SENT (a queued one has not
+      // reached the relay). S480 r2 (#1987 review NEW-2): it was applied nowhere and numbered never, so
+      // the client RE-SENDS it, paced — it stays pending and shown, the client slows down, and the pacer
+      // sends it again in its original order (`channelPacer` `refused`) — so an honest client loses no
+      // edit to a rate bound. Only this 2-key shape is a rate refusal (a fold refusal names its edit).
+      if (Object.keys(v).length === 2 && typeof v.__why === "string") {
+        const i = answerable();
+        if (i < 0) return "a rate __refused with no sent pending edit";
+        const p = pending[i];
+        p.retry = true;
+        let ref;
+        unit(() => { ref = pacer.refused(); });
+        if (ref !== p) return "a rate __refused the pacer cannot match to its oldest unanswered frame";
+        refused(`this client's own edit, unread by the relay (over a rate bound, §38.4.3) — re-sent, paced: ${v.__why.slice(0, 300)}`);
+        return "";
       }
-      const p = pending[0];
+      if (Object.keys(v).length !== 5 || !hasOwn(v, "__key") || !hasOwn(v, "__op") || !hasOwn(v, "__val") || typeof v.__why !== "string") {
+        return "a __refused that is not exactly {__type, __key, __op, __val, __why} or {__type, __why}";
+      }
+      const p = pending[answerable()];
       if (p === undefined || p.c.key !== v.__key || p.op !== v.__op || JSON.stringify(p.wire) !== JSON.stringify(v.__val)) {
         return "a __refused that is not this client's oldest pending edit";
       }
-      unit(() => { pending.shift(); });
+      floorSeen = p.seen;
+      unit(() => { pending.splice(pending.indexOf(p), 1); pacer.answered(false); });
       refused(`this client's own edit, by the relay (a concurrent edit came first in relay order): ${v.__why.slice(0, 300)}`);
       return "";
     }
     if (!relayedShape(v)) return "a frame that is not exactly {__type, __seq, __key, __op, __val, __own}";
     if (v.__seq !== seq + 1) return `a frame numbered ${v.__seq} after ${seq}`;
+    let mine;
     if (v.__own) {
-      const p = pending[0];
-      if (p === undefined || p.c.key !== v.__key || p.op !== v.__op || JSON.stringify(p.wire) !== JSON.stringify(v.__val)) {
+      mine = pending[answerable()];
+      if (mine === undefined || mine.c.key !== v.__key || mine.op !== v.__op || JSON.stringify(mine.wire) !== JSON.stringify(v.__val)) {
         return "an own frame that is not this client's oldest pending edit";
       }
+      floorSeen = mine.seen;
     }
     seq = v.__seq;
     unit(() => {
-      if (v.__own) pending.shift();
+      if (mine !== undefined) pending.splice(pending.indexOf(mine), 1);
       apply(v, v.__own);
+      // S480 r2: the refused frames sent before it are checked against it (superseded, dropped, kept)
+      if (mine !== undefined) pacer.answered(true);
     });
     return "";
   }
@@ -6111,8 +6260,17 @@ export function channel(scope, desc) {
   //   frame would be over it is not sent; the client reports it" — it is not pending either, so the
   //   next received unit's rebase drops it from the shown value (it never reaches a peer). Returns
   //   whether the edit was queued.
+  //   S479 (s479-channel-follow), §38.4.2 "The frame": `__seen` is the last sequence number this client
+  //   had applied when it made the edit — `seq` now: an edit is sent (queued) in the step that makes it,
+  //   and a held edit in the unit that re-applies it on the replay's value — so the relay can tell
+  //   whether any frame it relayed after that could explain a refusal (§38.4.2 "The relay's fold").
+  function frameText(p, seen) {
+    return JSON.stringify({ __type: "__sync", __key: p.c.key, __op: p.op, __val: p.wire, __seen: seen });
+  }
   function send(p) {
-    const text = JSON.stringify({ __type: "__sync", __key: p.c.key, __op: p.op, __val: p.wire });
+    p.seen = seq;
+    p.retry = false;
+    const text = frameText(p, seq);
     if (utf8Over(text, maxFrame)) { warn(`@${p.c.key} — an edit whose frame is over the channel's ${maxFrame}-byte frame-size bound (§38.4.3) — not synced`); return false; }
     if (!pacer.isOpen()) pacer.open();
     p.sent = false;
@@ -6140,12 +6298,14 @@ export function channel(scope, desc) {
     ws = s;
     live = false;
     seq = 0;
+    floorSeen = 0;
     let ok = true;
     held = [];
     // §38.4.3 (#1942): the pacer opens with the connection (a full bucket, as the relay's is). No
     // frame is pushed to it before the replay is applied (the edits until then are HELD, §38.4.2).
     s.onopen = () => {
       if (ws !== s) return;
+      retries = 0;                                      // §38.7: the backoff is reset on open
       pacer.open();
     };
     // #1941 fix r1 (MED-1), §38.10.2: "the handler SHALL run when the connection's replay message
@@ -6176,16 +6336,19 @@ export function channel(scope, desc) {
       // entries (#1941): a frame never sent has no relayed copy to wait for. The sent ones stay
       // pending until the replay of the next connection drops them (§38.4.2 "The frame log").
       const dropped = pacer.close();
-      pending = pending.filter((p) => p.sent === true);
+      // S480 r2: a rate-refused edit awaiting its re-send was applied nowhere: dropped with the queue
+      pending = pending.filter((p) => p.sent === true && p.retry !== true);
       // S478 fix r1 (MED-3a): a relay close (§38.4.3) is reported, naming why — never silent
       const code = ev !== null && typeof ev === "object" ? ev.code : undefined;
       if (RELAY_CLOSES.has(code)) {
         const reason = typeof ev.reason === "string" && ev.reason !== "" ? ` ("${ev.reason}")` : "";
         warn(`the relay closed this client's connection with ${code}${reason}: ${RELAY_CLOSES.get(code)} (§38.4.3) — an edit it refused was not relayed to the other clients`);
       }
-      if (dropped > 0) warn(`${dropped} edit${dropped === 1 ? "" : "s"} not yet sent were dropped when the connection closed (§38.10.4: sync is suspended while it is closed)`);
+      if (dropped > 0) warn(`${dropped} edit${dropped === 1 ? "" : "s"} not yet sent were dropped when the connection closed (§38.10.4: sync is suspended while it is closed; an edit refused over a rate bound and awaiting its re-send counts as not yet sent)`);
       hook(desc.close);
-      if (!disposed && !stopped && desc.reconnect > 0) timer = g.setTimeout(connect, desc.reconnect);
+      // §38.7 (S479 ruled §3.B item 5): `reconnect=` is the INITIAL delay; each attempt with no open
+      // between doubles it, ±20% jitter, up to the 30 s cap (`channelBackoff`); `0` disables
+      if (!disposed && !stopped && desc.reconnect > 0) timer = g.setTimeout(connect, channelBackoff(desc.reconnect, retries++, () => g.Math.random()));
     };
   }
   for (const c of desc.cells) c.cell.sync = sink(c);

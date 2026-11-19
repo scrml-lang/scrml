@@ -15,6 +15,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { mods, artifacts, loadServer } from "./server-artifact-harness.js";
 import { frontEnd } from "./harness.js";
+import { withSeen } from "./channel-seen-harness.js";
 import * as rt from "../slice-m1/runtime/runtime.js";
 
 // A real server and real sockets need Bun's own `Response` / `WebSocket`: a page environment
@@ -53,7 +54,7 @@ async function served(src) {
 // `got` keeps the relayed edit without them (what the earlier tests assert about the payload).
 function connect(base, path, headers = {}) {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(`ws://${base}${path}`, { headers });
+    const ws = withSeen(new WebSocket(`ws://${base}${path}`, { headers }));
     const got = [];
     const frames = [];
     const replays = [];
@@ -72,6 +73,7 @@ function connect(base, path, headers = {}) {
 }
 const tick = (ms = 80) => new Promise((r) => setTimeout(r, ms));
 const sync = (key, val, op = "replace") => JSON.stringify({ __type: "__sync", __key: key, __op: op, __val: val });
+const seenSync = (key, val) => JSON.stringify({ __type: "__sync", __key: key, __op: "replace", __val: val, __seen: 0 });
 
 describe("C — the server half: the upgrade route on the program's own fetch (§38.8, §40.2)", () => {
   test("the server artifact mounts `/_scrml_ws/<name>` and lists it in its manifest; each cell's §57 table is the client's", async () => {
@@ -126,7 +128,8 @@ describe("C — the server half: the upgrade route on the program's own fetch (�
     ["an object for a string cell", sync("note", { a: 1 }), 1007],
     // one byte over the bound: read and closed 1009 (S478 fix r1: a frame past the host's cap of
     // bound + 1 is dropped unread instead — 1006 — see channel-pacing-s478.test.js)
-    ["a frame over the size bound", sync("note", "x".repeat(65537 - sync("note", "").length)), 1009],
+    // (S479: the frame carries its `__seen` — counted in the bound like every other byte)
+    ["a frame over the size bound", seenSync("note", "x".repeat(65537 - seenSync("note", "").length)), 1009],
   ];
   for (const [what, frame, code] of BAD) {
     test(`fail closed: ${what} → the connection is closed (${code}) and nothing is relayed`, async () => {
@@ -215,13 +218,36 @@ describe("C — the server half: the upgrade route on the program's own fetch (�
       expect(await up(undefined)).toEqual({ status: 101, upgraded: true });
       // "an `https` origin SHALL be accepted on a request that arrived as plain `http`"
       expect(await up(`https://${base}`)).toEqual({ status: 101, upgraded: true });
-      // the proxy's X-Forwarded-Host / -Proto name the origin compared against
+      // S479 (s479-channel-follow), §40.2 `trusted-proxies=` (default 0): with no trusted proxy the
+      // X-Forwarded-Host / -Proto headers are text the client wrote, and are ignored — a client cannot
+      // name the host the check compares against
+      expect(await up("https://app.example", { "X-Forwarded-Host": "app.example", "X-Forwarded-Proto": "https" })).toEqual({ status: 403, upgraded: false });
+      expect(await up(`http://${base}`, { "X-Forwarded-Host": "app.example", "X-Forwarded-Proto": "https" })).toEqual({ status: 101, upgraded: true });
+      // a real cross-origin handshake never opens
+      await expect(connect(base, "/_scrml_ws/chat", { Origin: "https://evil.example" })).rejects.toThrow();
+    } finally { bun.stop(true); }
+  });
+
+  test("§40.2 `<program trusted-proxies=1>`: the proxy's X-Forwarded-Host / -Proto (their LAST entry) name the origin compared against", async () => {
+    const { srv, bun, base } = await served(SYNC.replace("<program>", "<program trusted-proxies=1>"));
+    try {
+      const up = async (origin, extra = {}) => {
+        const h = { Upgrade: "websocket", Connection: "Upgrade", ...extra };
+        if (origin !== undefined) h.Origin = origin;
+        let upgraded = false;
+        const fake = { upgrade: () => { upgraded = true; return true; } };
+        const res = await srv.fetch(new Request(`http://${base}/_scrml_ws/chat`, { headers: h }), fake);
+        return { status: res === undefined ? 101 : res.status, upgraded };
+      };
       expect(await up("https://app.example", { "X-Forwarded-Host": "app.example", "X-Forwarded-Proto": "https" })).toEqual({ status: 101, upgraded: true });
       expect(await up("http://app.example", { "X-Forwarded-Host": "app.example", "X-Forwarded-Proto": "https" })).toEqual({ status: 403, upgraded: false });
       // "Default ports compare equal to their omitted form"
       expect(await up("https://app.example:443", { "X-Forwarded-Host": "app.example", "X-Forwarded-Proto": "https" })).toEqual({ status: 101, upgraded: true });
-      // a real cross-origin handshake never opens
-      await expect(connect(base, "/_scrml_ws/chat", { Origin: "https://evil.example" })).rejects.toThrow();
+      // an APPENDING proxy: the client's own first entry is never read — only the one the proxy wrote
+      expect(await up("https://evil.example", { "X-Forwarded-Host": "evil.example, app.example", "X-Forwarded-Proto": "https, https" })).toEqual({ status: 403, upgraded: false });
+      expect(await up("https://app.example", { "X-Forwarded-Host": "evil.example, app.example", "X-Forwarded-Proto": "http, https" })).toEqual({ status: 101, upgraded: true });
+      // no forwarded header: the request's own host
+      expect(await up(`http://${base}`)).toEqual({ status: 101, upgraded: true });
     } finally { bun.stop(true); }
   });
 

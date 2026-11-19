@@ -1,0 +1,12 @@
+{
+  "id": "middleware-trusted-proxies-invalid-neg",
+  "description": "`<program trusted-proxies=1>` — a bare integer in 0..=32. Isolates the value form from the attribute itself.",
+  "language-version": "1.0",
+  "spec": "§40.2",
+  "provenance": "ruling:user-voice-scrml.md S479 \"⭐ RULED — the rest of S478 hand-off §3.B, PA recs adopted (S479, 2026-11-18)\" item 6",
+  "rationale": "§40.2: `trusted-proxies=N` with a bare integer from 0 to 32 declares N reverse proxies in front of the server; it is legal and raises no E-MW-009.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-MW-009"]
+  }
+}

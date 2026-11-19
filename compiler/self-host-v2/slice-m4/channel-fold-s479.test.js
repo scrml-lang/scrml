@@ -38,6 +38,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { mods, artifacts, loadServer } from "./server-artifact-harness.js";
 import { frontEnd } from "./harness.js";
+import { withSeen } from "./channel-seen-harness.js";
 import * as rt from "../slice-m1/runtime/runtime.js";
 import * as srt from "../slice-m1/runtime/server-runtime.js";
 
@@ -135,7 +136,7 @@ async function world(src, host = {}) {
   };
   const raws = [];
   const raw = () => new Promise((resolve, reject) => {
-    const ws = new savedWs(`ws://${base}/_scrml_ws/c`);
+    const ws = withSeen(new savedWs(`ws://${base}/_scrml_ws/c`));
     const got = [];
     const replays = [];
     const refusals = [];
@@ -205,14 +206,16 @@ describe("A — the relay's fold judges a frame by the receiver's check (3) (§3
       P.ws.send(frame("ys", "append", 2));
       P.ws.send(frame("ys", "append", 3));                     // ys is full: 1, 2, 3
       expect(await until(() => Q.got.length === 2)).toBe(true);
-      // Q sends an append it made before it saw P's frames (a concurrent edit came first)
-      Q.ws.send(frame("ys", "append", 9));
+      // Q sends an append it made before it saw P's frames (a concurrent edit came first): its
+      // `__seen` (S479, §38.4.2) is 0, the replay it opened at
+      Q.ws.send(JSON.stringify({ __type: "__sync", __key: "ys", __op: "append", __val: 9, __seen: 0 }));
       expect(await until(() => Q.refusals.length === 1)).toBe(true);
       expect(Q.refusals[0]).toEqual({ __type: "__refused", __key: "ys", __op: "append", __val: 9, __why: "an `append` of @ys past its length bound 1..=3" });
       await tick(150);
       expect(Q.closed()).toBe(null);
       expect(P.got.length).toBe(2);                            // relayed to no one
-      // once refused, a later refusal of the same connection is explained too: still not closed
+      // once refused, a later refusal of the same connection made before it could read that refusal
+      // (`__seen` at or before the refusal) is explained too: still not closed
       Q.ws.send(frame("ys", "append", 10));
       expect(await until(() => Q.refusals.length === 2)).toBe(true);
       expect(Q.closed()).toBe(null);
@@ -350,16 +353,21 @@ describe("C — per-address bounds (§38.4.3, INTERIM, keyed by `server.requestI
       for (let k = 0; k < 4; k++) for (let i = 1; i <= 10; i++) S[k].ws.send(frame("n", "replace", k * 100 + i));
       expect(await until(() => S.every((x) => x.got.length === 40))).toBe(true);
       expect(S.every((x) => x.closed() === null)).toBe(true);
-      const S5 = await w.raw();                                 // a fifth: its own bucket is full, the address's is not
+      // a fifth: its own bucket is full, the address's is not. S479 (s479-channel-follow), §38.4.3 "Over a
+      // rate bound": the frame is refused UNREAD (`{__type, __why}`) and relayed to no one; an address's
+      // bucket never closes a connection (its clients may be many honest users behind one NAT)
+      const S5 = await w.raw();
       S5.ws.send(frame("n", "replace", 500));
-      expect(await until(() => S5.closed() !== null)).toBe(true);
-      expect(S5.closed().code).toBe(1008);
-      expect(S5.closed().reason).toContain("rate limit for one address");
+      expect(await until(() => S5.refusals.length === 1)).toBe(true);
+      expect(S5.refusals[0].__why).toContain("rate limit of this connection's address");
+      expect(S5.closed()).toBe(null);
       S[0].ws.close();                                          // reconnect cycling buys nothing
       const S6 = await w.raw();
       S6.ws.send(frame("n", "replace", 600));
-      expect(await until(() => S6.closed() !== null)).toBe(true);
-      expect(S6.closed().reason).toContain("rate limit for one address");
+      expect(await until(() => S6.refusals.length === 1)).toBe(true);
+      expect(S6.refusals[0].__why).toContain("rate limit of this connection's address");
+      await tick(100);
+      expect(S.slice(1).every((x) => x.got.length === 40)).toBe(true);   // neither 500 nor 600 was relayed
       addr = "10.0.0.2";
       const T = await w.raw();
       for (let i = 21; i <= 30; i++) T.ws.send(frame("n", "replace", i));
