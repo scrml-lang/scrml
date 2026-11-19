@@ -25098,8 +25098,11 @@ S440, are earlier runtime errors at a value boundary. They keep their own sectio
   unit is the effect, not the mount — the failing hole renders nothing, the trap is reported once, the rest of
   the mount proceeds"; direction of change: semantics-changed — before it, one trap left the whole view
   unmounted.)* ⚑ **OPEN (not ruled):** a data-bound attribute's value that traps — with the attribute absent,
-  some attributes (an `<iframe>`'s `sandbox`) are in their less safe state; the bootstrap still ends the mount
-  there (`g-boot-mount-trap-attr-hole-unruled-s480`). A body-top statement is a top-level logic block, its
+  some attributes (an `<iframe>`'s `sandbox`) are in their less safe state, so the bootstrap does not make an
+  attribute a hole of its own: a trapping attribute at the top level of the view still ends the mount; one inside
+  a hole (an `if=` arm, an `<each>` row, a loop row) ends that hole, which renders nothing (the arm, or every row,
+  with the element carrying the attribute); and on a re-run an attribute whose value now traps keeps its previous
+  value (`g-boot-mount-trap-attr-hole-unruled-s480`). A body-top statement is a top-level logic block, its
   own unit above, not a hole.
 - *(S473, DRAFT.)* In a `kind="service"` program (§68) the unit of execution is the **turn**: a trap ends its turn
   only, is reported to stderr with its code and location, and the program carries on with its next event, unless

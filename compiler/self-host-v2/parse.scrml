@@ -3521,8 +3521,9 @@ ${
 
     // A statement-position `match` / `!{}` (the whole expression statement): its
     // block arms yield nothing (§18.5), so each block's LAST statement is a
-    // statement too — judged here (parseArmBlock left it alone). A `lift` there
-    // is analyze's refusal (it yields to nothing), not judged.
+    // statement too — judged here (parseArmBlock left it alone). A last-statement
+    // `lift` there becomes the `lift` statement it is written as (s480 item 17, §49.6
+    // rule 7): analyze sends it to the nearest bound loop, or refuses it where none is.
     fn armTails(tp: TP, s: AStmt, d0: int) -> RStmt {
         const x: AExpr | not = stmtExpr(s)
         if (x is not) return { s: s, tp: tp }

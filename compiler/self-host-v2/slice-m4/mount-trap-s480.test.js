@@ -183,11 +183,176 @@ describe("§19.17 (s480): the runtime's hole containment, unit level", () => {
     s.dispose();
   });
 
-  test("INTERIM — a data-bound ATTRIBUTE that traps still ends the mount (an absent `sandbox` is the less safe state; g-boot-mount-trap-attr-hole-unruled-s480)", () => {
+  test("INTERIM — a TOP-LEVEL data-bound ATTRIBUTE that traps still ends the mount (an absent `sandbox` is the less safe state; g-boot-mount-trap-attr-hole-unruled-s480; inside a hole it blanks that hole — below)", () => {
     document.body.innerHTML = '<iframe id="f"></iframe>';
     const s = new rtm.Scope(rtm.root);
     const trap = () => { throw new rtm.ScrmlTrap("E-INDEX-OUT-OF-RANGE-RT", "index 5 is out of range for a tape of length 2 (t.scrml:1)", {}); };
     expect(() => rtm.attr(s, $("#f"), "sandbox", trap)).toThrow(/E-INDEX-OUT-OF-RANGE-RT/);
     s.dispose();
+  });
+});
+
+// s480 r1 (#2008 review F1) — a ROW's render that throws (an `rt.attr` trap inside the row)
+// unwinds into the list's hole. Before r1, `reconcile` / `reconcileKeyed` built rows as
+// `scope.child()` and handed them to the list only after the whole loop, so the hole's blank
+// never saw the rows created before the throw: they stayed in the DOM (partial rows at mount),
+// their effects and listeners leaked, and a recovering run rendered next to them (duplicates).
+// A trapped list hole shows NO rows and disposes every row its failed run created.
+describe("§19.17 (s480 r1): a trap inside a list ROW blanks the whole list, leaks nothing", () => {
+  const lis = () => [...$("#rows").querySelectorAll("li")].map((li) => li.textContent);
+
+  test("`<each>` — a row attribute that traps at mount: no rows, one report; recovery renders exactly its rows", async () => {
+    const view = "        <ul id=\"rows\"><each in=([@i, 0, 1]) as r><li title=(@xs[r])>row${r}</li></each></ul>";
+    const reported = await withReports(async () => {
+      await loadProgram(clean(prog(view)).core, "s480mt-" + k++);
+    });
+    expect(codesOf(reported)).toEqual(["E-INDEX-OUT-OF-RANGE-RT"]);
+    expect(lis()).toEqual([]);                       // base: the rows rendered after the trapping one stayed
+    expect($("#rows").innerHTML).not.toContain("row");
+    expect($("#after").textContent).toBe("after ann");
+    const later = await withReports(async () => {
+      click(btn("in"));
+      expect(lis()).toEqual(["row1", "row0", "row1"]); // base: 5 <li> (the 2 stale rows + 3 new)
+    });
+    expect(codesOf(later)).toEqual([]);
+  });
+
+  test("`<each>` — a row attribute that traps on a RE-RUN: no stale or partial rows; recovery renders exactly its rows", async () => {
+    const view = "        <ul id=\"rows\"><each in=(@i == 1 ? [0, 9, 1, 0] : [0]) as r><li title=(@xs[r])>row${r}</li></each></ul>";
+    await withReports(async () => {
+      await loadProgram(clean(prog(view)).core, "s480mt-" + k++);
+    });
+    expect(lis()).toEqual(["row0"]);
+    const later = await withReports(async () => {
+      click(btn("in"));                               // row 9 traps
+      expect(lis()).toEqual([]);
+      click(btn("out"));
+      expect(lis()).toEqual(["row0"]);
+    });
+    expect(codesOf(later)).toEqual(["E-INDEX-OUT-OF-RANGE-RT"]);
+  });
+
+  test("keyed Tier-0 `for … key` — a row attribute that traps: no rows at mount and on a re-run; recovery exact", async () => {
+    const view = "        <ul id=\"rows\">${ for (const r of (@i == 1 ? [0, 1] : [@i, 0, 1]) key r) { lift <li title=(@xs[r])>k${r}</li>; } }</ul>";
+    const reported = await withReports(async () => {
+      await loadProgram(clean(prog(view)).core, "s480mt-" + k++);
+    });
+    expect(codesOf(reported)).toEqual(["E-INDEX-OUT-OF-RANGE-RT"]);
+    expect(lis()).toEqual([]);
+    const later = await withReports(async () => {
+      click(btn("in"));
+      expect(lis()).toEqual(["k0", "k1"]);
+      click(btn("out"));                              // [7, 0, 1]: rows 0 and 1 kept, row 7 traps
+      expect(lis()).toEqual([]);
+      click(btn("in"));
+      expect(lis()).toEqual(["k0", "k1"]);
+    });
+    expect(codesOf(later)).toEqual(["E-INDEX-OUT-OF-RANGE-RT"]);
+  });
+
+  test("unkeyed Tier-0 `for` (gather) — a row attribute that traps: no rows at mount and on a re-run; recovery exact", async () => {
+    const view = "        <ul id=\"rows\">${ for (r of (@i == 1 ? [0, 1] : [@i, 0, 1])) { lift <li title=(@xs[r])>g${r}</li>; } }</ul>";
+    const reported = await withReports(async () => {
+      await loadProgram(clean(prog(view)).core, "s480mt-" + k++);
+    });
+    expect(codesOf(reported)).toEqual(["E-INDEX-OUT-OF-RANGE-RT"]);
+    expect(lis()).toEqual([]);
+    const later = await withReports(async () => {
+      click(btn("in"));
+      expect(lis()).toEqual(["g0", "g1"]);
+      click(btn("out"));
+      expect(lis()).toEqual([]);
+      click(btn("in"));
+      expect(lis()).toEqual(["g0", "g1"]);
+    });
+    expect(codesOf(later)).toEqual(["E-INDEX-OUT-OF-RANGE-RT"]);
+  });
+
+  // Unit level: every row scope the failed run created is disposed (its cleanups — DOM,
+  // effects, listeners — ran), so nothing outlives the blank.
+  const trapAt = (bad) => (v) => { if (v === bad) throw new rtm.ScrmlTrap("E-INDEX-OUT-OF-RANGE-RT", "index " + v + " is out of range (t.scrml:1)", {}); };
+  function harness(mount) {
+    document.body.innerHTML = '<ul id="rows"><!--a--></ul>';
+    const s = new rtm.Scope(rtm.root);
+    const live = new Set();
+    const rowRender = (scope, anchor, v) => {
+      const li = document.createElement("li");
+      li.textContent = String(v);
+      anchor.parentNode.insertBefore(li, anchor);
+      live.add(li);
+      scope.own(() => { live.delete(li); if (li.parentNode) li.parentNode.removeChild(li); }); // its DOM, listeners, effects
+      trapAt(9)(v);
+    };
+    const items = new rtm.Cell([1, 9, 2]);
+    mount(s, $("#rows").firstChild, items, rowRender);
+    return { s, live, items };
+  }
+  const settle = async (items, s, live) => {
+    const reported = await withReports(async () => {
+      expect(live.size).toBe(0);                     // base: the rows created before the trap stayed live
+      expect(lis()).toEqual([]);
+      rtm.batch(() => items.set([1, 2]));
+      expect(lis()).toEqual(["1", "2"]);
+      expect(live.size).toBe(2);
+      rtm.batch(() => items.set([2, 9, 3, 1]));
+      expect(live.size).toBe(0);
+      expect(lis()).toEqual([]);
+      rtm.batch(() => items.set([3]));
+      expect(lis()).toEqual(["3"]);
+      expect(live.size).toBe(1);
+    });
+    expect(codesOf(reported)).toEqual(["E-INDEX-OUT-OF-RANGE-RT"]);
+    s.dispose();
+    expect(live.size).toBe(0);
+  };
+
+  test("unit: `each` disposes every row its failed run created", async () => {
+    let h;
+    const first = await withReports(async () => {
+      h = harness((s, a, items, render) => rtm.each(s, a, () => items.get(), (v) => v, (scope, cell, anchor) => render(scope, anchor, cell.get())));
+    });
+    expect(codesOf(first)).toEqual(["E-INDEX-OUT-OF-RANGE-RT"]);
+    await settle(h.items, h.s, h.live);
+  });
+
+  test("unit: `gatherKeyed` disposes every row its failed run created", async () => {
+    let h;
+    const first = await withReports(async () => {
+      h = harness((s, a, items, render) => rtm.gatherKeyed(s, a, () => items.get().map((v) => rtm.keyRow(rtm.loopKey(v), 0, [v], (scope, anchor, cell) => render(scope, anchor, cell.get())))));
+    });
+    expect(codesOf(first)).toEqual(["E-INDEX-OUT-OF-RANGE-RT"]);
+    await settle(h.items, h.s, h.live);
+  });
+
+  test("unit: `gather` disposes every row its failed run created (pin: its rows scope exists before the rows render)", async () => {
+    let h;
+    const first = await withReports(async () => {
+      h = harness((s, a, items, render) => rtm.gather(s, a, () => items.get().map((v) => (scope, anchor) => render(scope, anchor, v))));
+    });
+    expect(codesOf(first)).toEqual(["E-INDEX-OUT-OF-RANGE-RT"]);
+    await settle(h.items, h.s, h.live);
+  });
+});
+
+// s480 r1 (#2008 review F2) — `rt.attr` is not a hole: a top-level trapping attribute ends the
+// mount (the INTERIM test above), but one INSIDE a hole (an `if=` arm, an `<each>` row, a loop
+// row) unwinds into that hole, which blanks — fail closed: the arm is not rendered at all.
+describe("§19.17 (s480 r1): an attribute trap inside an `if=` arm blanks the arm", () => {
+  test("`<iframe sandbox=(…trap…)>` inside an `if=` arm: the arm is not rendered, reported once; it renders when the value reads", async () => {
+    const view = "        <div id=\"gate\" if=(@i > 0)><iframe id=\"f\" sandbox=(@xs[@i] == 20 ? \"\" : \"allow-scripts\") src=\"https://x.test/\"></iframe><p id=\"arm\">ARM</p></div>";
+    const reported = await withReports(async () => {
+      await loadProgram(clean(prog(view)).core, "s480mt-" + k++);
+    });
+    expect(codesOf(reported)).toEqual(["E-INDEX-OUT-OF-RANGE-RT"]);
+    expect($("#gate")).toBeNull();
+    expect($("#f")).toBeNull();                       // no iframe without its sandbox
+    expect($("#arm")).toBeNull();
+    expect($("#after").textContent).toBe("after ann");
+    const later = await withReports(async () => {
+      click(btn("in"));
+      expect($("#f").getAttribute("sandbox")).toBe("");
+      expect($("#arm").textContent).toBe("ARM");
+    });
+    expect(codesOf(later)).toEqual([]);
   });
 });

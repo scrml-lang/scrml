@@ -473,10 +473,12 @@ export function effect(scope, fn) {
 // trap SHALL be reported … It SHALL NOT be swallowed silently"), and the mount —
 // every other hole, and the insertion of the view — proceeds. Any other throw (a
 // bootstrap defect, a template the HTML parser restructured) is still rethrown
-// after the blank, as before. NOT a hole here (unchanged — the throw still ends
-// the mount): a data-bound ATTRIBUTE (`rt.attr` — with the attribute removed, a
-// value such as an `<iframe>`'s `sandbox` would be the less safe state; owner
-// question in g-boot-mount-trap-attr-hole-unruled-s480), a body-top statement
+// after the blank, as before. NOT a hole here (unchanged — the throw goes on to
+// the nearest enclosing hole, which blanks, or, at the top level, ends the
+// mount): a data-bound ATTRIBUTE (`rt.attr` — with the attribute removed, a
+// value such as an `<iframe>`'s `sandbox` would be the less safe state; on a
+// re-run a trapping attribute keeps its stale value; owner question in
+// g-boot-mount-trap-attr-hole-unruled-s480), a body-top statement
 // (`rt.run` — a top-level logic block, its own unit in §19.17, and a guard the
 // page must not render past), and an `<effect>` body.
 // ---------------------------------------------------------------------------
@@ -4389,28 +4391,46 @@ function reconcileKeyed(scope, anchor, oldRows, lifted) {
   // Rows on the longest increasing run of old positions stay put; others move.
   const stay = new Set(lis(next.map((n) => n.oldIndex)));
   const out = new Array(next.length);
+  const created = [];
   let before = anchor;
-  for (let i = next.length - 1; i >= 0; i--) {
-    const n = next[i];
-    let row = n.row;
-    if (!row) {
-      const l = n.lift;
-      const rowScope = scope.child();
-      const start = document.createComment("row");
-      const end = document.createComment("/row");
-      before.parentNode.insertBefore(start, before);
-      before.parentNode.insertBefore(end, before);
-      const cells = l.vals.map((v) => new Cell(v));
-      row = { key: l.it.key, ord: l.ord, tpl: l.tpl, scope: rowScope, cells, start, end };
-      rowScope.own(removeRange(start, end));
-      l.render(rowScope, end, ...cells);
-    } else if (!stay.has(i)) {
-      moveRange(row, before);
+  try {
+    for (let i = next.length - 1; i >= 0; i--) {
+      const n = next[i];
+      let row = n.row;
+      if (!row) {
+        const l = n.lift;
+        const rowScope = scope.child();
+        created.push(rowScope);
+        const start = document.createComment("row");
+        const end = document.createComment("/row");
+        before.parentNode.insertBefore(start, before);
+        before.parentNode.insertBefore(end, before);
+        const cells = l.vals.map((v) => new Cell(v));
+        row = { key: l.it.key, ord: l.ord, tpl: l.tpl, scope: rowScope, cells, start, end };
+        rowScope.own(removeRange(start, end));
+        l.render(rowScope, end, ...cells);
+      } else if (!stay.has(i)) {
+        moveRange(row, before);
+      }
+      out[i] = row;
+      before = row.start;
     }
-    out[i] = row;
-    before = row.start;
+  } catch (err) {
+    disposeCreated(created);
+    throw err;
   }
   return out;
+}
+
+/**
+ * s480 r1 (#2008 review F1) — a row's render threw (e.g. an `rt.attr` trap in
+ * the row): every row this run created is disposed (its DOM, effects and
+ * listeners) before the throw reaches the list's hole, whose blank then
+ * disposes the rows it already held — a trapped list hole shows NO rows
+ * (§19.17, s480 item 20), and a later recovering run starts from none.
+ */
+function disposeCreated(created) {
+  for (const s of created) s.dispose();
 }
 
 /** s469 — a Tier-0 row of text: a primitive value lifted in the loop (§17.4). */
@@ -4513,27 +4533,34 @@ function reconcile(scope, anchor, oldRows, items, key, render) {
   // Rows on the longest increasing run of old positions stay put; others move.
   const stay = new Set(lis(next.map((n) => n.oldIndex)));
   const out = new Array(next.length);
+  const created = [];
   let before = anchor;
-  for (let i = next.length - 1; i >= 0; i--) {
-    const n = next[i];
-    let row = n.row;
-    if (!row) {
-      const rowScope = scope.child();
-      const start = document.createComment("row");
-      const end = document.createComment("/row");
-      before.parentNode.insertBefore(start, before);
-      before.parentNode.insertBefore(end, before);
-      row = { key: n.key, scope: rowScope, item: new Cell(n.item), start, end };
-      // The cleanup is built OUTSIDE this function: a closure here would capture
-      // reconcile's whole environment (`byKey`, `next`, `items` — O(rows)) for
-      // the row's lifetime, so N rows added one at a time retained O(N²) objects.
-      rowScope.own(removeRange(start, end));
-      render(rowScope, row.item, end);
-    } else if (!stay.has(i)) {
-      moveRange(row, before);
+  try {
+    for (let i = next.length - 1; i >= 0; i--) {
+      const n = next[i];
+      let row = n.row;
+      if (!row) {
+        const rowScope = scope.child();
+        created.push(rowScope);
+        const start = document.createComment("row");
+        const end = document.createComment("/row");
+        before.parentNode.insertBefore(start, before);
+        before.parentNode.insertBefore(end, before);
+        row = { key: n.key, scope: rowScope, item: new Cell(n.item), start, end };
+        // The cleanup is built OUTSIDE this function: a closure here would capture
+        // reconcile's whole environment (`byKey`, `next`, `items` — O(rows)) for
+        // the row's lifetime, so N rows added one at a time retained O(N²) objects.
+        rowScope.own(removeRange(start, end));
+        render(rowScope, row.item, end);
+      } else if (!stay.has(i)) {
+        moveRange(row, before);
+      }
+      out[i] = row;
+      before = row.start;
     }
-    out[i] = row;
-    before = row.start;
+  } catch (err) {
+    disposeCreated(created);
+    throw err;
   }
   return out;
 }
