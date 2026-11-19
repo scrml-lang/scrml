@@ -127,10 +127,15 @@ afterAll(async () => {
 // F1 — text inside another attribute's string is not an attribute
 // ---------------------------------------------------------------------------
 
+// S480 (ruling:user-voice-scrml.md-S480-four-recs-2 item 1): `note=` is outside §61.2
+// `endpoint-attrs`, so these openers are now refused outright (E-ENDPOINT-ATTR-INVALID) —
+// stronger than the served "no CORS" control they had. What F1 still pins: the text inside
+// the string is never read as the endpoint's `cors=` / `path=` (no CORS-INVALID for the
+// smuggled list value or the newline, no PATH rule on `/old`), and nothing is built.
 describe("F1 — a cors= written inside another attribute's string is not the endpoint's cors=", () => {
-  let base;
-  beforeAll(async () => {
-    const r = build("smuggle", {
+  let r;
+  beforeAll(() => {
+    r = build("smuggle", {
       "app.scrml": program([
         TY(),
         // review corsbyp2 — an unchecked list value, and one with a newline in it
@@ -142,42 +147,27 @@ describe("F1 — a cors= written inside another attribute's string is not the en
         EPO(`path="/real" method="POST" accepts=Op note="moved from path='/old'"`, "real"),
       ].join("\n")),
     });
-    if (r.exitCode !== 0) throw new Error(`scrml build failed:\n${r.out}`);
-    base = await startProd(r.dist);
   }, TIMEOUT_MS);
 
-  for (const p of ["/op", "/q", "/star"]) {
-    test(`OPTIONS ${p} → 405, no Access-Control-Allow-Origin (the endpoint has no cors=)`, async () => {
-      const res = await preflight(base, p, "https://evil.example");
-      expect(res.status).toBe(405);
-      expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
-    }, TIMEOUT_MS);
+  test("the build is refused and emits no server", () => {
+    expect(r.exitCode).not.toBe(0);
+    expect(existsSync(join(r.dist, "_server.js"))).toBe(false);
+  });
 
-    test(`POST ${p} → 200 with no Access-Control-Allow-Origin (it was 500 for /q)`, async () => {
-      const res = await fetch(base + p, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Origin: "https://evil.example" },
-        body: '{"tag":"Ping"}',
-      });
-      expect(res.status).toBe(200);
-      expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
-      expect(res.headers.get("X-Injected")).toBeNull();
-    }, TIMEOUT_MS);
-  }
-
-  test("path= inside another attribute's string is not the path: /real is served, /old is not", async () => {
-    const ok = await post(base, "/real");
-    expect(ok.status).toBe(200);
-    expect(await ok.json()).toEqual({ pong: "real" });
-    const old = await post(base, "/old");
-    expect(old.status).not.toBe(200);
-  }, TIMEOUT_MS);
+  test("each `note=` is E-ENDPOINT-ATTR-INVALID, and the text inside it is never judged as a cors= / path=", () => {
+    const codes = [...r.out.matchAll(/\b(E-[A-Z0-9-]+)\b/g)].map((m) => m[1]);
+    expect(codes.filter((c) => c === "E-ENDPOINT-ATTR-INVALID").length).toBeGreaterThanOrEqual(4);
+    expect(codes).not.toContain("E-ENDPOINT-CORS-INVALID");
+    expect(codes).not.toContain("E-ENDPOINT-PATH-INVALID");
+    expect(codes).not.toContain("E-ATTR-001");
+  });
 });
 
 describe("F1 — attribute names are matched whole", () => {
   test("data-path= is not path= → E-ENDPOINT-PATH-MISSING", () => {
     const codes = compileOne("data-path", program(`${TY()}\n${EPO(`data-path="/x" method="POST" accepts=Op`)}`)).map((e) => e.code);
     expect(codes).toContain("E-ENDPOINT-PATH-MISSING");
+    expect(codes).toContain("E-ENDPOINT-ATTR-INVALID"); // and `data-path` itself is outside §61.2 (S480)
   });
 
   test("a cors= repeated as real attributes is still E-ENDPOINT-CORS-INVALID (\"written 2 times\")", () => {
@@ -187,9 +177,9 @@ describe("F1 — attribute names are matched whole", () => {
     expect(e.message).toContain("written 2 times");
   });
 
-  test("a cors= inside a string next to a real cors= counts once — the real one is judged", () => {
+  test("a cors= inside a string next to a real cors= counts once — the real one is judged (the `note=` itself is E-ENDPOINT-ATTR-INVALID)", () => {
     const errs = compileOne("cors-real", program(`${TY()}\n${EPO(`path="/x" method="POST" accepts=Op note="cors='*'" cors="${A}"`)}`));
-    expect(errs.map((x) => x.code)).toEqual([]);
+    expect(errs.map((x) => x.code)).toEqual(["E-ENDPOINT-ATTR-INVALID"]);
   });
 });
 
