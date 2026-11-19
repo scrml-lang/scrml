@@ -166,8 +166,8 @@ function go2() { if (@u is given) { @out = @u.name; } }
 });
 
 describe("fail closed — receivers the bootstrap cannot type stay refused", () => {
-  test("an unknown field of a `T | not` struct is E-SCOPE-001, not a typed read", () => {
-    expect(codes(prog(`function go() { if (@user is given) { @out = @user.nope; } }`))).toEqual(["E-SCOPE-001"]);
+  test("an unknown field of a `T | not` struct is E-TYPE-004 (§34, §14.3), not a typed read", () => {
+    expect(codes(prog(`function go() { if (@user is given) { @out = @user.nope; } }`))).toEqual(["E-TYPE-004"]);
   });
 
   test("an unknown member of a tape stays refused", () => {
