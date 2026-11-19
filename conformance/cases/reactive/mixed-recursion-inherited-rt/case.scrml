@@ -1,0 +1,18 @@
+// §31.2 + §12.2 Trigger 5 — mutual recursion between a db-touching (server-placed) `down` and a plain `step` that only `down` calls: `step` is server-placed by inheritance, both calls run in place on the server, and the pending cell's load is one call of `down`.
+<program db="./app.db">
+    type User:struct = { id: int, name: string }
+    function down(n: int) -> int {
+        const u: User = ?{`SELECT id, name FROM users WHERE id = 1`}.get() !{ _ :> { return 0; } };
+        if (n <= 0) { return u.id; }
+        return step(n - 1);
+    }
+    function step(n: int) -> int {
+        if (n <= 0) { return 0; }
+        return 1 + down(n - 1);
+    }
+    <v:(not to int)=(down(4) !{ _ :> not })/>
+    <main>
+        <p id="v" if=@v>${@v}</p>
+        <p id="wait" else>loading</p>
+    </main>
+</program>

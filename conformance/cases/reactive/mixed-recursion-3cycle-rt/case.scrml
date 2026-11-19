@@ -1,0 +1,21 @@
+// §31.2 + §12.2 Trigger 5 — a 3-cycle mixing placements: db-touching `down` (server-placed, Trigger 1) calls `a`, `a` calls `b`, `b` calls `down`. `a` and `b` are called only from server-placed functions (a cycle of helpers called only from the server), so both are server-placed by inheritance and every call in the cycle runs in place.
+<program db="./app.db">
+    type User:struct = { id: int, name: string }
+    function down(n: int) -> int {
+        const u: User = ?{`SELECT id, name FROM users WHERE id = 1`}.get() !{ _ :> { return 0; } };
+        if (n <= 0) { return u.id; }
+        return a(n - 1);
+    }
+    function a(n: int) -> int {
+        return 10 + b(n);
+    }
+    function b(n: int) -> int {
+        if (n <= 0) { return 0; }
+        return 100 + down(n - 1);
+    }
+    <v:(not to int)=(down(2) !{ _ :> not })/>
+    <main>
+        <p id="v" if=@v>${@v}</p>
+        <p id="wait" else>loading</p>
+    </main>
+</program>

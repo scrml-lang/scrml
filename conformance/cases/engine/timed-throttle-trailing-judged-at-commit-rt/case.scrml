@@ -1,0 +1,17 @@
+// §6.13.5 (S479) — a `throttled=` engine cell: the leading write commits at once; a write held
+// inside the window commits at the window's end and is judged against the variant held THEN.
+<program>
+    type Phase:enum = { Idle, Loading, Done }
+    <phase:Phase=.Idle single throttled=1s>
+        <Idle rule=.Loading/>
+        <Loading rule=.Done/>
+        <Done rule=.Idle/>
+    </>
+    function load() { @phase = .Loading; }
+    function finish() { @phase = .Done; }
+    <main>
+        <p id="s">${@phase}</p>
+        <button id="load" onclick=load()>Load</button>
+        <button id="finish" onclick=finish()>Finish</button>
+    </main>
+</program>

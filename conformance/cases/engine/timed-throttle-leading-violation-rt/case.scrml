@@ -1,0 +1,17 @@
+// §6.13.5 (S479) — a `throttled=` engine cell whose LEADING write violates `rule=`: the commit is
+// refused (the cell keeps its prior value) as a trap of the event handler, and no window opens.
+<program>
+    type Phase:enum = { Idle, Loading, Done }
+    <phase:Phase=.Idle single throttled=1s>
+        <Idle rule=.Loading/>
+        <Loading rule=.Done/>
+        <Done rule=.Idle/>
+    </>
+    function load() { @phase = .Loading; }
+    function finish() { @phase = .Done; }
+    <main>
+        <p id="s">${@phase}</p>
+        <button id="load" onclick=load()>Load</button>
+        <button id="finish" onclick=finish()>Finish</button>
+    </main>
+</program>
