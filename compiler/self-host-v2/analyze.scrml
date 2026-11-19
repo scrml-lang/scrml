@@ -9833,7 +9833,9 @@ ${
                             if (fd.sym.hint == name) return plain(fd.ty, addName(st, e.nid, NameFact.NStruct(s, i)))
                             i = i + 1
                         }
-                        return diagX(env, e, "E-SCOPE-001", shownStruct(env, s) + " has no field `" + name + "`", st)
+                        // S480: an unknown field of a struct is E-TYPE-004 (§34, §14.3, §14.8.8 T2a) —
+                        // a member name is not a scope identifier (E-SCOPE-001); impl#1 agrees
+                        return diagX(env, e, "E-TYPE-004", shownStruct(env, s) + " has no field `" + name + "`", st)
                     }
                 }
             }
@@ -9863,7 +9865,7 @@ ${
                                 if (fd.sym.hint == name) return plain(fd.ty, addName(st, e.nid, NameFact.NStruct(ms, mx)))
                                 mx = mx + 1
                             }
-                            return diagX(env, e, "E-SCOPE-001", shownStruct(env, ms) + " has no field `" + name + "`", st)
+                            return diagX(env, e, "E-TYPE-004", shownStruct(env, ms) + " has no field `" + name + "`", st)
                         }
                     }
                 }

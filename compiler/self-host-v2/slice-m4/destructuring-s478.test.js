@@ -72,8 +72,8 @@ describe("a destructuring declaration — built, typed from the struct fields, a
     expect(codes(prog(`${P1}\n        const { id, name } = p;\n        @out = name + id;`))).toContain("E-OPERATOR-OPERAND-TYPE");
   });
 
-  test("a field the struct does not declare is the member read's E-SCOPE-001", () => {
-    expect(msgs(prog(`${P1}\n        const { nope } = p;\n        @out = 1;`))).toEqual(["E-SCOPE-001: `P` has no field `nope`"]);
+  test("a field the struct does not declare is the member read's E-TYPE-004", () => {
+    expect(msgs(prog(`${P1}\n        const { nope } = p;\n        @out = 1;`))).toEqual(["E-TYPE-004: `P` has no field `nope`"]);
   });
 
   test("destructuring a value that is not a struct is refused as its member read is", () => {
@@ -122,8 +122,8 @@ describe("a destructuring `for` binder — built and run", () => {
     expect(codes(prog(`${XS}\n        for ({ id } of xs) { const id = 1; @out = id; }`))).toEqual(["E-SCOPE-REDECLARE"]);
   });
 
-  test("a missing field in a binder is E-SCOPE-001", () => {
-    expect(msgs(prog(`${XS}\n        for (const { nope } of xs) { @out = 1; }`))).toEqual(["E-SCOPE-001: `P` has no field `nope`"]);
+  test("a missing field in a binder is E-TYPE-004", () => {
+    expect(msgs(prog(`${XS}\n        for (const { nope } of xs) { @out = 1; }`))).toEqual(["E-TYPE-004: `P` has no field `nope`"]);
   });
 });
 
