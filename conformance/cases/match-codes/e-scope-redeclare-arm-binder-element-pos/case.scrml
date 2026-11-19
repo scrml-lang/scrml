@@ -1,0 +1,14 @@
+<program>
+${
+    type Pair:enum = { Loaded(a: int, b: int), Empty }
+    <pair>: Pair = .Empty
+}
+<match for=Pair on=@pair>
+    <Loaded(n, n)>
+        <p>${n}</p>
+    </>
+    <Empty>
+        <p>"empty"</p>
+    </>
+</match>
+</program>

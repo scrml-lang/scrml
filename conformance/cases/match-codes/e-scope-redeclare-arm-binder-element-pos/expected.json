@@ -1,0 +1,29 @@
+{
+  "id": "match-codes-e-scope-redeclare-arm-binder-element-pos",
+  "description": "§7.3.3 / §18.0.1 (S479) — a block-form `<match>` arm whose binder list names the same binder twice (`<Loaded(n, n)>`) SHALL be E-SCOPE-REDECLARE, as for the value form.",
+  "language-version": "1.0",
+  "spec": "§7.3.3",
+  "provenance": "ruling:user-voice-scrml.md-S478-open-Qs-item-14;pa-chose-code:S479",
+  "rationale": "§7.3.3 (S479): \"a binder that repeats an earlier binder of the SAME arm is E-SCOPE-REDECLARE, reported at the repeat, wherever the `match` stands\" (§18.7). Newly-rejecting on the bootstrap (it compiled the arm, the last binder winning). impl#1 fails the case closed with E-CODEGEN-INVALID-LOGIC instead of this code (carried, S471 policy).",
+  "expect": {
+    "codes": [
+      "E-SCOPE-REDECLARE"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-SCOPE-REDECLARE": "error"
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-arm-binder-redeclare-s479",
+      "fails": {
+        "codes": [
+          "emitted:E-CODEGEN-INVALID-LOGIC=1",
+          "missing:E-SCOPE-REDECLARE",
+          "severity:code 'E-SCOPE-REDECLARE' did not fire (expected severity error)"
+        ]
+      }
+    }
+  }
+}

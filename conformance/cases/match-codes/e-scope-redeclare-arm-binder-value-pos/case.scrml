@@ -1,0 +1,13 @@
+${
+    type Pair:enum = { Loaded(a: int, b: int), Empty }
+
+    function first(p: Pair) -> int {
+        return match p {
+            .Loaded(n, n) :> n,
+            .Empty :> 0
+        };
+    }
+}
+<program>
+    <p>${first(Pair.Loaded(1, 2))}</p>
+</program>

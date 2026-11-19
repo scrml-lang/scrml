@@ -72,6 +72,8 @@
 [esm] conformance/cases/markup-handler/s437-r4-dangling-else-top-neg/case.scrml  # emit-client-esm: Unexpected token
 [esm] conformance/cases/match-codes/e-match-arm-markup-in-value-pos/case.scrml  # emit-client-esm: Unexpected token
 [esm] conformance/cases/match-codes/e-match-for-required-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
+[esm] conformance/cases/match-codes/e-scope-redeclare-arm-binder-element-pos/case.scrml  # emit-client-esm: Argument name clash (an expect-reject case: E-SCOPE-REDECLARE §7.3.3, the repeated arm binder, S479)
+[esm] conformance/cases/match-codes/e-scope-redeclare-arm-binder-value-pos/case.scrml  # emit-client-esm: Identifier 'n' has already been declared (an expect-reject case: E-SCOPE-REDECLARE §7.3.3, the repeated arm binder, S479)
 [esm] conformance/cases/match-codes/e-syntax-010-else-not-last-pos/case.scrml  # emit-client-esm: Unexpected token
 [esm] conformance/cases/match-codes/e-type-024-match-no-for-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
 [esm] conformance/cases/match-leave/argument-match-arm-labelled-break-outer-neg/case.scrml  # emit-client-esm: Unsyntactic break

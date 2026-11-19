@@ -1611,11 +1611,11 @@ ${
     fn parsePattern(tp: TP, guard: boolean) -> RPat {
         const a: PTok = cur(tp)
         const b: PTok = peekAt(tp, 1)
-        if (a.cls == TC.Variant) return patBinds(adv(tp), a, a.v, guard, "")
-        if (a.cls == TC.Punct && tk(a, ".") && (b.cls == TC.Ident || b.cls == TC.Keyword) && touching(a, b)) return patBinds(adv(adv(tp)), b, b.v, guard, "")
+        if (a.cls == TC.Variant) return patBinds(adv(tp), a, a.v, guard, "", ".")
+        if (a.cls == TC.Punct && tk(a, ".") && (b.cls == TC.Ident || b.cls == TC.Keyword) && touching(a, b)) return patBinds(adv(adv(tp)), b, b.v, guard, "", ".")
         if (a.cls == TC.Punct && tk(a, ":") && tk(b, ":") && touching(a, b)) {
             const n: PTok = peekAt(tp, 2)
-            if ((n.cls == TC.Ident || n.cls == TC.Keyword) && touching(b, n)) return patBinds(adv(adv(adv(tp))), n, n.v, guard, "")
+            if ((n.cls == TC.Ident || n.cls == TC.Keyword) && touching(b, n)) return patBinds(adv(adv(adv(tp))), n, n.v, guard, "", "::")
         }
         if ((a.cls == TC.Ident && a.v == "_") || (a.cls == TC.Keyword && a.v == "else")) {
             const t: TP = adv(tp)
@@ -1653,17 +1653,17 @@ ${
         if (ph.n > 0) {
             const pd: PTok = peekAt(tp, 3)
             const pv: PTok = peekAt(tp, 4)
-            if (pd.cls == TC.Variant && touching(peekAt(tp, 2), pd)) return patBinds(adv(adv(adv(adv(tp)))), pd, pd.v, guard, ph.name)
-            if (pd.cls == TC.Punct && tk(pd, ".") && (pv.cls == TC.Ident || pv.cls == TC.Keyword) && touching(peekAt(tp, 2), pd) && touching(pd, pv)) return patBinds(adv(adv(adv(adv(adv(tp))))), pv, pv.v, guard, ph.name)
+            if (pd.cls == TC.Variant && touching(peekAt(tp, 2), pd)) return patBinds(adv(adv(adv(adv(tp)))), pd, pd.v, guard, ph.name, ".")
+            if (pd.cls == TC.Punct && tk(pd, ".") && (pv.cls == TC.Ident || pv.cls == TC.Keyword) && touching(peekAt(tp, 2), pd) && touching(pd, pv)) return patBinds(adv(adv(adv(adv(adv(tp))))), pv, pv.v, guard, ph.name, ".")
         }
-        if (a.cls == TC.Ident && b.cls == TC.Variant && touching(a, b)) return patBinds(adv(adv(tp)), b, b.v, guard, a.v)
+        if (a.cls == TC.Ident && b.cls == TC.Variant && touching(a, b)) return patBinds(adv(adv(tp)), b, b.v, guard, a.v, ".")
         if (a.cls == TC.Ident && b.cls == TC.Punct && tk(b, ".") && touching(a, b)) {
             const qn: PTok = peekAt(tp, 2)
-            if ((qn.cls == TC.Ident || qn.cls == TC.Keyword) && touching(b, qn)) return patBinds(adv(adv(adv(tp))), qn, qn.v, guard, a.v)
+            if ((qn.cls == TC.Ident || qn.cls == TC.Keyword) && touching(b, qn)) return patBinds(adv(adv(adv(tp))), qn, qn.v, guard, a.v, ".")
         }
         if (a.cls == TC.Ident && tk(b, ":") && touching(a, b) && tk(peekAt(tp, 2), ":") && touching(b, peekAt(tp, 2))) {
             const qc: PTok = peekAt(tp, 3)
-            if ((qc.cls == TC.Ident || qc.cls == TC.Keyword) && touching(peekAt(tp, 2), qc)) return patBinds(adv(adv(adv(adv(tp)))), qc, qc.v, guard, a.v)
+            if ((qc.cls == TC.Ident || qc.cls == TC.Keyword) && touching(peekAt(tp, 2), qc)) return patBinds(adv(adv(adv(adv(tp)))), qc, qc.v, guard, a.v, "::")
         }
         if (a.cls == TC.Ident && (tk(b, ".") || tk(b, ":")) && touching(a, b)) {
             // `E.V` / `E::V` — a qualified pattern
@@ -1675,7 +1675,9 @@ ${
     }
 
     // After a pattern's variant name (`nameTok`): its `(binders)`, if written.
-    fn patBinds(tp: TP, nameTok: PTok, name: string, guard: boolean, qual: string) -> RPat {
+    // s479 r1 (LOW-1): `sep` — the separator the pattern was written with before `name` (`.` or `::`),
+    // so a report names the pattern as written, qualifier included (`E.Bad(…)`, `m.E.V(…)`, `E::V(…)`).
+    fn patBinds(tp: TP, nameTok: PTok, name: string, guard: boolean, qual: string, sep: string) -> RPat {
         const o: PTok = cur(tp)
         if (o.cls == TC.Punct && tk(o, "(") && touching(nameTok, o)) {
             let t: TP = adv(tp)
@@ -1685,6 +1687,7 @@ ${
                 if (b.cls != TC.Ident) {
                     t = adv(diagAt(t, "E-PARSE-ARM", "expected a binder name (or `_`) in the pattern's `(…)`, found `" + b.text + "`", b))
                 } else {
+                    if (binderRepeated(binds, b.v)) t = diagAt(t, "E-SCOPE-REDECLARE", binderDupMsg(b.v, qual + sep + name + "(…)"), b)
                     binds = binds.concat([{ nid: t.nid, span: mkSpan(b.start, b.end), name: b.v }])
                     t = bumpId(adv(t))
                 }
@@ -1707,6 +1710,22 @@ ${
             return { pat: APat.PName(name, [bnd], false, qual), tp: bumpId(adv(tp)) }
         }
         return { pat: APat.PName(name, [], false, qual), tp: tp }
+    }
+
+    // s479 — SPEC §7.3.3: "a binder that repeats an earlier binder of the SAME arm is
+    // E-SCOPE-REDECLARE, reported at the repeat … The wildcard `_` binds nothing and may repeat"
+    // (§18.7; ruling: user-voice S478 open-Qs item 14; code PA-chosen S479).
+    // Shared by the `match` / `!{}` pattern (patBinds) and the `<match>` arm (parseArmBinds).
+    fn binderRepeated(bs: ABind[], name: string) -> boolean {
+        if (name == "_") return false
+        for (const x of bs) {
+            if (x.name == name) return true
+        }
+        return false
+    }
+
+    fn binderDupMsg(name: string, pat: string) -> string {
+        return "`" + name + "` is bound twice in the arm pattern `" + pat + "` — the second binder would silently shadow the first, so the arm would read the wrong field. Give each binder its own name, or `_` for a field the arm does not read (§7.3.3, §18.7)"
     }
 
     // An arm's body: a `{ block }`, or one expression read up to `armEnd`.
@@ -10388,8 +10407,11 @@ ${
                     m = mAt(mDiag(m, "E-PARSE-ARM", "expected a binder name (or `_`) in the pattern's `(…)`, found `" + w.w + "`", m.pos, w.mp.pos), after.pos)
                     if (nc == ",") m = mAdv(m, 1)
                 } else if (w.w != "" && isIdentStartCh(w.w.substring(0, 1)) && (nc == "," || nc == ")")) {
+                    const dup: boolean = binderRepeated(out, w.w)
+                    const from: int = m.pos
                     out = out.concat([{ nid: m.nid, span: mkSpan(m.pos, w.mp.pos), name: w.w }])
                     m = mBump(after)
+                    if (dup) m = mDiag(m, "E-SCOPE-REDECLARE", binderDupMsg(w.w, "<" + tag + "(…)>"), from, w.mp.pos)
                     if (nc == ",") m = mAdv(m, 1)
                 } else {
                     // not a positional binder: refused by name, skipped to the `)`
