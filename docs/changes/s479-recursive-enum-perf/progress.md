@@ -31,3 +31,10 @@ Gap: g-boot-recursive-enum-exponential-s479 (MED).
 - [x] Timings (frontEnd, k variants `Vi(a: E, b: E[])`): base k=1 5 ms, k=2 102 ms, k=3 6018 ms,
   k=4 >90 s (killed). New k=1..12 4-7 ms.
 - [x] Red on base: "at any depth" (14 levels) fails; 5-wide host-result graph 40.6 s (bound 10 s).
+- [x] Committed 1a422d03f (on origin/main 84f33f8ff; hook PASS).
+- [x] Corpus old-vs-new (scrml-boot compileSource, examples/ samples/ benchmarks/, 959 files): 0 changed.
+- [x] Conformance base vs new: identical — PASS 724, FAIL 0, CRASH 0 (only the timing line differs).
+- [x] CI checks: s34-census --check-new, types-gate --check, snippet-gate, claim-gate,
+  corpus-compile-floor --check, gen-md-shim --check — all exit 0.
+- [x] known-gaps: g-boot-recursive-enum-exponential-s479 status=resolved; filed
+  g-boot-host-desc-exponential-s480 (LOW, print.scrml hostDescJs tree-shaped descriptor).
