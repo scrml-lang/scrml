@@ -5666,9 +5666,10 @@ function rebaseSet(cell, v) {
 // with a margin — a bucket of `burst` less 5% (at least 1) refilled at 95% of `rate` — so frames
 // that arrive bunched (network jitter) still find a token at the relay. A frame that finds no
 // token is QUEUED, never sent past the bucket, and the queue drains in order as tokens refill.
-// A queued `replace` of a cell is superseded by a later `replace` of the same cell (the
-// receiver's value after the later one does not depend on it — lossless: the last value wins);
-// every other queued op is sent, in order. A new connection starts with a full bucket (the
+// A queued `replace` of a cell is superseded by a later `replace` of the same cell when no other
+// frame of that cell is queued between them (the receiver's value after the later one does not depend
+// on it, and no frame sent is judged on a value its sender did not make it on — lossless: the last
+// value wins; S480, #1987 r2 review M-pre); every other queued op is sent, in order. A new connection starts with a full bucket (the
 // relay's does, §38.4.3); a close drops the frames still queued (§38.10.4: sync is suspended
 // while closed) and returns how many. Self-contained, so a resend on reconnect can go through
 // `push` and be paced like any edit.
@@ -5690,7 +5691,8 @@ function rebaseSet(cell, v) {
 // edits. Two frames commute when they are of different cells and neither cell's write resets another
 // cell (`io.coupled(ref)`, `reset-on=`). A refused frame of a cell whose later `replace` (relayed, or
 // still to be sent) sets its value outright is superseded (`io.superseded(ref)`): the newest value
-// wins, as for a queued one — unless its cell's write resets another cell. `io.resend(ref, text)`
+// wins, as for a queued one — unless its cell's write resets another cell, or (still to be sent) a
+// frame of its cell that is re-sent sits between them (S480, #1987 r2 review L1). `io.resend(ref, text)`
 // gives the text a re-sent frame goes on the wire with (its `__seen` renewed), or null to drop it.
 //   io (optional, S480 r2): dropped(ref), coupled(ref) → bool, resend(ref, text) → text | null
 export function channelPacer(limits, io) {
@@ -5709,6 +5711,15 @@ export function channelPacer(limits, io) {
   const coupled = (f) => typeof io.coupled === "function" && io.coupled(f.ref) === true;
   const commute = (a, b) => a.key !== b.key && !coupled(a) && !coupled(b);
   const supersedes = (later, f) => later.key === f.key && later.op === "replace" && !coupled(f);
+  // S480 (#1987 r2 review M-pre, L1), §38.4.3: `f` is superseded only by the NEXT frame of its cell
+  // after it (`after`, in send order), and only when that one is a `replace`. A later `replace` with
+  // another frame of the cell between them does not supersede `f`: that frame (an `append`, say) was
+  // made and checked on the value `f` set, and dropping `f` would have the relay judge it on the value
+  // before — refused, and an honest client closed `1008` ("unexplained since __seen").
+  const supersededBy = (f, after) => {
+    const g = after.find((h) => h.key === f.key);
+    return g !== undefined && supersedes(g, f);
+  };
   function drop(f, superseded) {
     if (superseded) { if (typeof io.superseded === "function") io.superseded(f.ref); }
     else if (typeof io.dropped === "function") io.dropped(f.ref);
@@ -5735,7 +5746,7 @@ export function channelPacer(limits, io) {
     const back = [];
     for (let i = 0; i < flight.length; i++) {
       const f = flight[i];
-      if (flight.slice(i + 1).some((g) => supersedes(g, f)) || q.some((g) => supersedes(g, f))) { drop(f, true); continue; }
+      if (supersededBy(f, flight.slice(i + 1).concat(q))) { drop(f, true); continue; }
       const text = typeof io.resend === "function" ? io.resend(f.ref, f.text) : f.text;
       if (typeof text !== "string") continue;            // the caller dropped it
       f.text = text;
@@ -5809,12 +5820,15 @@ export function channelPacer(limits, io) {
     // Queue one frame of the cell `key` (op `op`); false (not queued) while the connection is not open.
     push(key, op, text, ref) {
       if (!open) return false;
+      // a queued `replace` of the cell is superseded only when it is the LAST queued frame of the cell
+      // (S480, #1987 r2 review M-pre: no frame of the cell between it and this one, above)
       if (op === "replace") {
-        q = q.filter((f) => {
-          if (!(f.key === key && f.op === "replace")) return true;
+        let j = q.length - 1;
+        while (j >= 0 && q[j].key !== key) j--;
+        if (j >= 0 && q[j].op === "replace") {
+          const [f] = q.splice(j, 1);
           if (typeof io.superseded === "function") io.superseded(f.ref);
-          return false;
-        });
+        }
       }
       q.push({ key, op, text, ref, retry: false });
       if (timer === null) pump();
