@@ -21,6 +21,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { mods, artifacts, loadServer } from "./server-artifact-harness.js";
 import { frontEnd } from "./harness.js";
+import { withSeen } from "./channel-seen-harness.js";
 import * as rt from "../slice-m1/runtime/runtime.js";
 
 let pageEnv = false;
@@ -96,7 +97,7 @@ async function served() {
 // keeps the relayed edit without them.
 function connect(base, path) {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(`ws://${base}${path}`);
+    const ws = withSeen(new WebSocket(`ws://${base}${path}`));
     const got = [];
     const frames = [];
     const replays = [];
@@ -115,6 +116,9 @@ function connect(base, path) {
 }
 const tick = (ms = 120) => new Promise((r) => setTimeout(r, ms));
 const frame = (key, op, val) => JSON.stringify({ __type: "__sync", __key: key, __op: op, __val: val });
+// S479 (s479-channel-follow): a frame handed straight to the relay's handler (no socket to add it) carries
+// its `__seen` (§38.4.2 "The frame") — 0, the replay these test connections open at
+const rframe = (key, op, val, seen = 0) => JSON.stringify({ __type: "__sync", __key: key, __op: op, __val: val, __seen: seen });
 // A socket stand-in's delivery as the relay makes it (§38.4.2): the replay first, then each frame
 // numbered in turn (`__seq`), as a peer's (`__own: false`) unless `own`.
 const EMPTY_REPLAY = JSON.stringify({ __type: "__replay", __complete: true, __seq: 0, __base: null, __frames: [] });
@@ -331,7 +335,7 @@ describe("F — the receiver's checks (§38.4.2), frames injected past the relay
       expect(c.cells.ps.peek()).toEqual([]);
       // and a LOCAL write after them is sent as its op
       rt.batch(() => rt.append(c.cells.xs, "b"));
-      expect(c.sock.sent).toEqual([{ __type: "__sync", __key: "xs", __op: "append", __val: "b" }]);
+      expect(c.sock.sent).toEqual([{ __type: "__sync", __key: "xs", __op: "append", __val: "b", __seen: 6 }]);
     } finally { c.done(); }
   });
 
@@ -348,7 +352,7 @@ describe("F — the receiver's checks (§38.4.2), frames injected past the relay
       rt.channel(scope, { name: "p", reconnect: 0, cells: [{ key: "pt", cell: pt, table: PT, ops: ["replace"], edges: null }], open: null, close: null, error: null });
       relayer(socks[0]);
       rt.batch(() => rt.setIn(pt, ["x"], 5));
-      expect(socks[0].sent).toEqual([{ __type: "__sync", __key: "pt", __op: "replace", __val: { x: 5, y: 2 } }]);
+      expect(socks[0].sent).toEqual([{ __type: "__sync", __key: "pt", __op: "replace", __val: { x: 5, y: 2 }, __seen: 0 }]);
     } finally { globalThis.WebSocket = saved; globalThis.location = savedLoc; scope.dispose(); }
   });
 });
@@ -891,7 +895,7 @@ describe("K — §38.4.2 the client's stream checks and the rate-limited report 
     try {
       c.raw({ __type: "__replay", __complete: true, __seq: 0, __base: null, __frames: [] });
       rt.batch(() => rt.append(xs, "mine"));
-      expect(c.sock.sent).toEqual([{ __type: "__sync", __key: "xs", __op: "append", __val: "mine" }]);
+      expect(c.sock.sent).toEqual([{ __type: "__sync", __key: "xs", __op: "append", __val: "mine", __seen: 0 }]);
       c.raw(sf(1, "xs", "append", "not-mine", true));
       expect(c.sock.closed).toBe(1);
       expect(c.errs.join("\n")).toContain("not this client's oldest pending edit");
@@ -1238,7 +1242,7 @@ describe("K — #1941 × #1942: relay order over the bounds and client pacing", 
     const u1 = await R.upgrade();
     expect(u1.res).toBe(undefined);
     const s1 = R.sock(u1.data); R.ws.open(s1);
-    for (let i = 1; i <= 3; i++) R.ws.message(s1, frame("n", "replace", i));
+    for (let i = 1; i <= 3; i++) R.ws.message(s1, rframe("n", "replace", i));
     expect(R.logs.join("\n")).toContain("the frame log passed its bound");
     // a second socket reserved (mid-upgrade, not yet opened) when the first leaves: no reset
     const u2 = await R.upgrade();
@@ -1256,7 +1260,7 @@ describe("K — #1941 × #1942: relay order over the bounds and client pacing", 
     const u4 = await R.upgrade();
     const s4 = R.sock(u4.data); R.ws.open(s4);
     expect(replayOf(s4)).toEqual({ __type: "__replay", __complete: true, __seq: 0, __base: null, __frames: [] });
-    R.ws.message(s4, frame("n", "replace", 7));
+    R.ws.message(s4, rframe("n", "replace", 7));
     expect(JSON.parse(s4.sent[1])).toEqual({ __type: "__sync", __seq: 1, __key: "n", __op: "replace", __val: 7, __own: true });
   });
 
@@ -1264,7 +1268,7 @@ describe("K — #1941 × #1942: relay order over the bounds and client pacing", 
     const R = await relay({ [LOG_HOOK]: { frames: 1 } }, CONV_NOFOLD);
     const u1 = await R.upgrade();
     const s1 = R.sock(u1.data); R.ws.open(s1);
-    R.ws.message(s1, frame("n", "replace", 1)); R.ws.message(s1, frame("n", "replace", 2));
+    R.ws.message(s1, rframe("n", "replace", 1)); R.ws.message(s1, rframe("n", "replace", 2));
     const bad = await R.upgrade(false);
     expect(bad.res.status).toBe(400);
     R.ws.close(s1);
@@ -1280,11 +1284,13 @@ describe("K — #1941 × #1942: relay order over the bounds and client pacing", 
     const R = await relay({});
     const u = await R.upgrade();
     const s = R.sock(u.data); R.ws.open(s);
-    for (let i = 1; i <= 100; i++) R.ws.message(s, frame("n", "replace", i));   // the default burst, exactly
+    for (let i = 1; i <= 100; i++) R.ws.message(s, rframe("n", "replace", i));   // the default burst, exactly
     expect(s.closed).toBe(null);
     expect(s.sent.length).toBe(101);                       // the replay + 100 own echoes
-    R.ws.message(s, frame("n", "replace", 101));            // the 101st client frame finds no token
-    expect(s.closed).toBe(1008);
+    R.ws.message(s, rframe("n", "replace", 101));            // the 101st client frame finds no token
+    // S479 (s479-channel-follow), §38.4.3 "Over a rate bound": refused UNREAD, not closed
+    expect(s.closed).toBe(null);
+    expect(JSON.parse(s.sent[101])).toEqual({ __type: "__refused", __why: "over this connection's rate limit (50/s, burst 100)" });
   });
 
   test("a replay larger than the frame-size bound is sent as ONE message and applied by the client", async () => {
@@ -1292,7 +1298,7 @@ describe("K — #1941 × #1942: relay order over the bounds and client pacing", 
     const u = await R.upgrade();
     const s = R.sock(u.data); R.ws.open(s);
     const big = "x".repeat(60000);                         // each frame under 65 536 bytes; the log well over
-    for (let i = 0; i < 4; i++) R.ws.message(s, frame("xs", "append", big + i));
+    for (let i = 0; i < 4; i++) R.ws.message(s, rframe("xs", "append", big + i));
     const u2 = await R.upgrade();
     const s2 = R.sock(u2.data); R.ws.open(s2);
     expect(s2.sent.length).toBe(1);

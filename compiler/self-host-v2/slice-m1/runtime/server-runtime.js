@@ -1559,7 +1559,8 @@ export function server(host, routes, conns = [], endpoints = [], channels = []) 
       // before anything about the request is answered), then 404 (no such channel), 405
       // (non-GET), 426 (no `Upgrade: websocket`); only then the upgrade.
       if (channels.length > 0 && path.startsWith(CHANNEL_PREFIX)) {
-        if (!originOk(request)) return jsonResponse(host, 403, FIXED[403]);
+        // §40.2: `trusted-proxies=` is one program value, printed on every channel's desc
+        if (!originOk(request, channels[0].trusted)) return jsonResponse(host, 403, FIXED[403]);
         const ch = byChannel.get(path);
         if (ch === undefined) return jsonResponse(host, 404, FIXED[404]);
         return upgradeChannel(host, ch, request, upgrader, websocket);
@@ -1595,11 +1596,12 @@ export function server(host, routes, conns = [], endpoints = [], channels = []) 
 // `desc` (print-server.scrml channelConsts): the channel's `name`, its `topic` and
 // per synced cell (§38.4) its key and §57 wire table.
 //   §38.1: "a server-side upgrade route at `/_scrml_ws/<name>`".
-//   §40.2 (S441): "Every compiler-emitted WebSocket upgrade route of a web-application
-//   program … SHALL accept the upgrade only when the request's `Origin` names the
-//   server's own origin: the same host — taken from `X-Forwarded-Host` when a proxy
-//   sets it, else the request's own host — and the same scheme — `X-Forwarded-Proto`,
-//   else the request's — except that an `https` origin SHALL be accepted on a request
+//   §40.2 (S441; amended S479 for `trusted-proxies=`): "Every compiler-emitted WebSocket upgrade
+//   route of a web-application program … SHALL accept the upgrade only when the request's `Origin`
+//   names the server's own origin: the same host — taken from `X-Forwarded-Host` when
+//   `trusted-proxies=` is 1 or more and that header holds the entry a trusted proxy wrote (next
+//   statement), else the request's own host — and the same scheme — `X-Forwarded-Proto` under the
+//   same rule, else the request's — except that an `https` origin SHALL be accepted on a request
 //   that arrived as plain `http` … Default ports compare equal to their omitted form. A
 //   mismatched origin, and the opaque `Origin: null`, SHALL be refused with `403` before
 //   the upgrade and before any channel handler runs. A handshake with NO `Origin` header
@@ -1628,7 +1630,8 @@ export function server(host, routes, conns = [], endpoints = [], channels = []) 
 //   an override the compiler resolves (`desc.limits`): a frame is at most `maxFrame` bytes of
 //   UTF-8 (default 65 536; 1009), a connection's frames pass a token bucket of `burst` tokens
 //   refilled at `rate` per second (defaults 100 / 50; "a frame that finds less than one token
-//   … closes the connection (1008)"), and a channel admits at most `maxSubs` subscribers per
+//   … closes the connection (1008)" — amended S479: refused unread, and closed only past the close
+//   bucket, `takeToken`), and a channel admits at most `maxSubs` subscribers per
 //   server process ("a further upgrade SHALL be answered `503`"; default 1000).
 //   S478 open-Qs ruling (user-voice), items 50–51 (s478-ruled-channel-sync2), §38.4.2:
 //   "A frame that passes is given the channel's next SEQUENCE NUMBER (1 for the channel's first
@@ -1672,6 +1675,34 @@ export const CHANNEL_ADDRESS_SHARE = 10;
 // connections' buckets — `burst` × 4 tokens refilled at `rate` × 4 per second (a browser's few tabs).
 export const CHANNEL_ADDRESS_BUCKETS = 4;
 export const CHANNEL_ADDRESS_TEST_HOOK = Symbol.for("scrml.test.channelAddress");
+// S480 r1 (#1987 review MED-1) — §38.4.3 "Over a rate bound": a connection's CLOSE bucket holds `burst`
+// plus this many seconds of `rate`. A conforming client is closed only when the network delays its
+// frames by more than about this long and then delivers them together.
+export const CHANNEL_CLOSE_WINDOW_S = 30;
+
+// §40.2 `trusted-proxies=` as the compiler resolved it (an int 0..=32), else 0 — fail closed: a value
+// this runtime cannot read trusts no forwarded header.
+export const TRUSTED_PROXIES_MAX = 32;
+function channelTrusted(v) {
+  return Number.isSafeInteger(v) && v >= 0 && v <= TRUSTED_PROXIES_MAX ? v : 0;
+}
+
+// S479 (s479-channel-follow) — ruling:user-voice-scrml.md S479 "⭐ RULED — the rest of S478 hand-off
+// §3.B", item 6: "`<program trusted-proxies=N>` (N = the number of proxies in front of the server; the
+// client IP is the Nth-from-last X-Forwarded-For entry; 0 ignores the headers). PA amendment … default
+// 0". §40.2: the entry of the forwarded header `name` that the outermost of `n` trusted proxies wrote —
+// the Nth from the last of its comma-separated entries (each proxy APPENDS one; the entries before the
+// Nth-from-last were written by the client or by an untrusted hop, and are never read). "" when `n` is
+// 0, when the header is absent, when it holds fewer than `n` entries (a hop that should have appended
+// one did not — fail closed: the caller uses the request's own value), or when that entry is empty.
+export function forwardedEntry(request, name, n) {
+  if (!Number.isSafeInteger(n) || n < 1) return "";
+  const raw = request.headers.get(name);
+  if (raw === null || raw === undefined) return "";
+  const parts = String(raw).split(",");
+  if (parts.length < n) return "";
+  return parts[parts.length - n].trim();
+}
 
 // A bound the compiler resolved (a safe integer ≥ 1), else the §38.4.3 default — never "no bound".
 function channelBound(v, dflt) {
@@ -1690,8 +1721,14 @@ export function channel(desc) {
     maxFrame: channelBound(lim.maxFrame, CHANNEL_MAX_FRAME),
     rate: channelBound(lim.rate, CHANNEL_FRAME_RATE),
     burst: channelBound(lim.burst, CHANNEL_FRAME_BURST),
+    // §38.4.3 "Over a rate bound" (S480 r1): the close bucket's size — `burst` + `rate` × 30 s
+    closeAt: channelBound(lim.burst, CHANNEL_FRAME_BURST) + channelBound(lim.rate, CHANNEL_FRAME_RATE) * CHANNEL_CLOSE_WINDOW_S,
     maxSubs,
     subs: 0,
+    // S479 (s479-channel-follow) — ruled §3.B item 6: `<program trusted-proxies=N>`, the number of
+    // proxies in front of the server (§40.2; 0, the default, ignores every X-Forwarded-* header). The
+    // compiler prints the one program value on every channel's desc.
+    trusted: channelTrusted(desc.trustedProxies),
     // S479 (s479-channel-relay-fold) — §38.4.3 "Per-address bounds" (INTERIM): the subscriber places
     // one address may hold, its upgrade bucket (`perAddr` upgrades, refilled at a tenth of that per
     // second, at least 1), and per address its live count, upgrade bucket and shared frame bucket
@@ -1912,10 +1949,32 @@ function utf8Over(s, max) {
 
 // §38.4.3: "each connection holds a bucket of `burst` tokens, refilled at `rate` tokens per
 // second up to `burst`; each frame it sends spends one token, before it is decoded". `now` ms.
+// S479 (s479-channel-follow), §38.4.3 "Over a rate bound": "ok" (a token spent); "refuse" — the bucket
+// held less than one token, and the refused frame spends none of it (no debt, so the frames an honest
+// client sends after a network-bunched burst find the bucket refilling at `rate`, faster than the
+// client's 95% pacing); "close" — a refused frame that ALSO found the connection's CLOSE bucket empty.
+// S480 r1 (#1987 review MED-1): every frame spends a token of the close bucket — `burst` + `rate` ×
+// CHANNEL_CLOSE_WINDOW_S tokens, refilled at `rate` — so a conforming client (at most `burst` less 5%
+// plus 95% of `rate` per second, in SEND time) empties it only when the network holds its frames back
+// for more than about that window and delivers them at once; a sender over `rate` empties it.
 function takeToken(data, ch, now) {
   let b = data.scrmlBucket;
   if (b === undefined) { b = { tokens: ch.burst, at: now }; data.scrmlBucket = b; }
-  return spend(b, ch.burst, ch.rate, now);
+  let d = data.scrmlCloseBucket;
+  if (d === undefined) { d = { tokens: ch.closeAt, at: now }; data.scrmlCloseBucket = d; }
+  const within = spend(d, ch.closeAt, ch.rate, now);
+  // S480 r2 (#1987 review NEW-1): "ok-dry" — a token spent, but the close bucket is empty, so the
+  // frame closes the sender if a LATER bound (its address's bucket) refuses it
+  if (spend(b, ch.burst, ch.rate, now)) return within ? "ok" : "ok-dry";
+  return within ? "refuse" : "close";
+}
+
+// §38.4.3 "Over a rate bound": a frame refused UNREAD — `{ __type: "__refused", __why }`. It counts as
+// a refusal of this connection for the `__seen` close rule (§38.4.2 "The relay's fold"): until the
+// sender has read it, its cells still show that edit.
+function refuseUnread(ws, r, why) {
+  ws.data.scrmlRefusedAt = r.seq;
+  try { ws.send(`{"__type":"__refused","__why":${JSON.stringify(why)}}`); } catch { /* the socket is gone */ }
 }
 
 // One token of bucket `b` (`size` tokens, refilled at `rate` per second), or false when it has less than one.
@@ -1932,15 +1991,18 @@ function clockOf(host) {
   return host !== null && typeof host === "object" && typeof host.now === "function" ? () => host.now() : () => performance.now();
 }
 
-function originOk(request) {
+function originOk(request, trusted = 0) {
   const origin = request.headers.get("Origin");
   if (origin === null) return true;
   try {
     const o = new URL(origin);
     if (o.origin === "null") return false;
     const u = new URL(request.url, "http://localhost");
-    const fwdHost = (request.headers.get("X-Forwarded-Host") ?? "").split(",")[0].trim();
-    const fwdProto = (request.headers.get("X-Forwarded-Proto") ?? "").split(",")[0].trim().toLowerCase();
+    // S479 (s479-channel-follow), §40.2 `trusted-proxies=`: the forwarded host and scheme are the
+    // entries the outermost trusted proxy wrote (`forwardedEntry`); with no trusted proxy (0, the
+    // default) both headers are ignored — they are text the client may have written
+    const fwdHost = forwardedEntry(request, "X-Forwarded-Host", trusted);
+    const fwdProto = forwardedEntry(request, "X-Forwarded-Proto", trusted).toLowerCase();
     let proto = fwdProto !== "" ? fwdProto : u.protocol.replace(":", "").toLowerCase();
     if (proto === "ws") proto = "http";
     if (proto === "wss") proto = "https";
@@ -1992,14 +2054,18 @@ function upgradeChannel(host, ch, request, upgrader, websocket) {
   return jsonResponse(host, 400, FIXED[400]);
 }
 
-// The per-address record of `ch` for this request's address (`server.requestIP(request).address`;
-// "" when the host names none — every such request is one address). Swept of idle, refilled records
+// The per-address record of `ch` for this request's address — S479 (s479-channel-follow), §40.2
+// `trusted-proxies=` N >= 1: the Nth-from-last `X-Forwarded-For` entry (`forwardedEntry`), else (N = 0,
+// or no such entry) `server.requestIP(request).address`; "" when the host names none — every such
+// request is one address. Swept of idle, refilled records
 // whenever the table has doubled since the last sweep, so it is bounded by the addresses in use.
 function addressOf(host, ch, request, upgrader, now) {
   let addr = "";
   try {
     const seam = host !== null && typeof host === "object" ? host[CHANNEL_ADDRESS_TEST_HOOK] : undefined;
+    const fwd = forwardedEntry(request, "X-Forwarded-For", ch.trusted);
     if (typeof seam === "function") addr = String(seam(request));
+    else if (fwd !== "") addr = fwd.slice(0, 128);
     else if (typeof upgrader.requestIP === "function") { const ip = upgrader.requestIP(request); if (ip !== null && ip !== undefined && typeof ip.address === "string") addr = ip.address; }
   } catch { addr = ""; }
   let a = ch.addrs.get(addr);
@@ -2040,7 +2106,10 @@ function channelFrame(ch, raw) {
   try { v = JSON.parse(raw); } catch { return { code: 1007, why: "a frame that is not JSON" }; }
   if (v === null || typeof v !== "object" || Array.isArray(v)) return { code: 1008, why: "a frame that is not a JSON object" };
   const keys = Object.keys(v);
-  if (keys.length !== 4 || !own(v, "__type") || !own(v, "__key") || !own(v, "__op") || !own(v, "__val")) return { code: 1008, why: "a frame that is not exactly {__type, __key, __op, __val}" };
+  // S479 (s479-channel-follow), §38.4.2 "The frame": a client frame carries `__seen`, the last sequence
+  // number its sender had applied (an int ≥ 0); its range is checked against the connection in `message`
+  if (keys.length !== 5 || !own(v, "__type") || !own(v, "__key") || !own(v, "__op") || !own(v, "__val") || !own(v, "__seen")) return { code: 1008, why: "a frame that is not exactly {__type, __key, __op, __val, __seen}" };
+  if (!Number.isSafeInteger(v.__seen) || v.__seen < 0) return { code: 1008, why: "a frame whose __seen is not an int ≥ 0" };
   if (v.__type !== "__sync") return { code: 1008, why: "a frame whose __type is not __sync" };
   if (typeof v.__key !== "string" || !ch.cells.has(v.__key)) return { code: 1008, why: "a __sync for a cell the channel does not declare" };
   const cell = ch.cells.get(v.__key);
@@ -2077,7 +2146,7 @@ function channelFrame(ch, raw) {
     return { code: 1008, why: `a __sync whose __op the server does not relay` };
   }
   if (!r.ok) return { code: 1011, why: `a __sync for @${v.__key} that does not re-encode to a value its receivers decode` };
-  return { key: v.__key, op, text: r.text, val: r.value };
+  return { key: v.__key, op, text: r.text, val: r.value, seen: v.__seen };
 }
 
 // `maxPayloadLength` (Bun's own cap, bytes) is the largest channel frame bound + 1 (S478 fix r1,
@@ -2183,7 +2252,19 @@ function channelSockets(host, channels = [], limits = {}) {
     message(ws, raw) {
       const ch = ws.data.scrmlChannel;
       const t = now();
-      if (!takeToken(ws.data, ch, t)) return closeSocket(host, ws, 1008, `frames faster than the channel's rate limit (${ch.rate}/s, burst ${ch.burst})`);
+      const r = relayOf(ch);
+      // S479 (s479-channel-follow) — §38.4.3 "Over a rate bound": a frame that finds less than one
+      // token in its connection's bucket, or in its address's shared bucket, is REFUSED UNREAD — not
+      // decoded, relayed to no one, numbered never, spending no token — and its sender is sent
+      // `{"__type":"__refused","__why"}`, which a client takes as its oldest unanswered frame refused: it
+      // slows down and re-sends that edit, paced (S480 r2). Only SUSTAINED abuse closes: a refused frame —
+      // by either bucket — that finds the connection's CLOSE bucket (`burst` + 30 s of `rate`, spent by
+      // every frame) empty closes the sender `1008`. An address's bucket alone never closes a connection
+      // (its clients may be many honest users behind one NAT, each pacing only its own connection, so
+      // none of them sends past `rate` and empties its own close bucket): they are refused, and slow down.
+      const rate = takeToken(ws.data, ch, t);
+      if (rate === "close") return closeSocket(host, ws, 1008, `frames faster than the channel's rate limit (${ch.rate}/s, burst ${ch.burst}), past its close bound (${ch.closeAt} frames over ${CHANNEL_CLOSE_WINDOW_S} s of the rate)`);
+      if (rate === "refuse") return refuseUnread(ws, r, `over this connection's rate limit (${ch.rate}/s, burst ${ch.burst})`);
       // S479 — §38.4.3 "Per-address bounds" (INTERIM): every frame also spends one token of its
       // ADDRESS's bucket, shared by all that address's connections and kept across them — so neither
       // reconnecting nor parallel sockets multiply one address's frame rate past CHANNEL_ADDRESS_BUCKETS
@@ -2191,27 +2272,45 @@ function channelSockets(host, channels = [], limits = {}) {
       const a = ws.data.scrmlAddr;
       const k = CHANNEL_ADDRESS_BUCKETS;
       if (a !== undefined && !spend(a.frames, ch.burst * k, ch.rate * k, t)) {
-        return closeSocket(host, ws, 1008, `frames faster than the channel's rate limit for one address (${ch.rate * k}/s, burst ${ch.burst * k}, shared by its connections)`);
+        // S480 r2 (#1987 review NEW-1), §38.4.3: "a frame that is refused unread and also finds less than
+        // one token in its close bucket SHALL instead close the sender" — an address refusal too, so a
+        // socket whose address bucket is kept dry is bounded by its own close bucket
+        if (rate === "ok-dry") return closeSocket(host, ws, 1008, `frames refused over the rate limit of this connection's address (${ch.rate * k}/s, burst ${ch.burst * k}), past this connection's close bound (${ch.closeAt} frames over ${CHANNEL_CLOSE_WINDOW_S} s of the rate)`);
+        // a refused frame spends no token of its connection's bucket (S480 r1): give back the one spent above
+        ws.data.scrmlBucket.tokens += 1;
+        return refuseUnread(ws, r, `over the rate limit of this connection's address (${ch.rate * k}/s, burst ${ch.burst * k}, shared by its connections)`);
       }
       const f = channelFrame(ch, raw);
       if (f.code !== undefined) return closeSocket(host, ws, f.code, f.why);
-      const r = relayOf(ch);
+      // S479 (s479-channel-follow), §38.4.2 "The frame": `__seen` names a sequence number this
+      // connection can have applied — at least its replay's and its own previous frame's (a client's
+      // applied sequence number only grows on one connection), at most the channel's last
+      const floor = Math.max(ws.data.scrmlOpenSeq, ws.data.scrmlSeen ?? 0);
+      if (f.seen < floor || f.seen > r.seq) {
+        return closeSocket(host, ws, 1008, `a frame whose __seen ${f.seen} is outside ${floor}..=${r.seq} (its last __seen or replay, to the last frame relayed)`);
+      }
+      ws.data.scrmlSeen = f.seen;
       // §38.4.2 "The relay's fold": the frame applied to the fold's value of its cell, by the
       // receiver's own check (3). Refused: relayed to no one, not logged, no sequence number. Its
-      // sender is closed `1008` when it could not have been made honestly — no frame of another
-      // connection was relayed after this connection's replay and none of its own frames was
-      // refused, so its cells showed exactly the fold's value — and is otherwise told `__refused`
-      // (a concurrent edit came first in relay order), which drops the edit from its pending edits.
+      // sender is told `__refused` when a concurrent edit can explain it, and is otherwise closed
+      // `1008`. S479 (s479-channel-follow) — `__seen` (the capable form of the S479 relay-fold close
+      // rule): a concurrent edit explains it when a frame of ANOTHER connection was relayed after
+      // `__seen` (the sender had not applied it when it made the edit), or an earlier frame of this
+      // connection was refused at or after `__seen` (the sender may not have read that refusal yet, so
+      // it still showed that edit). Otherwise the sender's cells showed exactly the fold's value —
+      // the frames up to `__seen`, and its own frames relayed since, which it applied first as pending
+      // edits by the same check — so no honest client could have made the edit.
       if (r.fold !== null) {
         // s479 fix r1 (MED-1): judged by the receivers' own rule (runtime.js `channelJudge`), then
         // applied to the fold in place (`foldApply`) — no copy of the cell's value per frame
         const s = channelJudge(ch.cells.get(f.key), r.fold.get(f.key), f.op, f.val);
         if (s !== null) {
           const other = r.last.who !== ws.data ? r.last.seq : r.other;
-          if (other <= ws.data.scrmlOpenSeq && ws.data.scrmlRefused !== true) {
-            return closeSocket(host, ws, 1008, `a frame the relay's fold refuses with no concurrent edit before it: ${s}`);
+          const refusedAt = ws.data.scrmlRefusedAt ?? -1;
+          if (other <= f.seen && refusedAt < f.seen) {
+            return closeSocket(host, ws, 1008, `the relay's fold refuses it, unexplained since __seen: ${s}`);
           }
-          ws.data.scrmlRefused = true;
+          ws.data.scrmlRefusedAt = r.seq;
           ws.send(`{"__type":"__refused","__key":${JSON.stringify(f.key)},"__op":${JSON.stringify(f.op)},"__val":${f.text},"__why":${JSON.stringify(s)}}`);
           return;
         }

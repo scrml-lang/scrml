@@ -19,6 +19,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { mods, artifacts, loadServer } from "./server-artifact-harness.js";
 import { frontEnd } from "./harness.js";
+import { withSeen } from "./channel-seen-harness.js";
 import * as rt from "../slice-m1/runtime/runtime.js";
 
 let pageEnv = false;
@@ -351,7 +352,7 @@ describe("C, D — the relay: the cap is reserved before the upgrade (LOW-4); th
     const { bun, base } = await served(src());
     try {
       const open = () => new Promise((res) => {
-        const ws = new WebSocket(`ws://${base}/_scrml_ws/chat`);
+        const ws = withSeen(new WebSocket(`ws://${base}/_scrml_ws/chat`));
         const got = []; let closed = null;
         ws.onmessage = (ev) => got.push(String(ev.data));
         ws.onclose = (ev) => { closed = ev.code; };

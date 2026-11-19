@@ -1,0 +1,21 @@
+{
+  "id": "middleware-trusted-proxies-invalid-pos",
+  "description": "`<program trusted-proxies=\"1\">` — a quoted value. `trusted-proxies=` is a bare integer literal from 0 to 32; any other value is E-MW-009.",
+  "language-version": "1.0",
+  "spec": "§40.2",
+  "provenance": "ruling:user-voice-scrml.md S479 \"⭐ RULED — the rest of S478 hand-off §3.B, PA recs adopted (S479, 2026-11-18)\" item 6 (`<program trusted-proxies=N>`, default 0); E-MW-009 minted by lane s479-channel-follow",
+  "rationale": "§40.2: the value is how many reverse proxies' forwarded headers the server trusts, so a value the compiler cannot read is refused (E-MW-009) rather than guessed — a guess either trusts a header the client wrote or ignores the proxy the author declared. impl#1 does not read `trusted-proxies=` (carried, g-impl1-xfwd-trusted-proxies-owed-s479).",
+  "expect": {
+    "codes": ["E-MW-009"]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-xfwd-trusted-proxies-owed-s479",
+      "fails": {
+        "codes": [
+          "missing:E-MW-009"
+        ]
+      }
+    }
+  }
+}
