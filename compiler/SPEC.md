@@ -8710,6 +8710,45 @@ checked as a direct call of the function the value holds would be. **Provenance:
 *"ratify that in §7.3.4 (the signature is the static callee type)."* · **supersedes:** the struck clause above.
 **Direction of change:** inert — the bootstrap's behaviour since s478-boot-fn-type; Nominal on impl#1.
 
+#### 7.3.5 An unread local binding is a lint — W-UNUSED-BINDING (S479)
+
+Any local binding — `let`, `const` or keywordless (§50.8.5) — that is not read before its scope ends SHALL be
+reported as **W-UNUSED-BINDING**, a Warning; a name beginning with `_` is exempt. `lin` is excluded: §35 governs
+a `lin` binding's use. A lint never rejects: the program compiles (§34, Severity).
+
+- **Local** is a binding declared inside a function body, an event-handler body, or any statement block nested in
+  one. A file-scope binding (§7.6) is not local and is not reported.
+- **Read** is any reference to the binding other than its own declaration and the target of a whole assignment
+  `x = v`. A binding that is only assigned is not read, so it is reported. A reference counts wherever it stands
+  in the scope: in a nested function or closure, in a markup interpolation `${x}` or an attribute value, in the
+  initializer of a later binding, in a branch that never runs. Shadowing is exact: a read of an inner binding of
+  the name is not a read of the outer one.
+- **The binding forms covered**: a `let` / `const` / keywordless declaration statement; each name a destructuring
+  declaration binds (`const { a, b } = o`); the binder of an iterate head — §49.3.5: *"A keywordless binder — `x`
+  in `for (x of xs)` — is `const` (§50.8.5) … `const x` is the same binder written out. `let x` gives a mutable
+  per-iteration binder"*; a counted head's `let` (`for (let i = 0; …)`); and a loop bound as a value
+  (`const xs = for (…) { … }`, §49.6).
+- **Not covered** (not a `let` / `const` / keywordless binding, or not local): function and lambda parameters, the
+  binders of a `match` / `!{}` arm and of a `<match>` arm (§18.7), a `given` name, an `<each>` binder, a nested
+  `function` declaration, and every file-scope binding.
+
+*Lane reading (S480, owner veto):* the two places "read" needed a reading the ruling does not spell out are taken
+conservatively, so the lint never fires on a binding a program uses: a write to a PART of the binding (`p.f = v`,
+`xs[i] = v`) reads it (the write starts from its current value), and so does a reassignment whose value names it
+(`x = x + 1`). The ruling's population list (`let`, `const`, keywordless) is read as the declaration forms the
+binding is written with, so the loop binder and the destructuring names written with those forms are covered; the
+pattern binders and parameters are listed above as not covered.
+
+> **Provenance:** ruling:user-voice-scrml.md "⭐ RULED — unused-binding lint code: W-UNUSED-BINDING (S479,
+> 2026-11-18)" — *"a Warning; a §7 sentence — any local binding (`let`, `const`, keywordless; `lin` excluded
+> because §35 governs it) not read before its scope ends gets the warning, and a `_` prefix exempts it — plus the
+> matching §34 row. The refusal of an unread keywordless binding stays removed (PR #1961), since a lint never
+> rejects."* (*"both yes"*) · completes ruling:user-voice-scrml.md S422 "CALL 3 — unused-binding is a LINT across
+> all binding forms, hard error later if it proves out" (*"Severity: LINT now, hard error as the declared
+> destination"*; *"Hatch: the per-site `_` token is GRANTED"*). Gap `g-spec-unused-binding-lint-code-s479`.
+> **Direction of change:** newly-warning (no program changes acceptance). Emitted by the bootstrap; Nominal on
+> impl#1, which still reports E-MU-001 for an unread keywordless binding (`g-impl1-e-mu-001-unread-binding-s479`).
+
 ### 7.4 Markup as Expression in Logic Context
 
 Markup syntax is valid as an expression inside `${ }` logic contexts.
@@ -30841,6 +30880,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | W-LIN-001 | §35.7 | `lin` variable passed to server-escalated function; guarantee does not extend to server copy | Warning |
 | W-MATCH-001 | §18.6 | Unreachable default `else` arm (all variants already covered) | Warning |
 | W-LOOP-COPY-WRITE-UNREAD | §66.10 | A part write to a `for … of` binder (`p.name = v` — the binder is a copy of the element, §66.10) that no later read of the binder observes: the write changes nothing, and the iterated cell or tape is unchanged. Write the source (`@ps[i].name = …`, or rebuild it with `.map(…)`), or read the changed copy. Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4. Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`loopCopyFor`); Nominal on impl#1 (§34.0). | Warning |
+| W-UNUSED-BINDING | §7.3.5 | A local binding — `let`, `const` or keywordless (§50.8.5), including a destructured name, an iterate-head binder, a counted head's `let` and a loop bound as a value — that nothing reads before its scope ends (a write-only binding included). A `_`-prefixed name is exempt; `lin` is excluded (§35); parameters, pattern binders and file-scope bindings are not reported. A lint: the program compiles. Provenance: ruling:user-voice-scrml.md "⭐ RULED — unused-binding lint code: W-UNUSED-BINDING (S479, 2026-11-18)"; completes ruling:user-voice-scrml.md S422 "CALL 3 — unused-binding is a LINT across all binding forms". Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`unusedBindings`); Nominal on impl#1 (§34.0), which reports E-MU-001 for an unread keywordless binding instead (`g-impl1-e-mu-001-unread-binding-s479`). | Warning |
 | W-MATCH-002 | §18.16 | Non-exhaustive literal match (string/number/boolean without `_` arm) | Warning |
 | W-DERIVED-001 | §6.6.11 | `const <name> = expr` has no `@variable` references; value never re-evaluates | Warning |
 | E-ERROR-001 | §19.3.3, §19.10.4 | `fail` used in non-`!` function; ALSO a `transaction { }` block **outside a `!` function** — inside a function not declared `!` (S450), or **at the top level of a `${}` logic block, outside any function (S453/B1b)**. §19.10.4: *"`transaction { }` SHALL be valid only inside `!` functions"* — outside one, a failure inside the block has nowhere to go, so its commit-or-rollback promise has no failure path to keep (the same reason manual transaction control there is E-ERROR-015, §19.10.4 S451). One code for one condition; B1b mints no new code. Fires once per block — a NESTED block's placement is reported by E-ERROR-007 on the inner block, not by a second E-ERROR-001 per nesting level. Direction of change: **newly-rejecting** for the top-level case; **migration MEASURED at 0 pre-existing sources** across 2,321 corpus `.scrml` files (the one top-level occurrence is `conformance/cases/error/transaction-top-level-neg`, added by the change). ⛑ **Not reached** for a `transaction` inside a LAMBDA arrow body: the parser never builds a `transaction-block` there (a lambda body is an EXPRESSION, and `parseTransactionBlock()` is called from the top-level loop and `parseOneStatement` only), so no §19.10.4 check sees it. ⛑ **THAT SHAPE IS NOT ACCEPTED SILENTLY, AND AN EARLIER REVISION OF THIS ROW SAID IT WAS.** It claimed the block "degrades to a `bare-expr` at exit 0". That is true only of the AST and of this §19.10.4 checker; through the FULL pipeline the shape is **LOUD** — **E-CODEGEN-INVALID-LOGIC**, measured on both `origin/main` and the S453 head, with a control proving the `transaction` is the cause (the same lambda body without it compiles clean). A codegen refusal is a far smaller problem than the silent-wrong-data exception the struck wording implied, and the distinction matters to anyone triaging it: **loud at the pipeline level; the missing `transaction-block` node is the AST-level fact.** ⚠ A `write: false` compile cannot surface it, because E-CODEGEN-INVALID-LOGIC is a codegen-stage code — which is how the struck claim survived its first measurement. The AST-level fact is pinned by `compiler/tests/unit/transaction-in-function-body.test.js`; a pre-existing parse gap of the class S450 closed for function bodies, not something B1b changes. Provenance: ruling:user-voice-scrml.md S449 (B1b) — *"a top-level `transaction` is rejected (§19.10.4 already says `!` functions only)"* (emitted at `compiler/src/type-system.ts` for `fail`, and `compiler/src/validators/lint-transaction.ts` for `transaction`.) | Error |

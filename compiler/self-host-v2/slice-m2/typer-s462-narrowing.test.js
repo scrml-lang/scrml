@@ -13,7 +13,8 @@
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2 } from "./harness.js";
-import { frontEnd, readSlice } from "./lowered.js";
+import { readSlice } from "./lowered.js";
+import { frontEndNoUnusedLint as frontEnd } from "./no-unused-lint.js";  // s480: fixtures hold incidental unread locals — W-UNUSED-BINDING is tested in slice-m4/unused-binding-s480.test.js
 import { expectNoPageErrors } from "../slice-m1/load-program.js";
 
 let mods;
