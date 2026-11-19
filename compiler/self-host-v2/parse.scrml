@@ -3543,7 +3543,23 @@ ${
                 t = rr.tp
             }
             const b: ABlock | not = armBlockOf(a)
-            if (b is given && !a.lifted && b.stmts.length > 0) {
+            // s480 (§49.6 rule 7, RULED S479 §3.B item 17): "A `lift` goes to the nearest
+            // enclosing bound loop — through any statement loops, `if`s, `match` arms and `!{}`
+            // arms in between." Here the arm's value is not used (§18.5: "In a STATEMENT position
+            // a block arm yields nothing"), so a LAST-statement `lift` (which parseArmBlock read as
+            // the arm's value, `Eval(e)` + `lifted`) is the `lift` statement it is written as —
+            // analyze sends it to the nearest bound loop, or refuses it where there is none
+            let liftedTail = false
+            if (b is given && a.lifted && b.stmts.length > 0) {
+                const lastL: AStmt = b.stmts[b.stmts.length - 1]
+                const lx: AExpr | not = stmtExpr(lastL)
+                if (lx is given) {
+                    const ls: AStmt = { nid: lastL.nid, span: lastL.span, k: AStmtK.Lift(ALift.LiftExpr(lx)) }
+                    a = withArmBlock(a, { nid: b.nid, span: b.span, stmts: b.stmts.slice(0, b.stmts.length - 1).concat([ls]) }, false, a.bare)
+                    liftedTail = true
+                }
+            }
+            if (b is given && !liftedTail && !a.lifted && b.stmts.length > 0) {
                 const last: AStmt = b.stmts[b.stmts.length - 1]
                 // s474 #1512 — a `{ e }` brace (one expression, no `;`) is that
                 // expression only where the arm's value is used (§18.5, RULED

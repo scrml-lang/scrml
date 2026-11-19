@@ -5078,7 +5078,7 @@ ${
             .LocalFn(f: x) :> 0
             .Loop(body: lb) :> liftsInto(lb, into)
             .If(thenB: t, elseB: el) :> liftsInto(t, into) + liftsIntoMaybe(el, into)
-            .Attempt(ok: ok) :> liftsInto(ok.body, into)
+            .Attempt(ok: ok, arms: arms) :> liftsInto(ok.body, into) + liftsIntoArms(arms, into)   // s480: a statement arm's `lift` (§49.6 rule 7)
             .Gather(g: x) :> 0
             .Suspend(then: t) :> 0
             .Join(k: x) :> 0
@@ -5096,6 +5096,12 @@ ${
             .Break(target: x) :> 0
             .Continue(target: x) :> 0
         }
+    }
+
+    fn liftsIntoArms(arms: ErrArm[], into: int) -> int {
+        let n: int = 0
+        for (const a of arms) { n = n + liftsInto(a.body, into) }
+        return n
     }
 
     fn liftIs(i: Sym, into: int) -> int {
