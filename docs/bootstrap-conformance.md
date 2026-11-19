@@ -7,30 +7,30 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1900 of 1900 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1903 of 1903 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 702 | 36.9% |
+| PASS | 706 | 37.1% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 4 | 0.2% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 637 | 33.5% |
-| UNSUPPORTED | 557 | 29.3% |
+| UNSUPPORTED | 556 | 29.2% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 706; of those, 702 hold (99.4%). Runtime half executed on the bootstrap for 230 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 710; of those, 706 hold (99.4%). Runtime half executed on the bootstrap for 230 case(s).
 
-- **Vacuous** passes: 18 of 702 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **684**.
+- **Vacuous** passes: 19 of 706 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **687**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 3 of 4; the other 1 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 557.
+UNSUPPORTED by reason: bootstrap-unsupported 556.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **879** — PASS 460 · FAIL 4 · UNSUPPORTED 415. Twin holds 460 (non-vacuous 445). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **882** — PASS 464 · FAIL 4 · UNSUPPORTED 414. Twin holds 464 (non-vacuous 448). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 5 replace a twin's expectations · 13 exclude a case.
 - Superseded-code mappings applied: 8 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -130,12 +130,12 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | hostmethod | 1 | 1 | · | · | · | · | · | · | · |
 | input | 2 | · | · | · | · | · | 2 | · | · |
 | lifecycle | 68 | 34 | · | · | · | 22 | 12 | · | · |
-| linear | 15 | 5 | · | · | · | · | 10 | · | · |
+| linear | 15 | 6 | · | · | · | · | 9 | · | · |
 | loop | 8 | 3 | · | · | · | 3 | 2 | · | · |
 | maps | 13 | · | · | · | · | 13 | · | · | · |
 | markup-handler | 89 | 36 | · | · | · | 40 | 13 | · | · |
 | match-block | 23 | 12 | · | · | · | 6 | 5 | · | · |
-| match-codes | 27 | 18 | · | · | · | · | 9 | · | · |
+| match-codes | 30 | 21 | · | · | · | · | 9 | · | · |
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
 | match-leave | 46 | 19 | · | · | · | 12 | 15 | · | · |
 | md | 18 | 1 | · | · | · | 3 | 14 | · | · |
@@ -195,7 +195,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (702)
+### PASS / CODES-ONLY (706)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -584,6 +584,7 @@ none
 - `linear/lin-003-branch-asymmetry-neg` — PASS · TWIN
 - `linear/lin-003-branch-asymmetry-pos` — PASS · TWIN
 - `linear/must-use-unread-neg` — PASS · TWIN · VACUOUS
+- `linear/must-use-unread-pos` — PASS · TWIN · VACUOUS
 - `loop/loop-001-break-outside` — PASS · TWIN
 - `loop/loop-002-continue-outside` — PASS · TWIN
 - `loop/loop-006-neg` — PASS · TWIN
@@ -643,6 +644,9 @@ none
 - `match-codes/e-match-block-in-lift-neg` — PASS · TWIN
 - `match-codes/e-match-block-in-lift-pos` — PASS · TWIN
 - `match-codes/e-match-for-required-pos` — PASS
+- `match-codes/e-scope-redeclare-arm-binder-element-pos` — PASS · TWIN
+- `match-codes/e-scope-redeclare-arm-binder-neg` — PASS · TWIN
+- `match-codes/e-scope-redeclare-arm-binder-value-pos` — PASS · TWIN
 - `match-codes/e-syntax-010-else-last-neg` — PASS · TWIN
 - `match-codes/e-syntax-010-else-not-last-pos` — PASS · TWIN
 - `match-codes/e-syntax-011-guard-clause-pos` — PASS · TWIN
@@ -900,7 +904,7 @@ none
 - `type-state-codes/e-type-any-forbidden-pos` — PASS · TWIN
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (557)
+### UNSUPPORTED (556)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1118,7 +1122,6 @@ none
 - `linear/lin-005-shadow-lin-pos` — twin · bootstrap-unsupported: a parameter the bootstrap cannot read (a default value `b: int = 1` or a rest parameter `...xs: T[]` is not in the bootstrap) — write a plain `name: Type` parameter
 - `linear/lin-006-deferred-ctx-neg` — twin · bootstrap-unsupported: a `<request>` assigns a cell of this program, written `@name` (§6.7.7 "`@variable = expr`") — `@userId` is not one in the bootstrap
 - `linear/lin-006-deferred-ctx-pos` — bootstrap-unsupported: a `<request>` assigns a cell of this program, written `@name` (§6.7.7 "`@variable = expr`") — `@userId` is not one in the bootstrap
-- `linear/must-use-unread-pos` — twin · bootstrap-unsupported: `unusedThing = …` declares `unusedThing` (the keywordless declaration, §50.8.5) and nothing reads it before its scope ends. Whether an unread binding is E-MU-001 is not settled — §34's E-MU-001 row is
 - `loop/loop-005-break-pos` — twin · bootstrap-unsupported: a `break` in the body of a block-bodied callback is not in the bootstrap (INTERIM — the language allows it; this compiler builds a callback body of `const` / `let` locals, assignments to the body's ow
 - `loop/loop-005-neg` — twin · bootstrap-unsupported: the initializer of the file-scope `let` `f` holds a function value — the bootstrap does not judge a function value's body per artifact at module initialization yet (INTERIM, g-boot-file-scope-init-res
 - `markup-handler/s437-r4-arrow-block-seq-dollar-engine-neg` — twin · bootstrap-unsupported: an arrow function stands where the bootstrap does not build a function value — a function value may be bound (`const f = …` / `let f = …`, or `f = …` to such a local), passed as an argument of a scrml
