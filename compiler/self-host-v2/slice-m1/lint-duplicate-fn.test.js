@@ -112,10 +112,11 @@ describe("s479-import-shadow — the §7.6 namespace", () => {
   });
   test("the incident, replayed on the real parse.scrml: importing lex.scrml's `opensTag` is flagged at the local", () => {
     const src = readFileSync(join(TREE, "parse.scrml"), "utf8");
-    const old = "isKeyword } from \"./lex.scrml\"";
+    // the last name of parse.scrml's lex.scrml import (whatever it is) — anchor on the closer
+    const old = " } from \"./lex.scrml\"";
     const at = src.indexOf(old);
     expect(at).toBeGreaterThan(0);
-    const replay = src.slice(0, at) + "isKeyword, opensTag } from \"./lex.scrml\"" + src.slice(at + old.length);
+    const replay = src.slice(0, at) + ", opensTag } from \"./lex.scrml\"" + src.slice(at + old.length);
     const r = lintText(replay);
     expect(r.violations.length).toBe(1);
     expect(r.violations[0].message).toContain("top-level function `opensTag` has the name of an import");

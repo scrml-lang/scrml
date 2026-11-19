@@ -7,30 +7,30 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1903 of 1903 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1905 of 1905 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 706 | 37.1% |
+| PASS | 710 | 37.3% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 4 | 0.2% |
+| FAIL | 1 | 0.1% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 637 | 33.5% |
-| UNSUPPORTED | 556 | 29.2% |
+| NOT-TWINNED | 637 | 33.4% |
+| UNSUPPORTED | 557 | 29.2% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 710; of those, 706 hold (99.4%). Runtime half executed on the bootstrap for 230 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 711; of those, 710 hold (99.9%). Runtime half executed on the bootstrap for 231 case(s).
 
-- **Vacuous** passes: 19 of 706 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **687**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 3 of 4; the other 1 are implemented checks that answered wrong.
+- **Vacuous** passes: 18 of 710 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **692**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 1 of 1; the other 0 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 556.
+UNSUPPORTED by reason: bootstrap-unsupported 557.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **882** — PASS 464 · FAIL 4 · UNSUPPORTED 414. Twin holds 464 (non-vacuous 448). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **883** — PASS 468 · FAIL 1 · UNSUPPORTED 414. Twin holds 468 (non-vacuous 453). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 5 replace a twin's expectations · 13 exclude a case.
 - Superseded-code mappings applied: 8 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -105,7 +105,7 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | attr-executable-sink | 23 | 7 | · | · | · | 11 | 5 | · | · |
 | auth | 65 | 12 | · | · | · | 15 | 38 | · | · |
 | block-grammar | 14 | 11 | · | · | · | 1 | 2 | · | · |
-| body-top | 27 | 19 | · | 1 | · | 1 | 6 | · | · |
+| body-top | 27 | 20 | · | · | · | 1 | 6 | · | · |
 | capability | 12 | 7 | · | · | · | · | 5 | · | · |
 | channel | 49 | 11 | · | · | · | 37 | 1 | · | · |
 | codegen | 4 | 1 | · | · | · | 3 | · | · | · |
@@ -116,7 +116,7 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
 | element-refusal | 39 | 26 | · | · | · | 11 | 2 | · | · |
-| endpoint | 24 | 24 | · | · | · | · | · | · | · |
+| endpoint | 25 | 24 | · | · | · | · | 1 | · | · |
 | engine | 99 | 29 | · | · | · | 50 | 20 | · | · |
 | enum | 1 | 1 | · | · | · | · | · | · | · |
 | equality | 10 | 6 | · | · | · | 4 | · | · | · |
@@ -147,7 +147,7 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | own-value-type | 12 | 12 | · | · | · | · | · | · | · |
 | page | 3 | 2 | · | · | · | 1 | · | · | · |
 | parse-syntax | 4 | 2 | · | · | · | 2 | · | · | · |
-| parse-variant | 12 | 12 | · | · | · | · | · | · | · |
+| parse-variant | 13 | 13 | · | · | · | · | · | · | · |
 | persist | 5 | 5 | · | · | · | · | · | · | · |
 | print | 1 | 1 | · | · | · | · | · | · | · |
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
@@ -159,33 +159,19 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | schema-for | 15 | · | · | · | · | · | 15 | · | · |
 | server-db | 92 | 15 | · | · | · | 17 | 60 | · | · |
 | server-fn | 27 | 13 | · | · | · | 7 | 7 | · | · |
-| sql | 21 | 6 | · | 1 | · | 9 | 5 | · | · |
+| sql | 21 | 7 | · | · | · | 9 | 5 | · | · |
 | ssr | 14 | · | · | · | · | 14 | · | · | · |
 | style | 27 | 2 | · | · | · | 24 | 1 | · | · |
 | table-for | 14 | · | · | · | · | 11 | 3 | · | · |
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
 | tool | 11 | 11 | · | · | · | · | · | · | · |
-| type-state-codes | 32 | 9 | · | 2 | · | 6 | 15 | · | · |
+| type-state-codes | 32 | 10 | · | 1 | · | 6 | 15 | · | · |
 
-### FAIL (4)
+### FAIL (1)
 
-- `body-top/declaration-trailing-tokens-rejected` (twin · parse-reject)
-  - count: E-STMT-MISSING-SEMICOLON fired 1 time(s), expected exactly 2
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `extra` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-TYPE: expected a type, found `"a"`
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `|` (other statements at logic-block level are not in the bootstrap)
-- `sql/query-not-readable-neg` (twin · parse-reject; not in the bootstrap: E-SQL-QUERY-NOT-READABLE)
-  - missing E-SQL-QUERY-NOT-READABLE
-  - count: E-SQL-QUERY-NOT-READABLE fired 0 time(s), expected exactly 1
-  - E-SQL-003: the content of `?{ … }` must be a backtick SQL template (`?{`SELECT …`}`) — found `SELECT` (§8.1). The SQL text is fixed at compile time; a runtime value is bound with `${…}` inside the template (§8.2), never assembled into the SQL
 - `type-state-codes/e-type-004-struct-field-access-pos` (twin · codes; not in the bootstrap: E-TYPE-004)
   - missing E-TYPE-004
   - severity: E-TYPE-004 did not fire (expected error)
-- `type-state-codes/e-type-045-prefix-not-negation-pos` (twin · parse-reject; not in the bootstrap: E-TYPE-045)
-  - missing E-TYPE-045
-  - severity: E-TYPE-045 did not fire (expected error)
-  - E-PARSE-EXPECTED: expected `)`, found `@`
-  - E-PARSE-TRAILING: unexpected `@` after the expression
 
 ### CRASH (0)
 
@@ -195,7 +181,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (706)
+### PASS / CODES-ONLY (710)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -229,6 +215,7 @@ none
 - `block-grammar/style-001-interp-body-pos` — PASS
 - `body-top/bare-write-is-legal` — PASS · TWIN
 - `body-top/code-line-after-declaration-runs` — PASS · TWIN
+- `body-top/declaration-trailing-tokens-rejected` — PASS · TWIN
 - `body-top/declared-prose-renders` — PASS · TWIN
 - `body-top/js-construct-await` — PASS
 - `body-top/js-construct-class` — PASS
@@ -726,6 +713,7 @@ none
 - `parse-variant/error-invalid-payload` — PASS · TWIN
 - `parse-variant/error-malformed-json` — PASS · TWIN
 - `parse-variant/error-missing-discriminator` — PASS · TWIN
+- `parse-variant/error-repeated-key` — PASS · TWIN
 - `parse-variant/error-unknown-variant` — PASS · TWIN
 - `parse-variant/happy-payload-variant` — PASS · TWIN
 - `parse-variant/happy-unit-variant` — PASS · TWIN
@@ -880,6 +868,7 @@ none
 - `sql/multiple-statements-neg` — PASS · TWIN
 - `sql/one-statement-trailing-semicolon-pos` — PASS · TWIN
 - `sql/prepare-tool-in-block-e-sql-006-neg` — PASS (also emitted, unasserted: E-ERROR-002, E-PRINT-NON-PRIMITIVE)
+- `sql/query-not-readable-neg` — PASS · TWIN
 - `sql/runtime-expr-body-e-sql-003-neg` — PASS · TWIN
 - `style/program-scope-overlap-soft` — PASS
 - `style/style-001-style-block-pos` — PASS
@@ -899,12 +888,13 @@ none
 - `type-state-codes/e-type-004-struct-field-access-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-041-not-assign-mismatch-neg` — PASS · TWIN
 - `type-state-codes/e-type-041-not-assign-mismatch-pos` — PASS · TWIN
-- `type-state-codes/e-type-045-prefix-not-negation-neg` — PASS · TWIN · VACUOUS
+- `type-state-codes/e-type-045-prefix-not-negation-neg` — PASS · TWIN
+- `type-state-codes/e-type-045-prefix-not-negation-pos` — PASS · TWIN
 - `type-state-codes/e-type-081-partial-match-render-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-any-forbidden-pos` — PASS · TWIN
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (556)
+### UNSUPPORTED (557)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1024,6 +1014,7 @@ none
 - `derived/e-derived-server-only-reach-fn-path` — twin · bootstrap-unsupported: `scrml:auth` is a server-only stdlib module (§12.2 Trigger 3: its implementation reaches a host API no browser has, or it handles a credential). Calling one of its bindings SHALL place the calling fun
 - `element-refusal/handler-arrow-markup-script-pos` — bootstrap-unsupported: an arrow function stands where the bootstrap does not build a function value — a function value may be bound (`const f = …` / `let f = …`, or `f = …` to such a local), passed as an argument of a scrml
 - `element-refusal/meta-emit-raw-body-pos` — bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
+- `endpoint/cors-attr-clean` — bootstrap-unsupported: `cors=` on `<endpoint>` (§61.7 — cross-origin browser callers) is not in the bootstrap yet: it builds no CORS answer (nor the `<program cors=…>` one), so it is refused by name rather than ignored (INT
 - `engine/history-no-inner-engine-pos` — twin · bootstrap-unsupported: `history` on the state-child `<Idle>` is not in the bootstrap — a state-child reads only `rule=` (§66.13.2); the attribute would be ignored
 - `engine/internal-rule-not-composite-pos` — twin · bootstrap-unsupported: `internal:rule` on the state-child `<Idle>` is not in the bootstrap — a state-child reads only `rule=` (§66.13.2); the attribute would be ignored
 - `engine/mount-not-engine-neg` — twin · bootstrap-unsupported: a component written as a constant (`const Name = <…>`, §21.2 Form 2) — §66.15 writes a component as a declaration; neither form is in the bootstrap at logic-block level

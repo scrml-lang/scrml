@@ -1,0 +1,13 @@
+<program>
+
+type Op:enum = {
+  Ping
+  Echo(say: string)
+}
+
+<endpoint path="/op" method="POST" accepts=Op cors="https://a.example">
+  <Ping : { pong: true }>
+  <Echo(say) : { said: say }>
+</endpoint>
+
+</program>

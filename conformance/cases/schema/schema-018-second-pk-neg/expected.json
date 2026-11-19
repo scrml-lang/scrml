@@ -1,0 +1,35 @@
+{
+  "id": "schema-018-second-pk-neg",
+  "description": "§38.5.1 (S479) — a `<schema>` table with two columns marked `primary key` is E-SCHEMA-018 (Error). SQLite refuses the table at CREATE (\"table has more than one primary key\"), so a program that compiled would ship DDL that cannot run. The positive twin is schema/schema-018-composite-key-pos (a key over several columns written as one table-level `PRIMARY KEY (a, b)` in raw DDL).",
+  "language-version": "1.0",
+  "spec": "§38.5.1",
+  "provenance": "ruling:user-voice-scrml.md S479 \"⭐ RULED — the rest of S478 hand-off §3.B, PA recs adopted\" item 4 (gap g-boot-schema-second-pk-code-s478)",
+  "rationale": "§38.5.1: \"Exactly one column per table MAY be designated `primary key`.\" \"A table with more than one `primary key` SHALL be a compile error (**E-SCHEMA-018**): two columns of one table each marked `primary key`, or one column marked twice …\"",
+  "expect": {
+    "codes": [
+      "E-SCHEMA-018"
+    ],
+    "notCodes": [
+      "E-BOOTSTRAP-UNSUPPORTED",
+      "W-SCHEMA-001"
+    ],
+    "codeCounts": {
+      "E-SCHEMA-018": 1
+    },
+    "severity": {
+      "E-SCHEMA-018": "error"
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-schema-018-unemitted-s479",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'E-SCHEMA-018' fired 0 time(s), expected exactly 1",
+          "missing:E-SCHEMA-018",
+          "severity:code 'E-SCHEMA-018' did not fire (expected severity error)"
+        ]
+      }
+    }
+  }
+}

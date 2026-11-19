@@ -88,7 +88,9 @@ describe("(1) a scrml structural element is never an HTML element", () => {
   // `E-NAME-COLLIDES-RESERVED`" (§24.4: the capitalised spellings too). Those are refused at
   // the declaration (markup-failclosed-s473.test.js); the rest keep r2 F2.
   const RESERVED = ["engine", "match", "each", "errors", "ontransition", "ontimeout", "onidle", "onmount",
-    "render", "page", "endpoint", "onchange", "theme", "defaults", "md"];
+    "render", "page", "endpoint", "onchange", "theme", "defaults", "md",
+    // S479 ruling item 15 (§4.15): `db` is reserved
+    "db"];
   const reserved = (n) => RESERVED.includes(n.toLowerCase());
   const declSrc = (name) => `<program>\n    <${name} label:string="x">\n    </>\n    renders <p>\${label}</p>\n    <main>\n        <${name} label="y"/>\n    </main>\n</program>\n`;
   for (const name of [...STRUCTURAL, "errors", "db", "Page", "Timer", "request"].filter((n) => !reserved(n))) {
@@ -103,6 +105,14 @@ describe("(1) a scrml structural element is never an HTML element", () => {
       expect(run(declSrc(name)).diags.map((x) => x.code)).toEqual(["E-NAME-COLLIDES-RESERVED"]);
     });
   }
+  // S479 ruling item 15: `db` is reserved, and a use `<db …>` is always the §4 state block — so the
+  // use here is read as a `<db>` (no `src=`, a stray `label=`) and refused as one, never rendered
+  // as the declaration
+  test("a user declaration named `db` is E-NAME-COLLIDES-RESERVED; its use is the `<db>` state block (§4.15, S479)", () => {
+    const ds = run(declSrc("db")).diags;
+    expect(ds.filter((x) => x.code === "E-NAME-COLLIDES-RESERVED").length).toBe(1);
+    expect(ds.filter((x) => x.code !== "E-NAME-COLLIDES-RESERVED").map((x) => x.message).join("\n")).toContain("a `<db>` without `src=` names no database");
+  });
   test("a `single` program cell named `page` is E-DECL-SINGLE-INSTANTIATED at `<page/>`, not a structural refusal", () => {
     const src = `<program>\n    type P:enum = { A, B }\n    <page:P=.A single>\n        <A rule=.B : "a">\n        <B rule=.A : "b">\n    </>\n    <main>\n        <page/>\n    </main>\n</program>\n`;
     expect(run(src).diags.map((x) => x.code)).toEqual(["E-DECL-SINGLE-INSTANTIATED"]);

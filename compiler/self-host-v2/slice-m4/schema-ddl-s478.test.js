@@ -170,8 +170,8 @@ describe("negative probes — fails CLOSED (refused by name)", () => {
     expect(errsOf(P(`        CREATE TABLE a (id INTEGER PRIMARY KEY, "x y" TEXT)`))).toEqual([UNSUP]);
     expect(errsOf(P("        CREATE TABLE a (id INTEGER PRIMARY KEY, `b` TEXT)"))).toEqual([UNSUP]);
   });
-  test("two primary keys (code still OPEN — refused by name); a duplicate column E-SCHEMA-017 and table E-SCHEMA-016 (S478 ruling 18)", () => {
-    expect(errsOf(P("        CREATE TABLE a (id INTEGER PRIMARY KEY, b TEXT, PRIMARY KEY (b))"))).toEqual([UNSUP]);
+  test("two primary keys E-SCHEMA-018 (S479 ruling item 4); a duplicate column E-SCHEMA-017 and table E-SCHEMA-016 (S478 ruling 18)", () => {
+    expect(errsOf(P("        CREATE TABLE a (id INTEGER PRIMARY KEY, b TEXT, PRIMARY KEY (b))"))).toEqual(["E-SCHEMA-018"]);
     expect(errsOf(P("        CREATE TABLE a (id INTEGER PRIMARY KEY, b TEXT, B TEXT)"))).toEqual(["E-SCHEMA-017"]);
     expect(errsOf(P("        CREATE TABLE a (id INTEGER PRIMARY KEY)\n        CREATE TABLE A (id INTEGER PRIMARY KEY)"))).toEqual(["E-SCHEMA-016"]);
   });

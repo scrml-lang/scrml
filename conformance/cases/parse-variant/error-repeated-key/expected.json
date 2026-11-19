@@ -1,0 +1,38 @@
+{
+  "id": "parse-variant-error-repeated-key",
+  "description": "§41.13 a repeated key — the string input '{\"tag\":\"Success\",\"rows\":42,\"rows\":7}' names `rows` twice in one object: a decode failure, ::Malformed (not Success(7), the last-value-wins reading of JSON.parse); @result stays .Empty.",
+  "language-version": "1.0",
+  "spec": "§41.13, §61.3",
+  "provenance": "ruling:user-voice-scrml.md \"⭐ RULED — #1962 file-scope questions 1–4 + `parseVariant` duplicate keys, PA recs adopted (S479, 2026-11-18)\" item 5",
+  "rationale": "§41.13 A repeated key: \"When the input is a string, a JSON text in which one object — the top-level object or any object nested in it — names the same key twice is a decode failure — `::Malformed` — exactly as §61.3 refuses such an `<endpoint>` request body\".",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#decode"
+      }
+    ],
+    "state": {
+      "result": "Empty",
+      "parseError": "malformed"
+    },
+    "domAnchored": [
+      {
+        "selector": "#status",
+        "text": "Parse status: malformed"
+      },
+      {
+        "selector": "#out",
+        "text": "No rows loaded"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-parsevariant-repeated-key-s479",
+      "fails": {
+        "runtime": "sha256:80cb70eb24fbb215"
+      }
+    }
+  }
+}

@@ -146,10 +146,20 @@ describe("R26 — the booted server serves the endpoint + SSE (via Server.fetch,
     expect(res.status).toBe(404);
   });
 
-  test("OPTIONS preflight on any path → 204 + CORS headers (the /* route)", async () => {
-    const res = await SRV.fetch(`http://localhost/fsp`, { method: "OPTIONS" });
+  test("OPTIONS preflight on a non-endpoint path → 204 + CORS headers (the /* route)", async () => {
+    const res = await SRV.fetch(`http://localhost/elsewhere`, { method: "OPTIONS" });
     expect(res.status).toBe(204);
     expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
+  });
+
+  // S479 ruling (user-voice) "program `cors=` does not cover `<endpoint>` routes" — §39.2.1:
+  // "An endpoint without its own `cors=` answers a preflight 405 and sends no
+  // `Access-Control-*` header, whatever the program's `cors=` says."
+  test("OPTIONS preflight on the endpoint path → 405 + Allow, no CORS header (program cors= does not cover it)", async () => {
+    const res = await SRV.fetch(`http://localhost/fsp`, { method: "OPTIONS", headers: { "Access-Control-Request-Method": "POST" } });
+    expect(res.status).toBe(405);
+    expect(res.headers.get("Allow")).toBe("POST");
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
   });
 });
 
