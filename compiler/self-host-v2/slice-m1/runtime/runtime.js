@@ -418,8 +418,10 @@ export class Derived {
 }
 
 class Effect {
-  constructor(scope, fn) {
+  constructor(scope, fn, blank = null) {
     this.fn = fn;
+    // s480 — a HOLE's effect (`hole`, below) carries the way its hole renders nothing; null otherwise
+    this.blank = blank;
     this.disposed = false;
     this.sources = new Set();
     stats.effects++;
@@ -435,7 +437,17 @@ class Effect {
     unsubscribe(this);
     const saved = tracking;
     tracking = this;
-    try { this.fn(); } finally { tracking = saved; }
+    try {
+      this.fn();
+    } catch (err) {
+      if (this.blank === null) throw err;
+      tracking = saved;
+      // The hole renders nothing — whatever the throw was (fail closed: an `if=` whose test
+      // threw shows no arm, a `show=` element is hidden, never the last value it showed).
+      untrack(this.blank);
+      if (!isTrap(err)) throw err;
+      reportLater(err);                              // a trap: reported once, and it ends here
+    } finally { tracking = saved; }
   }
   markStale() {
     queue.add(this);
@@ -447,6 +459,37 @@ class Effect {
 export function effect(scope, fn) {
   requireScope(scope, "an effect");
   return new Effect(scope, fn);
+}
+
+// ---------------------------------------------------------------------------
+// s480 — THE TRAP UNIT IS THE EFFECT, NOT THE MOUNT (SPEC §19.17; ruling
+// user-voice-scrml.md S479 "⭐ RULED — the rest of S478 hand-off §3.B" item 20:
+// "the trap unit is the effect, not the mount — the failing hole renders
+// nothing, the trap is reported once, the rest of the mount proceeds").
+// A view hole's effect is registered through `hole(scope, fn, blank)`: when a
+// run of `fn` throws, `blank()` makes the hole render nothing (no text, no arm,
+// no rows, a `show=` element hidden), on the first run (the mount) and on every
+// later one. A TRAP (§19.17) then ends there: it is reported once (§19.17 "Every
+// trap SHALL be reported … It SHALL NOT be swallowed silently"), and the mount —
+// every other hole, and the insertion of the view — proceeds. Any other throw (a
+// bootstrap defect, a template the HTML parser restructured) is still rethrown
+// after the blank, as before. NOT a hole here (unchanged — the throw still ends
+// the mount): a data-bound ATTRIBUTE (`rt.attr` — with the attribute removed, a
+// value such as an `<iframe>`'s `sandbox` would be the less safe state; owner
+// question in g-boot-mount-trap-attr-hole-unruled-s480), a body-top statement
+// (`rt.run` — a top-level logic block, its own unit in §19.17, and a guard the
+// page must not render past), and an `<effect>` body.
+// ---------------------------------------------------------------------------
+
+/** A trap (§19.17): the runtime's `ScrmlTrap`, or a host file's error carrying the same name and a code (stdlib/math/host.js). */
+function isTrap(err) {
+  return err instanceof ScrmlTrap || (err !== null && typeof err === "object" && err.name === "ScrmlTrap" && typeof err.code === "string");
+}
+
+/** A view hole's tracked effect (§19.17, s480): a throw blanks the hole; a trap is reported and ends there. */
+function hole(scope, fn, blank) {
+  requireScope(scope, "a view hole");
+  return new Effect(scope, fn, blank);
 }
 
 // ---------------------------------------------------------------------------
@@ -1553,7 +1596,7 @@ export function errors(scope, marker, messages, all) {
   const end = document.createComment("/errors");
   marker.parentNode.insertBefore(end, marker.nextSibling);
   let shown = [];
-  effect(scope, () => {
+  hole(scope, () => {
     const ms = messages();
     const want = all ? ms : ms.slice(0, 1);
     untrack(() => {
@@ -1566,6 +1609,9 @@ export function errors(scope, marker, messages, all) {
         return p;
       });
     });
+  }, () => {
+    for (const p of shown) p.remove();
+    shown = [];
   });
   scope.own(() => { for (const p of shown) p.remove(); end.remove(); });
 }
@@ -3695,7 +3741,7 @@ function display(v) { return v === null || v === undefined ? "" : String(v); }
 export function text(scope, marker, fn) {
   const t = document.createTextNode("");
   marker.parentNode.replaceChild(t, marker);
-  effect(scope, () => { t.data = display(fn()); });
+  hole(scope, () => { t.data = display(fn()); }, () => { t.data = ""; });
 }
 
 // ---------------------------------------------------------------------------
@@ -4100,7 +4146,7 @@ export function cssValueOf(v, extraFunctions) {
 /** `name` (`--scrml-<cell>`) on `:root` follows `read()` — guarded by `cssValueOf`. */
 export function cssVar(scope, name, read) {
   const style = document.documentElement.style;
-  effect(scope, () => {
+  hole(scope, () => {
     const v = cssValueOf(read());
     if (v === null) {
       style.removeProperty(name);
@@ -4108,15 +4154,15 @@ export function cssVar(scope, name, read) {
       return;
     }
     style.setProperty(name, v);
-  });
+  }, () => style.removeProperty(name));
 }
 
 export function visibility(scope, el, fn) {
   const own = el.style.display;
-  effect(scope, () => {
+  hole(scope, () => {
     const d = fn() === true ? own : "none";
     if (el.style.display !== d) el.style.display = d;
-  });
+  }, () => { el.style.display = "none"; });
 }
 
 /**
@@ -4186,11 +4232,11 @@ export function on(scope, el, event, handler) {
  */
 export function bind(scope, el, prop, read, write, surface) {
   requireScope(scope, "a bind");
-  effect(scope, () => {
+  hole(scope, () => {
     const v = read();
     const shown = prop === "checked" ? v === true : display(v);
     if (el[prop] !== shown) el[prop] = shown;
-  });
+  }, () => { el[prop] = prop === "checked" ? false : ""; });
   on(scope, el, prop === "checked" ? "change" : "input", () => {
     write(el[prop]);
     if (surface) surface.touch();
@@ -4211,7 +4257,7 @@ export function bind(scope, el, prop, read, write, surface) {
 export function cond(scope, anchor, arms) {
   let current = -1;
   let armScope = null;
-  effect(scope, () => {
+  hole(scope, () => {
     let idx = -1;
     for (let i = 0; i < arms.length; i++) if (arms[i].test()) { idx = i; break; }
     if (idx === current) return;
@@ -4224,6 +4270,11 @@ export function cond(scope, anchor, arms) {
         arms[idx].render(armScope, anchor);
       }
     });
+  }, () => {
+    // a test that threw shows NO arm — not the arm it showed before, and not a later `else`
+    if (armScope) armScope.dispose();
+    armScope = null;
+    current = -1;                                    // no arm is shown
   });
 }
 
@@ -4237,13 +4288,16 @@ export function cond(scope, anchor, arms) {
  */
 export function gather(scope, anchor, build) {
   let rowsScope = null;
-  effect(scope, () => {
+  hole(scope, () => {
     const rows = build();
     untrack(() => {
       if (rowsScope) rowsScope.dispose();
       rowsScope = scope.child();
       for (const r of rows) r(rowsScope, anchor);
     });
+  }, () => {
+    if (rowsScope) rowsScope.dispose();
+    rowsScope = null;
   });
 }
 
@@ -4264,9 +4318,12 @@ export function gather(scope, anchor, build) {
  */
 export function gatherKeyed(scope, anchor, build) {
   let rows = [];
-  effect(scope, () => {
+  hole(scope, () => {
     const lifted = build();
     untrack(() => { rows = reconcileKeyed(scope, anchor, rows, lifted); });
+  }, () => {
+    for (const r of rows) r.scope.dispose();
+    rows = [];
   });
 }
 
@@ -4298,7 +4355,7 @@ function textCellRow(scope, anchor, cell) {
   const t = document.createTextNode("");
   anchor.parentNode.insertBefore(t, anchor);
   scope.own(() => { if (t.parentNode) t.parentNode.removeChild(t); });
-  effect(scope, () => { t.data = display(cell.get()); });
+  hole(scope, () => { t.data = display(cell.get()); }, () => { t.data = ""; });
 }
 
 function reconcileKeyed(scope, anchor, oldRows, lifted) {
@@ -4426,9 +4483,12 @@ function moveRange(row, before) {
  */
 export function each(scope, anchor, src, key, render) {
   let rows = [];
-  effect(scope, () => {
+  hole(scope, () => {
     const items = src();
     untrack(() => { rows = reconcile(scope, anchor, rows, items, key, render); });
+  }, () => {
+    for (const r of rows) r.scope.dispose();
+    rows = [];
   });
 }
 

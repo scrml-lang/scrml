@@ -25031,6 +25031,18 @@ S440, are earlier runtime errors at a value boundary. They keep their own sectio
 - Every trap SHALL be reported to scrml's logging surface (§19.6.8 B5) with its code, the source location and,
   for `E-INDEX-OUT-OF-RANGE-RT`, the index and the length (for `E-WRITE-INVARIANT-RT`, the length the write would
   leave and the bound, S477). It SHALL NOT be swallowed silently.
+- *(S479.)* In a client view the unit of a trap is the **effect, not the mount**: a trap raised while one
+  hole's reactive effect runs — a text hole, an `if=` / `show=` test, a loop's or `<each>`'s rows, a bound
+  value — ends that effect only. The failing hole renders nothing (no text; no arm, the `else` included; no
+  rows; a `show=` element is hidden), the trap is reported once as above, and the rest of the mount
+  proceeds. Inside an `<errorBoundary>` the boundary's backstop takes it instead (§19.6.8 B2).
+  *(Provenance: ruling:user-voice-scrml.md S479 "⭐ RULED — the rest of S478 hand-off §3.B" item 20 — "the trap
+  unit is the effect, not the mount — the failing hole renders nothing, the trap is reported once, the rest of
+  the mount proceeds"; direction of change: semantics-changed — before it, one trap left the whole view
+  unmounted.)* ⚑ **OPEN (not ruled):** a data-bound attribute's value that traps — with the attribute absent,
+  some attributes (an `<iframe>`'s `sandbox`) are in their less safe state; the bootstrap still ends the mount
+  there (`g-boot-mount-trap-attr-hole-unruled-s480`). A body-top statement is a top-level logic block, its
+  own unit above, not a hole.
 - *(S473, DRAFT.)* In a `kind="service"` program (§68) the unit of execution is the **turn**: a trap ends its turn
   only, is reported to stderr with its code and location, and the program carries on with its next event, unless
   the program declares `on-trap="stop"` (then it stops with exit code 70). §68.6 is the full rule.
