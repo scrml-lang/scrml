@@ -16,4 +16,6 @@ W-UNUSED-BINDING population/reading questions (#2004), PA recs adopted (S480, 20
 - [x] corpus (bootstrap single-file front end, 5256 files, 646 clean): 22 arm hits / 19 files, all hand-checked
       genuinely unread (16 are `.Transport(t) :> return`); conformance: 28 cases newly carry the warning
       (unexpected Warning, still PASS), all genuinely unread
-- [ ] full gate set on final head
+- [x] full gate set on final head: pretest; bootstrap-conformance PASS 734->736, FAIL 0, CRASH 0, no PASS->FAIL; s34-census, types-gate,
+      snippet-gate, claim-gate, corpus-compile-floor, gen-md-shim green; host-global-scan both shards (new esm throws pinned);
+      byte-compare of 736 PASS conformance cases base vs head: identical (only the two new cases differ)
