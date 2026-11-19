@@ -52,3 +52,24 @@ ruling:user-voice-scrml.md-S480-four-recs item 1 (§61.2 placement + §61.7 dupl
   conformance cases only.
 - C5: LOW note (DELETE at an endpoint path → 404 + program CORS headers) under
   g-boot-endpoint-residue-s478; progress.
+
+## r2 (fix round for the #1998 r1 re-review — BLOCKED on N1)
+- C6 (4e6cc9374) N1/L2/L3/N2/L1 + NITs: the `<endpoint>` opener is read whole or refused
+  (readEndpointOpenerAttrs coverage: every character the markup tokenizer drops → E-ATTR-001
+  at it; stray =/value → E-ATTR-001; ATTR_OP_REJECT → the markup reader's code); repeated
+  path=/method=/accepts= → PATH-INVALID / METHOD-INVALID / ACCEPTS-MISSING; opener end by the
+  same tokenizer (readEndpointOpenerExtent); origin host [a-z0-9_.-]; cycle edges skipped in
+  importedFilePaths (Tarjan); bootstrap path messages. Tests: endpoint-opener-closed-grammar-served
+  (68; 48 red on 15e64df2f, incl. all four N1 reproducers).
+- Reproducers on 15e64df2f, served: sq1 / tick → preflight 204 ACAO *; sqpath → mounted at /evil;
+  sq2 → cors= dropped (405). Head: all four refused at build (no _server.js).
+- Corpus: 0 of 33 `<endpoint>`-bearing .scrml files change diagnostics.
+- OPEN (fork, not built): an unknown well-formed attribute (`note="…"`) — no §34 code fits;
+  g-impl1-endpoint-unknown-attr-s480.
+- Merged origin/main (2d3f9c665; no compiler/src change on main).
+- Final gates (merged tree): pretest 0; bootstrap conformance 1926 attempted, PASS 732 / FAIL 0 /
+  CRASH 0; byte-identity vs 15e64df2f: 66/66 building `<endpoint>`-free programs identical full
+  `scrml build` output (+7 refused identically on both); conformance impl#1 output 1925/1926
+  identical (codes + output hashes; the 1 is components/missing-required-slot-reject, its output
+  hash differs run to run on both trees); s34-census --check-new / types-gate / snippet-gate /
+  claim-gate / corpus-compile-floor / gen-md-shim PASS.
