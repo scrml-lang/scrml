@@ -5873,24 +5873,65 @@ ${
     // once-bound init, `boundValue`), the named struct `s`, and the path — the path ONLY through
     // the keep tests, `keepKey(field value) == placeKeyOf(d, inst, path ++ q)`. `keptPathClass`
     // is that path when some field value of some StructOf in the program reads a place under it
-    // (ob.keepReads), else "*": no keep test under the path can then succeed, so every path in
+    // (ob.keepPrefixes), else "*": no keep test under the path can then succeed, so every path in
     // "*" walks the same fields the same way. Only a CLEAN walk is recorded (a problem ends the
     // whole walk), and a clean state walked again is clean again and adds nothing to `done`
     // (every no-value state it expanded is in `done` already), so the memo changes no verdict
     // and no message — it only drops repeats.
+    // s480 r3 (review:#1994 r2 INFO): only a "*" key is recorded. A key whose class is the path
+    // itself can never be looked up again: one walk visits a path once (a literal state is
+    // reached only by extending the written path field by field — innerKeptWalk restarts with
+    // no value), so recording it changed nothing but the memo's size, which made every lookup
+    // (`indexOf`) linear in the paths with keep reads under them — quadratic with the keep reads.
     type KeptWalk:struct = { msg: string, done: int[], memo: string[] }
 
     fn structTapeKept(p: CoreProgram, ob: OnceBinds, ty: Type, v0: Expr | not, d: Sym, inst: InstRef, path: FieldRef[], label: string) -> string {
         return keptWalk(p, ob, ty, v0, d, inst, path, label, { msg: "", done: [], memo: [] }).msg
     }
 
+    // s480 r3 (review:#1994 r2 INFO): "some keep read is `pk` or under `pk.`" is "`pk` is in the
+    // set of every read's `.`-prefixes" (ob.keepPrefixes, sorted) — a binary search, where the scan
+    // of every read per literal visit was quadratic in the keep reads (kr24 + 800 literals: 2.2 s).
     fn keptPathClass(ob: OnceBinds, d: Sym, inst: InstRef, path: FieldRef[]) -> string {
         const pk: string = placeKeyOf(d, inst, path)
-        const below: string = pk + "."
-        for (const r of ob.keepReads) {
-            if (r == pk || r.startsWith(below)) return pk
-        }
+        if (sortedHas(ob.keepPrefixes, pk)) return pk
         return "*"
+    }
+
+    fn sortedHas(xs: string[], k: string) -> boolean {
+        let lo = 0
+        let hi: int = xs.length
+        while (lo < hi) {
+            const mid: int = Math.floor((lo + hi) / 2)
+            const x: string = xs[mid]
+            if (x == k) return true
+            if (x < k) {
+                lo = mid + 1
+            } else {
+                hi = mid
+            }
+        }
+        return false
+    }
+
+    // The place key each of `cand[lo..hi)` reads (keepKey of its boundValue), and each of its
+    // `.`-prefixes — split in halves (walk.scrml exprNodesOf): one `concat` per element would be
+    // quadratic in the reads. Repeats are kept (sortedHas does not mind them).
+    fn readPrefixes(p: CoreProgram, ob: OnceBinds, cand: Expr[], lo: int, hi: int) -> string[] {
+        if (hi - lo == 1) {
+            const r: string = keepKey(p, ob, boundValue(p, ob, cand[lo], 0))
+            if (!r.startsWith("<")) return []
+            let out: string[] = []
+            let j: int = r.indexOf(".")
+            while (j >= 0) {
+                out = out.concat([r.substring(0, j)])
+                j = r.indexOf(".", j + 1)
+            }
+            return out.concat([r])
+        }
+        if (hi <= lo) return []
+        const mid: int = lo + Math.floor((hi - lo) / 2)
+        return readPrefixes(p, ob, cand, lo, mid).concat(readPrefixes(p, ob, cand, mid, hi))
     }
 
     fn keptWalk(p: CoreProgram, ob: OnceBinds, ty: Type, v0: Expr | not, d: Sym, inst: InstRef, path: FieldRef[], label: string, w0: KeptWalk) -> KeptWalk {
@@ -5945,7 +5986,7 @@ ${
             }
             i = i + 1
         }
-        if (memoKey != "") return { msg: "", done: w.done, memo: w.memo.concat([memoKey]) }
+        if (memoKey != "" && memoKey.endsWith("/*")) return { msg: "", done: w.done, memo: w.memo.concat([memoKey]) }
         return w
     }
 
@@ -6063,8 +6104,8 @@ ${
     // `inits[k]` (program preorder); `assigned` every local some Assign rebinds.
     // s480 r2: `keepReads` — every place key a field value of a StructOf in the program reads
     // (keepKey of its boundValue: a cell read, or a read through a snapshot Local), the only
-    // keys a keep test of keptWalk can ever match (keptPathClass).
-    type OnceBinds:struct = { lets: int[], inits: Expr[], assigned: int[], keepReads: string[] }
+    // keys a keep test of keptWalk can ever match (keptPathClass) — kept as `keepPrefixes` (r3).
+    type OnceBinds:struct = { lets: int[], inits: Expr[], assigned: int[], keepPrefixes: string[] }
 
     fn onceBinds(p: CoreProgram) -> OnceBinds {
         let lets: int[] = []
@@ -6085,13 +6126,9 @@ ${
                 if (localSymOf(fv) is given || cellReadOf(fv) is given) cand = cand.concat([fv])
             }
         }
-        const ob0: OnceBinds = { lets: lets, inits: inits, assigned: assigned, keepReads: [] }
-        let reads: string[] = []
-        for (const fv of cand) {
-            const k: string = keepKey(p, ob0, boundValue(p, ob0, fv, 0))
-            if (k.startsWith("<") && reads.indexOf(k) < 0) reads = reads.concat([k])
-        }
-        return { lets: lets, inits: inits, assigned: assigned, keepReads: reads }
+        const ob0: OnceBinds = { lets: lets, inits: inits, assigned: assigned, keepPrefixes: [] }
+        const pre: string[] = readPrefixes(p, ob0, cand, 0, cand.length)
+        return { lets: lets, inits: inits, assigned: assigned, keepPrefixes: pre.sort() }
     }
 
     fn nodeStructOfFields(n: Node) -> Expr[] {
