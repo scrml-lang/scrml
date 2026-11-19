@@ -15078,6 +15078,13 @@ ${
             } else if (a.name == "csrf") {
                 // §61.7: "`<endpoint>` SHALL NOT carry a `csrf=` attribute" (no code named)
                 m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`csrf=` on `<endpoint>` — §61.7: \"`<endpoint>` SHALL NOT carry a `csrf=` attribute and SHALL NOT be routed through the §12 CSRF gate\" (a JSON + bearer endpoint is CSRF-exempt by construction); remove it", a.span.start, a.span.end)
+            } else if (a.name == "cors") {
+                // S479 ruling (user-voice) "program `cors=` does not cover `<endpoint>` routes;
+                // per-endpoint `cors=`" — §61.7: "An `<endpoint>` MAY carry `cors=`". The
+                // bootstrap builds no CORS (the program-level `cors=` is refused too), so it
+                // is refused by name, INTERIM (g-boot-endpoint-cors-unbuilt-s479): compiling it
+                // as an endpoint with no CORS would silently drop what the author asked for.
+                m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`cors=` on `<endpoint>` (§61.7 — cross-origin browser callers) is not in the bootstrap yet: it builds no CORS answer (nor the `<program cors=…>` one), so it is refused by name rather than ignored (INTERIM, gap g-boot-endpoint-cors-unbuilt-s479). Without `cors=`, the endpoint's preflight is answered 405 and same-origin or non-browser callers are served", a.span.start, a.span.end)
             } else {
                 m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=` on `<endpoint>` — an `<endpoint>` opener carries `path=`, `method=` and `accepts=` only (§61.2)", a.span.start, a.span.end)
             }

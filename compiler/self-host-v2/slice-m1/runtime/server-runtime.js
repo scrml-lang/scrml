@@ -94,6 +94,10 @@ export { lengthCheck, tapeInsert } from "./runtime.js";
 export { refineCheck } from "./runtime.js";
 // s478 (s478-ruled-stdlib-data): the §41.13 `parseVariant` intrinsic — "callable in both server-side and client-side contexts"
 export { parseVariant } from "./runtime.js";
+// S479 (#1962 ruling item 5): the §61.3 repeated-key detector moved to runtime.js, shared
+// with the standalone §41.13 `parseVariant`; the endpoint decode (handleEndpoint) uses it.
+export { jsonRepeatedKey } from "./runtime.js";
+import { jsonRepeatedKey as jsonRepeatedKeyRt } from "./runtime.js";
 import { refineCheck as refineCheckRt, ScrmlTrap as ScrmlTrapRt } from "./runtime.js";
 
 // Review #1911 MED-1 — a ROUTED server function's parameter refinements, judged in its
@@ -2308,57 +2312,9 @@ function isJsonMediaType(ct) {
 // review #1916 L6: a request-supplied name echoed in an error message is clipped
 const clip = (s) => (s.length > 64 ? s.slice(0, 64) + "…" : s);
 
-// S479 ruling (user-voice) §3.A item 5 — §61.3 "A repeated key": "A request body in which one
-// JSON object — the body itself or any object nested in it — names the same key twice is a
-// decode failure — `::Malformed` … Keys are compared after JSON string unescaping, so `"tag"`
-// and `"t\u0061g"` are the same key." `JSON.parse` keeps the last of a repeated name silently
-// (review #1940 (4): `{"tag":"Unit","tag":"I","n":3}` ran `I`, while a first-wins proxy saw
-// `Unit`), so the text is scanned once more after it parses.
-//
-// `text` is JSON that `JSON.parse` accepted, so the scan only tracks structure: string literals
-// (skipped by their escapes; a `\` escapes exactly the next character, so `\"` never ends a
-// string and `\\"` does), `{ [ } ] , :`. Each open object holds the set of its keys; a string
-// read where an object expects a key (after `{` or after a `,` inside that object) is a key. A
-// key with no `\` is its own text; one with escapes is decoded by `JSON.parse` of the literal,
-// so every spelling of a name (`\u0061`, `\/`, a surrogate pair) compares by its value. The
-// stack is explicit, so a deeply nested body cannot overflow the call stack here. Returns the
-// first repeated key, or `undefined`.
-export function jsonRepeatedKey(text) {
-  const stack = []; // per open container: a Set of keys (an object) or null (an array)
-  let expectKey = false;
-  let i = 0;
-  const n = text.length;
-  while (i < n) {
-    const c = text.charCodeAt(i);
-    if (c === 0x22) {
-      const start = i;
-      let escaped = false;
-      i++;
-      while (i < n) {
-        const d = text.charCodeAt(i);
-        if (d === 0x5c) { escaped = true; i += 2; continue; }
-        if (d === 0x22) break;
-        i++;
-      }
-      i++; // past the closing quote
-      if (expectKey) {
-        const keys = stack[stack.length - 1];
-        const key = escaped ? JSON.parse(text.slice(start, i)) : text.slice(start + 1, i - 1);
-        if (keys.has(key)) return key;
-        keys.add(key);
-        expectKey = false;
-      }
-      continue;
-    }
-    if (c === 0x7b) { stack.push(new Set()); expectKey = true; }
-    else if (c === 0x5b) { stack.push(null); expectKey = false; }
-    else if (c === 0x7d || c === 0x5d) { stack.pop(); expectKey = false; }
-    else if (c === 0x2c) expectKey = stack.length > 0 && stack[stack.length - 1] !== null;
-    else if (c === 0x3a) expectKey = false;
-    i++;
-  }
-  return undefined;
-}
+// §61.3 "A repeated key" — the detector lives in runtime.js (S479: the standalone §41.13
+// `parseVariant` refuses a repeated key too, and runs on the client), imported above as
+// `jsonRepeatedKeyRt` and re-exported here under its own name.
 
 async function handleEndpoint(host, ep, request) {
   if (!isJsonMediaType(request.headers.get("Content-Type"))) {
@@ -2369,7 +2325,7 @@ async function handleEndpoint(host, ep, request) {
   let v;
   try { v = JSON.parse(text); } catch (e) { return decodeFailure(host, "Malformed", `request body is not JSON: ${messageOf(e)}`); }
   if (v === null || typeof v !== "object" || Array.isArray(v)) return decodeFailure(host, "Malformed", "request body is not a JSON object");
-  const rep = jsonRepeatedKey(text);
+  const rep = jsonRepeatedKeyRt(text);
   if (rep !== undefined) return decodeFailure(host, "Malformed", `request body repeats the key '${clip(rep)}' in one object`);
   if (!own(v, "tag") || typeof v.tag !== "string") return decodeFailure(host, "MissingDiscriminator", "request body is missing the variant discriminator field 'tag'");
   let variant;

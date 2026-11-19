@@ -184,7 +184,8 @@ describe("<endpoint> codegen — server route-handler (§61.6), parseVariant dec
     expect(js).toContain(`method: "POST",`);
     expect(js).toMatch(/handler: _scrml_endpoint_\d+,/);
     // Auto-collected into the WinterCG aggregate (routes + fetch dispatch).
-    expect(js).toMatch(/export const routes = \[__ri_route_endpoint_\d+\];/);
+    // (S479 §61.7: followed by the OPTIONS record that answers the path's preflight.)
+    expect(js).toMatch(/export const routes = \[__ri_route_endpoint_\d+, __ri_route_endpoint_preflight__2ffsp\];/);
     expect(js).toContain(`if (r.path === url.pathname && r.method === request.method) {`);
     expect(js).toContain(`return r.handler(request);`);
   });

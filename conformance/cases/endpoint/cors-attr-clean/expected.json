@@ -1,0 +1,13 @@
+{
+  "id": "endpoint-cors-attr-clean",
+  "description": "§61.2/§61.7 — an `<endpoint>` carrying the per-endpoint `cors=` attribute (a string literal origin) is a valid declaration: `cors-attr ::= 'cors=' string-literal` is part of `endpoint-attrs`. The run-time half (a preflight answered 204 with that origin only; 405 without `cors=`; program `cors=` not applying to the endpoint, §39.2.1) is served-HTTP behavior the case schema cannot drive — it is proven by compiler/tests/integration/endpoint-cors-served.test.js.",
+  "language-version": "1.0",
+  "spec": "§61.2, §61.7, §39.2.1",
+  "provenance": "ruling:user-voice-scrml.md \"⭐ RULED — program `cors=` does not cover `<endpoint>` routes; per-endpoint `cors=` (S479, 2026-11-18)\"",
+  "source-test": "compiler/tests/integration/endpoint-cors-served.test.js",
+  "rationale": "§61.7: \"An `<endpoint>` MAY carry `cors=`, a string literal with the values of the §39.2.1 program attribute\".",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-ENDPOINT-"]
+  }
+}
