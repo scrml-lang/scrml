@@ -28,4 +28,4 @@ Ruled items (user-voice-scrml.md S479 "⭐ RULED — the rest of S478 hand-off �
       Message for a narrowed place now names the redundant test (analyze.scrml condKnown). Tests pinned.
 - [x] runtime joinStr writes each element via textOf (fail closed); unit test.
 - [x] resolveForStep: `addDiag(resolveExpr(...))` passed an RX where an AS goes → `.st` (crash `st.diags.concat` → diagnostic). Test.
-- [ ] shared-graph-walks-s480 kr24 flake (item 5).
+- [x] shared-graph-walks-s480 kr24 flake: M 800→600, bound 1000→375 ms, timeout 300 s. Local: base (9047dd5de check) checkCore 1156-1172 ms, head 100-109 ms, FE 4.8 s (was 8.2 s).
