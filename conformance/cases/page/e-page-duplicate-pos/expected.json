@@ -1,0 +1,24 @@
+{
+  "id": "page-e-page-duplicate-pos",
+  "description": "§40.8 (amended S478, code S479) — two `<page>`s in one `<program>`: the second is E-PAGE-DUPLICATE (a route has one page; a second page is a second route file).",
+  "language-version": "1.0",
+  "spec": "§40.8",
+  "provenance": "ruling:user-voice-scrml.md S478 \"⭐ RULED — open owner questions, PA recs adopted wholesale\" item 60 · ruling:user-voice-scrml.md S479 \"⭐ RULED — S478 hand-off §3.A and §3.B, PA recs adopted\" item 4",
+  "rationale": "§40.8: \"Two `<page>`s in one `<program>` are an error … The second `<page>` (and each later one) SHALL be **`E-PAGE-DUPLICATE`** (Error), reported at its opener.\"",
+  "expect": {
+    "codes": [
+      "E-PAGE-DUPLICATE"
+    ],
+    "notCodes": []
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-ruled-codes-s479",
+      "fails": {
+        "codes": [
+          "missing:E-PAGE-DUPLICATE"
+        ]
+      }
+    }
+  }
+}

@@ -15,8 +15,9 @@
 //     level → E-STRUCTURAL-ELEMENT-MISPLACED (§4.15); `<channel>` in a `<page>`
 //     → E-CHANNEL-INSIDE-PAGE (§38.1).
 //   - INTERIM refusals: a route file's `<page>` (no per-route documents / shell
-//     composition, §40.8.2), a second `<page>` in one file (⚑ the SPEC does not
-//     say how two pages of one route combine), a `<page>` in a nested program.
+//     composition, §40.8.2), a `<page>` in a nested program.
+//   - S479: a second `<page>` in one `<program>` → E-PAGE-DUPLICATE (§40.8; ruling S479
+//     hand-off §3.A item 4).
 //
 // RED ON BASE: 43 of 45 (measured at e29baf177: 2 pass / 43 fail — the 2 are the "unchanged" cell
 // / declaration-named-`page` twins; on base every
@@ -182,13 +183,24 @@ describe("route files and multiple pages (INTERIM — refused by name)", () => {
     expect(r.diags.filter((d) => d.file === "app/lib/page.scrml").map((d) => d.code)).toEqual(["E-STRUCTURAL-ELEMENT-MISPLACED"]);
   });
   // S478 open-Qs ruling item 60 — §40.8 (amended S478): "Two `<page>`s in one `<program>` are an
-  // error … A `<page>` inside a nested `<program>` … is `E-STRUCTURAL-ELEMENT-MISPLACED`". The
-  // ruling names no code for the second page: refused by name (owner question).
-  test("two `<page>`s in one `<program>`: the second is an error (S478 item 60; refused by name — no code is ruled)", () => {
+  // error … A `<page>` inside a nested `<program>` … is `E-STRUCTURAL-ELEMENT-MISPLACED`". S479
+  // (hand-off §3.A item 4) names the code: "The second `<page>` (and each later one) SHALL be
+  // **`E-PAGE-DUPLICATE`** (Error), reported at its opener." (Red on base: E-BOOTSTRAP-UNSUPPORTED.)
+  test("two `<page>`s in one `<program>`: the second is E-PAGE-DUPLICATE (S478 item 60, S479 item 4)", () => {
     const d = run(`<program>\n<page>\n<p>a</p>\n</page>\n<page>\n<p>b</p>\n</page>\n</program>\n`).diags;
-    expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(d.map((x) => x.code)).toEqual(["E-PAGE-DUPLICATE"]);
     expect(d[0].message).toContain("second `<page>`");
-    expect(d[0].message).toContain("amended S478");
+    expect(d[0].message).toContain("§40.8");
+  });
+  test("three `<page>`s: each page after the first is E-PAGE-DUPLICATE, at its own opener", () => {
+    const src = `<program>\n<page>\n<p>a</p>\n</page>\n<page>\n<p>b</p>\n</page>\n<page>\n<p>c</p>\n</page>\n</program>\n`;
+    const d = run(src).diags;
+    expect(d.map((x) => x.code)).toEqual(["E-PAGE-DUPLICATE", "E-PAGE-DUPLICATE"]);
+    expect(d[0].span.start).not.toBe(d[1].span.start);
+  });
+  test("one `<page>` stays clean (no E-PAGE-DUPLICATE)", () => {
+    const d = run(`<program>\n<page>\n<p>a</p>\n</page>\n</program>\n`).diags;
+    expect(d.map((x) => x.code)).not.toContain("E-PAGE-DUPLICATE");
   });
   test("a `<page>` in a nested `<program>` is E-STRUCTURAL-ELEMENT-MISPLACED (S478 item 60)", () => {
     const d = run(`<program>\n<program name="w">\n<page>\n<p>w</p>\n</page>\n</program>\n<p>home</p>\n</program>\n`).diags;

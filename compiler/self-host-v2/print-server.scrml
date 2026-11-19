@@ -46,13 +46,14 @@
 // binding (positional binding over an imported enum is silently dropped).
 // =============================================================================
 ${
-    import { Sym, Expr, Stmt, Failable, Fn, HostFn, ServerFn, CoreProgram, Db, Driver, SqlQuery, Param, Block, ForeignSlice, CoreTool,
+    import { Sym, Expr, Stmt, Failable, Fn, HostFn, ServerFn, CoreProgram, CoreConst, Db, Driver, SqlQuery, Param, Block, ForeignSlice, CoreTool,
              CoreEndpoint, CoreEpArm, TypeDef, VariantDef, FieldDef, Type, typeDefSym,
              findFn, findServerFn, findDb } from "./core.scrml"
     import { Node, allNodes } from "./walk.scrml"
     import { JsExpr, JsStmt, JsProp, jid, jstr, jnum, jcall, jmember, jmcall, sexpr, printModule } from "./js.scrml"
     import { RouteOut, Ctx, coreRefusal, sliceName, serverCtx, serverFnJs, envelopedFnJs, symNameOf, routeJs, routeName, routePath, calledServerFns, routeEntryChecks,
-             sqlTextName, dbVarName, hostImports, hostFnJs, constsReadIn, constStmts, wireOrNull, channelRefusal, chOpsJs } from "./print.scrml"
+             sqlTextName, dbVarName, hostImports, hostFnJs, constsReadIn, constStmts, wireOrNull, channelRefusal, chOpsJs,
+             ChReset, chFoldWhy, chResets, chValueJs, chEdgesJs } from "./print.scrml"
 
     export type ServerOutput:struct = { js: string, refused: string[], routes: RouteOut[] }
 
@@ -125,13 +126,23 @@ ${
             JsStmt.SComment("each route's wire contract — the same §57 tables the client artifact encodes and decodes with"),
         ])
         for (const sf of routed) { body = body.concat([routeJs(p, sf)]) }
-        body = body.concat(endpointConsts(p)).concat(channelConsts(p))
+        body = body.concat(endpointConsts(p)).concat(channelConsts(ctx, p))
 
         // s472: the constants the SERVER's code reads (the functions it reaches), once each
         let roots: Node[] = []
         for (const sf2 of p.server) { if (reach.indexOf(sf2.sym.id) >= 0) roots = roots.concat([Node.NServerFn(sf2)]) }
         for (const f2 of p.fns) { if (reach.indexOf(f2.sym.id) >= 0) roots = roots.concat([Node.NFn(f2)]) }
-        body = body.concat(constStmts(ctx, constsReadIn(p, roots)))
+        const sconsts: CoreConst[] = constsReadIn(p, roots)
+        body = body.concat(constStmts(ctx, sconsts))
+        // s479: the functions those bindings' initializers call run at MODULE initialization
+        // (§7.6 S478 rule (b)), before any createServer — so they are printed at module level,
+        // not inside createServer. (analyze fileScopePass: none of them reaches a server-placed
+        // function or client-only state, so none needs a connection.)
+        const initFns: int[] = initFnClosure(p, sconsts)
+        if (initFns.length > 0) body = body.concat([JsStmt.SBlank, JsStmt.SComment("the functions a file-scope initializer calls (§7.6) — module level: they run at module initialization")])
+        for (const f3 of p.fns) {
+            if (initFns.indexOf(f3.sym.id) >= 0) body = body.concat([serverFnOf(ctx, p, f3)])
+        }
 
         // the SQL text of every query site the server reaches, frozen once at load (§8.1:
         // a query's text is the literal runs only; every value is a bound parameter)
@@ -156,7 +167,7 @@ ${
             if (reach.indexOf(sf.sym.id) >= 0) inner = inner.concat([bodyFnJs(ctx, p, sf.sym, sf.params, sf.body, sf.waits)])
         }
         for (const f of p.fns) {
-            if (reach.indexOf(f.sym.id) >= 0) inner = inner.concat([serverFnOf(ctx, p, f)])
+            if (reach.indexOf(f.sym.id) >= 0 && initFns.indexOf(f.sym.id) < 0) inner = inner.concat([serverFnOf(ctx, p, f)])
         }
         let routeExprs: JsExpr[] = []
         for (const sf of routed) { routeExprs = routeExprs.concat([routeEntry(ctx, sf)]) }
@@ -520,27 +531,49 @@ ${
     // decodes every client frame against it.
     fn channelName(i: int) -> string { return "channel$" + i }
 
-    fn channelConsts(p: CoreProgram) -> JsStmt[] {
+    // S479 (s479-channel-relay-fold) — §38.4.2 "The relay's fold": a channel the relay can fold
+    // (print.scrml chFoldWhy "") also carries each cell's `init` (its literal initializer, printed as
+    // the client prints it), and the channel its `resets` (`reset-on=` rules among its own cells); every
+    // cell carries `edges` (a `rule=` field's graph — the client's `<field>_edges` table — else null).
+    // The relay's fold starts from those values and makes those writes; `noFold` is "" then, else
+    // why the channel has no fold.
+    fn channelConsts(ctx: Ctx, p: CoreProgram) -> JsStmt[] {
         if (p.channels.length == 0) return []
-        let out: JsStmt[] = [JsStmt.SBlank, JsStmt.SComment("the §38 channels — each `__sync` op frame a client sends names an op its cell syncs and decodes against its cell's table (§38.4.2, §57), or the connection is closed")]
+        let out: JsStmt[] = [JsStmt.SBlank, JsStmt.SComment("the §38 channels — each `__sync` op frame a client sends names an op its cell syncs and decodes against its cell's table (§38.4.2, §57), or the connection is closed; a channel with a fold (`noFold` empty) also judges each frame against the relay's fold of its cells (§38.4.2 \"The relay's fold\")")]
         let i: int = 0
         for (const ch of p.channels) {
+            const noFold: string = chFoldWhy(p, ch)
             let cells: JsExpr[] = []
             let ci: int = 0
             for (const c of ch.cells) {
                 for (const d of p.decls) {
                     if (d.sym.id == p.program.id) {
                         for (const f of d.fields) {
-                            if (f.sym.id == c.id) cells = cells.concat([JsExpr.JObject([{ key: "key", value: jstr(c.hint) }, { key: "table", value: wireOrNull(p, f.ty) }, { key: "ops", value: chOpsJs(ch.ops, ci) }])])
+                            if (f.sym.id == c.id) {
+                                let props: JsProp[] = [{ key: "key", value: jstr(c.hint) }, { key: "table", value: wireOrNull(p, f.ty) }, { key: "ops", value: chOpsJs(ch.ops, ci) }, { key: "edges", value: chEdgesJs(ctx, f) }]
+                                const init: Expr | not = f.init
+                                if (noFold == "" && init is given) props = props.concat([{ key: "init", value: chValueJs(ctx, init) }])
+                                cells = cells.concat([JsExpr.JObject(props)])
+                            }
                         }
                     }
                 }
                 ci = ci + 1
             }
+            let resets: JsExpr[] = []
+            if (noFold == "") {
+                for (const r of chResets(p, ch)) {
+                    let on: JsExpr[] = []
+                    for (const k of r.on) { on = on.concat([jstr(k)]) }
+                    resets = resets.concat([JsExpr.JObject([{ key: "cell", value: jstr(r.cell) }, { key: "on", value: JsExpr.JArray(on) }, { key: "rank", value: jnum(r.rank) }, { key: "value", value: chValueJs(ctx, r.value) }])])
+                }
+            }
             out = out.concat([JsStmt.SConst(channelName(i), JsExpr.JObject([
                 { key: "name", value: jstr(ch.name) },
                 { key: "topic", value: jstr(ch.topic) },
                 { key: "cells", value: JsExpr.JArray(cells) },
+                { key: "resets", value: JsExpr.JArray(resets) },
+                { key: "noFold", value: jstr(noFold) },
                 // §38.4.3 (S478 open-Qs ruling items 42, 49): the relay's bounds, resolved (analyze channelPass)
                 { key: "limits", value: JsExpr.JObject([
                     { key: "maxFrame", value: jnum(ch.maxFrame) },
@@ -649,6 +682,9 @@ ${
     // ---- reach: the functions the server artifact holds ------------------------
     // The routed server functions and everything they call, transitively (Fns and
     // ServerFns by Sym — a Call's callee, an Attempt's FCall).
+    // s479: and the functions the initializers of the file-scope bindings that reached code
+    // reads call — each such initializer runs in this artifact at module initialization
+    // (§7.6 S478 rule (b)), so its callees are server-artifact code too.
     fn serverReach(p: CoreProgram, routed: ServerFn[]) -> int[] {
         let out: int[] = []
         let todo: int[] = []
@@ -656,6 +692,60 @@ ${
             out = out.concat([sf.sym.id])
             todo = todo.concat([sf.sym.id])
         }
+        let more = true
+        while (more) {
+            out = reachClose(p, out, todo)
+            todo = []
+            let roots: Node[] = []
+            for (const sf2 of p.server) { if (out.indexOf(sf2.sym.id) >= 0) roots = roots.concat([Node.NServerFn(sf2)]) }
+            for (const f2 of p.fns) { if (out.indexOf(f2.sym.id) >= 0) roots = roots.concat([Node.NFn(f2)]) }
+            for (const k of constsReadIn(p, roots)) {
+                for (const n of allNodes(Node.NExpr(k.init))) {
+                    const c: Sym | not = nodeCallee(n)
+                    if (c is given) {
+                        if (findFn(p, c) is given && out.indexOf(c.id) < 0 && todo.indexOf(c.id) < 0) todo = todo.concat([c.id])
+                    }
+                }
+            }
+            for (const id of todo) { out = out.concat([id]) }
+            more = todo.length > 0
+        }
+        return out
+    }
+
+    // s479 — the Fns the initializers of `ks` call, closed over the Fns they call.
+    fn initFnClosure(p: CoreProgram, ks: CoreConst[]) -> int[] {
+        let todo: int[] = []
+        for (const k of ks) {
+            for (const n of allNodes(Node.NExpr(k.init))) {
+                const c: Sym | not = nodeCallee(n)
+                if (c is given) {
+                    if (findFn(p, c) is given && todo.indexOf(c.id) < 0) todo = todo.concat([c.id])
+                }
+            }
+        }
+        let out: int[] = []
+        while (todo.length > 0) {
+            const id: int = todo[0]
+            todo = todo.slice(1)
+            if (out.indexOf(id) < 0) {
+                out = out.concat([id])
+                for (const c2 of calleesOf(p, id)) {
+                    if (out.indexOf(c2) < 0 && isFnId(p, c2)) todo = todo.concat([c2])
+                }
+            }
+        }
+        return out
+    }
+
+    fn isFnId(p: CoreProgram, id: int) -> boolean {
+        for (const f of p.fns) { if (f.sym.id == id) return true }
+        return false
+    }
+
+    fn reachClose(p: CoreProgram, out0: int[], todo0: int[]) -> int[] {
+        let out: int[] = out0
+        let todo: int[] = todo0
         while (todo.length > 0) {
             const id: int = todo[0]
             todo = todo.slice(1)

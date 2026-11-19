@@ -1,0 +1,24 @@
+{
+  "id": "error-fail-variant-sqlerror-undeclared-neg",
+  "description": "§19.3.3 E-ERROR-009 against the compiler-provided `SqlError` (§19.8.4: a built-in ENUM) — `fail SqlError.Bogus(\"boom\")` names a variant SqlError does not have (QueryFailed, ConstraintViolation, ConnectionLost). The twin of error/fail-variant-undeclared-neg for the built-in error type. Incidental W-DEAD-FUNCTION/W-PROGRAM-001 ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §19.3.3",
+  "spec": "§19.3.3, §19.8.4",
+  "provenance": "lane:s479-records (PA-cleanup — g-impl1-fail-site-unchecked-against-sqlerror-s474: the SPEC already requires it; impl#1 carried divergence)",
+  "rationale": "§19.3.3: \"A variant that does not belong to the declared error type SHALL be a compile error: E-ERROR-009 … This covers a variant undeclared by the declared enum\"; §19.8.4: \"`SqlError` SHALL be a built-in enum type provided by the compiler.\" So SqlError's variant set is the one a `fail` is checked against.",
+  "expect": {
+    "codes": ["E-ERROR-009"],
+    "severity": { "E-ERROR-009": "error" }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-fail-site-unchecked-against-sqlerror-s474",
+      "fails": {
+        "codes": [
+          "missing:E-ERROR-009",
+          "severity:code 'E-ERROR-009' did not fire (expected severity error)"
+        ]
+      }
+    }
+  }
+}

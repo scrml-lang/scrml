@@ -125,26 +125,29 @@ describe("fix round 1 — the keywordless declaration is `const`'s twin everywhe
     expect(codes(`<program>\n    x = 1;\n    <p>\${x}</p>\n</program>\n`)).toEqual([]);
   });
 
-  test("MED-1: it gets the file-scope const's refusals (a cell read, a call)", () => {
-    for (const [kw, cst] of [
-      [fs("yy = @n + 1;"), fs("const yy = @n + 1;")],
-      [fs("yy = f();", "    function f() -> int { return 3; }\n"), fs("const yy = f();", "    function f() -> int { return 3; }\n")],
-    ]) {
-      const a = codes(kw);
-      expect(a).toContain("E-BOOTSTRAP-UNSUPPORTED");
-      expect(a).toEqual(codes(cst));
-    }
+  test("MED-1: it gets the file-scope const's treatment (a cell read refused; s479: a call admitted, §7.6 rule (b))", () => {
+    const kwRead = codes(fs("yy = @n + 1;"));
+    expect(kwRead).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    expect(kwRead).toEqual(codes(fs("const yy = @n + 1;")));
+    const kwCall = codes(fs("yy = f();", "    function f() -> int { return 3; }\n"));
+    expect(kwCall).toEqual([]);
+    expect(kwCall).toEqual(codes(fs("const yy = f();", "    function f() -> int { return 3; }\n")));
   });
 
   test("MED-1: a second file-scope write is an assignment to a file-scope const", () => {
     expect(codes(`<program>\n    \${\n        x = 1;\n        x = 2;\n    }\n    <p>\${x}</p>\n</program>\n`)).toContain("E-ASSIGN-004");
   });
 
-  test("MED-2 (INTERIM): an unread keywordless declaration is refused by name, never accepted", () => {
-    const r = run(prog(`    function go() -> int {\n        unusedThing = 42;\n        return 1;\n    }`));
-    const errs = r.diags.filter((d) => d.severity === "Error");
-    expect(errs.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(errs[0].message).toContain("E-MU-001");
+  // s479 — ruling user-voice "⭐ RULED — S478 hand-off §3.A and §3.B" (§3.B): "S422 stands; an unread
+  // keywordless binding is the same lint as every other binding form; the E-MU-001 reading is
+  // rejected". The S478 INTERIM refusal is retired: the binding gets what an unread `const` gets.
+  test("S479: an unread keywordless declaration is no error — exactly what an unread `const` gets", () => {
+    const kw = prog(`    function go() -> int {\n        unusedThing = 42;\n        return 1;\n    }`);
+    const cst = prog(`    function go() -> int {\n        const unusedThing = 42;\n        return 1;\n    }`);
+    expect(codes(kw)).toEqual([]);
+    const all = (src) => run(src).diags.map((d) => d.code).sort();
+    expect(all(kw)).toEqual(all(cst));
+    expect(all(kw)).not.toContain("E-MU-001");
   });
 
   test("MED-2: a read one, and a `_`-prefixed one, are accepted", () => {

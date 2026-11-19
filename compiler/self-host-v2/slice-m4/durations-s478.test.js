@@ -139,12 +139,15 @@ describe("r1 fix round (review s478-1875)", () => {
   test("F2 <program debounced=300ms> → only W-ATTR-001 (well-formed, ignored)", () => {
     expect(prog("<program debounced=300ms>")).toEqual(["W-ATTR-001"]);
   });
-  // F5 — §6.13 rules no timing wrapper over an engine's transitions.
-  test("F5 debounced= on an engine → refused by name", () => {
-    const src = P(`type Phase:enum = { Active, Idle }\n<phase:Phase=.Active single debounced=300ms>\n<Active rule=.Idle></>\n<Idle rule=.Active></>\n</>`, `<p>\${@phase}</p>`);
-    const e = errs(src);
+  // F5 — S479 (ruling §3.B item 8, §6.13.5): a timed engine transitions at commit — it compiles
+  // (slice-m4/timed-engine-s479.test.js); only an engine with an `<onIdle>` watchdog stays refused
+  // (no SPEC sentence on how the watchdog's fire composes with the timing rule).
+  test("F5 debounced= on an engine compiles (S479); with an <onIdle> it is refused by name", () => {
+    const eng = (idle) => P(`type Phase:enum = { Active, Idle }\n<phase:Phase=.Active single debounced=300ms>\n<Active rule=.Idle></>\n<Idle rule=.Active></>\n${idle}</>`, `<p>\${@phase}</p>`);
+    expect(errs(eng(""))).toEqual([]);
+    const e = errs(eng(`<onIdle after=5m to=.Idle/>\n`));
     expect(e.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(e[0].message).toContain("an engine");
+    expect(e[0].message).toContain("`<onIdle>` watchdog");
   });
 });
 

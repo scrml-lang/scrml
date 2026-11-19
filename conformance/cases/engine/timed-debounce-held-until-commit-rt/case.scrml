@@ -1,0 +1,17 @@
+// §6.13.5 (S479) — a `debounced=` engine cell transitions at commit: a write is held, and the
+// transition (judged against `rule=`) happens when the held value commits.
+<program>
+    type Phase:enum = { Idle, Loading, Done }
+    <phase:Phase=.Idle single debounced=1s>
+        <Idle rule=.Loading/>
+        <Loading rule=.Done/>
+        <Done rule=.Idle/>
+    </>
+    function load() { @phase = .Loading; }
+    function finish() { @phase = .Done; }
+    <main>
+        <p id="s">${@phase}</p>
+        <button id="load" onclick=load()>Load</button>
+        <button id="finish" onclick=finish()>Finish</button>
+    </main>
+</program>

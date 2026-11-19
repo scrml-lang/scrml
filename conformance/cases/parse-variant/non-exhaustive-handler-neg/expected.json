@@ -1,0 +1,19 @@
+{
+  "id": "parse-variant-non-exhaustive-handler-neg",
+  "description": "§41.13 / §19.7 — the `!{}` handler of a parseVariant call covers two of the four ParseError variants (no UnknownVariant, no InvalidPayload) and has no wildcard: E-TYPE-080.",
+  "language-version": "1.0",
+  "spec": "§41.13, §19.7",
+  "provenance": "ruling:user-voice-scrml.md \"⭐ RULED — S478 hand-off §3.A and §3.B, PA recs adopted (S479, 2026-11-18)\" item 6 (§41.13 strict keys + E-TYPE-080; `parseVariant` accepts an enum alias)",
+  "rationale": "§41.13: \"the handler's exhaustiveness check (cross-ref §19.7) sees the four `ParseError` variants and a non-exhaustive handler is `E-TYPE-080`\".",
+  "expect": {
+    "codes": [
+      "E-TYPE-080"
+    ],
+    "notCodes": [
+      "E-MATCH-NOT-EXHAUSTIVE"
+    ],
+    "severity": {
+      "E-TYPE-080": "error"
+    }
+  }
+}

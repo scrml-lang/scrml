@@ -1,0 +1,18 @@
+// §31.2 — a self-recursive CLIENT function that calls a server function at each level (no call back from the server): `walk` is client-placed (the pending cell's initializer calls it, §12.2 Trigger 5), each `down(n)` is a client call of a server function handled with `!{}` (§19.9.10).
+<program db="./app.db">
+    type User:struct = { id: int, name: string }
+    function down(n: int) -> int {
+        const u: User = ?{`SELECT id, name FROM users WHERE id = 1`}.get() !{ _ :> { return 0; } };
+        return u.id + n;
+    }
+    function walk(n: int) -> int {
+        if (n <= 0) { return 0; }
+        const d = down(n) !{ _ :> 0 };
+        return d + walk(n - 1);
+    }
+    <v:(not to int)=(walk(3))/>
+    <main>
+        <p id="v" if=@v>${@v}</p>
+        <p id="wait" else>loading</p>
+    </main>
+</program>

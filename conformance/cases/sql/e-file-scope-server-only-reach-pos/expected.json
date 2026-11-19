@@ -1,0 +1,24 @@
+{
+  "id": "sql-e-file-scope-server-only-reach-pos",
+  "description": "§7.6 (S478; code name confirmed S479) — a file-scope `const` whose initializer runs a `?{}` query is E-FILE-SCOPE-SERVER-ONLY-REACH: module initialization is synchronous and cannot wait on the server.",
+  "language-version": "1.0",
+  "spec": "§7.6",
+  "provenance": "ruling:user-voice-scrml.md S478 \"⭐ RULED — open owner questions, PA recs adopted wholesale\" item 59 (a) · ruling:user-voice-scrml.md S479 \"⭐ RULED — S478 hand-off §3.A and §3.B, PA recs adopted\" item 2 (code name confirmed)",
+  "rationale": "§7.6: \"An initializer that reaches a server-only resource — a `?{}` query (§8) … — SHALL be a compile error, **`E-FILE-SCOPE-SERVER-ONLY-REACH`**\".",
+  "expect": {
+    "codes": [
+      "E-FILE-SCOPE-SERVER-ONLY-REACH"
+    ],
+    "notCodes": []
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-ruled-codes-s479",
+      "fails": {
+        "codes": [
+          "missing:E-FILE-SCOPE-SERVER-ONLY-REACH"
+        ]
+      }
+    }
+  }
+}

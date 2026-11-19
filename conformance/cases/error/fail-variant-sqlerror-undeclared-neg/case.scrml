@@ -1,0 +1,6 @@
+${
+    function f()! SqlError {
+        fail SqlError.Bogus("boom");
+    }
+}
+<p>x</>

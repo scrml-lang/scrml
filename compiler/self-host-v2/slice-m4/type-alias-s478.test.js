@@ -10,7 +10,7 @@
 // here. Before s478 the bootstrap read `type Id = int` as a malformed `type Id:kind = …`
 // (E-PARSE-EXPECTED ×2 + E-PARSE-TYPE).
 //
-// NOT built: `type E : error = { … }` (whether `:error` is a kind is an open owner question).
+// `type E : error = { … }` is not a kind (§14.2, ruling S479 item 1) — slice-m4/error-kind-dg-s479.test.js.
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
@@ -86,9 +86,9 @@ describe("§14.1.2 — `type A = T` is T wherever it is written", () => {
     expect(r.diags.map((d) => `${d.code}: ${d.message}`)).toEqual([]);
   });
 
-  test("the `:kind` forms are unchanged; `type E : error` is still not built", () => {
+  test("the `:kind` forms are unchanged; `type E : error` is not a kind (§14.2, S479)", () => {
     expect(codes(L(`    type S:struct = { a: int }\n    type K:enum = { A, B }`))).toEqual([]);
-    expect(codes(L(`    type MyError : error = { message : string }`))).toContain("E-PARSE-TYPE");
+    expect(codes(L(`    type MyError : error = { message : string }`))).toEqual(["E-PARSE-TYPE"]);
   });
 });
 

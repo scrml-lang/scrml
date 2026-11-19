@@ -65,7 +65,9 @@ describe("§7.6 S439 #12 — declarations in a `${ … }` inside markup are file
 
 describe("what such a block holds besides declarations is refused by name (INTERIM)", () => {
   test("statements (§7.6: once per mount; §17.3: a render position)", () => {
-    expect(codes(run(P(`<p>\${ let x = 1; }</p>`)))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    // s479 (s479-file-scope-init): `let x = 1;` there is a file-scope `let` DECLARATION (§7.6 S439 #12),
+    // hoisted as a `const` is — no longer a by-name refusal
+    expect(codes(run(P(`<p>\${ let x = 1; }</p>`)))).toEqual([]);
     expect(codes(run(P(`<div>\${\n  function f() { return 1; }\n  f();\n}</div>`)))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
 

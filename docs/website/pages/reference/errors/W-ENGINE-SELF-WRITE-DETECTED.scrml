@@ -58,25 +58,22 @@
         </p>
 
         <p class="text-slate-700 leading-relaxed mt-3">
-            The lint surfaces two firing patterns:
+            The lint fires in one pattern only:
         </p>
 
         <ul class="space-y-2 text-slate-700 mt-3">
             <li>
-                <strong>STRICT (inside-state-child fire):</strong>
+                <strong>Inside a state-child body:</strong>
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.CurrentVariant</code>
                 matches the enclosing state-child tag. The static check
                 is exact &mdash; the write target IS the surrounding state.
             </li>
             <li>
-                <strong>CONSERVATIVE (outside-state-child fire):</strong>
-                the write site is outside any state-child body AND
-                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">.CurrentVariant</code>
-                is a declared variant of the engine. The current state at
-                runtime is dynamic, but the literal `.Variant` write target
-                is statically known &mdash; the lint surfaces the pattern
-                where it WILL be a no-op IF the engine happens to be in
-                that variant.
+                <strong>Outside any state-child body</strong> (a function
+                body, top-level logic) the lint does not fire: the current
+                state is not known there, and a function-body engine write
+                is the canonical idiom (S479 ruling; the earlier
+                CONSERVATIVE outside firing is struck from §51.0.F.1).
             </li>
         </ul>
 
@@ -127,17 +124,11 @@
 
         <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>type Phase:enum = &#123; Active, Idle &#125;
 
-function refresh() &#123;
-  @phase = .Active
-  //          ^^^^^^^
-  //          W-ENGINE-SELF-WRITE-DETECTED (CONSERVATIVE):
-  //          .Active is a declared variant; if @phase is currently
-  //          .Active, this write is a runtime no-op.
-&#125;
-
 &lt;engine for=Phase initial=.Active&gt;
   &lt;Active rule=.Idle&gt;
-    &lt;button onclick=refresh()&gt;I&apos;m here&lt;/button&gt;
+    &lt;button onclick=$&#123;@phase = .Active&#125;&gt;I&apos;m here&lt;/button&gt;
+    &lt;!-- W-ENGINE-SELF-WRITE-DETECTED: inside &lt;Active&gt;, @phase
+         is already .Active, so this write is a runtime no-op. --&gt;
   &lt;/&gt;
   &lt;Idle/&gt;
 &lt;/&gt;</code></pre>

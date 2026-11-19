@@ -260,13 +260,44 @@ describe("4 — the checks (same arm reader as the §18 `match`)", () => {
     expect(codes(M(`<Idle : "i">\n<Loading : "l">`, "on=@ph"))).toEqual(["E-MATCH-NOT-EXHAUSTIVE"]);
     expect(codes(M(`<Loaded(n)><p>${"${"}n}</p></>\n<_ : "">`, "on=@ld"))).toEqual(["E-TYPE-021"]);
   });
-  test("S478 item 12: no `for=` and an `on=` the bootstrap cannot prove one enum type stays refused by name", () => {
+  // S479 (hand-off §3.A item 4) — §18.0.1 "Amended S479": a `<match>` that omits `for=` where it
+  // stays required SHALL be "`E-TYPE-024` when the type of `on=` is known and is not an enum" and
+  // "`E-MATCH-FOR-REQUIRED` when the compiler cannot prove the type of `on=` to be one enum type";
+  // "An `on=` of a `T | not` type is neither". (Red on base: each was E-BOOTSTRAP-UNSUPPORTED.)
+  test("S479 item 4: no `for=` and an `on=` of a known non-enum type is E-TYPE-024", () => {
     let e = errs(prog(`let <n:int=0/>\n<match on=@n>\n<_ : "x">\n</match>`));
-    expect(e.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(e.map((d) => d.code)).toEqual(["E-TYPE-024"]);
     expect(e[0].message).toContain("not an enum");
-    e = errs(M(`<_ : "x">`, "on=(true ? @ph : @ph)"));
-    expect(e.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    e = errs(prog(`let <s:string=""/>\n<match on=@s>\n<_ : "x">\n</match>`));
+    expect(e.map((d) => d.code)).toEqual(["E-TYPE-024"]);
+    e = errs(M(`<_ : "x">`, "on=(5)"));
+    expect(e.map((d) => d.code)).toEqual(["E-TYPE-024"]);
+    expect(e[0].message).toContain("a number");
+  });
+  test("S479 item 4: no `for=` and an `on=` the compiler cannot prove one enum type is E-MATCH-FOR-REQUIRED", () => {
+    let e = errs(M(`<_ : "x">`, "on=(true ? @ph : @ph)"));
+    expect(e.map((d) => d.code)).toEqual(["E-MATCH-FOR-REQUIRED"]);
     expect(e[0].message).toContain("for=");
+    e = errs(M(`<_ : "x">`, "on=(.Idle)"));
+    expect(e.map((d) => d.code)).toEqual(["E-MATCH-FOR-REQUIRED"]);
+    // writing `for=` is the fix
+    expect(errs(M(`<_ : "x">`, "for=Phase on=(true ? @ph : @ph)"))).toEqual([]);
+  });
+  test("S479 item 4: no `for=` over a `T | not` cell stays refused by name (§18.0.1 defines no absence arm)", () => {
+    const e = errs(prog(`let <mp:Phase | not=not/>\n<match on=@mp>\n<_ : "x">\n</match>`));
+    expect(e.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(e[0].message).toContain("T | not");
+  });
+  test("S479 item 4: no `for=` over an undeclared `@name` is reported once (the undeclared name, §42.4 statement 6)", () => {
+    const e = errs(M(`<_ : "x">`, "on=@nope"));
+    expect(e.map((d) => d.code)).not.toContain("E-MATCH-FOR-REQUIRED");
+    expect(e.map((d) => d.code)).not.toContain("E-BOOTSTRAP-UNSUPPORTED");
+    expect(e.length).toBe(1);
+  });
+  test("S479 item 4: a quoted `on=` with no `for=` is reported once (the `on=` refusal)", () => {
+    const e = errs(M(`<_ : "x">`, `on="ph"`));
+    expect(e.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(e[0].message).toContain("on=");
   });
   test("S478 item 12: no `for=` renders the arm for the cell's variant", async () => {
     await load(prog(`${PHASE_BTNS}<div id="m"><match on=@ph>\n<Idle : "idle!">\n<_ : "other">\n</match></div>`));
