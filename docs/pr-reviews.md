@@ -2876,3 +2876,11 @@ Each `probe=` names the reviewed head of every round and the report path. Where 
 <!-- @review pr=1987 verdict=finding by=S480-bryan date=2026-11-19 probe=r0: MED-1 paced client refused-run closed 1008, LOW-1 (self-caused rate refusal turns the close off, residue item 7), NIT-1..4 → r1; r1 re-review NOT land-able: NEW-1 MED regression address refund flood, NEW-2 LOW-MED final value dropped → r2; r2 re-review FINDINGS land-able (fuzz converged); follow-ups g-boot-channel-rate-close-window-s480, g-boot-channel-append-append-refused-first-s480; probes ~/.cache/scrml/review/s480-1987-scratch/, s480-1987-r1rev/, s480-1987-r2rev/ -->
 <!-- @review pr=1989 verdict=clean by=S480-bryan date=2026-11-19 probe=PA-direct review clean (unknown struct field E-TYPE-004 on reads); follow-up g-boot-unknown-field-write-code-s480 -->
 <!-- @review pr=1991 verdict=finding by=S480-bryan date=2026-11-19 probe=S239 FINDINGS land-able: 4000-case differential clean (recursive enum containsHost walks each named type once); follow-ups → #1994; probes ~/.cache/scrml/review/s480-1991-scratch/ -->
+<!-- @review pr=1995 verdict=finding by=S480-bryan date=2026-11-19 probe=S239 FINDINGS land-able: 18.5M-run pacer enumeration head 0 closes vs base 3264; LOW PR-body L1 claim corrected by PA; INFO backlog growth, INFO reset-on supersede asymmetry -->
+<!-- @review pr=1985 verdict=carve-out by=S480-bryan date=2026-11-19 probe=bot post-merge regen of generated blocks -->
+<!-- @review pr=1986 verdict=carve-out by=S480-bryan date=2026-11-19 probe=bot post-merge regen of generated blocks -->
+<!-- @review pr=1988 verdict=carve-out by=S480-bryan date=2026-11-19 probe=bot post-merge regen of generated blocks -->
+<!-- @review pr=1990 verdict=carve-out by=S480-bryan date=2026-11-19 probe=bot post-merge regen of generated blocks -->
+<!-- @review pr=1992 verdict=carve-out by=S480-bryan date=2026-11-19 probe=bot post-merge regen of generated blocks -->
+<!-- @review pr=1993 verdict=carve-out by=S480-bryan date=2026-11-19 probe=bot post-merge regen of generated blocks -->
+<!-- @review pr=1997 verdict=carve-out by=S480-bryan date=2026-11-19 probe=bot post-merge regen of generated blocks -->
