@@ -38,7 +38,7 @@
 //       (a codegen miscompile is otherwise silent).
 //
 //   (E) CLIENT-CODEGEN SKIP (§61.6). NO endpoint surface leaks into the client
-//       bundle — no `_scrml_endpoint_` handler, no `__ri_route_endpoint` record,
+//       bundle — no `_scrml_endpoint_` handler, no `_scrml_route_endpoint` record,
 //       no `parseVariant` decode IIFE. The foreign client has its own SDK; there
 //       is no compiler-generated scrml caller to pair with. `node --check` the
 //       emitted `.client.js`.
@@ -57,7 +57,7 @@ import { join } from "path";
 import { compileScrml } from "../../src/api.js";
 
 const TMP = mkdtempSync(join(tmpdir(), "endpoint-conformance-"));
-// scrml emits ES modules (`export const __ri_route_endpoint_POST__2ffsp = …`). `node --check` picks the
+// scrml emits ES modules (`export const _scrml_route_endpoint_POST__2ffsp = …`). `node --check` picks the
 // module kind from the nearest package.json, and there is none above os.tmpdir(), so it would
 // parse an ESM artifact under CommonJS rules and report `export` as a SyntaxError — a red gate
 // for a reason no change caused. Declare the module type the artifacts are actually emitted in.
@@ -211,10 +211,10 @@ describe("(D) route registration at the verbatim path=/method= + node --check (�
     const r = compile(FSP_ENDPOINT);
     const sjs = serverJs(r);
     // The route record SHAPE the WinterCG aggregate auto-collects.
-    expect(sjs).toMatch(/export const __ri_route_endpoint_POST__2ffsp = \{\s*\n\s*path: "\/fsp",\s*\n\s*method: "POST",/);
+    expect(sjs).toMatch(/export const _scrml_route_endpoint_POST__2ffsp = \{\s*\n\s*path: "\/fsp",\s*\n\s*method: "POST",/);
     // S479 (§61.7): plus one OPTIONS record at the endpoint's path — its preflight
     // answer (405 without the endpoint's own `cors=`; endpoint-cors-served.test.js).
-    expect(sjs).toMatch(/export const routes = \[__ri_route_endpoint_POST__2ffsp, __ri_route_endpoint_preflight__2ffsp\];/);
+    expect(sjs).toMatch(/export const routes = \[_scrml_route_endpoint_POST__2ffsp, _scrml_route_endpoint_preflight__2ffsp\];/);
     // The imported aggregate confirms the live record (not just the text).
     expect(Array.isArray(SRV.routes)).toBe(true);
     expect(SRV.routes.length).toBe(2);
@@ -246,7 +246,7 @@ describe("(E) client-codegen SKIP — NO endpoint surface in the client bundle (
     const r = compile(FSP_ENDPOINT);
     const cjs = clientJs(r);
     expect(cjs).not.toContain("_scrml_endpoint_");
-    expect(cjs).not.toContain("__ri_route_endpoint");
+    expect(cjs).not.toContain("_scrml_route_endpoint");
     expect(cjs).not.toContain("switch (_v.tag)");
   });
 

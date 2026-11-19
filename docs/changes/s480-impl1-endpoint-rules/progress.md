@@ -29,3 +29,15 @@ ruling:user-voice-scrml.md-S480-four-recs item 1 (§61.2 placement + §61.7 dupl
   item 3, file g-impl1-endpoint-entry-ambiguous-app-s480 (INTERIM). Gates: s34-census
   --check-new PASS, types-gate unchanged, snippet-gate / claim-gate 0 fail, corpus floor PASS,
   gen-md-shim current, bootstrap conformance CRASH 0 / FAIL 0.
+
+## r1 (fix round for the #1998 S239 review)
+- Merged origin/main (54c85a81d).
+- C3 (1b7d862d0) F1 + ruled path rules + origin NITs: `<endpoint>` opener read by the markup
+  attribute tokenizer (`readEndpointOpenerAttrs`); §61.7 reserved prefixes
+  (E-ENDPOINT-ROUTE-DUPLICATE) + path grammar (E-ENDPOINT-PATH-INVALID); six conformance
+  cases un-xfailed; g-impl1-endpoint-path-rules-s479 resolved ((c) split to
+  g-impl1-endpoint-repeated-key-s480); g-boot-endpoint-empty-path-s480 filed; SPEC §61.7/§34.
+- C4 F2 (route names `_scrml_route_endpoint_…`; build.js E-CG-006 on a route-name conflict,
+  pre-write) + F3 (import graph: an imported file is not an entry; rules run after MOD) +
+  Max-Age (a silent mounting entry counts as the default). g-impl1-endpoint-entry-ambiguous-app-s480
+  narrowed. Tests: endpoint-route-names-entry-served.test.js.

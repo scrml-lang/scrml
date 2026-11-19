@@ -21,7 +21,7 @@
 //     `{ error: { kind, message } }`, status 400 (kind ∈ the §41.13 ParseError
 //     family: MissingDiscriminator / UnknownVariant / InvalidPayload / Malformed).
 //   • The handler is registered at the author-stable `path=`/`method=` via
-//     `export const __ri_route_endpoint_<METHOD>_<path> = { path, method, handler }`
+//     `export const _scrml_route_endpoint_<METHOD>_<path> = { path, method, handler }`
 //     (§61.7), auto-collected into the WinterCG `routes` / `fetch` aggregate.
 //   • NO CSRF block (§61.7 — JSON+bearer is CSRF-exempt by construction).
 //   • Client-codegen SKIP (§61.6): NO paired client fetch-stub, NO endpoint
@@ -182,12 +182,12 @@ describe("<endpoint> codegen — server route-handler (§61.6), parseVariant dec
     // The route record SHAPE the route-collection regex auto-collects.
     // (S480: the record is named by its METHOD and PATH — app-unique under the §61.7
     // one-handler-per-route rule — not by its per-file AST node id.)
-    expect(js).toMatch(/export const __ri_route_endpoint_POST__2ffsp = \{\s*\n\s*path: "\/fsp",/);
+    expect(js).toMatch(/export const _scrml_route_endpoint_POST__2ffsp = \{\s*\n\s*path: "\/fsp",/);
     expect(js).toContain(`method: "POST",`);
     expect(js).toMatch(/handler: _scrml_endpoint_\d+,/);
     // Auto-collected into the WinterCG aggregate (routes + fetch dispatch).
     // (S479 §61.7: followed by the OPTIONS record that answers the path's preflight.)
-    expect(js).toMatch(/export const routes = \[__ri_route_endpoint_POST__2ffsp, __ri_route_endpoint_preflight__2ffsp\];/);
+    expect(js).toMatch(/export const routes = \[_scrml_route_endpoint_POST__2ffsp, _scrml_route_endpoint_preflight__2ffsp\];/);
     expect(js).toContain(`if (r.path === url.pathname && r.method === request.method) {`);
     expect(js).toContain(`return r.handler(request);`);
   });
@@ -215,7 +215,7 @@ describe("<endpoint> codegen — client-codegen SKIP (§61.6): server handler on
     // No endpoint handler, no endpoint route record, no endpoint decode surface
     // leak into the client (the foreign client has its own SDK).
     expect(cjs).not.toContain(`_scrml_endpoint_`);
-    expect(cjs).not.toContain(`__ri_route_endpoint`);
+    expect(cjs).not.toContain(`_scrml_route_endpoint`);
     expect(cjs).not.toContain(`switch (_v.tag)`);
     // The client still compiled clean (the endpoint-decl kind is skipped, not a choke).
     expect(nodeChecks(r, "clientJs")).toBeGreaterThanOrEqual(1);

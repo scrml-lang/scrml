@@ -235,12 +235,12 @@ describe("<endpoint> parser — valid declaration now mounts a server handler (W
     for (const [, entry] of (r.outputs ?? new Map())) {
       if (typeof entry?.serverJs === "string" && entry.serverJs.includes("/fsp")) {
         serverHasRoute = true;
-        expect(entry.serverJs).toContain("__ri_route_endpoint_");
+        expect(entry.serverJs).toContain("_scrml_route_endpoint_");
       }
       if (typeof entry?.clientJs === "string") {
         sawClient = true;
         expect(entry.clientJs).not.toContain("/fsp");
-        expect(entry.clientJs).not.toContain("__ri_route_endpoint");
+        expect(entry.clientJs).not.toContain("_scrml_route_endpoint");
       }
       // The sibling `<p>hello</p>` SHOULD render — confirms the file emitted.
       if (typeof entry?.html === "string") {

@@ -225,7 +225,7 @@ describe("route-record names are app-unique (g-impl1-endpoint-route-name-collide
     expect(await res.json()).toEqual({ pong: "POST /a" });
   }, TIMEOUT_MS);
 
-  test("/b is served (it was dropped: both modules exported __ri_route_endpoint_<same id>)", async () => {
+  test("/b is served (it was dropped: both modules exported one per-file node-id route name)", async () => {
     const res = await post(base, "/b");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ pong: "POST /b" });

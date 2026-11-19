@@ -337,7 +337,7 @@ describe("§A generateHeadlessServerJs: routes + fetch, NO html/client/CSRF/SSR"
 
     // The endpoint handler + its author-stable route (§61.7).
     expect(headless).toContain("async function _scrml_endpoint_fsp1(");
-    expect(headless).toContain("export const __ri_route_endpoint_POST__2ffsp = {");
+    expect(headless).toContain("export const _scrml_route_endpoint_POST__2ffsp = {");
     expect(headless).toContain('path: "/fsp"');
     // The SSE route mounts at the author path (§37).
     expect(headless).toContain('path: "/fsp/deltas"');
@@ -422,7 +422,7 @@ describe("§B shape gate is load-bearing: baseline CSRF present web-app / absent
 
     // The ROUTES are shape-invariant — both shapes mount the same handlers.
     for (const out of [webApp, headless]) {
-      expect(out).toContain("export const __ri_route_endpoint_POST__2ffsp = {");
+      expect(out).toContain("export const _scrml_route_endpoint_POST__2ffsp = {");
       expect(out).toContain('path: "/fsp/deltas"');
       expect(out).toContain('path: "/api/save"');
       expect(out).toContain("export async function fetch(request) {");
@@ -471,7 +471,7 @@ describe("§C shape gate is load-bearing: session/CSRF + SSR compose present web
     // Routes still present in BOTH shapes.
     expect(webApp).toContain("export async function fetch(request) {");
     expect(headless).toContain("export async function fetch(request) {");
-    expect(headless).toContain("export const __ri_route_endpoint_POST__2ffsp = {");
+    expect(headless).toContain("export const _scrml_route_endpoint_POST__2ffsp = {");
 
     // The critical no-dangling-reference guard: suppressing the session infra
     // must not leave a reference to an undefined symbol (Finding 3 — the SCOPE-AWARE

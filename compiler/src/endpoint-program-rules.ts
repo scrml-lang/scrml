@@ -27,11 +27,17 @@
  *     candidates (`resolveBuildRoot`, §40.8 "The build root") — the one rule every
  *     other app-scope decision uses. A route file (`pages/`, `routes/`) of a build
  *     with an application program is never one: its `<program>` is nested under the
- *     application's (§4.12, S445 item 1). When the build holds several candidates
- *     (two top-level `<program>`s in different files — the §40.8 `E-PROGRAM-002`
- *     shape, which impl#1 does not refuse yet) each is accepted as an entry here:
- *     choosing one by file order is the guess §40.8 forbids, and this rule is not
- *     the place to refuse the second program.
+ *     application's (§4.12, S445 item 1). A file another file of the build IMPORTS
+ *     (or re-exports from) is never one either, whatever it declares: §61.2 "a route
+ *     belongs to the served program, not to an imported module" — the import graph
+ *     (module-resolver.js `buildImportGraph`, the MOD stage) decides it, so a module
+ *     with its own top-level `<program>` and an `<endpoint>`, imported by the entry,
+ *     is refused (#1998 review r1 F3). When the build still holds several candidates
+ *     (two top-level `<program>`s in different files that do not import each other —
+ *     the §40.8 `E-PROGRAM-002` shape, which impl#1 does not refuse yet) each is
+ *     accepted as an entry here: choosing one by file order is the guess §40.8
+ *     forbids, and this rule is not the place to refuse the second program
+ *     (g-impl1-endpoint-entry-ambiguous-app-s480).
  *   - ONE HANDLER PER ROUTE. Every web-app file's top-level endpoints mount on ONE
  *     server (`scrml build`'s `_server.js` and `scrml dev` register every module's
  *     routes side by side), so a path and method is checked across the files of the
@@ -45,6 +51,7 @@
  */
 
 import { resolveBuildRoot } from "./route-inference.ts";
+import { toPosix } from "./path-canonical.js";
 import { isToolProgram } from "./tool-program.ts";
 import { forEachProgramWithRole } from "./program-role.ts";
 
@@ -95,12 +102,46 @@ export function topLevelProgramEndpoints(fileAST: unknown): NodeLike[] {
 
 /**
  * The application's entry files (§40.8): route inference's application-program
- * candidates over the build's web-app files (not §64 tools). One file in a
- * well-formed application; see the module comment for several.
+ * candidates over the build's web-app files (not §64 tools), less every file another
+ * file of the build imports (`importedFiles`, posix paths — `importedFilePaths`). One
+ * file in a well-formed application; see the module comment for several.
  */
-export function endpointEntryFiles(files: readonly unknown[], givenRoot?: string): Set<unknown> {
+export function endpointEntryFiles(
+  files: readonly unknown[],
+  givenRoot?: string,
+  importedFiles: ReadonlySet<string> | null = null,
+): Set<unknown> {
   const web = (files ?? []).filter((f) => !!f && typeof f === "object" && !isToolProgram(f));
-  return new Set<unknown>(resolveBuildRoot(web as never, givenRoot).candidates as unknown[]);
+  const candidates = resolveBuildRoot(web as never, givenRoot).candidates as unknown[];
+  return new Set<unknown>(
+    importedFiles === null ? candidates : candidates.filter((f) => !importedFiles.has(toPosix(filePathOf(f)))),
+  );
+}
+
+interface ImportGraphEntry {
+  imports?: ReadonlyArray<{ absSource?: string | null }>;
+  exports?: ReadonlyArray<{ reExportSource?: string | null }>;
+}
+
+/**
+ * The files of the build that another file of it imports or re-exports from (posix
+ * paths), from the MOD stage's import graph (`absSource` of every import, the resolved
+ * `reExportSource` of every re-export). A file importing itself does not count.
+ */
+export function importedFilePaths(importGraph: Iterable<[string, ImportGraphEntry]> | null | undefined): Set<string> {
+  const out = new Set<string>();
+  if (!importGraph) return out;
+  for (const [file, entry] of importGraph) {
+    const self = toPosix(String(file));
+    const add = (p: unknown) => {
+      if (typeof p !== "string" || p === "") return;
+      const q = toPosix(p);
+      if (q !== self) out.add(q);
+    };
+    for (const imp of entry?.imports ?? []) add(imp?.absSource);
+    for (const exp of entry?.exports ?? []) add(exp?.reExportSource);
+  }
+  return out;
 }
 
 function spanOf(node: NodeLike, file: string): Span {
@@ -120,12 +161,16 @@ function where(span: Span, file: string, here: string): string {
 }
 
 /** Run both build-level rules over the compilation's FileASTs. */
-export function checkEndpointProgramRules(files: readonly unknown[], givenRoot?: string): EndpointRuleDiagnostic[] {
+export function checkEndpointProgramRules(
+  files: readonly unknown[],
+  givenRoot?: string,
+  importedFiles: ReadonlySet<string> | null = null,
+): EndpointRuleDiagnostic[] {
   const diags: EndpointRuleDiagnostic[] = [];
   const all = (files ?? []).filter((f) => !!f && typeof f === "object");
   const perFile = all.map((f) => ({ f, eps: topLevelProgramEndpoints(f) }));
   if (!perFile.some((x) => x.eps.length > 0)) return diags; // a program without `<endpoint>`: nothing to judge
-  const entries = endpointEntryFiles(all, givenRoot);
+  const entries = endpointEntryFiles(all, givenRoot, importedFiles);
   const firstAt = new Map<string, Span>();
   for (const { f, eps } of perFile) {
     if (eps.length === 0) continue;
@@ -137,7 +182,8 @@ export function checkEndpointProgramRules(files: readonly unknown[], givenRoot?:
         diags.push({
           code: "E-STRUCTURAL-ELEMENT-MISPLACED",
           message:
-            `E-STRUCTURAL-ELEMENT-MISPLACED: \`<endpoint>\` in \`${shortFile(file)}\`, which is not the program's entry file — ` +
+            `E-STRUCTURAL-ELEMENT-MISPLACED: \`<endpoint>\` in \`${shortFile(file)}\`, which is not the program's entry file` +
+            (importedFiles !== null && importedFiles.has(toPosix(file)) ? ` (another file of the build imports it)` : ``) + ` — ` +
             `an \`<endpoint>\` is grammatical only as a direct child of the top-level \`<program>\` (§61.2, §4.15): ` +
             `a route belongs to the served program, not to an imported module or a route file; move it into the ` +
             `entry file's \`<program>\`.`,
