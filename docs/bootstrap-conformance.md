@@ -11,26 +11,26 @@ Scope: **1903 of 1903 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 706 | 37.1% |
+| PASS | 709 | 37.3% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 4 | 0.2% |
+| FAIL | 1 | 0.1% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 637 | 33.5% |
 | UNSUPPORTED | 556 | 29.2% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 710; of those, 706 hold (99.4%). Runtime half executed on the bootstrap for 230 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 710; of those, 709 hold (99.9%). Runtime half executed on the bootstrap for 230 case(s).
 
-- **Vacuous** passes: 19 of 706 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **687**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 3 of 4; the other 1 are implemented checks that answered wrong.
+- **Vacuous** passes: 18 of 709 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **691**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 1 of 1; the other 0 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
 UNSUPPORTED by reason: bootstrap-unsupported 556.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **882** — PASS 464 · FAIL 4 · UNSUPPORTED 414. Twin holds 464 (non-vacuous 448). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **882** — PASS 467 · FAIL 1 · UNSUPPORTED 414. Twin holds 467 (non-vacuous 452). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 5 replace a twin's expectations · 13 exclude a case.
 - Superseded-code mappings applied: 8 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -105,7 +105,7 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | attr-executable-sink | 23 | 7 | · | · | · | 11 | 5 | · | · |
 | auth | 65 | 12 | · | · | · | 15 | 38 | · | · |
 | block-grammar | 14 | 11 | · | · | · | 1 | 2 | · | · |
-| body-top | 27 | 19 | · | 1 | · | 1 | 6 | · | · |
+| body-top | 27 | 20 | · | · | · | 1 | 6 | · | · |
 | capability | 12 | 7 | · | · | · | · | 5 | · | · |
 | channel | 49 | 11 | · | · | · | 37 | 1 | · | · |
 | codegen | 4 | 1 | · | · | · | 3 | · | · | · |
@@ -159,33 +159,19 @@ NOT-TWINNED by reason (637 cases; a case counts once per distinct reason):
 | schema-for | 15 | · | · | · | · | · | 15 | · | · |
 | server-db | 92 | 15 | · | · | · | 17 | 60 | · | · |
 | server-fn | 27 | 13 | · | · | · | 7 | 7 | · | · |
-| sql | 21 | 6 | · | 1 | · | 9 | 5 | · | · |
+| sql | 21 | 7 | · | · | · | 9 | 5 | · | · |
 | ssr | 14 | · | · | · | · | 14 | · | · | · |
 | style | 27 | 2 | · | · | · | 24 | 1 | · | · |
 | table-for | 14 | · | · | · | · | 11 | 3 | · | · |
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
 | tool | 11 | 11 | · | · | · | · | · | · | · |
-| type-state-codes | 32 | 9 | · | 2 | · | 6 | 15 | · | · |
+| type-state-codes | 32 | 10 | · | 1 | · | 6 | 15 | · | · |
 
-### FAIL (4)
+### FAIL (1)
 
-- `body-top/declaration-trailing-tokens-rejected` (twin · parse-reject)
-  - count: E-STMT-MISSING-SEMICOLON fired 1 time(s), expected exactly 2
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `extra` (other statements at logic-block level are not in the bootstrap)
-  - E-PARSE-TYPE: expected a type, found `"a"`
-  - E-PARSE-ITEM: expected `import`, `type`, `const`, `function` or `fn` in a logic block, found `|` (other statements at logic-block level are not in the bootstrap)
-- `sql/query-not-readable-neg` (twin · parse-reject; not in the bootstrap: E-SQL-QUERY-NOT-READABLE)
-  - missing E-SQL-QUERY-NOT-READABLE
-  - count: E-SQL-QUERY-NOT-READABLE fired 0 time(s), expected exactly 1
-  - E-SQL-003: the content of `?{ … }` must be a backtick SQL template (`?{`SELECT …`}`) — found `SELECT` (§8.1). The SQL text is fixed at compile time; a runtime value is bound with `${…}` inside the template (§8.2), never assembled into the SQL
 - `type-state-codes/e-type-004-struct-field-access-pos` (twin · codes; not in the bootstrap: E-TYPE-004)
   - missing E-TYPE-004
   - severity: E-TYPE-004 did not fire (expected error)
-- `type-state-codes/e-type-045-prefix-not-negation-pos` (twin · parse-reject; not in the bootstrap: E-TYPE-045)
-  - missing E-TYPE-045
-  - severity: E-TYPE-045 did not fire (expected error)
-  - E-PARSE-EXPECTED: expected `)`, found `@`
-  - E-PARSE-TRAILING: unexpected `@` after the expression
 
 ### CRASH (0)
 
@@ -195,7 +181,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (706)
+### PASS / CODES-ONLY (709)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -229,6 +215,7 @@ none
 - `block-grammar/style-001-interp-body-pos` — PASS
 - `body-top/bare-write-is-legal` — PASS · TWIN
 - `body-top/code-line-after-declaration-runs` — PASS · TWIN
+- `body-top/declaration-trailing-tokens-rejected` — PASS · TWIN
 - `body-top/declared-prose-renders` — PASS · TWIN
 - `body-top/js-construct-await` — PASS
 - `body-top/js-construct-class` — PASS
@@ -880,6 +867,7 @@ none
 - `sql/multiple-statements-neg` — PASS · TWIN
 - `sql/one-statement-trailing-semicolon-pos` — PASS · TWIN
 - `sql/prepare-tool-in-block-e-sql-006-neg` — PASS (also emitted, unasserted: E-ERROR-002, E-PRINT-NON-PRIMITIVE)
+- `sql/query-not-readable-neg` — PASS · TWIN
 - `sql/runtime-expr-body-e-sql-003-neg` — PASS · TWIN
 - `style/program-scope-overlap-soft` — PASS
 - `style/style-001-style-block-pos` — PASS
@@ -899,7 +887,8 @@ none
 - `type-state-codes/e-type-004-struct-field-access-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-041-not-assign-mismatch-neg` — PASS · TWIN
 - `type-state-codes/e-type-041-not-assign-mismatch-pos` — PASS · TWIN
-- `type-state-codes/e-type-045-prefix-not-negation-neg` — PASS · TWIN · VACUOUS
+- `type-state-codes/e-type-045-prefix-not-negation-neg` — PASS · TWIN
+- `type-state-codes/e-type-045-prefix-not-negation-pos` — PASS · TWIN
 - `type-state-codes/e-type-081-partial-match-render-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-any-forbidden-pos` — PASS · TWIN
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
