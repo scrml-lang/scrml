@@ -209,8 +209,8 @@ const STATUS = {
   "loop/range": ["PASS", []],
   "loop/sum-tape": ["PASS", []],
   // s471 (g-bootstrap-loop-wait-and-defer-s469): a `defer` in a loop body; a loop in a deferred body
-  "loop/defer-per-iteration": ["PASS", []],
-  "loop/defer-loop-in-defer": ["PASS", []],
+  "loop/defer-per-iteration": ["PASS", ["W-UNUSED-BINDING"]],   // s480: the loop binder `i` is unread (§7.3.5)
+  "loop/defer-loop-in-defer": ["PASS", ["W-UNUSED-BINDING"]],   // s480: the loop binder `i` is unread (§7.3.5)
   "loop/neg-defer-bound-direct": ["PASS", ["E-DEFER-UNSUPPORTED-SITE"]],
   "loop/neg-defer-break-out": ["PASS", ["E-DEFER-CONTROL-FLOW"]],
   // s471 (g-bootstrap-lin-not-implemented-s469): linear types (§35)

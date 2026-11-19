@@ -21,7 +21,8 @@ setDefaultTimeout(180000);
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { loadM2, frontEnd } from "./harness.js";
+import { loadM2 } from "./harness.js";
+import { frontEndNoUnusedLint as frontEnd } from "../slice-m2/no-unused-lint.js";  // s480: fixtures hold incidental unread locals — W-UNUSED-BINDING is tested in slice-m4/unused-binding-s480.test.js
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); }, { timeout: 180000 });
