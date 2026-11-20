@@ -50,6 +50,8 @@
  *     the LogicBinding interface for backward compat with existing pre-Phase-2g bindings.
  */
 
+import type { AttrWriteGuard } from "./url-attr-guard.ts";
+
 /** An event binding recorded by HTML gen and consumed by client JS gen. */
 export interface EventBinding {
   placeholderId: string;
@@ -306,6 +308,15 @@ export interface LogicBinding {
   valueAttrUrlGuardTarget?: string;
 
   /**
+   * §5.2 (S479 carve-out 2) — the value attr is a CSS-url attribute (`fill=${@c}`, …), an SVG animation
+   * value that may write one, or a `<link>`'s `href`: its runtime write is the guarded setter
+   * (`codegen/url-attr-guard.ts` `dataAttrWriteGuard` / `guardedAttrWrite`), which removes a refused
+   * value. Stamped by emit-html (the one stage that knows the TAG). When set, `valueAttrUrlGuard` is
+   * not consulted (the setter applies rule 3's guard itself where it is due).
+   */
+  valueAttrWriteGuard?: AttrWriteGuard;
+
+  /**
    * i81 — the CSS-SAFE placeholder key for a reactive value attribute.
    *
    * `valueAttrName` is the ORIGINAL author-written name and is what reaches
@@ -510,6 +521,8 @@ export interface LogicBinding {
    * attributeName="href">`), passed as `_scrml_safe_url`'s 4th argument; `""` = computed `attributeName`.
    */
   directiveUrlGuardTarget?: string;
+  /** §5.2 (S479 carve-out 2) — as `valueAttrWriteGuard`, for an arm-body `attr-template`. */
+  directiveWriteGuard?: AttrWriteGuard;
 
   /**
    * i225 — form-control `value` marker for arm-body `attr-template` bindings.

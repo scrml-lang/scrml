@@ -1,0 +1,13 @@
+{
+  "id": "attr-executable-sink-stylesheet-href-data-neg",
+  "description": "§5.2 \"Data-supplied stylesheets (S472)\": a `<link>` whose `href` is not a static string (a cell read, a call) and whose `rel` contains `stylesheet` (any case, anywhere — `alternate STYLESHEET`, `preload stylesheet`, either attribute order), holds a `&` (a character reference: `style&#115;heet`), or is itself computed, is refused — seven links, seven reports. impl#1 emits it under the S479 carve-out 2 (ruling:user-voice-scrml.md-S479-3B-rest-item-21, gap g-impl1-svg-css-url-attr-and-link-stylesheet-href-unguarded-s473); before it, impl#1 compiled every one clean.",
+  "language-version": "1.0",
+  "spec": "§5.2",
+  "rationale": "§5.2: \"A `<link>` (tag compared case-insensitively) whose `href` (any case) is not a static string — `href=@u`, `href=(…)`, `href=name`, a call, … — and whose `rel` contains the text `stylesheet` (ASCII case-insensitive, anywhere in the value …) or is not a static string (`rel=@r`, `rel=(…)`) SHALL be a compile error (E-ATTR-STYLESHEET-HREF).\" \"A static `rel` whose text holds a `&` … is judged as not static.\"",
+  "expect": {
+    "codes": ["E-ATTR-STYLESHEET-HREF"],
+    "notCodes": [],
+    "severity": { "E-ATTR-STYLESHEET-HREF": "error" },
+    "codeCounts": { "E-ATTR-STYLESHEET-HREF": 7 }
+  }
+}

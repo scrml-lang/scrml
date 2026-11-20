@@ -38,7 +38,7 @@ import { deriveHtmlAttrs, htmlPredicateOf, refinementAtPath } from "./emit-predi
 // keyed by var-name (mirrors emit-bindings.ts §53.7.2 path for runtime gating).
 // S458 one reader — `cellRefinement` reads the TS-resolved refinement off that map.
 import { buildReactiveTypeMap, cellRefinement, lowerClassDirectiveCondition, lowerAttrTemplateValue } from "./emit-bindings.ts";
-import { dynamicUrlAttrNeedsGuard, quotedUrlAttrNeedsGuard, refuseExecutableDataWrite, urlGuardTarget } from "./url-attr-guard.ts";
+import { dataAttrWriteGuard, dynamicUrlAttrNeedsGuard, quotedUrlAttrNeedsGuard, refuseExecutableDataWrite, urlGuardTarget } from "./url-attr-guard.ts";
 import { _SCRML_SVG_ANIMATION_ELEMENTS } from "../runtime-url-guard.js";
 // errorBoundary (SPEC §19.6 + §19.6.8) — markup-context error catch support.
 // `collectEnumRenders` builds the file's variant -> renders-markup map;
@@ -3443,6 +3443,10 @@ export function generateHtml(
                 ...(urlGuardTarget(String(tag), name, attrs) !== null
                   ? { directiveUrlGuardTarget: urlGuardTarget(String(tag), name, attrs)! }
                   : {}),
+                // §5.2 (S479 carve-out 2) — a CSS-url attribute / a `<link>`'s `href`.
+                ...(dataAttrWriteGuard(String(tag), name, attrs) !== null
+                  ? { directiveWriteGuard: dataAttrWriteGuard(String(tag), name, attrs)! }
+                  : {}),
               });
             }
           } else {
@@ -3753,6 +3757,10 @@ export function generateHtml(
                 ...(dynamicUrlAttrNeedsGuard(tag, name, attrs) ? { valueAttrUrlGuard: true } : {}),
                 ...(urlGuardTarget(tag, name, attrs) !== null
                   ? { valueAttrUrlGuardTarget: urlGuardTarget(tag, name, attrs)! }
+                  : {}),
+                // §5.2 (S479 carve-out 2) — a CSS-url attribute / a `<link>`'s `href`.
+                ...(dataAttrWriteGuard(tag, name, attrs) !== null
+                  ? { valueAttrWriteGuard: dataAttrWriteGuard(tag, name, attrs)! }
                   : {}),
                 refs: val.refs,
               });

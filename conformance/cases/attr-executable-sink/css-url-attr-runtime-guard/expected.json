@@ -1,0 +1,24 @@
+{
+  "id": "attr-executable-sink-css-url-attr-runtime-guard",
+  "description": "§5.2 \"Data-supplied CSS-url attributes — runtime guard (S473)\": a data write of fill / stroke / filter / mask / clip-path / marker-start / cursor (on SVG AND HTML elements, any name case) is judged by the §25.7 bridge's value check — a url(…) to another document, a fallback paint after url(#id), and a non-plain value animating `fill` are REMOVED, initially and on a reactive re-write; a plain colour, a filter function list and exactly `url(#ident)` are written. Written in the parenthesized form both implementations compile. impl#1 built under the S479 carve-out 2 (ruling:user-voice-scrml.md-S479-3B-rest-item-21, gap g-impl1-svg-css-url-attr-and-link-stylesheet-href-unguarded-s473); before it, impl#1 wrote every one of these values raw.",
+  "language-version": "1.0",
+  "spec": "§5.2",
+  "rationale": "§5.2: \"Every write from data of an attribute whose name, lowercased, is a CSS-url attribute, on ANY element (SVG, HTML or custom — matched by name, fail closed)\"; \"Also every write from data of an SVG animation value (`to` / `from` / `by` / `values` …) whose static `attributeName` names a CSS-url attribute\"; \"The value … SHALL be admitted only if the §25.7 bridge's value check (`cssValueOf`) admits it, or it is the one `url(#ident)` form\" (a Filter Effects 1 filter function admitted for these attributes); \"a fallback paint (`url(#grad) red`)\" is refused; \"The attribute SHALL be removed, not written\".",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ATTR-INTERP-EXECUTABLE", "E-ATTR-STYLESHEET-HREF"],
+    "input": [{ "click": "#flip" }, { "wait": "settle" }],
+    "domAnchored": [
+      { "selector": "#pb", "attr": { "fill": null } },
+      { "selector": "#pr", "attr": { "fill": "red" } },
+      { "selector": "#rs", "attr": { "stroke": null, "filter": "blur(2px) drop-shadow(1px 1px 2px red)" } },
+      { "selector": "#rf", "attr": { "fill": "url(#grad)", "clip-path": null } },
+      { "selector": "#rm", "attr": { "mask": null, "marker-start": null, "cursor": null } },
+      { "selector": "#rp", "attr": { "fill": null } },
+      { "selector": "#sa", "attr": { "to": null } },
+      { "selector": "#sb", "attr": { "to": "red" } },
+      { "selector": "#hd", "attr": { "filter": null } },
+      { "selector": "#hc", "attr": { "fill": null } }
+    ]
+  }
+}

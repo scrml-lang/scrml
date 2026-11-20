@@ -118,6 +118,10 @@
  *   urlguard      _scrml_safe_url + the shared URL scheme reader (§5.2 rule 3, S457), inlined
  *                 verbatim from compiler/src/runtime-url-guard.js. Activated by the post-emit
  *                 `_scrml_safe_url(` scan in emit-client.ts.
+ *   cssattrguard  _scrml_css_attr_set / _scrml_link_href_set — §5.2 CSS-url attribute and stylesheet
+ *                 `<link>` `href` write guards (S479 carve-out 2), inlined verbatim from
+ *                 compiler/src/runtime-css-attr-guard.js. Activated by the post-emit scan in
+ *                 emit-client.ts; depends on 'urlguard'.
  *   metaemit      _scrml_meta_emit_insert — the runtime meta.emit() gate (§22.4.1, S458 "a", S459),
  *                 inlined from markup-attr-allow-list.js + runtime-meta-emit-gate.js. Pulled with 'meta'
  *                 (CHUNK_DEPENDENCIES meta → metaemit → urlguard): `_scrml_meta_emit` calls it.
@@ -176,6 +180,7 @@ export const RUNTIME_CHUNK_ORDER = [
   'refine',
   'urlguard',
   'metaemit',
+  'cssattrguard',
   // ---------------------------------------------------------------------
   // Stdlib registry chunks — inlined from compiler/runtime/stdlib/<name>.js
   // via `_scrml_stdlib.<name>`. Activated per-file by `detectRuntimeChunks`
@@ -370,6 +375,10 @@ const CHUNK_MARKERS: Record<NonCoreChunkName, string> = {
   // whenever the 'meta' chunk is (CHUNK_DEPENDENCIES): every runtime `^{}` effect's `meta` object
   // carries `emit`, so a program that ships `_scrml_meta_emit` always ships the gate it calls.
   metaemit:       "§22.4.1 runtime meta.emit gate (chunk: 'metaemit')",
+  // §5.2 (S479 carve-out 2) — the CSS-url attribute / stylesheet `<link>` `href` write guards
+  // (runtime-css-attr-guard.js). Activated by a POST-EMIT scan (emit-client.ts) for a
+  // `_scrml_css_attr_set(` / `_scrml_link_href_set(` call; pulls 'urlguard' (CHUNK_DEPENDENCIES).
+  cssattrguard:   "§5.2 CSS-url attribute and stylesheet href write guards (chunk: 'cssattrguard')",
 
   // Function definition markers — 'function _name' starts at a line boundary.
   // Previous chunk ends after the preceding function/IIFE closing brace.
@@ -594,6 +603,9 @@ export const CHUNK_DEPENDENCIES: Partial<Record<RuntimeChunkName, RuntimeChunkNa
   reset: ['errors'],
   ssr: ['errors'],
   urlguard: ['errors'],
+  // §5.2 (S479 carve-out 2): `_scrml_css_attr_set` / `_scrml_link_href_set` call `_scrml_safe_url`
+  // (urlguard) and report through `_scrml_error_boundary_log` (errors).
+  cssattrguard: ['urlguard', 'errors'],
   // §19.6.6 (S468) — `_scrml_error_boundary_run` reports through `_scrml_error_boundary_log`.
   boundary: ['errors'],
   // S461 — the engine <onTimeout> helpers (`_scrml_engine_arm_state_timers`, …) arm and clear

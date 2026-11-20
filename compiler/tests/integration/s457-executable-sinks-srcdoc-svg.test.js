@@ -237,9 +237,13 @@ describe("§4 an SVG animation value writing a URL attribute is guarded at every
   test("a computed attributeName fails closed — the value is guarded with target \"\"", () => {
     const { codes, client } = compile("anim-computed", `<program>\n<n> = "width"\n<u> = "/a"\n<svg><a><set attributeName=\${@n} to=\${@u}/><text>t</text></a></svg>\n</program>\n`);
     expect(codes).toEqual([]);
-    const writes = writesOf(client, "to");
+    // S480 (s480-impl1-css-url, §5.2 "Data-supplied CSS-url attributes"): a computed attributeName
+    // may also name a CSS-url attribute, so the write is the CSS setter, which runs the URL guard
+    // with target "" FIRST (`_scrml_css_attr_set(el, "to", v, "")` → `_scrml_safe_url(el, "to", v, "")`).
+    expect(writesOf(client, "to").length).toBe(0);
+    const writes = client.split("\n").filter((l) => l.includes(`_scrml_css_attr_set(_scrml_el, "to",`));
     expect(writes.length).toBeGreaterThan(0);
-    for (const w of writes) expect(w).toContain(`_scrml_safe_url(_scrml_el, "to", _scrml_g.String(_scrml_x), "")`);
+    for (const w of writes) expect(w).toContain(`_scrml_css_attr_set(_scrml_el, "to", _scrml_g.String(_scrml_x), "")`);
   });
 });
 

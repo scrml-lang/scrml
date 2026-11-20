@@ -52,6 +52,9 @@ import {
   isQuotedStaticHandler,
   quotedHandlerMessage,
   attrSinkKey,
+  ATTR_STYLESHEET_HREF_CODE,
+  stylesheetHrefFromData,
+  stylesheetHrefMessage,
 } from "../attr-injection-sink.ts";
 
 // ---------------------------------------------------------------------------
@@ -289,7 +292,12 @@ export function collectExecutableSinkErrors(
         const s = executableDataWriteSink(attr.name);
         if (s && s.kind === "srcdoc") { sink = s; form = "data"; }
       }
-      if (!sink && !quotedHandler && !staticSink) continue;
+      // §5.2 "Data-supplied stylesheets (S472)" — impl#1 under the S479 carve-out 2: a `<link>`
+      // whose `href` is not static and whose `rel` loads a stylesheet (or is computed).
+      const sheetHref = !sink && !quotedHandler && !staticSink &&
+        dataValueReachesElementAttr(node, attr.name) &&
+        stylesheetHrefFromData(node.tag, attr.name, v, node.attrs);
+      if (!sink && !quotedHandler && !staticSink && !sheetHref) continue;
       // A value written verbatim by the author (no caller substitution): anchored where it is written.
       const staticText = quotedHandler || staticSink !== null;
       if (opts.markReported) (attr as { _execSinkReportedAtDef?: boolean })._execSinkReportedAtDef = true;
@@ -325,10 +333,12 @@ export function collectExecutableSinkErrors(
       reported.add(key);
       const err: AttrInterpError = {
         code: quotedHandler ? ATTR_QUOTED_HANDLER_CODE
-          : staticSink ? ATTR_STATIC_EXECUTABLE_CODE : ATTR_INTERP_EXECUTABLE_CODE,
+          : staticSink ? ATTR_STATIC_EXECUTABLE_CODE
+          : sheetHref ? ATTR_STYLESHEET_HREF_CODE : ATTR_INTERP_EXECUTABLE_CODE,
         message: quotedHandler
           ? quotedHandlerMessage(attr.name, node.tag ?? "", where)
           : staticSink ? staticExecutableMessage(staticSink, attr.name, node.tag ?? "", where)
+          : sheetHref ? stylesheetHrefMessage(attr.name, node.tag ?? "", where)
           : interpolatedAttrSinkMessage(sink!, attr.name, node.tag ?? "", where, form),
         span,
         severity: "error",
