@@ -2,6 +2,49 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S480 — 2026-11-19 → 11-20 (bryan · theRog) — 32 PRs + bot regens: bootstrap channels follow-ups, timed engine + `<onIdle>`, W-UNUSED-BINDING, build mode + driver-text withholding, trap holes, `??` / `@.` / `is .V` / `class:`; impl#1 endpoint + URL-attribute carve-outs; compile time near-linear in function count; conformance PASS ~706 → 760
+
+Rulings: user-voice §S480 (PA recs adopted on every batch). Every code PR took an S239 adversarial review on a frozen tree (or a PA-direct read for small/records PRs); every fix round got a fresh re-review.
+
+- #1963 — bootstrap: three parse FAILs (body-top type alias, E-SQL-QUERY-NOT-READABLE, E-TYPE-045); landed after a merge-main round.
+- #1971 — bootstrap: schema type-name case, E-SCHEMA-018, reserved `db` (ruled S479).
+- #1975 — bootstrap: file-scope follow-ups — tool exemption narrowed by `serve=` (ruled S480), later-binding E-SCOPE-001, foreign `let` write.
+- #1981 — `<endpoint>` cors scoping + per-endpoint `cors=`; parseVariant duplicate keys (ruled S479).
+- #1987 — bootstrap channels: `__seen`, `__refused`, reconnect backoff, trusted proxies; `replace` not bound by a fixed length (ruled S480); honest client not closed, 30 s close window (two fix rounds).
+- #1989 — bootstrap: an unknown struct field is E-TYPE-004, not E-SCOPE-001 (reads).
+- #1991 — bootstrap: recursive enum compile time (k=4 over 90 s → 4 ms); containsHost walks each named type once.
+- #1994 — bootstrap: shared type graphs compile in linear time (tape-grant walks, host descriptors); a fail-open memo found and closed in review.
+- #1995 — bootstrap channels: replace-supersede never strands a same-cell edit.
+- #1996 — records: review markers, gaps, rate-close-window ruling.
+- #1998 — impl#1 carve-out 1: endpoint placement + duplicate routes (§61.2, §61.7), reserved path prefixes, one attribute reader (smuggling closed in r2).
+- #1999 — bootstrap: timed engine + `<onIdle>` watchdog (ruled S479); tool initializers.
+- #2000 — bootstrap: server copy of a waiting helper — server callers run it in place.
+- #2002 — tooling: lint-duplicate-fn nested `<program>` scope, markup after `)`, lex once (85 s → 36 ms).
+- #2003 — bootstrap: tape-grant diagnostics report every distinct fix; hints that compile.
+- #2004 — bootstrap: W-UNUSED-BINDING lint (ruled S479; population ruled S480).
+- #2006 — bootstrap typer: join on primitive tapes, loop-narrowing SPEC, counted-head keep, bare-arrow pin.
+- #2007 — E-ENDPOINT-ATTR-INVALID (impl#1 + bootstrap); tools evaluate every file-scope initializer in source order; onIdle / trailing-dot markers ratified.
+- #2008 — bootstrap: the trap unit is the effect, statement-arm lift, placement ≠ waiting.
+- #2009 — bootstrap: W-UNUSED-BINDING reports unread arm binders; §7.3.5 ruled text.
+- #2011 — bootstrap build mode (prod default, dev in its own folder) + driver text withheld from every delivered value.
+- #2012 — bootstrap: §61.2 `<endpoint>` opener read whole (an empty-path fail-open closed in r1); typed-attr ruling.
+- #2013 — bootstrap: W-UNUSED-BINDING reports unread `<each>` binders; `.Transport(_)` fix-its and renames.
+- #2014 — records batch 2: review markers, 19 LOW gaps, SPEC wording.
+- #2015 — impl#1 carve-out 2: CSS-url attribute guard + E-ATTR-STYLESHEET-HREF (renders and fallback= templates closed in r1/r2).
+- #2016 — CI: slices job sharded into two legs (merge-queue runs were timing out).
+- #2017 — bootstrap: a trapped data-bound attribute's hole is its element (§19.17, ruled S480); four fix rounds.
+- #2020 — bootstrap perf: compile time near-linear in top-level function count (8000 fns 114 s → 3.9 s; parse.scrml 198 s → 7.5 s).
+- #2023 — impl#1 carve-out 2 widened: URL attributes in renders/fallback templates, `<set attributeName=href>`, `<link href>`, `<base href>`.
+- #2026 — records batch 3: census gaps, review residue, E-TYPE-004 row, reserved cells `db` / `schema` / `md`.
+- #2028 — bootstrap census cheap wins: `??` (§42.11, W-NULLISH-NEVER-ABSENT), bare `@.`, `is .Variant`, `class:` (E-ATTR-WRITER-CONFLICT with `class=(expr)`).
+- #2029 — bootstrap: full §4.15 reserved-name list on program cells; §19.9.1 stored driver text is the author's data.
+- Bot regens: #1982 #1984 #1985 #1986 #1988 #1990 #1992 #1993 #1997 #2001 #2005 #2010 #2018 #2019 #2021 #2022 #2024 #2027 #2030 #2031.
+- **Rulings (user-voice §S480):** `serve=` narrows the tool exemption; `replace` not bound by a fixed length; four recs (impl#1 §61.2/§61.7, E-ENDPOINT-CORS-INVALID, honest-client + 30 s INTERIM, append-append gap); two #1998 recs (reserved paths, repeated cors=); four recs 2 (E-ENDPOINT-ATTR-INVALID, onIdle no-op fire, tool initializers, trailing-dot origins); W-UNUSED-BINDING six; trap attr hole; `<each>` binders; endpoint typed attr; census build order + carve-out 2 widening; §5.2 covered writes + templates; stored driver text + reserved cells; `is .V` / `==` on `E | not` + `??` type.
+- **Census:** 701 positive programs — bootstrap clean 14 as written (181 after mechanical migration) vs impl#1 687; dialect is the main blocker; `^{}` meta the largest feature blocker. Build order ruled: Track M (`scrml fix` dialect rules + migration) first, then `^{}`.
+- **Conformance:** bootstrap PASS ~706 / FAIL 4 at session start (the 4 FAILs pre-existing) → 760 / 0 at #2028, CRASH 0.
+- **Open at wrap:** #2025 (Track M1 dialect fix rules) in its r4 fix round after three BLOCK re-reviews.
+- **Lessons:** never wrap `git commit` in `timeout` (it kills the hook); seed each lane's SCRML_TEST_TIMINGS from the shared file; after a CI-shape change, update open PR branches (update-branch drops auto-merge); new conformance cases need host-global-scan --check; an allow-list reader fails open — guard with a fail-closed rule.
+
 ## S479 — 2026-11-18 (bryan · theRog) — every S478 owner question ruled and built in reviewed lanes; three narrow impl#1 carve-outs; channel relay fold; file-scope `let`; endpoint path grammar and duplicate-key refusal; host OOM capped the session
 
 Rulings: user-voice §S479 (PA recs adopted on every batch; three impl#1 carve-outs). Every code PR took an S239 adversarial review on a frozen tree; every fix round got a fresh re-review.

@@ -37320,7 +37320,7 @@ The keyword `not` serves exactly one role in scrml: it is the absence value. It 
 
 1. **Evaluation.** `a` SHALL be evaluated first. When its value is not `not`, that value is the result and `b` SHALL NOT be evaluated. When it is `not`, `b` SHALL be evaluated and its value is the result. (Absence is `null` / `undefined` at run time, §42.8, exactly what JavaScript's `??` tests.)
 2. **Type.** The type of `a ?? b` SHALL be the type of `a` with `not` removed, joined with the type of `b`. For `a: T | not` and `b: T`, it is `T`; for `a: T | not` and `b: U | not`, it is `T | U | not` joined as any two types are; when `a` is the `not` literal, it is the type of `b`. Where the two types have no join, the result is not one type and is judged where it lands (an assignment, a return, a condition — §42.4 statement 5).
-3. **A left operand that can never be absent.** When the type of `a` is known and does not include `| not`, the compiler SHALL emit **W-NULLISH-NEVER-ABSENT** (Warning): `b` never runs, and it only widens the type of the result. The program still compiles. A left operand whose type the compiler cannot resolve is not reported.
+3. **A left operand that can never be absent.** When the type of `a`, after narrowing (§42.3), is known and does not include `| not`, the compiler SHALL emit **W-NULLISH-NEVER-ABSENT** (Warning): `b` never runs, and it only widens the type of the result. The program still compiles. A left operand whose type the compiler cannot resolve is not reported.
 4. **Mixing.** `??` SHALL NOT be combined with `&&` or `||` without parentheses (E-EXPR-NULLISH-MIX, §34).
 
 ```scrml
