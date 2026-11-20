@@ -24,7 +24,7 @@ afterEach(() => expectNoPageErrors());
 const ENTRY = "app.scrml";
 const F = "/virtual/app.scrml";
 const errs = (r) => r.diags.filter((d) => d.severity === "Error");
-const SEED_NOTE = /which a statement before it writes/;
+const SEED_NOTE = /which a statement before it (may )?write/;
 let k = 0;
 
 /** fixS66 (every rule), then the bootstrap on the result: { blockers, clean, text }. */
@@ -87,4 +87,16 @@ describe("fixS66 never moves a §66 declaration past a write it reads (review F1
     expect(r.clean).toBe(true);
     expect(r.text).toBe("9 3");
   }, 120000);
+
+  test("the declaration's head (`<count pinned>`) is not its initializer: a literal seed after a call is not refused", () => {
+    const src = ["${", "    function readEarly() {", "        return @count;", "    }", "    @count = readEarly()", "    <count pinned> = 0", "}", "<p>x</>", ""].join("\n");
+    const fx = fixS66(src, { filePath: F, entry: true, rules: S66_RULES, allowNonCompiling: true, wrapPageRoot: true });
+    expect(fx.blockers.map((b) => b.reason).join("\n")).not.toMatch(SEED_NOTE);
+  });
+
+  test("a call before the declaration refuses a seed that reads anything (the callee may write it)", () => {
+    const src = ["<program>", "${", "    <a>: number = 1", "    bump()", "    <b>: number = @a + 1", "    function bump() { @a = 5 }", "}", '<p id="c">${@b}</p>', "</program>", ""].join("\n");
+    const fx = fixS66(src, { filePath: F, entry: true, rules: S66_RULES, allowNonCompiling: true });
+    expect(fx.blockers.map((b) => b.reason).join("\n")).toMatch(/line 5 reads `a`, which a statement before it may write/);
+  });
 });

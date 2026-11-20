@@ -224,11 +224,22 @@ function seedChainEnd(toks, j) {
 /** What a §66 declaration statement's initializer reads: `{ names, any }` (`any`: it calls code). */
 function seedReads(toks) {
   const out = { names: new Set(), any: false };
-  // the declared name (`<x>`, `const <x>`) is not a read
+  // the head `<x attrs>` (the declared name, `pinned`, …) is not the initializer: reads start after it
   const lt = toks.findIndex((t) => t.text === "<");
-  const declared = lt >= 0 && toks[lt + 1] ? lt + 1 : -1;
-  for (let j = 0; j < toks.length; j++) {
-    if (j === declared) continue;
+  let from = 0;
+  if (lt >= 0) {
+    let d = 0;
+    for (let j = lt + 1; j < toks.length; j++) {
+      const x = toks[j].text;
+      if (x === "(" || x === "[" || x === "{") d++;
+      else if (x === ")" || x === "]" || x === "}") d--;
+      else if (x === ">" && d === 0) { from = j + 1; break; }
+    }
+    // `<x>: T = v`: the type annotation is not a read either — the initializer follows the `=`
+    const eq = toks.findIndex((t, j) => j >= from && t.text === "=");
+    if (eq >= 0) from = eq + 1;
+  }
+  for (let j = from; j < toks.length; j++) {
     const t = toks[j];
     const afterDot = j > 0 && (toks[j - 1].text === "." || toks[j - 1].text === "?.");
     if (t.kind === "BLOCK_REF") { out.any = true; continue; }
@@ -269,11 +280,11 @@ function addSeedWrites(w, st) {
   }
 }
 
-/** The first name in `r` (reads) that `w` (writes) may have written, or null. */
+/** How a statement before the declaration may change what its initializer reads (`r`), or null. */
 function seedConflict(w, r) {
-  if (w.any && (r.any || r.names.size > 0)) return "a call or block that runs code";
-  if (r.any && w.names.size > 0) return [...w.names][0];
-  for (const n of r.names) if (w.names.has(n)) return n;
+  for (const n of r.names) if (w.names.has(n)) return `reads \`${n}\`, which a statement before it writes`;
+  if (r.any && w.names.size > 0) return `calls code that may read \`${[...w.names][0]}\`, which a statement before it writes`;
+  if (w.any && (r.any || r.names.size > 0)) return `reads \`${[...r.names][0] ?? "code"}\`, which a statement before it may write (that statement runs code: a call or a block)`;
   return null;
 }
 
@@ -1833,7 +1844,7 @@ export function fixS66(source, opts = {}) {
     for (let k = 0; k < stmts.length; k++) {
       if (!moves[k]) { addSeedWrites(w, stmts[k]); continue; }
       const hit = seedConflict(w, seedReads(stmts[k].toks ?? []));
-      if (hit) return `the declaration on line ${lineOf(src, stmts[k].start)} reads \`${hit}\`, which a statement before it writes — a §66 cell's initializer runs when the program is constructed, before the body's statements (impl#1 runs them first), so moving it would change the value it reads`;
+      if (hit) return `the declaration on line ${lineOf(src, stmts[k].start)} ${hit} — a §66 cell's initializer runs when the program is constructed, before the body's statements (impl#1 runs them first), so moving it would change the value it reads`;
     }
     return null;
   };
