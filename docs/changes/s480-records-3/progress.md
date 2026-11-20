@@ -14,4 +14,5 @@ widening, four smaller questions, PA recs adopted (S480, 2026-11-20)" items 6–
       fn-count scaling bound indep/chain 10× → 8× (compile-scaling-fn-count-s480.test.js — the bound is there,
       not in shared-graph-walks-s480.test.js).
 - [x] §4.15 endpoint owning-locus sentence: already fixed on main (S480 parenthetical) — dropped.
+- [x] Coordinator add-on (after #2023): §5.2 rule 3 Covered writes — renders / fallback= templates, judged whole (ruling:user-voice-scrml.md-S480-covered-writes-templates); gap corrections g-impl1-renders-template-hyphen-attr-split-s480, g-impl1-quoted-url-list-later-entry-unjudged-s480.
 - [ ] Final gates, PR.

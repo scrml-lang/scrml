@@ -28,8 +28,15 @@
 
 import { runBlockSplitter } from "../block-splitter.js";
 import { buildAST } from "../ast-builder.js";
-import { RENDERS_FIELD_SENTINEL, stylesheetHrefFromData } from "../attr-injection-sink.ts";
-import { dataAttrWriteGuard } from "./url-attr-guard.ts";
+import {
+  ATTR_BASE_HREF_CODE,
+  ATTR_STYLESHEET_HREF_CODE,
+  RENDERS_FIELD_SENTINEL,
+  baseHrefFromData,
+  stylesheetHrefFromData,
+} from "../attr-injection-sink.ts";
+import { dataAttrWriteGuard, dynamicUrlAttrNeedsGuard, urlGuardTarget } from "./url-attr-guard.ts";
+import { _SCRML_SVG_ANIMATION_ELEMENTS, _SCRML_SVG_ANIMATION_VALUE_ATTRS } from "../runtime-url-guard.js";
 
 /**
  * A compiled markup template for a fallback / renders body.
@@ -194,9 +201,16 @@ const FIELD_INTERP = /\$\{\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\}/g;
  * builds. The runtime twin is `_scrml_link_href_html`. The template is re-parsed as
  * `compileBoundaryMarkup` parses it, except that an UNQUOTED `name=${field}` is read as the quoted
  * `name="${field}"` (codegen drops its value, but it is data all the same — fail closed, as the
- * bootstrap refuses `href=sheet`). Returns one `{ tag, name }` per refused attribute.
+ * bootstrap refuses `href=sheet`). Returns one `{ tag, name, code }` per refused attribute.
+ *
+ * S480 (carve-out 2 widened — ruling:user-voice-scrml.md-S480-census-recs item 5): the same walk
+ * reports a `<base>`'s `href` taken from a payload field — §5.2 "Data never moves the document base
+ * (S473)": "A `<base>` … whose `href` (any case) is not a static string … SHALL be a compile error
+ * (E-ATTR-BASE-HREF)" (attr-injection-sink.ts `baseHrefFromData`, the bootstrap's shape). The runtime
+ * twin is `_scrml_link_href_html(…, "base")`.
  */
-export function rendersStylesheetHrefHits(rawMarkup: string): Array<{ tag: string; name: string }> {
+export type RendersHrefRefusal = { tag: string; name: string; code: string };
+export function rendersHrefRefusalHits(rawMarkup: string): RendersHrefRefusal[] {
   const trimmed = normalizeTokenizedMarkup((rawMarkup ?? "").trim());
   if (trimmed === "") return [];
   const quotedForm = trimmed.replace(/=\s*\$\{\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\}/g,
@@ -211,7 +225,7 @@ export function rendersStylesheetHrefHits(rawMarkup: string): Array<{ tag: strin
     // compileBoundaryMarkup then writes the template as escaped TEXT (no element, no attribute).
     return [];
   }
-  const hits: Array<{ tag: string; name: string }> = [];
+  const hits: RendersHrefRefusal[] = [];
   const seen = new Set<any>();
   const visit = (n: any): void => {
     if (!n || typeof n !== "object" || seen.has(n)) return;
@@ -219,8 +233,11 @@ export function rendersStylesheetHrefHits(rawMarkup: string): Array<{ tag: strin
     if (Array.isArray(n)) { n.forEach(visit); return; }
     if (typeof n.tag === "string" && Array.isArray(n.attrs)) {
       for (const a of n.attrs) {
-        if (a && typeof a.name === "string" && stylesheetHrefFromData(n.tag, a.name, a.value, n.attrs)) {
-          hits.push({ tag: n.tag, name: a.name });
+        if (!a || typeof a.name !== "string") continue;
+        if (stylesheetHrefFromData(n.tag, a.name, a.value, n.attrs)) {
+          hits.push({ tag: n.tag, name: a.name, code: ATTR_STYLESHEET_HREF_CODE });
+        } else if (baseHrefFromData(n.tag, a.name, a.value)) {
+          hits.push({ tag: n.tag, name: a.name, code: ATTR_BASE_HREF_CODE });
         }
       }
     }
@@ -337,8 +354,17 @@ export function emitBoundaryMarkupExpr(
   // §5.2 "Data-supplied stylesheets (S472)" (S480 r2 N1) — likewise a `<link>`'s `href` carrying a
   // payload field is built by `_scrml_link_href_html` from its `rel` and `href` pieces: not written
   // (reported) when `rel` loads a stylesheet. Defence in depth: VP-3 already refuses that template
-  // (E-ATTR-STYLESHEET-HREF). A non-stylesheet `<link href>` is written as before (no URL guard —
-  // outside the S479 carve-out 2; gap g-impl1-renders-href-unguarded-s480).
+  // (E-ATTR-STYLESHEET-HREF).
+  // §5.2 rule 3 (S480, carve-out 2 widened — ruling:user-voice-scrml.md-S480-census-recs item 5; gap
+  // g-impl1-renders-href-unguarded-s480): "a data-supplied value written to a URL attribute … SHALL be
+  // judged at run time". Every other URL attribute carrying a payload field (`href`, `src`, `action`,
+  // `formaction`, `xlink:href`, `poster`, `data` on `<object>` … — `_scrml_is_url_attr` on its element),
+  // and an SVG animation value that animates one (`<set attributeName="href" to="${f}">`), is built by
+  // `_scrml_url_attr_html`, which judges the assembled value with `_scrml_safe_url` (refused →
+  // `about:blank`, reported), as every DOM writer's URL write is judged. A non-stylesheet `<link href>`
+  // goes through `_scrml_link_href_html`, which now applies the same guard (as `_scrml_link_href_set`
+  // does). A `<base>`'s `href` from a payload field is never written (`_scrml_link_href_html(…, "base")`
+  // → `""`; VP-3 already refuses it, E-ATTR-BASE-HREF).
   const valueParts = (value: string): string => {
     const segs = value.split(FIELD_SENTINEL);
     const parts: string[] = [];
@@ -353,7 +379,11 @@ export function emitBoundaryMarkupExpr(
     pushHtml(tpl.htmlTemplate.slice(at, g.start));
     if (g.kind === "link-href") {
       const rel = g.rel === null ? "null" : valueParts(g.rel);
-      pieces.push(`_scrml_link_href_html(${JSON.stringify(g.name)}, ${rel}, ${valueParts(g.value)})`);
+      const base = g.tag === "base" ? `, "base"` : "";
+      pieces.push(`_scrml_link_href_html(${JSON.stringify(g.name)}, ${rel}, ${valueParts(g.value)}${base})`);
+    } else if (g.kind === "url") {
+      const extra = typeof g.target === "string" ? `, ${JSON.stringify(g.target)}` : "";
+      pieces.push(`_scrml_url_attr_html(${JSON.stringify(g.tag)}, ${JSON.stringify(g.name)}, ${valueParts(g.value)}${extra})`);
     } else {
       const extra = typeof g.target === "string" ? `, ${JSON.stringify(g.target)}` : "";
       pieces.push(`_scrml_css_attr_html(${JSON.stringify(g.tag)}, ${JSON.stringify(g.name)}, ${valueParts(g.value)}${extra})`);
@@ -375,13 +405,19 @@ function decodeHtmlAttr(s: string): string {
  * The attributes of a generated template (`generateHtml` output: ` name="value"`, values
  * attribute-escaped) that a §5.2 write guard covers: a payload field (`FIELD_SENTINEL`) in the value,
  * and `url-attr-guard.ts` `dataAttrWriteGuard` answers `css` (a CSS-url attribute; a captured field in
- * another attribute's value — `attributeName` — counts as computed) or `link-href` (a `<link>`'s
- * `href`; `rel` is that element's `rel` value, null when it has none) for the name on that element.
+ * another attribute's value — `attributeName` — counts as computed) or `link-href` (a `<link>`'s or a
+ * `<base>`'s `href`; `rel` is that element's `rel` value, null when it has none) for the name on that
+ * element; otherwise `url` when §5.2 rule 3 guards the name there (`dynamicUrlAttrNeedsGuard`: a URL
+ * attribute on that element, or an SVG animation value whose static `attributeName` names one —
+ * `target`). An SVG animation value whose `attributeName` is itself a payload field is guarded even when
+ * the value is static (S480: the data chooses which attribute the static text is written to —
+ * `attributeName="${f}" to="javascript:…"`; the bootstrap judges such a value at run time,
+ * `animatedUrlTarget` → "").
  * `start` is the whitespace before the name, `end` just past the closing quote.
  */
 type GuardedTemplateAttr = {
   start: number; end: number; tag: string; name: string; value: string;
-  kind: "css" | "link-href"; target: string | null; rel: string | null;
+  kind: "css" | "link-href" | "url"; target: string | null; rel: string | null;
 };
 function guardedTemplateAttrs(html: string): GuardedTemplateAttr[] {
   const out: GuardedTemplateAttr[] = [];
@@ -425,10 +461,21 @@ function guardedTemplateAttrs(html: string): GuardedTemplateAttr[] {
       value: a.value === null ? { kind: "absent" }
         : { kind: "string-literal", value: a.value.replace(/\uE000([^\uE000]*)\uE000/g, "${$1}") },
     }));
+    const lowerTag = tag.toLowerCase();
+    const computedAnimationTarget = _SCRML_SVG_ANIMATION_ELEMENTS.has(lowerTag) &&
+      attrs.some((r) => r.name.toLowerCase() === "attributename" && r.value !== null && r.value.indexOf(FIELD_SENTINEL) >= 0);
     for (const a of attrs) {
-      if (a.value === null || a.value.indexOf(FIELD_SENTINEL) < 0) continue;
+      if (a.value === null) continue;
+      if (a.value.indexOf(FIELD_SENTINEL) < 0 &&
+          !(computedAnimationTarget && _SCRML_SVG_ANIMATION_VALUE_ATTRS.has(a.name.toLowerCase()))) continue;
       const guard = dataAttrWriteGuard(tag, a.name, asAst as any);
-      if (!guard) continue;
+      if (!guard) {
+        if (dynamicUrlAttrNeedsGuard(tag, a.name, asAst as any)) {
+          out.push({ start: a.start, end: a.end, tag: lowerTag, name: a.name, value: a.value,
+            kind: "url", target: urlGuardTarget(tag, a.name, asAst as any), rel: null });
+        }
+        continue;
+      }
       if (guard.kind === "link-href") {
         const relAttr = attrs.find((r) => r.name.toLowerCase() === "rel");
         const rel = relAttr === undefined ? null : (relAttr.value ?? "");

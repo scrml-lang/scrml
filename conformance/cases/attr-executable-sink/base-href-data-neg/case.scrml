@@ -1,0 +1,8 @@
+<program>
+<u> = "https://evil.example/"
+function root() { return "https://evil.example/app/"; }
+<base href=(@u)>
+<base HREF=(@u)>
+<base href=root()>
+<p id="ok">ok</p>
+</program>
