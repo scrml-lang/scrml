@@ -2446,6 +2446,7 @@ ${
         return match k {
             .AIf :> true
             .AShow :> false
+            .AClass(name: acn) :> false
             .AOn(event: ev) :> false
             .AConstruct(field: x) :> false
             .AStatic :> false
@@ -2488,6 +2489,7 @@ ${
             .AOn(event: ev) :> [Attr.On(ev, handlerBlock(c, a.value))]
             .AIf :> []
             .AShow :> showAttr(c, a)
+            .AClass(name: acn) :> classAttr(c, a, acn)
             .AConstruct(field: x) :> []
             .AAs :> []
             .AEachIn :> []
@@ -2502,6 +2504,15 @@ ${
     // if-chain arm it composes (§17.1.1): the arm decides presence, this
     // decides visibility. A condition that does not lower (analyze reported
     // it) hides the element (fail closed).
+    // s480 (s480-boot-cheap-wins) — `class:name=cond` (§5.5.2) → Attr.ClassOn: `name` is in the
+    // element's class list exactly while the condition holds. A condition that does not lower
+    // (analyze reported it) leaves the class off (fail closed).
+    fn classAttr(c: LC, a: AAttr, name: string) -> Attr[] {
+        const t: Expr | not = lowerValue(c, a.value)
+        if (t is given) return [Attr.ClassOn(name, t)]
+        return [Attr.ClassOn(name, Expr.Lit(Literal.Bool(false)))]
+    }
+
     fn showAttr(c: LC, a: AAttr) -> Attr[] {
         const t: Expr | not = lowerValue(c, a.value)
         if (t is given) return [Attr.Show(t)]
@@ -2648,6 +2659,7 @@ ${
             .ABound :> -1
             .AIf :> -1
             .AShow :> -1
+            .AClass(name: acn) :> -1
             .AAs :> -1
             .AEachIn :> -1
             .AEachKey :> -1
@@ -2685,6 +2697,7 @@ ${
             .ABound :> 0
             .AIf :> 0
             .AShow :> 0
+            .AClass(name: acn) :> 0
             .AConstruct(field: x) :> 0
             .AAs :> 0
             .AEachAs :> 0
@@ -2918,6 +2931,7 @@ ${
             .Static(name: n, value: v) :> n == "data-scrml"
             .Bound(name: n, e: e) :> n == "data-scrml"
             .Show(test: e) :> false
+            .ClassOn(test: e) :> false
             .On(event: e, body: b) :> false
             .Bind(kind: k) :> false
             .Gate(values: vs) :> false
@@ -4869,6 +4883,7 @@ ${
             .Static(name: x) :> a
             .Bound(name: x) :> a
             .Show(test: x) :> a
+            .ClassOn(test: x) :> a
             .On(event: x) :> a
             .Bind(kind: x) :> a
         }
@@ -5155,6 +5170,7 @@ ${
             .Static(name: n, value: v) :> staticIf(n, v, name)
             .Bound(name: x) :> not
             .Show(test: x) :> not
+            .ClassOn(test: x) :> not
             .On(event: x) :> not
             .Bind(kind: x) :> not
             .Gate(values: x) :> not
@@ -5178,6 +5194,7 @@ ${
             .Static(name: x) :> []
             .Bound(name: x) :> []
             .Show(test: x) :> []
+            .ClassOn(test: x) :> []
             .On(event: x) :> []
             .Gate(values: x) :> []
         }

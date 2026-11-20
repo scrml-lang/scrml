@@ -479,7 +479,7 @@ export function effect(scope, fn) {
 // every other hole, and the insertion of the view — proceeds. Any other throw (a
 // bootstrap defect, a template the HTML parser restructured) is still rethrown
 // after the blank, as before. A data-bound ATTRIBUTE's hole is its ELEMENT
-// (`rt.attr`, `elementHole` below; ruling user-voice-scrml.md S480 "⭐ RULED —
+// (`rt.attr` and a `class:` toggle, `rt.classOn`; `elementHole` below; ruling user-voice-scrml.md S480 "⭐ RULED —
 // what a trap renders when "nothing" is not safe" item 1): an absent attribute
 // is not safe for every name (an `<iframe>`'s `sandbox`), so the element that
 // carries it is replaced by a placeholder. NOT a hole here (unchanged — the
@@ -3990,6 +3990,10 @@ function restoreHeld() {
       if (!s.dirty) continue;
       s.dirty = false;
       if (s.refused) { refuseLinkHref(el, s.name); continue; }
+      if (s.cls) {                                   // a `class:` toggle (classOn): only its own class
+        if (el.classList.contains(s.name) !== s.v) el.classList.toggle(s.name, s.v);
+        continue;
+      }
       writeAttr(el, s.name, s.v, s.guard, true);
     }
     if (queue.size > 0) {                            // a write re-entered: settle first, then try again
@@ -4343,6 +4347,41 @@ export function visibility(scope, el, fn) {
     const d = fn() === true ? own : "none";
     if (el.style.display !== d) el.style.display = d;
   }, () => { el.style.display = "none"; });
+}
+
+/**
+ * s480 (s480-boot-cheap-wins) — `class:name=cond` (SPEC §5.5.2): "The compiler SHALL emit
+ * client-side wiring that calls `classList.toggle(name, !!condition)` on the target element when
+ * any dependency changes", applied on mount when the condition holds and absent when it does not.
+ * Only `name` is touched: the static `class` and every other `class:` directive are independent.
+ *
+ * s480 r1 (#2028 F2) — A `class:` directive writes the `class` attribute, so it is a DATA-BOUND
+ * ATTRIBUTE for §19.17 (ruling user-voice-scrml.md S480 "⭐ RULED — what a trap renders when
+ * "nothing" is not safe" item 1: "removing the element is the only state that is safe for every
+ * attribute" — a removed `hidden` / `blur` / `redacted` class REVEALS content). It is one of the
+ * element's writers, exactly as `attr`'s are (`elementHoleOf`): a live element is toggled at once;
+ * a trap holds the element out (`holdElement`, reported once); while it is out the condition's
+ * value waits in the writer's slot; on recovery (`restoreHeld`) the class state is written, then
+ * the element goes back. With no trap the writes are `classList.toggle(name, v)`, as before.
+ */
+export function classOn(scope, el, name, fn) {
+  requireScope(scope, "a class directive");
+  const h = elementHoleOf(el);
+  const slot = { name, guard: null, v: false, refused: false, dirty: false, cls: true };
+  const tok = {};
+  h.writers.set(tok, slot);
+  scope.own(() => { h.writers.delete(tok); h.trapped.delete(tok); });
+  new Effect(scope, () => {
+    slot.v = !!fn();
+    h.trapped.delete(tok);
+    if (h.out) {
+      slot.dirty = true;
+      if (h.trapped.size === 0) heldToRestore.add(el);
+      return;
+    }
+    slot.dirty = false;
+    el.classList.toggle(name, slot.v);
+  }, () => holdElement(el, h, tok));               // the element leaves the page; nothing is written to it
 }
 
 /**

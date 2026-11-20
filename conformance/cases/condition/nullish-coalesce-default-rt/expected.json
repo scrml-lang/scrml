@@ -1,0 +1,19 @@
+{
+  "id": "condition-nullish-coalesce-default-rt",
+  "description": "`a ?? b` (§7 binary operator; §42 absence): `pick(not)` is the fallback \"none\", `pick(\"x\")` is \"x\"; `(@n ?? 0) + 1` reads @n once it is present; the markup `${@n ?? 0}` shows 0 before the click and 4 after.",
+  "language-version": "1.0",
+  "spec": "§7.2.2, §42.8",
+  "provenance": "ruling:user-voice-scrml.md S440 \"all recs on 1-3 and dpa-037\" (Gotcha Q2: \"`!`, `&&`, `||` (and `and`/`or`) take booleans only; defaults use `??`\")",
+  "rationale": "§7 lists `??` among the binary (infix) operators; §42.8: \"`not` … Its runtime representation in compiled JavaScript is `null`\" and the absence test matches \"both JavaScript `null` and `undefined`\" — the values `??` falls through on. S440 Gotcha Q2 makes `??` the default form and Q3 requires a `T | not` operand to be narrowed before arithmetic or a template: `??` is that default, so `(@n ?? 0) + 1` and `${@n ?? 0}` are legal.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-"],
+    "input": [{ "click": "#go" }],
+    "state": { "label": "none|x", "total": 5, "n": 4 },
+    "domAnchored": [
+      { "selector": "#out", "text": "none|x" },
+      { "selector": "#tot", "text": "5" },
+      { "selector": "#shown", "text": "4" }
+    ]
+  }
+}

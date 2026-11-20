@@ -11,7 +11,7 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 429 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
+// 435 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
 // generator's PROVISIONAL table: none); 36 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
@@ -75,6 +75,7 @@ ${
             "W-MATCH-001" :> Severity.Warning
             "W-MATCH-002" :> Severity.Warning
             "W-MATCH-RULE-INERT" :> Severity.Warning
+            "W-NULLISH-NEVER-ABSENT" :> Severity.Warning
             "W-PROGRAM-TITLE-NESTED" :> Severity.Warning
             "W-REQUEST-ID-UNREFERENCEABLE" :> Severity.Warning
             "W-SCHEMA-001" :> Severity.Warning
@@ -105,6 +106,7 @@ ${
             "E-ATTR-001" :> Severity.Error
             "E-ATTR-010" :> Severity.Error
             "E-ATTR-011" :> Severity.Error
+            "E-ATTR-013" :> Severity.Error
             "E-ATTR-BASE-HREF" :> Severity.Error
             "E-ATTR-FORM-ACTION" :> Severity.Error
             "E-ATTR-INTERP-EXECUTABLE" :> Severity.Error
@@ -114,6 +116,7 @@ ${
             "E-ATTR-STATIC-EXECUTABLE" :> Severity.Error
             "E-ATTR-STYLESHEET-HREF" :> Severity.Error
             "E-ATTR-UNQUOTED-OPERATOR" :> Severity.Error
+            "E-ATTR-WRITER-CONFLICT" :> Severity.Error
             "E-AUTH-001" :> Severity.Error
             "E-AUTH-ATTR-INVALID" :> Severity.Error
             "E-AWAIT-NOT-IN-SCRML" :> Severity.Error
@@ -219,6 +222,7 @@ ${
             "E-ERRORS-002" :> Severity.Error
             "E-EVENT-CONTROL-AFTER-AWAIT" :> Severity.Error
             "E-EXPORT-001" :> Severity.Error
+            "E-EXPR-NULLISH-MIX" :> Severity.Error
             "E-FILE-SCOPE-LET-FOREIGN-WRITE" :> Severity.Error
             "E-FILE-SCOPE-LET-SERVER-WRITE" :> Severity.Error
             "E-FILE-SCOPE-SERVER-ONLY-REACH" :> Severity.Error
@@ -476,6 +480,8 @@ ${
             "E-TYPE-044" :> Severity.Error
             "E-TYPE-045" :> Severity.Error
             "E-TYPE-046" :> Severity.Error
+            "E-TYPE-062" :> Severity.Error
+            "E-TYPE-063" :> Severity.Error
             "E-TYPE-080" :> Severity.Error
             "E-TYPE-082" :> Severity.Error
             "E-TYPE-ANY-FORBIDDEN" :> Severity.Error

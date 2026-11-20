@@ -232,6 +232,7 @@ ${
         AOn(event: string),       // an event handler (onclick → "click")
         AIf,                      // if= (L5)
         AShow,                    // s451: show= (§17.2) — a visibility condition on an HTML element
+        AClass(name: string),     // s480: class:name= (§5.5.2) — a class toggled by a condition on an HTML element
         AConstruct(field: int),   // a use-site construction value (§66.14 rule 4)
         AAs,                      // as= on a use (the handle is on the element's MUse)
         AEachIn,
@@ -4910,6 +4911,23 @@ ${
         if (cx.res && cmp) return rinf(infOk(Type.Bool), d)
         const isAndOr: boolean = o == BinOp.And || o == BinOp.Or
         if (cx.res && isAndOr) return rinf(andOrInf(rl.r, rr.r, o), d)
+        // s480: `a ?? b` — RESOLVE mode: `a`'s present type joined with `b`'s (typer nullishVT).
+        // An own value's initializer: `??` is not in §66.3 rule 5's inferable set ("closed: it
+        // grows only by a ruling") — annotate.
+        if (o == BinOp.Nullish) {
+            if (!cx.res) {
+                const badN: Inf = worse(rl.r, rr.r)
+                if (badN.kind >= 3) return rinf(badN, d)
+                return rinf(infOut("`??` (not in the inferable set)"), d)
+            }
+            if (rl.r.kind != 0 || rr.r.kind != 0) return rinf(worse(rl.r, rr.r), d)
+            const na: Type | not = rl.r.ty
+            const nb: Type | not = rr.r.ty
+            if (na is not || nb is not) return rinf(infBlamed(), d)
+            const nj: Type | not = joinType(unMaybe(na), nb)
+            if (nj is given) return rinf(infOk(nj), d)
+            return rinf(infUnres("`??` over a `" + typeName(na) + "` and a `" + typeName(nb) + "` — no one type"), d)
+        }
         if (isLogic) {
             const bad: Inf = worse(rl.r, rr.r)
             if (bad.kind >= 3) return rinf(bad, d)
@@ -4948,6 +4966,7 @@ ${
             .Ne :> "`!=`"
             .And :> "`&&`"
             .Or :> "`||`"
+            .Nullish :> "`??`"
             .Pipe :> "`|`"
         }
     }
@@ -13256,9 +13275,13 @@ ${
     }
 
     fn andOrRight(o: BinOp, r: AExpr) -> AExpr[] {
-        if (o == BinOp.And || o == BinOp.Or) return [r]
+        if (shortCircuit(o)) return [r]
         return []
     }
+
+    // s480 (s480-boot-cheap-wins): the operators whose right operand runs on one path only —
+    // `&&`, `||`, and `??` (its right operand runs only where the left is absent).
+    fn shortCircuit(o: BinOp) -> boolean { return o == BinOp.And || o == BinOp.Or || o == BinOp.Nullish }
 
     fn oneArg(args: AExpr[]) -> AExpr | not {
         if (args.length != 1) return not
@@ -13982,7 +14005,10 @@ ${
             rr = { x: rr.x, st: rl.st }
         } else {
             rl = resolveExpr(env, l, not, st0)
-            rr = resolveExpr(env, r, rl.x.ty, rl.st)
+            // s480: `a ?? b` — `b` stands in for a PRESENT `a` (a bare `.V` takes that type)
+            let want: Type | not = rl.x.ty
+            if (op == BinOp.Nullish) want = nullishTy(rl.x.ty, not)
+            rr = resolveExpr(env, r, want, rl.st)
         }
         let st: AS = rr.st
         // s469 #1471 delta review: `x == not` / `x != not` is §45 E-EQ-002 (E-TYPE-042 retired
@@ -14009,8 +14035,20 @@ ${
             .Ge :> plain(Type.Bool, addValue(st, e.nid, ValueFact.VOp(PrimOp.Ge)))
             .And :> plain(Type.Bool, addValue(st, e.nid, ValueFact.VOp(PrimOp.And)))
             .Or :> plain(Type.Bool, addValue(st, e.nid, ValueFact.VOp(PrimOp.Or)))
+            .Nullish :> plain(nullishTy(lt, rr.x.ty), addValue(st, e.nid, ValueFact.VOp(PrimOp.Coalesce)))
             .Pipe :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`|` outside a `rule=` alternation is not in bootstrap slice M2", st)
         }
+    }
+
+    // s480 (s480-boot-cheap-wins) — `a ?? b`, the binder's type: `a`'s type with its `not` taken
+    // off (the value is `a` only where `a` is present — §42.8: absence is `null` / `undefined`,
+    // exactly what JavaScript's `??` tests), else `b`'s. Where the two differ the typer's join
+    // decides (typeNullish); here the left's present type, or the right's when the left has none.
+    fn nullishTy(l: Type | not, r: Type | not) -> Type | not {
+        if (l is not) return r
+        const i: Type | not = maybeInner(l)
+        if (i is given) return i
+        return l
     }
 
     fn eqOp(structural: boolean, eq: boolean) -> PrimOp {
@@ -20335,6 +20373,71 @@ ${
         return psubjBad("E-TYPE-024", "a `match` over `" + typeName(inner) + "`, which is not an enum — a `match` is valid over an enum, a `T | not` and the literal types, not over a struct (§18.8.2)")
     }
 
+    // s480 (s480-boot-cheap-wins) — `x is .V` (§18.17), read by the parser as `match x { .V :>
+    // true, else :> false }` with its arms marked `test` (parse.scrml variantTest). Its subject
+    // rules are §18.17's, not a `match`'s: "The `is` operator SHALL be valid only when the
+    // left-hand operand is of an enum type. If the operand is not an enum type, this SHALL be a
+    // compile error (E-TYPE-062 …)"; "An unknown variant name SHALL be a compile error (E-TYPE-063
+    // …)". A `E | not` operand is not "of an enum type": E-TYPE-062, naming the narrowing
+    // (`x is given && x is .V`) — the left operand of `&&` narrows the right (§42.4 statement 8).
+    fn isTestArms(arms: AArm[]) -> boolean { return arms.length > 0 && arms[0].test }
+
+    fn testSubject(sk: PSubj, ty: Type | not, arms: AArm[]) -> PSubj {
+        const pn: PatName | not = patName(arms[0].pat)
+        let v: string = ""
+        if (pn is given) v = "." + pn.name
+        const what: string = "`is` tests the variant of an enum value (§18.17)"
+        if (sk.code == "E-TYPE-VARIANT") return { kind: sk.kind, es: sk.es, maybe: sk.maybe, known: sk.known, code: "E-TYPE-063", msg: "`" + v + "` is not a variant of any enum in scope — " + what }
+        if (sk.code == "E-VARIANT-AMBIGUOUS") return sk
+        let tn: string = "a value whose type is not known here"
+        if (ty is given) tn = "`" + typeName(ty) + "`"
+        if (sk.code != "") return psubjBad("E-TYPE-062", "`is " + v + "` requires an enum-typed left-hand operand, and this one is " + tn + " — " + what)
+        const es: Sym | not = sk.es
+        if (es is not) return psubjBad("E-TYPE-062", "`is " + v + "` requires an enum-typed left-hand operand, and this one is " + tn + " — " + what)
+        return sk
+    }
+
+    // Is this handled expression the parser's reading of `x is .V`? (An `E | not` operand is valid:
+    // an absent value is not `.V`, so the test is `false` — RULED S480, ruling:user-voice-scrml.md-
+    // S480-is-not-nullish-type item 1, which withdrew the typer's E-TYPE-062 for an un-narrowed
+    // `E | not` operand. The `else` arm of the reading takes `not`.)
+    fn handledIsTest(h: AHandled) -> boolean {
+        const how: AHow = h.how
+        return match how {
+            .MatchOn(arms: a) :> isTestArms(a)
+            // no-default-arm: only the `match` reading of `x is .V` is a test
+            _ :> false
+        }
+    }
+
+    // `.V` of `x is .V` (its first arm's variant), or "" when it has none
+    fn testVariantName(h: AHandled) -> string {
+        const how: AHow = h.how
+        const arms: AArm[] = match how {
+            .MatchOn(arms: a) :> a
+            // no-default-arm: handledIsTest admitted a MatchOn only
+            _ :> []
+        }
+        if (arms.length == 0) return ""
+        const pn: PatName | not = patName(arms[0].pat)
+        if (pn is given) return "." + pn.name
+        return ""
+    }
+
+    // s480 r1 (#2028 F3) — the typer's half of §18.17's subject rules, for a subject whose type
+    // only the typer knows (`h() is .A`, `const v = g(); v is .A`): the resolver found `.V` in
+    // the enum `es` by name; the subject is some other type. Not an enum: E-TYPE-062 ("`is`
+    // operator requires an enum-typed operand"). Another enum: `.V` is not one of its variants,
+    // E-TYPE-063 ("unknown variant name in `is` expression") — as testSubject maps the
+    // resolver's codes, never the `match` wording about arms the author did not write.
+    fn testSubjectMismatch(env: TEnv, subj: AExpr, h: AHandled, t: Type, inner: Type, ts: TypeState) -> TypeState {
+        const v: string = testVariantName(h)
+        const what: string = "`is` tests the variant of an enum value (§18.17)"
+        const oe: Sym | not = isEnumType(env.t.types, inner)
+        if (oe is given) return report(ts, env, subj.span, "E-TYPE-063", "`" + v + "` is not a variant of `" + oe.hint + "`, the type of `is`'s left-hand operand — " + what)
+        return report(ts, env, subj.span, "E-TYPE-062", "`is " + v + "` requires an enum-typed left-hand operand, and this one is `" + typeName(t) + "` — " + what)
+    }
+
     // s472 r1 (F1) — §18.13: "`.VariantName` (shorthand) SHALL be valid when the
     // matched value's type can be inferred by the compiler from context." A call
     // of a function in scope whose DECLARED return type is an enum names that
@@ -20551,7 +20654,10 @@ ${
                 if (!same) st = addDiag(st, env.file, a.span, "E-TYPE-VARIANT", "`" + pn.qual + "." + pn.name + "` names `" + pn.qual + "`, but the subject is `" + es.hint + "` (§18.13)")
             }
             if (i < 0) {
-                st = addDiag(st, env.file, a.span, "E-TYPE-VARIANT", "`." + pn.name + "` is not a variant of `" + es.hint + "` (its variants: " + variantNamesOf(vs).join(", ") + ")")
+                // s480: in `x is .V` (§18.17) an unknown variant is E-TYPE-063
+                let vcode: string = "E-TYPE-VARIANT"
+                if (a.test) vcode = "E-TYPE-063"
+                st = addDiag(st, env.file, a.span, vcode, "`." + pn.name + "` is not a variant of `" + es.hint + "` (its variants: " + variantNamesOf(vs).join(", ") + ")")
                 const rb1: RBinds = bindArm(armEnv, pn.binds, [], st)
                 return rparm(-3, "", rb1.env, rb1.st)
             }
@@ -20623,7 +20729,8 @@ ${
         let st: AS = plainMatchBinderDiags(env, arms, st0)
         const rs: RX = resolveExpr(withWhole(env, -1), subj, not, st)
         st = rs.st
-        const sk: PSubj = plainSubject(env, subj, rs.x.ty, arms)
+        let sk: PSubj = plainSubject(env, subj, rs.x.ty, arms)
+        if (isTestArms(arms)) sk = testSubject(sk, rs.x.ty, arms)
         if (sk.code != "") st = addDiag(st, env.file, subj.span, sk.code, sk.msg)
         let vs: VariantDef[] = []
         const es0: Sym | not = sk.es
@@ -20692,7 +20799,10 @@ ${
                 if (!wild && missing.length > 0) covRefused = true
                 if (!wild && missing.length > 0) st = addDiag(st, env.file, e.span, "E-TYPE-020", "this `match` over " + en + " is not exhaustive: it does not cover " + missing.join(", ") + " — add those arms, or end with `else :>` (§18.8.1)")
                 if (missing.length == 0 && absentDone) exh = true
-                if (wild && missing.length == 0 && (!maybe || notSeen)) st = addDiag(st, env.file, e.span, "W-MATCH-001", "the wildcard arm is unreachable: every case of " + en + " already has an arm (§18.6)")
+                // s480 r1 (#2028 F4): `x is .V` is read as a `match` with an `else` arm the author never
+                // wrote — over a one-variant enum that arm is unreachable, and §18.17 says `is` "provides
+                // NO exhaustiveness guarantee": no W-MATCH-001 for a test
+                if (wild && missing.length == 0 && (!maybe || notSeen) && !isTestArms(arms)) st = addDiag(st, env.file, e.span, "W-MATCH-001", "the wildcard arm is unreachable: every case of " + en + " already has an arm (§18.6)")
             }
             if (sk.kind == 3) {
                 const both: boolean = lits.indexOf("b:true") >= 0 && lits.indexOf("b:false") >= 0
@@ -28618,6 +28728,8 @@ ${
                 } else {
                     st = resolveBind(penv, e, a, st)
                 }
+            } else if (a.name.substring(0, 6) == "class:") {
+                st = resolveClassDirective(penv, e, a, st)
             } else if (a.name.indexOf(":") >= 0) {
                 st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` is not in bootstrap slice M2")
             } else if (isBracedValue(a.value)) {
@@ -28710,7 +28822,32 @@ ${
                 st = addAttr(st, a.nid, AttrKind.AStatic)
             }
         }
+        st = classWriterConflict(env, e, st)
         return resolveNodes(penv, e.kids, st)
+    }
+
+    // s480 r1 (#2028 F1) — SPEC §5.5.4 "Exclusive wholesale ownership (Axiom ①)": "`class=(expression)`
+    // is a WHOLESALE writer of the element's `class` surface … It SHALL be the SOLE writer of that
+    // surface on its element. If a `class:name=` directive (§5.5.2) … also targets `class` on the
+    // SAME element, the compiler SHALL emit `E-ATTR-WRITER-CONFLICT` (§34) naming both sites". A
+    // computed `class=` (any value that is an expression: `(…)`, `@x`, a call, a member path) and
+    // a `class:` directive on one HTML element: one report, at the `class=`, naming every
+    // directive (as impl#1's, emit-html.ts analyzeWriterConflict). A static `class="k"` is in the
+    // template, never rewritten, and composes with `class:` (§5.5.1). The bootstrap reads every
+    // element here — inside `<each>` too (§5.5.4's loop-context note is impl#1's enforcement gap,
+    // not the rule).
+    fn classWriterConflict(env: Env, e: AElem, st0: AS) -> AS {
+        let whole: AAttr | not = not
+        let toggles: string[] = []
+        for (const a of e.attrs) {
+            if (a.name.toLowerCase() == "class" && valueExpr(a.value) is given) whole = a
+            if (a.name.substring(0, 6) == "class:" && isClassName(a.name.substring(6))) toggles = toggles.concat(["`" + a.name + "=`"])
+        }
+        if (toggles.length == 0) return st0
+        if (whole is not) return st0
+        let verb: string = "writes"
+        if (toggles.length > 1) verb = "write"
+        return addDiag(st0, env.file, whole.span, "E-ATTR-WRITER-CONFLICT", "`class=` on `<" + e.tag + ">` is computed — a WHOLESALE writer of the whole `class` attribute, rewritten on every update — and " + toggles.join(", ") + " on the same element also " + verb + " `class`: the next `class=` update would erase the toggled class. Each surface has one wholesale owner (Axiom ①); pick one: keep `class=(…)` and fold the toggle into it (`class=(@on ? \"tab active\" : \"tab\")`), or write the fixed classes as a static `class=\"…\"` and toggle the rest with `class:` (§5.5.4)")
     }
 
     // s451 — `show=cond` on an HTML element (§17.2): "The element EXISTS in the
@@ -28735,6 +28872,85 @@ ${
     // fault. It returns with a `style`-typed value (Wave 2). On any other host
     // (`<each>`, a use, `<*x>`, `<errors>`, `<slot>`, a state-child) `show=`
     // is refused (showHostCheck), never ignored.
+    // s480 (s480-boot-cheap-wins, g-boot-class-directive-unbuilt-s480) — `class:name=expr`
+    // (SPEC §5.5.2) on an HTML element: "conditionally applies a single named class based on a
+    // boolean expression"; "The right-hand side SHALL be any of: an `@`-prefixed reactive
+    // variable, a property access expression (`obj.prop`), a parenthesized boolean expression
+    // (`(a == b)`), or a function call (`fn()`). A plain unqualified bare identifier (no `@`, no
+    // dot) SHALL be a compile error (E-ATTR-013). A string literal SHALL be a compile error
+    // (E-ATTR-013)" — and §5.5.2's table adds "or has no value". The grammar:
+    //   class-name ::= [a-zA-Z][a-zA-Z0-9_-]*
+    // The value is a condition, typed as `show=`'s is (the typer's checkCond: a `bool`, or a
+    // `T | not` presence test — §42.4; S440 "a condition has no truthiness" — PA reading,
+    // owner question in the s480-boot-cheap-wins PR). Any other value form (a bare literal, a
+    // duration, `{…}`) is outside the grammar: E-ATTR-013 names the forms.
+    // On a declaration use / `<*x>` the attribute keeps the use rules (E-DECL-USE-ATTR).
+    fn resolveClassDirective(env: Env, e: AElem, a: AAttr, st0: AS) -> AS {
+        const name: string = a.name.substring(6)
+        const forms: string = "write `" + a.name + "=@cell`, `" + a.name + "=obj.prop`, `" + a.name + "=(expr)` or `" + a.name + "=fn()` (§5.5.2)"
+        if (!isClassName(name)) {
+            return addDiag(st0, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` — a `class:` directive names one class, `[a-zA-Z][a-zA-Z0-9_-]*` (§5.5.2); this name is not one, and the bootstrap reads no other form")
+        }
+        const x: AExpr | not = valueExpr(a.value)
+        if (x is not) {
+            return addDiag(st0, env.file, a.span, "E-ATTR-013", "`" + a.name + "` needs a boolean expression, and this one has " + classValueWhat(a.value) + " — " + forms)
+        }
+        if (!classValueForm(a.value)) {
+            // a bare name or literal: one report (the name is not also read as a scope error)
+            return addDiag(st0, env.file, a.span, "E-ATTR-013", "`" + a.name + "` needs a boolean expression: a bare name (no `@`, no dot) or a literal is not one of its forms — " + forms)
+        }
+        const st: AS = resolveIfValue(env, a.value, st0)
+        return addAttr(st, a.nid, AttrKind.AClass(name))
+    }
+
+    fn isClassName(n: string) -> boolean {
+        if (n == "") return false
+        const letters: string = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        if (letters.indexOf(n.substring(0, 1)) < 0) return false
+        let i: int = 1
+        while (i < n.length) {
+            const c: string = n.substring(i, i + 1)
+            if (letters.indexOf(c) < 0 && "0123456789_-".indexOf(c) < 0) return false
+            i = i + 1
+        }
+        return true
+    }
+
+    fn classValueWhat(v: AAttrValue) -> string {
+        return match v {
+            .NoValue :> "no value"
+            .Quoted(v: s) :> "a string literal"
+            .Dur(text: s) :> "a duration literal"
+            .Braced(b: b) :> "a `{…}` block"
+            .Bare(e: x) :> "a value"
+            .Paren(e: x) :> "a value"
+        }
+    }
+
+    // A `(…)` value, or a bare `@x` / `@.` / member path / call (§5.5.2's forms).
+    fn classValueForm(v: AAttrValue) -> boolean {
+        return match v {
+            .Paren(e: x) :> true
+            .Bare(e: x) :> classBareForm(x)
+            .NoValue :> false
+            .Quoted(v: s) :> false
+            .Dur(text: s) :> false
+            .Braced(b: b) :> false
+        }
+    }
+
+    fn classBareForm(x: AExpr) -> boolean {
+        const k: AExprK = x.k
+        return match k {
+            .At(name: n) :> true
+            .AtItem :> true
+            .Member(obj: o) :> true
+            .Call(callee: c) :> true
+            // no-default-arm: every other bare value (a name, a literal, a variant …) is outside §5.5.2's forms
+            _ :> false
+        }
+    }
+
     fn resolveShow(env: Env, e: AElem, a: AAttr, st0: AS) -> AS {
         let st: AS = st0
         if (valueExpr(a.value) is not) {
@@ -29460,7 +29676,7 @@ ${
         // the §18 plain `match`'s arm reader: the variant, its binders, their arity
         let pat: APat = APat.PWild
         if (!isWild) pat = APat.PName(ae.tag, ae.binds, ae.parens, "")
-        const arm: AArm = { nid: ae.nid, span: ae.span, pat: pat, body: AArmBody.ArmExpr({ nid: -1, span: ae.span, k: AExprK.Recovered }), legacy: false, lifted: false, bare: false }
+        const arm: AArm = { nid: ae.nid, span: ae.span, pat: pat, body: AArmBody.ArmExpr({ nid: -1, span: ae.span, k: AExprK.Recovered }), legacy: false, lifted: false, bare: false, test: false }
         const l0: int = st.locs.length
         const ra: RPArm = plainArm(env, arm, sk, vs, st)
         st = markMarkupArmLocs(ra.st, l0)   // s480-unused-sweep: the `<match>` arm's own message
@@ -31515,6 +31731,7 @@ ${
             .AOn(event: ev) :> -1
             .AIf :> -1
             .AShow :> -1
+            .AClass(name: acn) :> -1
             .AAs :> -1
             .AEachIn :> -1
             .AEachKey :> -1
@@ -32320,6 +32537,7 @@ ${
             .Eq :> presenceCmp(env, l, r, false)
             .And :> andNarrowing(condNarrowing(env, l), condNarrowing(env, r))
             .Or :> orNarrowing(condNarrowing(env, l), condNarrowing(env, r))
+            .Nullish :> noNarrowing()
             .Add :> noNarrowing()
             .Sub :> noNarrowing()
             .Mul :> noNarrowing()
@@ -34524,6 +34742,7 @@ ${
             .AOn(event: ev) :> -1
             .AIf :> -1
             .AShow :> -1
+            .AClass(name: acn) :> -1
             .AAs :> -1
             .AEachIn :> -1
             .AEachKey :> -1
@@ -35662,13 +35881,52 @@ ${
         const isOr: boolean = bop == BinOp.Or
         if (isAnd) renv = tCallUnnarrow(tNarrow(env, condNarrowing(env, l).yes), l)   // r3 N1: what the left operand's calls write is not narrowed
         if (isOr) renv = tCallUnnarrow(tNarrow(env, condNarrowing(env, l).no), l)
+        if (bop == BinOp.Nullish) renv = tCallUnnarrow(env, l)
         const rr: RVT = typeExpr(renv, r, rl.ts)
+        if (bop == BinOp.Nullish) return rvt(nullishVT(rl.vt, rr.vt), nullishNeverAbsent(env, l, rl.vt, rr.ts))
         const op: PrimOp | not = opOf(f)
         if (op is not) return rvt(VType.Unknown, rr.ts)
         const ts2: TypeState = checkOperands(env, e, op, l, r, rl.vt, rr.vt, rr.ts)
         // a refused operation has no type to pass on (no second report downstream)
         if (ts2.diags.length > rr.ts.diags.length) return rvt(VType.Unknown, ts2)
         return rvt(binaryType(op, rl.vt, rr.vt), ts2)
+    }
+
+    // s480 (s480-boot-cheap-wins) — `a ?? b`: the value is `a` where `a` is present, else `b`
+    // (RULED S440 Gotcha Q2: "defaults use `??`"; Q3: a `T | not` operand is narrowed before
+    // use — `??` is that narrowing: its left operand's `not` is taken off, then joined with the
+    // right's type, as a ternary's two arms are). `not ?? b` is `b`. An unproven left operand
+    // stays unproven (provable-or-silent, Truthiness Q2).
+    fn nullishVT(a: VType, b: VType) -> VType {
+        return match a {
+            .Known(t: x) :> joinVT(known(unMaybe(x)), b)
+            .Absent :> b
+            .Unknown :> joinVT(VType.Unknown, b)
+            .OneOf(ts: xs) :> joinVT(VType.OneOf(unMaybeAll(xs)), b)
+            .Partial(ts: xs) :> joinVT(VType.Partial(unMaybeAll(xs)), b)
+        }
+    }
+
+    // s480 r1 — §42.11 (RULED S480, ruling:user-voice-scrml.md-S480-is-not-nullish-type item 2: "plus
+    // a warning when the left side can never be absent"): a left operand of `??` whose type is KNOWN
+    // and has no `| not` can never be `not`, so the right operand never runs (and only widens the
+    // result's type) — W-NULLISH-NEVER-ABSENT. An unresolved left operand stays silent
+    // (provable-or-silent); the `not` literal is the other way round (always absent) and is not this.
+    fn nullishNeverAbsent(env: TEnv, l: AExpr, v: VType, ts: TypeState) -> TypeState {
+        const t: Type | not = match v {
+            .Known(t: x) :> x
+            // no-default-arm: only a known type proves "never absent"
+            _ :> not
+        }
+        if (t is not) return ts
+        if (maybeInner(t) is given) return ts
+        return report(ts, env, l.span, "W-NULLISH-NEVER-ABSENT", "the left operand of `??` is `" + typeName(t) + "`, which can never be `not` — the right operand never runs (it only widens the result's type); drop the `?? …`, or give the left operand a `" + typeName(t) + " | not` type if it can be absent (§42.11)")
+    }
+
+    fn unMaybeAll(ts: Type[]) -> Type[] {
+        let out: Type[] = []
+        for (const t of ts) { out = out.concat([unMaybe(t)]) }
+        return out
     }
 
     // ---- OPERATORS AND CONDITIONS (RULED S440) ----------------------------------
@@ -35697,6 +35955,7 @@ ${
         return match op {
             .Add :> checkPlus(env, e, l, r, a, b, ts)
             .Concat :> checkPlus(env, e, l, r, a, b, ts)
+            .Coalesce :> ts                        // s480: any operand types (typeNullish joins them)
             .Sub :> checkNumPair(env, e, l, r, a, b, "`-`", ts)
             .Mul :> checkNumPair(env, e, l, r, a, b, "`*`", ts)
             .Mod :> checkNumPair(env, e, l, r, a, b, "`%`", ts)
@@ -36094,11 +36353,11 @@ ${
         return match v {
             .Known(t: t) :> condKnown(env, c, t, what, ts)
             .Absent :> markPresence(ts, c.nid)      // `not` as a condition: a presence test that is always false
-            .Unknown :> condUnresolvedWhole(env, c, what, ts)
+            .Unknown :> condUnresolvedWhole(env, c, what, ts, v)
             // s472: a choice is judged as an unresolved condition was (S460 N1's
             // arm-by-arm rule — strict-direction: it admits nothing more)
-            .OneOf(ts: xs) :> condUnresolvedWhole(env, c, what, ts)
-            .Partial(ts: xs) :> condUnresolvedWhole(env, c, what, ts)
+            .OneOf(ts: xs) :> condUnresolvedWhole(env, c, what, ts, v)
+            .Partial(ts: xs) :> condUnresolvedWhole(env, c, what, ts, v)
         }
     }
 
@@ -36113,9 +36372,9 @@ ${
     // arms' judgement is discarded and the WHOLE ternary is refused as
     // unresolved, exactly as before (statement 5, blame per statement 6).
     // A ternary whose arms joined to a known type is judged whole (condKnown).
-    fn condUnresolvedWhole(env: TEnv, c: AExpr, what: string, ts0: TypeState) -> TypeState {
+    fn condUnresolvedWhole(env: TEnv, c: AExpr, what: string, ts0: TypeState, v: VType) -> TypeState {
         const arms: AExpr[] = armsOf(c)
-        if (arms.length == 0) return condUnresolved(env, c, what, ts0)
+        if (arms.length == 0) return condMixed(env, c, what, v, ts0)
         let ts: TypeState = ts0
         for (const arm of arms) {
             ts = condWhole(env, arm, exprType0(ts, arm.nid), armWhat(what), ts)
@@ -36321,6 +36580,33 @@ ${
     // s460 — a condition whose type did not resolve is E-COND-NOT-BOOLEAN
     // (§42.4 statement 5), unless an error already reported explains it
     // (statement 6: no second report — see Blame).
+    // s480 r1 (#2028 F6): a condition whose type is a KNOWN mix (`@a ?? @t` over an `int | not`
+    // and a `bool` is `int` or `bool`) is not "a type the compiler cannot resolve" — the message
+    // names the mix, and still says the type does not resolve (to one type) and names the fixes,
+    // as §42.4 statement 5 requires of this report. Same code, same refusal; an unknown type keeps
+    // condUnresolved's wording.
+    fn condMixed(env: TEnv, c: AExpr, what: string, v: VType, ts: TypeState) -> TypeState {
+        const mix: string = vtMixName(v)
+        if (mix == "") return condUnresolved(env, c, what, ts)
+        if (condBlamed(env, c, ts)) return ts
+        return report(ts, env, c.span, "E-COND-NOT-BOOLEAN", what + " is " + mix + " — a value whose type the compiler cannot resolve to one type, and a condition must be a `bool` or a `T | not` presence test — annotate it (a parameter or return type), or say what you test: `x is given` (is it present?) or `x == true` (is it true?) (ruled S460, \"a′, go\")")
+    }
+
+    fn vtMixName(v: VType) -> string {
+        return match v {
+            .OneOf(ts: xs) :> "either " + typeNames(xs).join(" or ")
+            .Partial(ts: xs) :> "either " + typeNames(xs).join(" or ") + ", or a value whose type the compiler cannot resolve"
+            // no-default-arm: a known, absent or unknown type is not a mix
+            _ :> ""
+        }
+    }
+
+    fn typeNames(ts: Type[]) -> string[] {
+        let out: string[] = []
+        for (const t of ts) { out = out.concat(["`" + typeName(t) + "`"]) }
+        return out
+    }
+
     fn condUnresolved(env: TEnv, c: AExpr, what: string, ts: TypeState) -> TypeState {
         if (condBlamed(env, c, ts)) return ts
         return report(ts, env, c.span, "E-COND-NOT-BOOLEAN", what + " is a value whose type the compiler cannot resolve, and a condition must be a `bool` or a `T | not` presence test — annotate it (a parameter or return type), or say what you test: `x is given` (is it present?) or `x == true` (is it true?) (ruled S460, \"a′, go\")")
@@ -36467,6 +36753,7 @@ ${
             .And :> known(Type.Bool)
             .Or :> known(Type.Bool)
             .Concat :> known(Type.Str)
+            .Coalesce :> nullishVT(a, b)
             .Add :> numJoin(a, b)
             .Sub :> numJoin(a, b)
             .Mul :> numJoin(a, b)
@@ -37338,7 +37625,7 @@ ${
     // not know the subject's type, the arms are checked against it here.
     fn typePlain(env: TEnv, e: AExpr, h: AHandled, m: PlainMatch, ts0: TypeState) -> RVT {
         const rs: RVT = typeExpr(env, h.subject, quietPlace(ts0, h.subject))     // s475: a `match` discriminates (§13.9.3)
-        let ts: TypeState = plainSubjectCheck(env, e, h.subject, m, rs.vt, rs.ts)
+        let ts: TypeState = plainSubjectCheck(env, e, h.subject, h, m, rs.vt, rs.ts)
         let present: string[] = []
         const st0: Type | not = knownOf(rs.vt)
         let subjMaybe: boolean = m.maybe
@@ -37525,7 +37812,7 @@ ${
     // the subject's (E-TYPE-VARIANT), a literal arm's type must be the
     // subject's (E-TYPE-001), and a `T | not` subject owes a `not` arm or a
     // wildcard (E-MATCH-012).
-    fn plainSubjectCheck(env: TEnv, e: AExpr, subj: AExpr, m: PlainMatch, v: VType, ts: TypeState) -> TypeState {
+    fn plainSubjectCheck(env: TEnv, e: AExpr, subj: AExpr, h: AHandled, m: PlainMatch, v: VType, ts: TypeState) -> TypeState {
         const t: Type | not = knownOf(v)
         if (t is not) return ts
         const inner: Type = unMaybe(t)
@@ -37540,6 +37827,7 @@ ${
             const ns: Sym | not = namedOf(inner)
             let same = false
             if (ns is given) same = ns.id == es.id
+            if (!same && handledIsTest(h)) return testSubjectMismatch(env, subj, h, t, inner, out)
             if (!same) out = report(out, env, subj.span, "E-TYPE-VARIANT", "the arms are variants of `" + es.hint + "`, but the subject is `" + typeName(t) + "` (§18.13)")
         }
         if (m.kind == 1 && k != 2) out = report(out, env, subj.span, "E-TYPE-001", "the arms are string literals, but the subject is `" + typeName(t) + "` (§18.16)")
@@ -39206,6 +39494,13 @@ ${
                 // s451: §17.2 — a condition (checkCond), under the element's
                 // `if=` narrowing; it narrows nothing itself
                 ts = typeShowAttr(renv, a, ts)
+            } else if (a.name.substring(0, 6) == "class:" && isClassName(a.name.substring(6)) && classValueForm(a.value)) {
+                // s480: §5.5.2 — a `class:` directive's value is a condition, as `show=`'s
+                const cx: AExpr | not = valueExpr(a.value)
+                if (cx is given) {
+                    const cr: RVT = typeExpr(renv, cx, quietCond(renv, cx, ts))
+                    ts = checkCond(renv, cx, cr.vt, "`" + a.name + "=`", cr.ts)
+                }
             } else if (eventName(a.name) != "") {
                 ts = typeHandlerValue(renv, a.value, ts, eventName(a.name))
             } else if (a.name.substring(0, 5) == "bind:") {
@@ -39244,6 +39539,7 @@ ${
             .AOn(event: ev) :> not
             .AIf :> not
             .AShow :> not
+            .AClass(name: acn) :> not
             .AAs :> not
             .AEachIn :> not
             .AEachKey :> not
@@ -41826,6 +42122,7 @@ ${
         const what: string = match k {
             .AIf :> "the `if=` condition on `<" + tag + ">`"
             .AShow :> "the `show=` condition on `<" + tag + ">`"
+            .AClass(name: acn) :> "the `class:" + acn + "=` condition on `<" + tag + ">`"
             .AConstruct(field: i) :> "the use-site value `" + a.name + "=` of `<" + tag + ">`"
             .AEachIn :> "the `<each in=…>` sequence"
             .AEachKey :> "the `<each key=…>` key"
@@ -41849,6 +42146,7 @@ ${
             .AConstruct(field: i) :> true
             .AIf :> false
             .AShow :> false
+            .AClass(name: acn) :> false
             .AEachIn :> false
             .AEachKey :> false
             .AStatic :> false
@@ -46722,7 +47020,7 @@ ${
     fn mArms(arms: AArm[], m: CMap) -> AArm[] {
         let out: AArm[] = []
         for (const a of arms) {
-            if (m.drop.indexOf(a.nid) < 0) out = out.concat([{ nid: a.nid, span: a.span, pat: a.pat, body: mArmBody(a.body, m), legacy: a.legacy, lifted: a.lifted, bare: a.bare }])
+            if (m.drop.indexOf(a.nid) < 0) out = out.concat([{ nid: a.nid, span: a.span, pat: a.pat, body: mArmBody(a.body, m), legacy: a.legacy, lifted: a.lifted, bare: a.bare, test: a.test }])
         }
         return out
     }
@@ -49223,9 +49521,9 @@ ${
 
     // `a && f()` / `a || f()`: the right operand runs on one path only.
     fn planBinary(cx: PCx, o: BinOp, l: AExpr, r: AExpr, pos: Pos, ps: PS) -> PX {
-        if (o == BinOp.And || o == BinOp.Or) {
+        if (shortCircuit(o)) {
             const rl: PX = planExpr(cx, l, pos, ps)
-            const rr: PX = planExpr(cx, r, condPos(pos, "the right operand of `&&` / `||`"), rl.ps)
+            const rr: PX = planExpr(cx, r, condPos(pos, "the right operand of `&&` / `||` / `??`"), rl.ps)
             return { found: rl.found || rr.found, ps: rr.ps }
         }
         return planKids(cx, [l, r], pos, ps)
@@ -49446,6 +49744,7 @@ ${
             .Ne :> "!="
             .And :> "&&"
             .Or :> "||"
+            .Nullish :> "??"
             .Pipe :> "|>"
         }
     }
@@ -51474,10 +51773,10 @@ ${
     fn linBinary(cx: LinCx, e: AExpr, op: BinOp, l: AExpr, r: AExpr, s0: LinSt) -> LinR {
         const rl: LinR = linExpr(cx, l, s0)
         if (rl.ends) return rl
-        if (op != BinOp.And && op != BinOp.Or) return linExpr(cx, r, rl.st)
+        if (!shortCircuit(op)) return linExpr(cx, r, rl.st)
         const pre: LinSt = rl.st
         const rr: LinR = linExpr(cx, r, pre)
-        return linMerge(cx, pre, [rr, linGo(linFrom(pre, rr.st))], e.span, "this `&&` / `||` (its right operand runs on one path only)")
+        return linMerge(cx, pre, [rr, linGo(linFrom(pre, rr.st))], e.span, "this `&&` / `||` / `??` (its right operand runs on one path only)")
     }
 
     fn linTernaryOf(cx: LinCx, e: AExpr, t: AExpr, y: AExpr, n: AExpr, optChain: boolean, s: LinSt) -> LinR {
@@ -53807,6 +54106,7 @@ ${
             .AOn(event: ev) :> []
             .AIf :> []
             .AShow :> []
+            .AClass(name: acn) :> []
             .AConstruct(field: x) :> []
             .AAs :> []
             .AEachIn :> []
@@ -53899,6 +54199,7 @@ ${
             .AOn(event: ev) :> -1
             .AIf :> -1
             .AShow :> -1
+            .AClass(name: acn) :> -1
             .AAs :> -1
             .AEachIn :> -1
             .AEachKey :> -1
@@ -53953,6 +54254,7 @@ ${
             .AOn(event: ev) :> []
             .AIf :> []
             .AShow :> []
+            .AClass(name: acn) :> []
             .AConstruct(field: x) :> []
             .AAs :> []
             .AEachIn :> []
@@ -54078,6 +54380,7 @@ ${
             .AOn(event: ev) :> false
             .AIf :> false
             .AShow :> false
+            .AClass(name: acn) :> false
             .AConstruct(field: x) :> false
             .AAs :> false
             .AEachIn :> false

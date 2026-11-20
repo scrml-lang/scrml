@@ -766,6 +766,7 @@ ${
             .IsSome :> JsExpr.JBin(JsOp.LooseNe, a[0], JsExpr.JNull)
             .IsNot :> JsExpr.JBin(JsOp.LooseEq, a[0], JsExpr.JNull)
             .Concat :> bin(JsOp.Plus, a)
+            .Coalesce :> bin(JsOp.Nullish, a)
             .Length :> jmember(a[0], "length")
             // s469 — the typed built-in methods. Case and whitespace are the
             // host's own (they change no position). Everything that counts or
@@ -1453,6 +1454,7 @@ ${
             .Static(name: n, value: x) :> staticValueNamed(n, x, name)
             .Bound :> ""
             .Show :> ""
+            .ClassOn :> ""
             .On :> ""
             .Bind :> ""
             .Gate :> ""
@@ -2988,6 +2990,7 @@ ${
             .Static(name: n, value: v) :> [{ name: n, value: v }]
             .Bound :> []
             .Show :> []
+            .ClassOn :> []
             .On :> []
             .Bind :> []
             .Gate(values: vs) :> gatedMarker(vs)
@@ -3015,6 +3018,7 @@ ${
             .Static(name: n) :> false
             .Bound(name: n) :> true
             .Show(test: t) :> true
+            .ClassOn(test: t) :> true
             .On(event: ev) :> true
             .Bind(kind: k) :> true
             .Gate(values: vs) :> true
@@ -3460,6 +3464,7 @@ ${
             .Static(name: n) :> false
             .Bound(name: n) :> false
             .Show(test: t) :> false
+            .ClassOn(test: t) :> false
             .On(event: ev) :> false
             .Bind(kind: k) :> false
         }
@@ -3556,6 +3561,7 @@ ${
             .Static :> []
             .Bound(name: n, e: e) :> [sexpr(rtCall(ctx, "attr", [scopeVar(), node, jstr(n), jthunk(exprJs(ctx, e))]))]
             .Show(test: t) :> [sexpr(rtCall(ctx, "visibility", [scopeVar(), node, jthunk(exprJs(ctx, t))]))]
+            .ClassOn(name: cn, test: t) :> [sexpr(rtCall(ctx, "classOn", [scopeVar(), node, jstr(cn), jthunk(exprJs(ctx, t))]))]
             .On(event: ev, body: body) :> [sexpr(rtCall(ctx, "on", [scopeVar(), node, jstr(ev), JsExpr.JArrow(handlerParams(body), blockJs(ctx, body))]))]
             .Bind(kind: k, read: r, sink: sk, write: w) :> [sexpr(rtCall(ctx, "bind", [scopeVar(), node, jstr(bindProp(k)), jthunk(exprJs(ctx, r)), JsExpr.JArrow([symName(ctx, sk)], blockJs(ctx, w))].concat(bindSurface(ctx, r))))]
             .Gate(values: vs, fields: fs) :> [sexpr(rtCall(ctx, "gate", [scopeVar(), node, JsExpr.JArrowE([], JsExpr.JArray(gateSurfacesJs(ctx, fs)))]))]
