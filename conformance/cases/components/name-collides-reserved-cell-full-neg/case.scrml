@@ -1,0 +1,6 @@
+<program>
+    let <onIdle:int=1/>
+    let <Theme:int=2/>
+    <page=3/>
+    <p>${@onIdle} ${@Theme} ${@page}</p>
+</program>

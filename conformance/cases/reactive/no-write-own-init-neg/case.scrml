@@ -3,9 +3,9 @@
     let <hits:int=0/>
     fn bump() -> int { return 1; }
     fn label() -> string { return "x"; }
-    let <page:int=(bump())/>
+    let <pageNo:int=(bump())/>
     <main>
-        <p>${@page}</p>
+        <p>${@pageNo}</p>
         <p>${@hits}</p>
     </main>
 </program>

@@ -42,7 +42,7 @@ const clean = (src) => {
 const coreOf = (src) => clean(src).core;
 // s478 (E-DG-002): a case's program carries only the shared-scaffold cells (the describes' `D`) it names
 const SCAFFOLD = ["    let <n:int=0/>", "    let <m:int=0/>", "    <step=1/>", "    <dbl:int=(@n * 2)/>",
-  "    let <query:string=\"\"/>", "    let <page:int=1/>", "    let <hits:int=0/>", "    <xs:int[free, append]=[]/>"];
+  "    let <query:string=\"\"/>", "    let <pageNo:int=1/>", "    let <hits:int=0/>", "    <xs:int[free, append]=[]/>"];
 const P = (decls, main) => dropUnnamedScaffold(`<program>\n${decls}\n    <main>\n${main}\n    </main>\n</program>\n`, SCAFFOLD);
 const $ = (sel) => document.querySelector(sel);
 const btn = (label) => [...document.querySelectorAll("button")].find((b) => b.textContent === label);
@@ -314,23 +314,23 @@ describe("§6.7.4 — codes", () => {
 });
 
 describe("§6.7.4 the no-write rule — E-EFFECT-WRITES-STATE (the transitive write summary)", () => {
-  const D = `    let <query:string=""/>\n    let <page:int=1/>\n    let <hits:int=0/>\n    <xs:int[free, append]=[]/>\n${PING}`;
+  const D = `    let <query:string=""/>\n    let <pageNo:int=1/>\n    let <hits:int=0/>\n    <xs:int[free, append]=[]/>\n${PING}`;
   const writes = (bodyOrDecls, eff) => diagsOf(P(`${D}\n${bodyOrDecls}\n    ${eff}`, ""));
   const W = (src) => src.map((d) => d.code);
 
   test("rule 1: a direct write in the body — assignment, `reset`, an edit call — each is an error", () => {
-    expect(W(writes("", `<effect deps=[@query]>\${ @page = 1; }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
-    expect(W(writes("", `<effect deps=[@query]>\${ reset(@page); }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
+    expect(W(writes("", `<effect deps=[@query]>\${ @pageNo = 1; }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
+    expect(W(writes("", `<effect deps=[@query]>\${ reset(@pageNo); }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
     expect(W(writes("", `<effect deps=[@query]>\${ @xs.append(1); }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
-    expect(W(writes("", `<effect deps=[@query]>\${\n        if (@page > 1) {\n            @hits = @hits + 1;\n        }\n    }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
+    expect(W(writes("", `<effect deps=[@query]>\${\n        if (@pageNo > 1) {\n            @hits = @hits + 1;\n        }\n    }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
   });
 
   test("the message names the cell and the fix BY SHAPE (S447 1a): reset → `reset-on=`; a call result → `<request>`; otherwise → the writer / derive", () => {
-    const reset = writes("", `<effect deps=[@query]>\${ @page = 1; }</>`)[0].message;
-    expect(reset).toContain("writes `@page`");
+    const reset = writes("", `<effect deps=[@query]>\${ @pageNo = 1; }</>`)[0].message;
+    expect(reset).toContain("writes `@pageNo`");
     expect(reset).toContain("declare it on the cell: `reset-on=[@query]` (§6.8.4)");
-    expect(writes("", `<effect deps=[@query]>\${ reset(@page); }</>`)[0].message).toContain("`reset-on=[@query]`");
-    const req = writes(`    fn load(q: string) -> int { return 3; }`, `<effect deps=[@query]>\${ @page = load(@query); }</>`)[0].message;
+    expect(writes("", `<effect deps=[@query]>\${ reset(@pageNo); }</>`)[0].message).toContain("`reset-on=[@query]`");
+    const req = writes(`    fn load(q: string) -> int { return 3; }`, `<effect deps=[@query]>\${ @pageNo = load(@query); }</>`)[0].message;
     expect(req).toContain("`<request>`'s job");
     const other = writes("", `<effect deps=[@query]>\${ @hits = @hits + 1; }</>`)[0].message;
     expect(other).toContain("Move the write into the code that writes the trigger");
@@ -425,12 +425,12 @@ describe("§6.7.4 the no-write rule — E-EFFECT-WRITES-STATE (the transitive wr
   });
 
   test("negatives: writing a local, calling a write-free `function` / `fn`, the host — all clean", () => {
-    expect(W(writes(`    fn dbl(x: int) -> int { return x * 2; }\n    function readOnly() {\n        const v = @page + 1;\n        const t = Date.now();\n    }`,
-      `<effect deps=[@query]>\${\n        let local = 0;\n        local = dbl(@page);\n        readOnly();\n        ping();\n    }</>`))).toEqual([]);
+    expect(W(writes(`    fn dbl(x: int) -> int { return x * 2; }\n    function readOnly() {\n        const v = @pageNo + 1;\n        const t = Date.now();\n    }`,
+      `<effect deps=[@query]>\${\n        let local = 0;\n        local = dbl(@pageNo);\n        readOnly();\n        ping();\n    }</>`))).toEqual([]);
   });
 
   test("a write to a cell an effect LISTS is the same error (E-LIFECYCLE-006 is subsumed)", () => {
-    expect(W(writes("", `<effect deps=[@page]>\${ @page = @page + 1; }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
+    expect(W(writes("", `<effect deps=[@pageNo]>\${ @pageNo = @pageNo + 1; }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
   });
 
   test("a write the binder refuses (a locked cell) is still a write of the effect", () => {

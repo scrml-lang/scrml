@@ -1,7 +1,7 @@
-// §6.7.4 — the SPEC's worked example: an effect that resets @page.
+// §6.7.4 — the SPEC's worked example: an effect that resets @pageNo.
 <program>
   <query> = ""
-  <page> = 1
-  <effect deps=[@query]>${ @page = 1; }</>
-  <p>${@query} ${@page}</p>
+  <pageNo> = 1
+  <effect deps=[@query]>${ @pageNo = 1; }</>
+  <p>${@query} ${@pageNo}</p>
 </program>
