@@ -6407,6 +6407,9 @@ ${
                 if (isNestedUserDecl(d)) {
                     // a user declaration (stubbed by withNestedStubs), not a field
                 } else {
+                    if (reservedCellName(d.name)) {
+                        st = addDiag(st, te.file, d.span, "E-NAME-COLLIDES-RESERVED", "a cell named `" + d.name + "` takes a reserved name (§4.15: the cell names `db`, `schema` and `md` are reserved, compared lowercase — they name the `<db>` state block, the `<schema>` block and the `<md>` element). Rename the cell")
+                    }
                     const r: RField = fieldOf(te, g, d.nid, d.span, d.name, d.isLet, d.exported, d.ty, d.own, d.body, FieldRole.Child, d.validators, 2, ix, tab, boundaryOf(d.exported, d.mods), pend.indexOf(d.nid) >= 0, st)
                     out = out.concat([r.f])
                     st = r.st
@@ -6448,6 +6451,16 @@ ${
             }
         }
         return out
+    }
+
+    // s480-records-3 — §4.15 reserves the CELL names `db`, `schema` and `md`
+    // (ruling:user-voice-scrml.md-S480-census-recs item 9: "Reserve the cell names `db`,
+    // `schema` and `md` in §4.15"). A file-scope declaration of any reserved name is already
+    // refused at userDeclStub; this covers a program cell (programFields). Compared lowercase
+    // (§24.4).
+    fn reservedCellName(name: string) -> boolean {
+        const t: string = name.toLowerCase()
+        return t == "db" || t == "schema" || t == "md"
     }
 
     fn declsOfItem(it: AItem) -> ADecl[] {

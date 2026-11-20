@@ -1,0 +1,12 @@
+{
+  "id": "components-name-collides-reserved-cell-pos",
+  "description": "§4.15 (S480) — the reserved cell names are whole names: cells named `dbx`, `schemas`, `mdText` compile, and a CHILD field named `db` of a declaration (`@card.db`) is not a cell and compiles.",
+  "language-version": "1.0",
+  "spec": "§4.15, §24.4",
+  "provenance": "ruling:user-voice-scrml.md-S480-census-recs item 9; gap g-boot-reserved-name-cell-db-s480",
+  "rationale": "§4.15 reserves the cell names `db`, `schema` and `md` exactly (compared lowercase); a longer name is not one of them, and a child field is not a cell.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-NAME-COLLIDES-RESERVED"]
+  }
+}

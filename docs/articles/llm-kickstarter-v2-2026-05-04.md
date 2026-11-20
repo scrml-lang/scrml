@@ -1873,7 +1873,7 @@ function loadContacts()! -> SqlError {
 
 The single-expression rows can drop to `:`-shorthand, the item can go unnamed as `@.`, and the count form uses `of=`:
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×2, E-PARSE-EXPECTED, E-PARSE-TRAILING] — the bootstrap has no <empty>, no <each of=> and no bare @. in an interpolation yet -->
+<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED×2] — the bootstrap has no <empty> and no <each of=> yet (its bare `@.` in an interpolation is built, s480-boot-cheap-wins) -->
 ```scrml
 <program>
 
