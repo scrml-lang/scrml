@@ -15,6 +15,8 @@
 [esm] conformance/cases/channel/dup-name-cross-file/case.scrml  # emit-client-esm: Identifier '_scrml_ws_chat' has already been declared
 [esm] conformance/cases/channel/same-source-two-aliases/case.scrml  # emit-client-esm: Identifier '_scrml_ws_chat' has already been declared
 [esm] conformance/cases/components/callback-prop-narrowing-ends-on-assign-reject/case.scrml  # emit-client-esm: Assigning to rvalue (an expect-reject case: E-TYPE-031 + E-COMPONENT-PROP-WRITE; the substituted `onGo = not` is the refused write, S462)
+[esm] conformance/cases/components/name-collides-reserved-cell-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved (impl#1 does not parse the §66 `let <x:T=v/>` cell form; S480 reserved cell names)
+[esm] conformance/cases/components/name-collides-reserved-cell-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved (impl#1 does not parse the §66 `let <x:T=v/>` cell form; S480 reserved cell names)
 [esm] conformance/cases/condition/known-int-markup-if-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved
 [esm] conformance/cases/condition/known-int-while-neg/case.scrml  # emit-client-esm: Unexpected token
 [esm] conformance/cases/condition/presence-bare-optional-markup-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
