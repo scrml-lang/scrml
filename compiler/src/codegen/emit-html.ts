@@ -45,7 +45,7 @@ import { _SCRML_SVG_ANIMATION_ELEMENTS } from "../runtime-url-guard.js";
 // `compileBoundaryMarkup` + `emitBoundaryMarkupExpr` lower fallback / renders
 // markup to a runtime HTML expression. emit-event-wiring.ts consumes the
 // boundary fields these stamp onto each logic binding.
-import { collectEnumRenders, compileBoundaryMarkup, emitBoundaryMarkupExpr } from "./emit-error-boundary.ts";
+import { boundaryFallbackRaw, collectEnumRenders, compileBoundaryMarkup, emitBoundaryMarkupExpr } from "./emit-error-boundary.ts";
 
 // Supported bind: attribute names per SPEC §5.4
 const SUPPORTED_BIND_NAMES = new Set(["value", "valueAsNumber", "checked", "selected", "files", "group"]);
@@ -2173,13 +2173,10 @@ export function generateHtml(
         let fallbackExpr = '""';
         let hasFallback = false;
         if (fallbackAttr && fallbackAttr.value) {
-          const fv: any = fallbackAttr.value;
           // The attr value is an `expr` wrapper whose `raw` holds the markup
           // source (e.g. `<div>Something went wrong</>`), or an escape-hatch
-          // node carrying the same in `.raw`.
-          const rawMarkup: string =
-            (typeof fv.raw === "string" ? fv.raw : undefined) ??
-            (fv.exprNode && typeof fv.exprNode.raw === "string" ? fv.exprNode.raw : "") ?? "";
+          // node carrying the same in `.raw` (one reader, shared with VP-3's §5.2 check).
+          const rawMarkup: string = boundaryFallbackRaw(fallbackAttr.value);
           if (rawMarkup.trim() !== "") {
             const tpl = compileBoundaryMarkup(rawMarkup, generateHtml);
             fallbackExpr = emitBoundaryMarkupExpr(tpl, "_scrml_eb_result && _scrml_eb_result.data");

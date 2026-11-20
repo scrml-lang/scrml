@@ -185,9 +185,13 @@ function convertTerseClosers(s: string): string {
 const FIELD_INTERP = /\$\{\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\}/g;
 
 /**
- * §5.2 "Data-supplied stylesheets (S472)" over a `renders` / `fallback=` template (S480 r1 F1): the
- * `<link>` attributes written from a payload field whose `rel` loads a stylesheet
- * (attr-injection-sink.ts `stylesheetHrefFromData`). The template is re-parsed as
+ * §5.2 "Data-supplied stylesheets (S472)" over a `renders` / `fallback=` template (S480 r1 F1; r2
+ * N1): the `<link>` attributes written from a payload field whose `rel` loads a stylesheet
+ * (attr-injection-sink.ts `stylesheetHrefFromData`). Its callers are VP-3
+ * (validators/attribute-interpolation.ts): `collectRendersStylesheetHrefErrors` for every enum
+ * variant's `renders` (reported at the declaration) and `collectExecutableSinkErrors` for every
+ * `<errorBoundary fallback=…>` (reported at the boundary) — the two templates `emitBoundaryMarkupExpr`
+ * builds. The runtime twin is `_scrml_link_href_html`. The template is re-parsed as
  * `compileBoundaryMarkup` parses it, except that an UNQUOTED `name=${field}` is read as the quoted
  * `name="${field}"` (codegen drops its value, but it is data all the same — fail closed, as the
  * bootstrap refuses `href=sheet`). Returns one `{ tag, name }` per refused attribute.
@@ -224,6 +228,18 @@ export function rendersStylesheetHrefHits(rawMarkup: string): Array<{ tag: strin
   };
   visit(nodes);
   return hits;
+}
+
+/**
+ * The raw markup text of an `<errorBoundary>`'s `fallback={<markup/>}` attribute value — an `expr`
+ * wrapper whose `raw` holds the markup source, or an escape-hatch node carrying it in `.raw`. "" when
+ * there is none. The one reader for codegen (emit-html.ts) and the §5.2 check (VP-3).
+ */
+export function boundaryFallbackRaw(value: unknown): string {
+  const fv = value as { raw?: unknown; exprNode?: { raw?: unknown } } | null | undefined;
+  if (!fv || typeof fv !== "object") return "";
+  return (typeof fv.raw === "string" ? fv.raw : undefined) ??
+    (fv.exprNode && typeof fv.exprNode.raw === "string" ? fv.exprNode.raw : "") ?? "";
 }
 
 export function compileBoundaryMarkup(
@@ -318,17 +334,30 @@ export function emitBoundaryMarkupExpr(
   // payload field is not written raw: the whole ` name="…"` is built at run time by
   // `_scrml_css_attr_html` (runtime-css-attr-guard.js), which judges the assembled value with the
   // same reader as `_scrml_css_attr_set` and writes nothing (reported) when it is refused.
-  let at = 0;
-  for (const g of guardedTemplateAttrs(tpl.htmlTemplate)) {
-    pushHtml(tpl.htmlTemplate.slice(at, g.start));
-    const segs = g.value.split(FIELD_SENTINEL);
+  // §5.2 "Data-supplied stylesheets (S472)" (S480 r2 N1) — likewise a `<link>`'s `href` carrying a
+  // payload field is built by `_scrml_link_href_html` from its `rel` and `href` pieces: not written
+  // (reported) when `rel` loads a stylesheet. Defence in depth: VP-3 already refuses that template
+  // (E-ATTR-STYLESHEET-HREF). A non-stylesheet `<link href>` is written as before (no URL guard —
+  // outside the S479 carve-out 2; gap g-impl1-renders-href-unguarded-s480).
+  const valueParts = (value: string): string => {
+    const segs = value.split(FIELD_SENTINEL);
     const parts: string[] = [];
     for (let i = 0; i < segs.length; i++) {
       if (i % 2 === 0) { if (segs[i] !== "") parts.push(JSON.stringify(decodeHtmlAttr(segs[i]))); }
       else parts.push(fieldValue(segs[i]));
     }
-    const extra = typeof g.target === "string" ? `, ${JSON.stringify(g.target)}` : "";
-    pieces.push(`_scrml_css_attr_html(${JSON.stringify(g.tag)}, ${JSON.stringify(g.name)}, [${parts.join(", ")}]${extra})`);
+    return `[${parts.join(", ")}]`;
+  };
+  let at = 0;
+  for (const g of guardedTemplateAttrs(tpl.htmlTemplate)) {
+    pushHtml(tpl.htmlTemplate.slice(at, g.start));
+    if (g.kind === "link-href") {
+      const rel = g.rel === null ? "null" : valueParts(g.rel);
+      pieces.push(`_scrml_link_href_html(${JSON.stringify(g.name)}, ${rel}, ${valueParts(g.value)})`);
+    } else {
+      const extra = typeof g.target === "string" ? `, ${JSON.stringify(g.target)}` : "";
+      pieces.push(`_scrml_css_attr_html(${JSON.stringify(g.tag)}, ${JSON.stringify(g.name)}, ${valueParts(g.value)}${extra})`);
+    }
     at = g.end;
   }
   pushHtml(tpl.htmlTemplate.slice(at));
@@ -344,15 +373,18 @@ function decodeHtmlAttr(s: string): string {
 
 /**
  * The attributes of a generated template (`generateHtml` output: ` name="value"`, values
- * attribute-escaped) that the §5.2 CSS-url write guard covers: a payload field (`FIELD_SENTINEL`) in
- * the value, and `url-attr-guard.ts` `dataAttrWriteGuard` answers `css` for the name on that element
- * (a captured field in another attribute's value — `attributeName` — counts as computed). `start` is
- * the whitespace before the name, `end` just past the closing quote.
+ * attribute-escaped) that a §5.2 write guard covers: a payload field (`FIELD_SENTINEL`) in the value,
+ * and `url-attr-guard.ts` `dataAttrWriteGuard` answers `css` (a CSS-url attribute; a captured field in
+ * another attribute's value — `attributeName` — counts as computed) or `link-href` (a `<link>`'s
+ * `href`; `rel` is that element's `rel` value, null when it has none) for the name on that element.
+ * `start` is the whitespace before the name, `end` just past the closing quote.
  */
-function guardedTemplateAttrs(html: string): Array<{
-  start: number; end: number; tag: string; name: string; value: string; target: string | null;
-}> {
-  const out: Array<{ start: number; end: number; tag: string; name: string; value: string; target: string | null }> = [];
+type GuardedTemplateAttr = {
+  start: number; end: number; tag: string; name: string; value: string;
+  kind: "css" | "link-href"; target: string | null; rel: string | null;
+};
+function guardedTemplateAttrs(html: string): GuardedTemplateAttr[] {
+  const out: GuardedTemplateAttr[] = [];
   if (html.indexOf(FIELD_SENTINEL) < 0) return out;
   const n = html.length;
   let i = 0;
@@ -396,8 +428,16 @@ function guardedTemplateAttrs(html: string): Array<{
     for (const a of attrs) {
       if (a.value === null || a.value.indexOf(FIELD_SENTINEL) < 0) continue;
       const guard = dataAttrWriteGuard(tag, a.name, asAst as any);
-      if (!guard || guard.kind !== "css") continue;
-      out.push({ start: a.start, end: a.end, tag: tag.toLowerCase(), name: a.name, value: a.value, target: guard.target });
+      if (!guard) continue;
+      if (guard.kind === "link-href") {
+        const relAttr = attrs.find((r) => r.name.toLowerCase() === "rel");
+        const rel = relAttr === undefined ? null : (relAttr.value ?? "");
+        out.push({ start: a.start, end: a.end, tag: tag.toLowerCase(), name: a.name, value: a.value,
+          kind: "link-href", target: null, rel });
+        continue;
+      }
+      out.push({ start: a.start, end: a.end, tag: tag.toLowerCase(), name: a.name, value: a.value,
+        kind: "css", target: guard.target, rel: null });
     }
     i = j;
   }

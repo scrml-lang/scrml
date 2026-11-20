@@ -56,7 +56,7 @@ import {
   stylesheetHrefFromData,
   stylesheetHrefMessage,
 } from "../attr-injection-sink.ts";
-import { extractVariantRenders, rendersStylesheetHrefHits } from "../codegen/emit-error-boundary.ts";
+import { boundaryFallbackRaw, extractVariantRenders, rendersStylesheetHrefHits } from "../codegen/emit-error-boundary.ts";
 
 // ---------------------------------------------------------------------------
 // Diagnostic shape
@@ -261,6 +261,31 @@ export function collectExecutableSinkErrors(
       // refused; prop substitution copies the attribute with `{...attr}`, so the stamp travels
       // with every expanded copy whose definition text was itself a sink).
       if ((attr as { _execSinkReportedAtDef?: boolean })._execSinkReportedAtDef === true) continue;
+      // §5.2 "Data-supplied stylesheets (S472)" (S480 r2 N1) — an `<errorBoundary fallback={…}>`
+      // template is raw text until codegen re-parses it (emit-error-boundary.ts), so this walk never
+      // sees its elements: a `<link>` there whose `href` takes a payload field and whose `rel` loads a
+      // stylesheet is E-ATTR-STYLESHEET-HREF, reported at the boundary's `fallback=`.
+      if (attr.name === "fallback" && String(node.tag ?? "").toLowerCase() === "errorboundary") {
+        rendersStylesheetHrefHits(boundaryFallbackRaw(v)).forEach((hit, i) => {
+          const own: Span = attr.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+          const inExpansion = spanFileIsSynthesized(own.file) && ctx.anchor !== null;
+          const span = opts.spanOverride ?? (inExpansion ? (ctx.anchor as Span) : own);
+          const key = `fallback|${span.file ?? filePath}:${span.start}:${span.end}|${own.file ?? filePath}:${own.start}:${own.end}|${i}`;
+          if (reported.has(key)) return;
+          reported.add(key);
+          const err: AttrInterpError = {
+            code: ATTR_STYLESHEET_HREF_CODE,
+            message: stylesheetHrefMessage(hit.name, hit.tag,
+              (opts.where ? opts.where + " " : "") + "in an `<errorBoundary>` `fallback=` template (a payload field)"),
+            span,
+            severity: "error",
+          };
+          // One report per refused attribute across VP-3 and the post-meta check (api.js dedupe).
+          (err as { attrSinkKey?: string }).attrSinkKey = attrSinkKey(own, `fallback|${hit.name}|${i}`, filePath);
+          errors.push(err);
+        });
+        continue;
+      }
       let sink: ReturnType<typeof classifyInterpolatedAttrSink> = null;
       let form: "quoted" | "data" = "quoted";
       let quotedHandler = false;

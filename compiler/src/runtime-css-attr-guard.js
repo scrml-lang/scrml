@@ -140,12 +140,46 @@ export function _scrml_css_attr_html(tag, name, parts, target) {
   return "";
 }
 
-// Does this `<link>` load (or may it load) a stylesheet? Its `rel` text holds `stylesheet` anywhere
-// (ASCII case-insensitive — a superset of the token test, fail closed). A `rel` written from data is
-// refused at compile time with any data `href` (E-ATTR-STYLESHEET-HREF), so the static text decides.
+// Does this `rel` text load (or may it load) a stylesheet? It holds `stylesheet` anywhere (ASCII
+// case-insensitive — a superset of the token test, fail closed). null: no `rel`.
+function _scrml_rel_loads_sheet(rel) {
+  return rel !== null && rel !== undefined && String(rel).toLowerCase().indexOf("stylesheet") !== -1;
+}
+
+// Does this `<link>` load (or may it load) a stylesheet? A `rel` written from data is refused at
+// compile time with any data `href` (E-ATTR-STYLESHEET-HREF), so the static text decides.
 function _scrml_link_loads_sheet(el) {
-  const rel = el && typeof el.getAttribute === "function" ? el.getAttribute("rel") : null;
-  return rel !== null && String(rel).toLowerCase().indexOf("stylesheet") !== -1;
+  return _scrml_rel_loads_sheet(el && typeof el.getAttribute === "function" ? el.getAttribute("rel") : null);
+}
+
+function _scrml_link_href_refused(name, fate) {
+  _scrml_css_guard_report(
+    "refused a data-supplied `" + String(name) + "` on a <link> whose `rel` loads a stylesheet: a " +
+    "stylesheet is never chosen by data (SPEC §5.2). The attribute was " + fate + ".",
+  );
+}
+
+// THE write of a `<link>`'s `href` into an HTML STRING (S480 r2 N1) — the string-template twin of
+// `_scrml_link_href_set`, for a `renders` / `fallback=` template (codegen/emit-error-boundary.ts
+// `emitBoundaryMarkupExpr`). `relParts` are the pieces of the element's `rel` value (null: no `rel`),
+// `hrefParts` those of the `href` value (static text and payload fields, `null` / `undefined` read as
+// ""). When `rel` loads a stylesheet: `""` (the attribute is not written; reported, never the value).
+// Otherwise ` name="…"` (attribute-escaped) — NOT judged by §5.2 rule 3's URL guard, unlike
+// `_scrml_link_href_set`: a non-stylesheet URL attribute in these templates is outside the S479
+// carve-out 2 (gap g-impl1-renders-href-unguarded-s480), so it is written as it was before.
+export function _scrml_link_href_html(name, relParts, hrefParts) {
+  let rel = null;
+  if (relParts != null) {
+    rel = "";
+    for (let i = 0; i < relParts.length; i++) rel += relParts[i] == null ? "" : String(relParts[i]);
+  }
+  if (_scrml_rel_loads_sheet(rel)) {
+    _scrml_link_href_refused(name, "not written");
+    return "";
+  }
+  let text = "";
+  for (let i = 0; i < hrefParts.length; i++) text += hrefParts[i] == null ? "" : String(hrefParts[i]);
+  return " " + name + '="' + _scrml_css_attr_escape(text) + '"';
 }
 
 // THE write of a `<link>`'s `href` (any case, any `prefix:href`) from data (SPEC §5.2 "Data-supplied
@@ -155,10 +189,7 @@ function _scrml_link_loads_sheet(el) {
 export function _scrml_link_href_set(el, name, value) {
   if (_scrml_link_loads_sheet(el)) {
     el.removeAttribute(name);
-    _scrml_css_guard_report(
-      "refused a data-supplied `" + String(name) + "` on a <link> whose `rel` loads a stylesheet: a " +
-      "stylesheet is never chosen by data (SPEC §5.2). The attribute was removed.",
-    );
+    _scrml_link_href_refused(name, "removed");
     return;
   }
   el.setAttribute(name, _scrml_safe_url(el, name, value));

@@ -39,3 +39,12 @@ data-written stylesheet `href` only). Gap: g-impl1-svg-css-url-attr-and-link-sty
 - F3: meta.emit gate judges CSS-url attrs (metaemit → cssattrguard).
 - F2b filed: g-impl1-renders-href-unguarded-s480 (HIGH, owner question). F4: SPEC wording scoped.
 - tests: compiler/tests/integration/s480-r1-renders-css-url-guard.test.js (7 red on c1b892e1a, 9 green).
+
+## r2 (S239 re-review of #2015 — BLOCKED on N1)
+- merged origin/main.
+- N1 compile: `<errorBoundary fallback={…}>` template read by collectExecutableSinkErrors
+  (rendersStylesheetHrefHits over boundaryFallbackRaw) → E-ATTR-STYLESHEET-HREF at the boundary.
+- N1 runtime: `_scrml_link_href_html(name, relParts, hrefParts)` (string twin of _scrml_link_href_set);
+  emitBoundaryMarkupExpr routes payload <link> href through it. Non-stylesheet link href: unjudged (F2b).
+- N2: g-impl1-renders-href-unguarded-s480 text extended (fallback templates; <set attributeName=href to=>).
+- tests: compiler/tests/integration/s480-r2-fallback-stylesheet-href.test.js (5 red on f13d5efbe, 7 green).
