@@ -244,6 +244,12 @@ function seedExprFree(toks, from, to, bound, src) {
     }
     if (t.kind === "PUNCT" || t.kind === "OPERATOR") {
       if (!SEED_OPERATORS.has(t.text)) return false;
+      // `.Name(…)` in operand position is an enum variant's constructor (§18), not a call: the `.` has no
+      // receiver (it opens the operand), so no user code is named; its arguments are checked like any other
+      const p2 = j - 2 >= from ? toks[j - 2] : null;
+      const p3 = j - 3 >= from ? toks[j - 3] : null;
+      if (t.text === "(" && pv && pv.kind === "IDENT" && p2 && p2.text === "."
+        && (!p3 || ((p3.kind === "PUNCT" || p3.kind === "OPERATOR") && p3.text !== ")" && p3.text !== "]" && p3.text !== "}"))) continue;
       if (t.text === "(" && pv && (pv.kind === "IDENT" || pv.kind === "AT_IDENT" || pv.kind === "KEYWORD" || pv.kind === "STRING"
         || pv.kind === "NUMBER" || pv.kind === "MARKUP" || pv.text === ")" || pv.text === "]" || pv.text === "}")) return false; // a call
       continue;

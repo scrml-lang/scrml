@@ -165,6 +165,15 @@ describe("r2 — the seed-order guard fails closed (re-review N1 / N2 / N3 probe
     expect(r.text).toBe("7");
   }, 120000);
 
+  test("an enum variant constructor `.Name(…)` is not a call; a method call on a receiver is", () => {
+    const run = (pre) => fixS66(prog(pre, "${", "    <x>: number = 1", "    <y>: number = @x", "}", '<p id="c">${@x}</p>'),
+      { filePath: F, entry: true, rules: S66_RULES, allowNonCompiling: true }).blockers.map((b) => b.reason).join("\n");
+    expect(run('${ type R:enum = { Ok(n: int) Failed(reason: string) } }\n${ <r>: R = .Failed("unset") }')).not.toMatch(SEED_NOTE);
+    expect(run("${ let a = x.f(1) }")).toMatch(SEED_NOTE);
+    expect(run("${ let a = (1).f(1) }")).toMatch(SEED_NOTE);
+    expect(run("${ let a = [1].length }")).not.toMatch(SEED_NOTE);
+  });
+
   test("cell declarations and function declarations before a declaration do not refuse it (the common program head)", async () => {
     const src = prog("${", "    <count>: number = 0", "    <step>: number = 1", "    function inc() { @count = @count + @step }", "    <total>: number = @count + @step", "}", '<p id="c">${@count} ${@step} ${@total}</p>');
     const r = await migrateAndRun(src);
