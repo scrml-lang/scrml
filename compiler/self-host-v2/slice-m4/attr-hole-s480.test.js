@@ -189,7 +189,10 @@ describe("S480 attr-hole: the element carrying a trapped attribute is the hole",
   });
 
   // r1 (review of #2017) — the reviewer's compiled repros. `@i` 1 → 7 (F1) and 1 → 2 → 0 (F2).
-  test("r1 F1 compiled: `src` changes as `referrerpolicy` traps — nothing written, no policy removed from the live img", async () => {
+  // r3: a live element's writers write at their own place in the flush, as on base — `src` (first)
+  // is written while the img is live, before `referrerpolicy` (second) traps; then the img leaves
+  // with its policy kept (nothing removed, nothing written to it once it is out).
+  test("r1 F1 compiled: `src` changes as `referrerpolicy` traps — src written live (base order), no policy removed, then out", async () => {
     await load(prog(`        <img id="p" src=(@i == 1 ? "/one" : "/other") referrerpolicy=(@xs[@i] == 20 ? "no-referrer" : "origin")/>`));
     const writes = [];
     let img = null;
@@ -200,9 +203,10 @@ describe("S480 attr-hole: the element carrying a trapped attribute is the hole",
       logWrites(img, writes);
       click(btn("out"));
     });
-    expect(writes).toEqual([]);
+    expect(writes).toEqual(["set src=/other connected=true"]);
     expect(img.isConnected).toBe(false);
-    expect(img.getAttribute("src")).toBe("/one");
+    expect(img.getAttribute("src")).toBe("/other");
+    expect(img.getAttribute("referrerpolicy")).toBe("no-referrer");
     expect(codesOf(later)).toEqual(["E-INDEX-OUT-OF-RANGE-RT"]);
   });
 
@@ -289,9 +293,9 @@ describe("S480 attr-hole: runtime, unit level", () => {
   });
 
   // r1 (review of #2017) — F1: a live img whose `src` changes in the same flush in which its
-  // `referrerpolicy` traps: nothing is written (no new `src` fetched without the policy, no
-  // policy removed from a live img); the element leaves with its last consistent values.
-  test("r1 F1: a writer that traps in the same flush as a sibling's change — nothing is written; the element leaves", async () => {
+  // `referrerpolicy` traps: no policy is removed from the live img. r3: the `src` writer (first)
+  // writes while the img is live, as on base; once the policy traps, nothing more is written.
+  test("r1 F1: a writer that traps in the same flush as a sibling's change — no removal; the element leaves", async () => {
     document.body.innerHTML = '<div id="w"><img id="p"></div>';
     const img = $("#p");
     const s = new rtm.Scope(rtm.root);
@@ -303,9 +307,9 @@ describe("S480 attr-hole: runtime, unit level", () => {
       logWrites(img, writes);
       rtm.batch(() => i.set(2));
     });
-    expect(writes).toEqual([]);
+    expect(writes).toEqual(["set src=/p2 connected=true"]);
     expect(img.isConnected).toBe(false);
-    expect(img.getAttribute("src")).toBe("/p1");
+    expect(img.getAttribute("src")).toBe("/p2");
     expect(img.getAttribute("referrerpolicy")).toBe("no-referrer");
     expect(codesOf(reported)).toEqual(["E-INDEX-OUT-OF-RANGE-RT"]);
     s.dispose();
@@ -332,8 +336,11 @@ describe("S480 attr-hole: runtime, unit level", () => {
       expect(writes).toEqual([]);
       rtm.batch(() => i.set(1));                                       // all read: written, then back
     });
-    // every attribute is written from its current value while the img is still out, then it returns
-    expect(writes).toEqual(["set title=20 connected=false", "set referrerpolicy=no-referrer connected=false", "set src=/p1 connected=false"]);
+    // r3: recovery (after the flush) writes only the values that differ from the img's attributes —
+    // here none (back at i=1, the values it left with) — then the img returns
+    expect(writes).toEqual([]);
+    expect(img.getAttribute("title")).toBe("20");
+    expect(img.getAttribute("src")).toBe("/p1");
     expect($("#p")).toBe(img);
     expect(img.getAttribute("referrerpolicy")).toBe("no-referrer");
     expect(codesOf(reported)).toEqual(["E-INDEX-OUT-OF-RANGE-RT", "E-INDEX-OUT-OF-RANGE-RT"]);
@@ -436,17 +443,117 @@ describe("S480 attr-hole: runtime, unit level", () => {
 // element's writes until its LAST queued writer ran let a render effect queued between them (a
 // `bind:value`) run against stale attributes. The element's other queued writers now run right
 // after the first one, and the element is committed there — where an unheld write always landed.
-describe("S480 attr-hole r2: an element's writes land at its first queued writer (non-trapping path)", () => {
-  async function run(src, steps, probe) {
-    const log = [];
-    await load(src);
-    log.push(probe());
-    for (const s of steps) { click(btn(s)); log.push(probe()); }
-    return log;
-  }
+// r3 (re-review of #2017, head 2bc19f9f6): the NON-trapping write path is the base's. Every bound
+// attribute is written by its own writer at the writer's own place in the flush — no batching per
+// element, no writer pulled forward, no write deferred — so every DOM write, and its order, is what
+// origin/main does. Each test below pins the trace measured on origin/main (dfbcca30b). r1 deferred
+// an element's writes to its last writer (a `bind:value` saw stale attributes); r2 pulled an
+// element's later writers forward to its first, so they read a list row's cell before the keyed
+// `<each>` re-render updated it — a value from a state that never existed was written to a live
+// `<img src>` / `<iframe src>` (glitch*, red on 2bc19f9f6).
+async function trace(src, steps, probe) {
+  await load(src);
+  const log = ["mount: " + probe()];
+  const P = window.Element.prototype, N = window.Node.prototype;
+  const sa = P.setAttribute, ra = P.removeAttribute, rc = N.replaceChild;
+  const tag = (el) => el.id || el.tagName;
+  P.setAttribute = function (n, v) { log.push(`  set ${tag(this)}.${n}=${v} conn=${this.isConnected}`); return sa.call(this, n, v); };
+  P.removeAttribute = function (n) { log.push(`  remove ${tag(this)}.${n} conn=${this.isConnected}`); return ra.call(this, n); };
+  N.replaceChild = function (a, b) { log.push(`  replace ${b.nodeName}->${a.nodeName}`); return rc.call(this, a, b); };
+  const reported = await withReports(async () => {
+    try { for (const s of steps) { click(btn(s)); log.push(s + ": " + probe()); } }
+    finally { P.setAttribute = sa; P.removeAttribute = ra; N.replaceChild = rc; }
+  });
+  if (process.env.S480_MEASURE) console.log("TRACE", JSON.stringify(log));
+  return { log, codes: codesOf(reported) };
+}
 
-  test("N1: `<select bind:value>` selects an `<option>` by the `value` written in the same flush", async () => {
-    const log = await run(`<program>
+// Measured on origin/main (dfbcca30b) with `S480_MEASURE=1` — the base's trace, write for write.
+const BASE = {
+  select: ["mount: z/0 a ta a", "  set o.value=b conn=true", "  set o.title=tb conn=true", "go: b/1 b tb b"],
+  range: ["mount: 5 0 10", "  set r.max=100 conn=true", "  set r.min=1 conn=true", "go: 50 1 100"],
+  broad: {
+    number: ["mount: v=5 min=0 out=5", "  set n.max=100 conn=true", "  set n.step=5 conn=true", "  set n.min=50 conn=true", "go: v=55 min=50 out=55"],
+    textarea: ["mount: v=abc ml=3", "  set t.maxlength=10 conn=true", "go: v=abcdefg ml=10"],
+    checkbox: ["mount: checked=false value=a t=t0", "  set c.value=b conn=true", "  set c.title=t1 conn=true", "go: checked=true value=b t=t1"],
+    details: ["mount: open=false t=t0", "  set d.title=t1 conn=true", "  set d.open= conn=true", "go: open=true t=t1"],
+    selectmulti: ["mount: a:false,b:true", "  set oa.title=t1 conn=true", "  set ob.title=t1 conn=true", "  set oa.selected= conn=true", "  remove ob.selected conn=true", "go: a:true,b:false"],
+  },
+  multi: [
+    "mount: 5 z/0 w0",
+    "  set r.max=100 conn=true", "  set o.value=b conn=true", "  set a.href=/h1 conn=true", "  set a.title=w1 conn=true",
+    "  set d1.alt=w1 conn=true", "  set d2.title=w1 conn=true", "  set r.min=1 conn=true", "  set o.title=tb conn=true",
+    "  set d1.title=tb conn=true", "  set d2.alt=tb conn=true",
+    "go: 50 b/1 w1",
+  ],
+};
+
+describe("S480 attr-hole r3: the non-trapping write path is the base's (every write, in order)", () => {
+  test("glitch: a keyed-row img's `src` is written once, from the settled state (red on 2bc19f9f6)", async () => {
+    const r = await trace(`<program>
+    type Row:struct = { id: int, url: string }
+    let <label:string="L0"/>
+    let <q:string="?a"/>
+    <rows:Row[replace]=([{ id: 1, url: "/u0" }])/>
+    function go() { @label = "L1"; @rows = [{ id: 1, url: "/u1" }]; @q = "?b"; }
+    <main>
+        <button onclick=go()>go</button>
+        <ul><each in=@rows key=@.id as row><li><img alt=(@label) src=(row.url + @q)/></li></each></ul>
+    </main>
+</program>
+`, ["go"], () => $("img").outerHTML);
+    expect(r).toEqual({ codes: [], log: [
+      'mount: <img alt="L0" src="/u0?a">',
+      "  set IMG.alt=L1 conn=true",
+      "  set IMG.src=/u1?b conn=true",
+      'go: <img alt="L1" src="/u1?b">',
+    ] });
+  });
+
+  test("glitch2: a token never goes to the row's OLD host (red on 2bc19f9f6)", async () => {
+    const r = await trace(`<program>
+    type Row:struct = { id: int, host: string }
+    let <label:string="L0"/>
+    let <tok:string="t0"/>
+    <rows:Row[replace]=([{ id: 1, host: "https://old.example" }])/>
+    function go() { @label = "L1"; @rows = [{ id: 1, host: "https://new.example" }]; @tok = "SECRET"; }
+    <main>
+        <button onclick=go()>go</button>
+        <ul><each in=@rows key=@.id as row><li><img alt=(@label) src=(row.host + "/x?t=" + @tok)/></li></each></ul>
+    </main>
+</program>
+`, ["go"], () => $("img").outerHTML);
+    expect(r).toEqual({ codes: [], log: [
+      'mount: <img alt="L0" src="https://old.example/x?t=t0">',
+      "  set IMG.alt=L1 conn=true",
+      "  set IMG.src=https://new.example/x?t=SECRET conn=true",
+      'go: <img alt="L1" src="https://new.example/x?t=SECRET">',
+    ] });
+  });
+
+  test("glitch3: no spurious trap from a row cell read before the re-render (red on 2bc19f9f6)", async () => {
+    const r = await trace(`<program>
+    type Row:struct = { id: int, i: int }
+    let <label:string="L0"/>
+    <xs:string[replace]=(["a", "b"])/>
+    <rows:Row[replace]=([{ id: 1, i: 1 }])/>
+    function go() { @label = "L1"; @rows = [{ id: 1, i: 0 }]; @xs = ["c"]; }
+    <main>
+        <button onclick=go()>go</button>
+        <ul><each in=@rows key=@.id as row><li><iframe id="f" title=(@label) src=("/p" + @xs[row.i])></iframe></li></each></ul>
+    </main>
+</program>
+`, ["go"], () => { const f = $("iframe"); return f ? f.outerHTML : "NO IFRAME"; });
+    expect(r).toEqual({ codes: [], log: [
+      'mount: <iframe id="f" title="L0" src="/pb"></iframe>',
+      "  set f.title=L1 conn=true",
+      "  set f.src=/pc conn=true",
+      'go: <iframe id="f" title="L1" src="/pc"></iframe>',
+    ] });
+  });
+
+  test("order: `<select bind:value>` selects an `<option>` by the `value` written in the same flush", async () => {
+    const r = await trace(`<program>
     let <v:string="a"/>
     let <t:string="ta"/>
     let <sel:string="a"/>
@@ -454,14 +561,15 @@ describe("S480 attr-hole r2: an element's writes land at its first queued writer
     <main>
         <button onclick=go()>go</button>
         <select id="s" bind:value=@sel><option value="z">z</option><option id="o" value=(@v) title=(@t)>opt</option></select>
+        <p id="out">\${@sel}</p>
     </main>
 </program>
-`, ["go"], () => `${$("#s").value}/${$("#s").selectedIndex} ${$("#o").getAttribute("value")} ${$("#o").getAttribute("title")}`);
-    expect(log).toEqual(["z/0 a ta", "b/1 b tb"]);
+`, ["go"], () => `${$("#s").value}/${$("#s").selectedIndex} ${$("#o").getAttribute("value")} ${$("#o").getAttribute("title")} ${$("#out").textContent}`);
+    expect(r).toEqual({ codes: [], log: BASE.select });
   });
 
-  test("N1: a range input's `bind:value` is judged against the `max` written in the same flush", async () => {
-    const log = await run(`<program>
+  test("order: a range input's `bind:value` is judged against the `max` written in the same flush", async () => {
+    const r = await trace(`<program>
     let <hi:int=10/>
     let <lo:int=0/>
     let <x:string="5"/>
@@ -472,13 +580,70 @@ describe("S480 attr-hole r2: an element's writes land at its first queued writer
     </main>
 </program>
 `, ["go"], () => `${$("#r").value} ${$("#r").getAttribute("min")} ${$("#r").getAttribute("max")}`);
-    expect(log).toEqual(["5 0 10", "50 1 100"]);
+    expect(r).toEqual({ codes: [], log: BASE.range });
   });
 
-  // What every `value` write observes, and the final DOM, are the base's (origin/main before #2017,
-  // measured): each element's attributes are now written together, at its first queued writer.
-  test("N1: multi-attribute elements interleaved with binds — every bind observes what it did on the base", async () => {
-    await load(`<program>
+  test("broad: number / textarea / checkbox / details / multi-select — every write in base order", async () => {
+    const out = {};
+    out.number = (await trace(`<program>
+    let <lo:int=0/>
+    let <hi:int=10/>
+    let <st:int=1/>
+    let <x:string="5"/>
+    function go() { @hi = 100; @st = 5; @x = "55"; @lo = 50; }
+    <main>
+        <button onclick=go()>go</button>
+        <input id="n" type="number" min=(@lo) max=(@hi) step=(@st) bind:value=@x/><p id="o">\${@x}</p>
+    </main>
+</program>
+`, ["go"], () => `v=${$("#n").value} min=${$("#n").getAttribute("min")} out=${$("#o").textContent}`)).log;
+    out.textarea = (await trace(`<program>
+    let <m:int=3/>
+    let <x:string="abc"/>
+    function go() { @x = "abcdefg"; @m = 10; }
+    <main>
+        <button onclick=go()>go</button>
+        <textarea id="t" maxlength=(@m) bind:value=@x></textarea>
+    </main>
+</program>
+`, ["go"], () => `v=${$("#t").value} ml=${$("#t").getAttribute("maxlength")}`)).log;
+    out.checkbox = (await trace(`<program>
+    let <v:string="a"/>
+    let <c:boolean=false/>
+    let <t:string="t0"/>
+    function go() { @v = "b"; @c = true; @t = "t1"; }
+    <main>
+        <button onclick=go()>go</button>
+        <input id="c" type="checkbox" value=(@v) title=(@t) bind:checked=@c/>
+    </main>
+</program>
+`, ["go"], () => `checked=${$("#c").checked} value=${$("#c").getAttribute("value")} t=${$("#c").getAttribute("title")}`)).log;
+    out.details = (await trace(`<program>
+    let <o:boolean=false/>
+    let <t:string="t0"/>
+    function go() { @t = "t1"; @o = true; }
+    <main>
+        <button onclick=go()>go</button>
+        <details id="d" open=(@o) title=(@t)><summary>s</summary>x</details>
+    </main>
+</program>
+`, ["go"], () => `open=${$("#d").open} t=${$("#d").getAttribute("title")}`)).log;
+    out.selectmulti = (await trace(`<program>
+    let <a:boolean=false/>
+    let <b:boolean=true/>
+    let <t:string="t0"/>
+    function go() { @t = "t1"; @a = true; @b = false; }
+    <main>
+        <button onclick=go()>go</button>
+        <select id="s" multiple><option id="oa" value="a" selected=(@a) title=(@t)>a</option><option id="ob" value="b" selected=(@b) title=(@t)>b</option></select>
+    </main>
+</program>
+`, ["go"], () => [...$("#s").options].map((o) => o.value + ":" + o.selected).join(","))).log;
+    expect(out).toEqual(BASE.broad);
+  });
+
+  test("multi-attribute elements interleaved with binds — every write, and what every bind observes, in base order", async () => {
+    const r = await trace(`<program>
     let <lo:int=0/>
     let <hi:int=10/>
     let <x:string="5"/>
@@ -497,35 +662,11 @@ describe("S480 attr-hole r2: an element's writes land at its first queued writer
         <img id="d1" alt=(@w) title=(@t)/><img id="d2" alt=(@t) title=(@w)/>
     </main>
 </program>
-`);
-    const log = [];
-    const P = window.Element.prototype;
-    const sa = P.setAttribute;
-    const d = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
-    P.setAttribute = function (n, v) { log.push(`${this.id}.${n}=${v}`); return sa.call(this, n, v); };
-    Object.defineProperty(window.HTMLInputElement.prototype, "value", { configurable: true, get: d.get, set(v) {
-      log.push(`${this.id}.value:=${v} (r.max=${$("#r").getAttribute("max")} o.value=${$("#o").getAttribute("value")})`);
-      d.set.call(this, v);
-    } });
-    try { click(btn("go")); } finally {
-      P.setAttribute = sa;
-      Object.defineProperty(window.HTMLInputElement.prototype, "value", d);
-    }
-    expect(log.filter((l) => l.includes(":="))).toEqual([
-      "r.value:=50 (r.max=100 o.value=b)",
-      "i.value:=w1 (r.max=100 o.value=b)",
-    ]);
-    expect(log.filter((l) => !l.includes(":=")).sort()).toEqual([
-      "a.href=/h1", "a.title=w1", "d1.alt=w1", "d1.title=tb", "d2.alt=tb", "d2.title=w1",
-      "o.title=tb", "o.value=b", "r.max=100", "r.min=1",
-    ]);
-    // one element's writes are contiguous (written together)
-    const ids = log.filter((l) => !l.includes(":=")).map((l) => l.split(".")[0]);
-    expect(ids.filter((x, j) => j === 0 || ids[j - 1] !== x)).toEqual(["r", "o", "a", "d1", "d2"]);
-    expect(`${$("#r").value} ${$("#s").value}/${$("#s").selectedIndex} ${$("#i").value}`).toBe("50 b/1 w1");
+`, ["go"], () => `${$("#r").value} ${$("#s").value}/${$("#s").selectedIndex} ${$("#i").value}`);
+    expect(r).toEqual({ codes: [], log: BASE.multi });
   });
 
-  test("N1 runtime: a render effect queued between two writers of one element sees both new values", () => {
+  test("runtime: a render effect queued between two writers of one element sees what it saw on base", () => {
     document.body.innerHTML = '<div><img id="p"></div>';
     const img = $("#p");
     const s = new rtm.Scope(rtm.root);
@@ -536,8 +677,37 @@ describe("S480 attr-hole r2: an element's writes land at its first queued writer
     rtm.attr(s, img, "alt", () => "x" + b.get());
     seen.length = 0;
     rtm.batch(() => { a.set(2); m.set(2); b.set(2); });
-    expect(seen).toEqual(["/p2 x2"]);
+    expect(seen).toEqual(["/p2 x1"]);
+    expect(`${img.getAttribute("src")} ${img.getAttribute("alt")}`).toBe("/p2 x2");
     s.dispose();
+  });
+
+  // Recovery is a post-flush step: a held row element comes back only after the keyed `<each>`
+  // re-render of the same flush has updated the row's cells — written from the settled state
+  // (while still out), then returned. Nothing is written to it while it is held.
+  test("trap path: a held row img recovers after the flush settles — settled values, written before it returns", async () => {
+    const r = await trace(`<program>
+    type Row:struct = { id: int, i: int }
+    let <label:string="L0"/>
+    <xs:string[replace]=(["a", "b"])/>
+    <rows:Row[replace]=([{ id: 1, i: 5 }])/>
+    function go() { @label = "L1"; @rows = [{ id: 1, i: 0 }]; @xs = ["c"]; }
+    function lab() { @label = "L2"; }
+    <main>
+        <button onclick=go()>go</button>
+        <button onclick=lab()>lab</button>
+        <ul id="u"><each in=@rows key=@.id as row><li><img id="m" alt=(@label) src=("/p" + @xs[row.i])/></li></each></ul>
+    </main>
+</program>
+`, ["lab", "go"], () => $("#u").innerHTML);
+    expect(r).toEqual({ codes: [], log: [
+      "mount: <!--row--><li><!--trapped--></li><!--/row--><!--each-->",
+      "lab: <!--row--><li><!--trapped--></li><!--/row--><!--each-->",
+      "  set m.alt=L1 conn=false",
+      "  set m.src=/pc conn=false",
+      "  replace #comment->IMG",
+      'go: <!--row--><li><img id="m" alt="L1" src="/pc"></li><!--/row--><!--each-->',
+    ] });
   });
 
   // N2: a queued sibling disposed before it would have run no longer strands the element's value

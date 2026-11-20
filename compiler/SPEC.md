@@ -25138,17 +25138,19 @@ S440, are earlier runtime errors at a value boundary. They keep their own sectio
   `<svg>` / `<math>` content alike — where writing an attribute loads nothing; an element held there is never
   inserted, so a trapped frame, image or other element that fetches never starts loading, and an element one of
   whose attributes traps after another of them was written there is held before the view is inserted. On a
-  re-run the element leaves the page; it is never left showing the value it had before the trap. When a change
-  of state re-evaluates several data-bound attributes of one element, every one of them is evaluated before any
-  is written, and none is written if one traps; they are written together, where the first of them is
-  re-evaluated, so a binding that runs after that point (a `bind:value` judged against a new `max`, a `<select>`
-  choosing an `<option>` by its new `value`) sees every new value. While the element is out, none of its
-  data-bound attributes is written (a detached element can still start a fetch) and none is removed (it leaves
-  with the values it had); its other bindings (a `bind:` value, a `show=` display) and the holes inside it stay
-  current. When every data-bound attribute
-  of the element reads again, the element SHALL be restored in the placeholder's place with each of those
-  attributes written from its current value before it is back in the page. An element is never in the page
-  with a stale or absent value of a data-bound attribute because of a trap. The restored element may lose
+  re-run the element leaves the page; it is never left showing the value it had before the trap. A trap
+  changes nothing about when an attribute that does not trap is written: on an element that is in the page,
+  each data-bound attribute is written when its own value is re-evaluated, in the order the change of state
+  re-evaluates them, so an attribute of an element written earlier in the change that then traps was written
+  while the element was in the page. While the element is out, none of its data-bound attributes is written (a
+  detached element can still start a fetch) and none is removed (it leaves with the values it had); their
+  values are still re-evaluated, and its other bindings (a `bind:` value, a `show=` display) and the holes
+  inside it stay current. The element SHALL be restored only once the change of state that re-evaluated it has
+  finished updating the view (every attribute, hole and list row it re-evaluates), and only if every data-bound
+  attribute of the element then reads without a trap: each of those attributes whose value differs from the
+  element's is written before the element is back in the placeholder's place. Otherwise it stays out. So once
+  a change of state has finished updating the view, no element is in the page with a stale or absent value of
+  a data-bound attribute because of a trap. The restored element may lose
   focus, selection and scroll position, and a frame or media element reloads. *(Provenance:
   ruling:user-voice-scrml.md S480 "⭐ RULED — what a trap renders when "nothing" is not safe (#2008, item 20
   follow-up)" item 1 — "the element is replaced by a placeholder, the trap is reported once, and the element is
