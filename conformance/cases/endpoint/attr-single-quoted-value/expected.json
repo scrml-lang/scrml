@@ -1,0 +1,14 @@
+{
+  "id": "endpoint-attr-single-quoted-value",
+  "description": "§61.2 — an `<endpoint>` opener is read whole by the markup attribute reader, whose attribute string is `\"…\"` only: a `'…'` value (`method='POST'`) is E-ATTR-001 at the `'`, and the `method=` it was meant for has no value the reader reads (E-ENDPOINT-METHOD-INVALID). It is never read as `method=\"POST\"`.",
+  "language-version": "1.0",
+  "spec": "§61.2, §4.18.3, §34",
+  "provenance": "S480 #2007 review (S239) item 1; §61.2 as amended by #1998 review r2 N1",
+  "source-test": "compiler/self-host-v2/slice-m4/endpoint-opener-s480.test.js",
+  "rationale": "§61.2: \"an attribute string is `\\\"…\\\"` only (§4.18.3). A character that reader drops (a `'`, a backtick, …) … is `E-ATTR-001` at that character, never skipped\"; \"a `path=` / `method=` / `accepts=` / `cors=` written with no value, or with a value that is not its production's form, is that attribute's code.\"",
+  "expect": {
+    "codes": ["E-ATTR-001", "E-ENDPOINT-METHOD-INVALID"],
+    "notCodes": ["E-BOOTSTRAP-UNSUPPORTED"],
+    "severity": { "E-ATTR-001": "error", "E-ENDPOINT-METHOD-INVALID": "error" }
+  }
+}

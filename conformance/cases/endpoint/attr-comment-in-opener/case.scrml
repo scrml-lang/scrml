@@ -1,0 +1,13 @@
+<program>
+
+type FspMethod:enum = {
+  FleetStatus
+  DeltaSince(seq: int)
+}
+
+<endpoint path="/fsp" /* note */ method="POST" accepts=FspMethod>
+  <FleetStatus : { jsonrpc: "2.0", result: { active: 3 } }>
+  <DeltaSince(seq) : { jsonrpc: "2.0", result: { since: seq } }>
+</endpoint>
+
+</program>
