@@ -33,7 +33,7 @@ bun run boot:dev docs/tutorial-snippets/02-counter.scrml
 bun run boot:compile docs/tutorial-snippets/02-counter.scrml
 ```
 
-The bootstrap writes the page (`index.html`), the client script and its runtime — plus a server module when the program has server functions — to `dist/<name>/` next to the input file, here `docs/tutorial-snippets/dist/02-counter/`. Pass `--output-dir <dir>` to put them elsewhere. The page loads ES modules, so open it over HTTP (`boot:dev`, or any static server), not `file://`. The first run builds the bootstrap itself (about ten seconds); later runs reuse a cached build.
+The bootstrap writes the page (`index.html`), the client script and its runtime — plus a server module when the program has server functions — to `dist/<name>/` next to the input file, here `docs/tutorial-snippets/dist/02-counter/`. `boot:dev` writes its development build to `dist/<name>.dev/` instead, so the production folder never holds one. Pass `--output-dir <dir>` to put them elsewhere. The page loads ES modules, so open it over HTTP (`boot:dev`, or any static server), not `file://`. The first run builds the bootstrap itself (about ten seconds); later runs reuse a cached build.
 
 The everyday surface is small:
 
