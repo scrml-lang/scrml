@@ -24,6 +24,15 @@
 2. **#2032 static class never removed by `class:`** (12b1614e9) — PA-direct reviewed, auto-merge on at wrap; confirm it merged. Compile-time `fixed` flag on `rt.classOn`; impl#1 also strips → gap `g-impl1-class-directive-strips-static-class-s480` (LOW). Marker owed pr=2032 (clean, PA-direct).
 3. **Gaps to file when #2025 lands** (locus `compiler/src/commands/fix-s66.js`, prov `review:#2025`, INTERIM, fail-closed): the seed guard refuses validator heads `<x min(18)>` and object-literal keys; a `^{}` after a declaration refuses the move until the bootstrap has `^{}`.
 
+## 1a. Post-wrap addendum (2026-11-20, after #2034 merged)
+- **#2025 r4 re-review = LAND-W-F/U** (head 6c0b28485; 0 introduced findings; the commutation guard held over 101 prior probes + new attacks). Auto-merge enabled at wrap; **confirm it merged** (it was BEHIND main; windows job pending — check it). Markers owed: pr=2025 (r0 BLOCK → r1 → r1rev BLOCK → r2 → r2rev FIX → r3 → r3rev FIX → r4 → r4rev LAND-W-F/U), pr=2032 (PA-direct clean).
+- **Gaps to file** (all PRE-EXISTING bootstrap-vs-impl#1 divergences, reproduced on c15225d88 with no fix; `scrml fix` output now reaches them). Probes in `~/.cache/scrml/review/s480-2025-r4rev/scratch/p/`:
+  - P1 MED: the bootstrap drops an unread file-scope binding even when its initializer has a side effect (`constsReadIn`, print.scrml:5376). `b04n-nofix.scrml`: boot "1" vs impl#1 "11".
+  - P2 MED: a file-scope binding is hoisted above a top-level write (§7.6 module-init model). `h02-hoist-nomove.scrml` (`let n=1; n=5; const k=n`): "1" vs "5".
+  - P3 MED: render order differs — impl#1 runs all top-level logic, then fills interpolations; the bootstrap interleaves in source order, and its CSS bridge reads derived cells at boot. `e01-render-model.scrml`: "1 10" vs "10 10"; e02/e03 101 vs 110. **Likely an owner question**: which order does the SPEC mandate? Grep SPEC (§6 / §7.6 / §55) and user-voice before asking.
+  - LOW: the guard comment (fix-s66.js:1909–1946) says impl#1 "runs all of it in source order" — false for interpolations and component instances (stricter, still sound); fix the comment.
+  - Also file the #2025 INTERIM refusals listed in §1.3.
+
 ## 2. Rulings this session (verbatim in user-voice §S480)
 All "your recs go" — PA recs adopted. Cite slugs `ruling:user-voice-scrml.md-S480-<slug>`:
 - `four-recs` (impl#1 §61.2/§61.7; E-ENDPOINT-CORS-INVALID; honest-client guarantee + 30 s INTERIM; append-append gap) · `1998-recs` (reserved-prefix paths) · `four-recs-2` (E-ENDPOINT-ATTR-INVALID; onIdle no-op fire; tools evaluate every initializer in source order; §61.7 trailing dot).
