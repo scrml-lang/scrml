@@ -2534,6 +2534,14 @@ full re-render.
 - `class:` directives and a static `class=` attribute MAY coexist on the same element.
   The static class is always present; each `class:` directive independently adds or removes
   its named class. The compiler SHALL NOT treat this as a conflict.
+  A `class:` directive whose name is also in the static `class=` never removes it: its condition
+  is still read (and a trap still holds the element out, §19.17), but the class stays present.
+
+  > **Provenance (a static class is never removed):** lane:s480-static-class (review:#2028
+  > re-review, LOW) — a clarification of "The static class is always present", not a change of
+  > behaviour. **Direction of change: none** (both implementations removed the class; the bootstrap
+  > now conforms — `print.scrml` `staticClasses` → `rt.classOn` `fixed`; impl#1 carried as gap
+  > `g-impl1-class-directive-strips-static-class-s480`).
 - A `class:` attribute is NOT emitted as a literal HTML attribute. The compiler substitutes
   a `data-scrml-class-name` marker attribute that client-side wiring uses as a querySelector
   anchor. The `class:` form does NOT appear in the HTML output.

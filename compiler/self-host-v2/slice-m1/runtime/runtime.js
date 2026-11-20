@@ -4363,16 +4363,24 @@ export function visibility(scope, el, fn) {
  * a trap holds the element out (`holdElement`, reported once); while it is out the condition's
  * value waits in the writer's slot; on recovery (`restoreHeld`) the class state is written, then
  * the element goes back. With no trap the writes are `classList.toggle(name, v)`, as before.
+ *
+ * s480 (s480-static-class) — `fixed`: the compiler passes `true` when `name` is also in the
+ * element's static `class="…"` (§5.5.2: "The static class is always present; each `class:`
+ * directive independently adds or removes its named class"). The condition is still read every
+ * time (its dependencies; a trap still holds the element out, §19.17), but the slot's value is
+ * always true, so no path — mount, re-run, or `restoreHeld` (which writes `slot.v`) — removes it.
+ * The decision is the compiler's (it knows the static tokens); the runtime only obeys it.
  */
-export function classOn(scope, el, name, fn) {
+export function classOn(scope, el, name, fn, fixed = false) {
   requireScope(scope, "a class directive");
   const h = elementHoleOf(el);
-  const slot = { name, guard: null, v: false, refused: false, dirty: false, cls: true };
+  const slot = { name, guard: null, v: fixed, refused: false, dirty: false, cls: true };
   const tok = {};
   h.writers.set(tok, slot);
   scope.own(() => { h.writers.delete(tok); h.trapped.delete(tok); });
   new Effect(scope, () => {
-    slot.v = !!fn();
+    const v = !!fn();                              // always read: its dependencies, and a trap holds the element
+    slot.v = fixed || v;
     h.trapped.delete(tok);
     if (h.out) {
       slot.dirty = true;
