@@ -1,6 +1,6 @@
 {
   "id": "acceptance-request-target-read-not-dep",
-  "description": "`@items = load(@page, @items)` depends on @page only: on mount it loads 0+1, and each change of @page re-runs it once (1+2 = 3) — its own settle (a write of @items) never re-triggers it.",
+  "description": "`@items = load(@pageNo, @items)` depends on @pageNo only: on mount it loads 0+1, and each change of @pageNo re-runs it once (1+2 = 3) — its own settle (a write of @items) never re-triggers it.",
   "language-version": "1.0",
   "spec": "§6.7.7",
   "rationale": "§6.7.7: \"`<request>` is not a loop … the body executes once on mount, then only on dependency change or `refetch()`\".",
@@ -21,7 +21,7 @@
       }
     ],
     "state": {
-      "page": 2,
+      "pageNo": 2,
       "items": 3
     },
     "domAnchored": [

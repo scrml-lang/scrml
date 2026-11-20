@@ -113,9 +113,12 @@ describe("(1) a scrml structural element is never an HTML element", () => {
     expect(ds.filter((x) => x.code === "E-NAME-COLLIDES-RESERVED").length).toBe(1);
     expect(ds.filter((x) => x.code !== "E-NAME-COLLIDES-RESERVED").map((x) => x.message).join("\n")).toContain("a `<db>` without `src=` names no database");
   });
+  // S480 (ruling:user-voice-scrml.md-S480-driver-text-reserved-cells item 2): the cell's NAME is now
+  // E-NAME-COLLIDES-RESERVED too (§4.15, the full list on program cells); the use is still read as
+  // the cell, not as the structural element.
   test("a `single` program cell named `page` is E-DECL-SINGLE-INSTANTIATED at `<page/>`, not a structural refusal", () => {
     const src = `<program>\n    type P:enum = { A, B }\n    <page:P=.A single>\n        <A rule=.B : "a">\n        <B rule=.A : "b">\n    </>\n    <main>\n        <page/>\n    </main>\n</program>\n`;
-    expect(run(src).diags.map((x) => x.code)).toEqual(["E-DECL-SINGLE-INSTANTIATED"]);
+    expect(run(src).diags.map((x) => x.code).sort()).toEqual(["E-DECL-SINGLE-INSTANTIATED", "E-NAME-COLLIDES-RESERVED"]);
   });
   test("twin: HTML elements and the implemented structural elements are unaffected", () => {
     expect(run(inMain(`<section><p>\${@n}</p></section>`)).diags).toEqual([]);
