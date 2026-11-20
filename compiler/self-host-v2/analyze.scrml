@@ -718,8 +718,20 @@ ${
     // A family table grows by appending (`at` stays empty); `indexed` builds
     // every index once, when the binder is done.
     // =========================================================================
+    // S480 (s480-boot-fn-count-perf): a table grows by one fact per node, and a `concat` over
+    // the WHOLE table copied every fact so far (O(nodes²) over a program). `old` holds the
+    // tables' earlier entries in full chunks (moved out once the tables reach factChunk()
+    // entries; never edited — every AS the binder threads shares them), so an append copies
+    // only the short current tables. `indexed` joins them once, when the binder is done; the
+    // binder's own readers (nameFactIn, effectFactIn, bindFactNow, …) read the chunks, then
+    // the tables, in order.
     type NodeFacts:struct = { names: NameTable, values: ValueTable, effects: EffectTable, binds: BindTable,
-                              elems: ElemTable, attrs: AttrTable, fails: FailTable }
+                              elems: ElemTable, attrs: AttrTable, fails: FailTable, old: FactChunk[] }
+    // `lo` / `hi`: the least and greatest nid of each looked-up family's table (names, effects,
+    // binds, elems — in that order; lo > hi when empty), so a lookup skips a chunk that cannot
+    // hold its nid (nids grow as the binder walks, so most chunks are skipped).
+    type FactChunk:struct = { names: NameTable, values: ValueTable, effects: EffectTable, binds: BindTable,
+                              elems: ElemTable, attrs: AttrTable, fails: FailTable, lo: int[], hi: int[] }
     // `bad`: the declared types that did not resolve (r8 — see Unresolved).
     // `effects` (s449): the reactive effects the binder accepted in an element
     // scope, in order, with their file — the input of the no-write pass
@@ -757,10 +769,122 @@ ${
         return { names: { facts: [], nids: [], at: [] }, values: { facts: [], nids: [], at: [] },
                  effects: { facts: [], nids: [], at: [] }, binds: { facts: [], nids: [], at: [] },
                  elems: { facts: [], nids: [], at: [] }, attrs: { facts: [], nids: [], at: [] },
-                 fails: { facts: [], nids: [], at: [] } }
+                 fails: { facts: [], nids: [], at: [] }, old: [] }
     }
 
-    fn indexed(fs: NodeFacts) -> NodeFacts {
+    fn factChunk() -> int { return 256 }
+
+    // `fs`, its tables moved into a chunk of `old` once they hold factChunk() entries.
+    fn settledFacts(fs: NodeFacts) -> NodeFacts {
+        const n: int = fs.names.nids.length + fs.values.nids.length + fs.effects.nids.length + fs.binds.nids.length + fs.elems.nids.length + fs.attrs.nids.length + fs.fails.nids.length
+        if (n < factChunk()) return fs
+        const lo: int[] = [nidLo(fs.names.nids), nidLo(fs.effects.nids), nidLo(fs.binds.nids), nidLo(fs.elems.nids)]
+        const hi: int[] = [nidHi(fs.names.nids), nidHi(fs.effects.nids), nidHi(fs.binds.nids), nidHi(fs.elems.nids)]
+        const c: FactChunk = { names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems, attrs: fs.attrs, fails: fs.fails, lo: lo, hi: hi }
+        const e: NodeFacts = noFacts()
+        return { names: e.names, values: e.values, effects: e.effects, binds: e.binds, elems: e.elems, attrs: e.attrs, fails: e.fails, old: fs.old.concat([c]) }
+    }
+
+    fn nidLo(ns: int[]) -> int {
+        if (ns.length == 0) return 1
+        let m: int = ns[0]
+        for (const n of ns) { if (n < m) m = n }
+        return m
+    }
+
+    fn nidHi(ns: int[]) -> int {
+        if (ns.length == 0) return 0
+        let m: int = ns[0]
+        for (const n of ns) { if (n > m) m = n }
+        return m
+    }
+
+    // Can chunk `c`'s family `fam` (0 names, 1 effects, 2 binds, 3 elems) hold `nid`?
+    fn chunkMay(c: FactChunk, fam: int, nid: int) -> boolean {
+        return nid >= c.lo[fam] && nid <= c.hi[fam]
+    }
+
+    // Every fact so far, each table whole (`old` empty).
+    fn joinedFacts(fs: NodeFacts) -> NodeFacts {
+        const n: int = fs.old.length
+        if (n == 0) return fs
+        const onames: NameTable = oldNames(fs.old, 0, n)
+        const ovalues: ValueTable = oldValues(fs.old, 0, n)
+        const oeffects: EffectTable = oldEffects(fs.old, 0, n)
+        const obinds: BindTable = oldBinds(fs.old, 0, n)
+        const oelems: ElemTable = oldElems(fs.old, 0, n)
+        const oattrs: AttrTable = oldAttrs(fs.old, 0, n)
+        const ofails: FailTable = oldFails(fs.old, 0, n)
+        return {
+            names: { facts: onames.facts.concat(fs.names.facts), nids: onames.nids.concat(fs.names.nids), at: [] },
+            values: { facts: ovalues.facts.concat(fs.values.facts), nids: ovalues.nids.concat(fs.values.nids), at: [] },
+            effects: { facts: oeffects.facts.concat(fs.effects.facts), nids: oeffects.nids.concat(fs.effects.nids), at: [] },
+            binds: { facts: obinds.facts.concat(fs.binds.facts), nids: obinds.nids.concat(fs.binds.nids), at: [] },
+            elems: { facts: oelems.facts.concat(fs.elems.facts), nids: oelems.nids.concat(fs.elems.nids), at: [] },
+            attrs: { facts: oattrs.facts.concat(fs.attrs.facts), nids: oattrs.nids.concat(fs.attrs.nids), at: [] },
+            fails: { facts: ofails.facts.concat(fs.fails.facts), nids: ofails.nids.concat(fs.fails.nids), at: [] },
+            old: [],
+        }
+    }
+
+    fn oldNames(cs: FactChunk[], lo: int, hi: int) -> NameTable {
+        if (hi - lo == 1) return cs[lo].names
+        const mid: int = lo + Math.floor((hi - lo) / 2)
+        const a: NameTable = oldNames(cs, lo, mid)
+        const b: NameTable = oldNames(cs, mid, hi)
+        return { facts: a.facts.concat(b.facts), nids: a.nids.concat(b.nids), at: [] }
+    }
+
+    fn oldValues(cs: FactChunk[], lo: int, hi: int) -> ValueTable {
+        if (hi - lo == 1) return cs[lo].values
+        const mid: int = lo + Math.floor((hi - lo) / 2)
+        const a: ValueTable = oldValues(cs, lo, mid)
+        const b: ValueTable = oldValues(cs, mid, hi)
+        return { facts: a.facts.concat(b.facts), nids: a.nids.concat(b.nids), at: [] }
+    }
+
+    fn oldEffects(cs: FactChunk[], lo: int, hi: int) -> EffectTable {
+        if (hi - lo == 1) return cs[lo].effects
+        const mid: int = lo + Math.floor((hi - lo) / 2)
+        const a: EffectTable = oldEffects(cs, lo, mid)
+        const b: EffectTable = oldEffects(cs, mid, hi)
+        return { facts: a.facts.concat(b.facts), nids: a.nids.concat(b.nids), at: [] }
+    }
+
+    fn oldBinds(cs: FactChunk[], lo: int, hi: int) -> BindTable {
+        if (hi - lo == 1) return cs[lo].binds
+        const mid: int = lo + Math.floor((hi - lo) / 2)
+        const a: BindTable = oldBinds(cs, lo, mid)
+        const b: BindTable = oldBinds(cs, mid, hi)
+        return { facts: a.facts.concat(b.facts), nids: a.nids.concat(b.nids), at: [] }
+    }
+
+    fn oldElems(cs: FactChunk[], lo: int, hi: int) -> ElemTable {
+        if (hi - lo == 1) return cs[lo].elems
+        const mid: int = lo + Math.floor((hi - lo) / 2)
+        const a: ElemTable = oldElems(cs, lo, mid)
+        const b: ElemTable = oldElems(cs, mid, hi)
+        return { facts: a.facts.concat(b.facts), nids: a.nids.concat(b.nids), at: [] }
+    }
+
+    fn oldAttrs(cs: FactChunk[], lo: int, hi: int) -> AttrTable {
+        if (hi - lo == 1) return cs[lo].attrs
+        const mid: int = lo + Math.floor((hi - lo) / 2)
+        const a: AttrTable = oldAttrs(cs, lo, mid)
+        const b: AttrTable = oldAttrs(cs, mid, hi)
+        return { facts: a.facts.concat(b.facts), nids: a.nids.concat(b.nids), at: [] }
+    }
+
+    fn oldFails(cs: FactChunk[], lo: int, hi: int) -> FailTable {
+        if (hi - lo == 1) return cs[lo].fails
+        const mid: int = lo + Math.floor((hi - lo) / 2)
+        const a: FailTable = oldFails(cs, lo, mid)
+        const b: FailTable = oldFails(cs, mid, hi)
+        return { facts: a.facts.concat(b.facts), nids: a.nids.concat(b.nids), at: [] }
+    }
+
+    fn indexed(fs0: NodeFacts) -> NodeFacts {
+        const fs: NodeFacts = joinedFacts(fs0)
         return {
             names: { facts: fs.names.facts, nids: fs.names.nids, at: nidIndex(fs.names.nids) },
             values: { facts: fs.values.facts, nids: fs.values.nids, at: nidIndex(fs.values.nids) },
@@ -769,6 +893,7 @@ ${
             elems: { facts: fs.elems.facts, nids: fs.elems.nids, at: nidIndex(fs.elems.nids) },
             attrs: { facts: fs.attrs.facts, nids: fs.attrs.nids, at: nidIndex(fs.attrs.nids) },
             fails: { facts: fs.fails.facts, nids: fs.fails.nids, at: nidIndex(fs.fails.nids) },
+            old: [],
         }
     }
 
@@ -801,43 +926,43 @@ ${
     fn addName(st: AS, nid: int, f: NameFact) -> AS {
         const fs: NodeFacts = st.facts
         const t: NameTable = { facts: fs.names.facts.concat([f]), nids: fs.names.nids.concat([nid]), at: [] }
-        return withFacts(st, { names: t, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems, attrs: fs.attrs, fails: fs.fails })
+        return withFacts(st, settledFacts({ names: t, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems, attrs: fs.attrs, fails: fs.fails, old: fs.old }))
     }
 
     fn addValue(st: AS, nid: int, f: ValueFact) -> AS {
         const fs: NodeFacts = st.facts
         const t: ValueTable = { facts: fs.values.facts.concat([f]), nids: fs.values.nids.concat([nid]), at: [] }
-        return withFacts(st, { names: fs.names, values: t, effects: fs.effects, binds: fs.binds, elems: fs.elems, attrs: fs.attrs, fails: fs.fails })
+        return withFacts(st, settledFacts({ names: fs.names, values: t, effects: fs.effects, binds: fs.binds, elems: fs.elems, attrs: fs.attrs, fails: fs.fails, old: fs.old }))
     }
 
     fn addEffect(st: AS, nid: int, f: EffectFact) -> AS {
         const fs: NodeFacts = st.facts
         const t: EffectTable = { facts: fs.effects.facts.concat([f]), nids: fs.effects.nids.concat([nid]), at: [] }
-        return withFacts(st, { names: fs.names, values: fs.values, effects: t, binds: fs.binds, elems: fs.elems, attrs: fs.attrs, fails: fs.fails })
+        return withFacts(st, settledFacts({ names: fs.names, values: fs.values, effects: t, binds: fs.binds, elems: fs.elems, attrs: fs.attrs, fails: fs.fails, old: fs.old }))
     }
 
     fn addBind(st: AS, nid: int, f: BindFact) -> AS {
         const fs: NodeFacts = st.facts
         const t: BindTable = { facts: fs.binds.facts.concat([f]), nids: fs.binds.nids.concat([nid]), at: [] }
-        return withFacts(st, { names: fs.names, values: fs.values, effects: fs.effects, binds: t, elems: fs.elems, attrs: fs.attrs, fails: fs.fails })
+        return withFacts(st, settledFacts({ names: fs.names, values: fs.values, effects: fs.effects, binds: t, elems: fs.elems, attrs: fs.attrs, fails: fs.fails, old: fs.old }))
     }
 
     fn addElem(st: AS, nid: int, f: ElemFact) -> AS {
         const fs: NodeFacts = st.facts
         const t: ElemTable = { facts: fs.elems.facts.concat([f]), nids: fs.elems.nids.concat([nid]), at: [] }
-        return withFacts(st, { names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: t, attrs: fs.attrs, fails: fs.fails })
+        return withFacts(st, settledFacts({ names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: t, attrs: fs.attrs, fails: fs.fails, old: fs.old }))
     }
 
     fn addAttr(st: AS, nid: int, k: AttrKind) -> AS {
         const fs: NodeFacts = st.facts
         const t: AttrTable = { facts: fs.attrs.facts.concat([k]), nids: fs.attrs.nids.concat([nid]), at: [] }
-        return withFacts(st, { names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems, attrs: t, fails: fs.fails })
+        return withFacts(st, settledFacts({ names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems, attrs: t, fails: fs.fails, old: fs.old }))
     }
     // s451 (Ue)
     fn addFail(st: AS, nid: int, f: FailFact) -> AS {
         const fs: NodeFacts = st.facts
         const t: FailTable = { facts: fs.fails.facts.concat([f]), nids: fs.fails.nids.concat([nid]), at: [] }
-        return withFacts(st, { names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems, attrs: fs.attrs, fails: t })
+        return withFacts(st, settledFacts({ names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems, attrs: fs.attrs, fails: t, old: fs.old }))
     }
 
     fn addDiag(st: AS, file: string, span: ASpan, code: string, msg: string) -> AS {
@@ -952,6 +1077,10 @@ ${
         cycles: ImportCycle[],
         // s478-boot-sql-row-types: each typed `?{}` site's result type (rowTypes)
         rows: RowOf[],
+        // S480 (s480-boot-fn-count-perf): `name ␁ file ␁ position` of every function in a file
+        // scope (fnIndex), sorted — fnNamed scanned every function per name resolved
+        fnIx: string[],
+        fnSyms: SymIx,          // S480: g.fns by Sym id (fnOfSym; it scanned every function per call)
     }
 
     // s477 (s477-boot-compile-perf): one file's imports (host-import declarations, or module
@@ -1230,7 +1359,10 @@ ${
     // A lookup takes the declaration of (`from`, `orig`), so the declaration —
     // and its per-file scope key — stay the DECLARING file's.
     type ScopeName:struct = { name: string, kind: NameKind, from: string, orig: string }
-    type FileScope:struct = { file: string, names: ScopeName[] }
+    // S480 (s480-boot-fn-count-perf): `ix` — `name ␁ kind ␁ position` of every entry, sorted
+    // (scopeIndex): scopeHit is a binary search, where it scanned the file's every name per
+    // lookup (O(references × names)).
+    type FileScope:struct = { file: string, names: ScopeName[], ix: string[] }
     // s475: `nss` — every namespace import (`import * as ns from "…"`) of every file: `target`
     // the file it resolves to, "" when none (its refusal is checkImports').
     type NsBind:struct = { file: string, ns: string, from: string, target: string }
@@ -1504,13 +1636,51 @@ ${
     fn scopeHit(lk: Linkage, file: string, k: NameKind, name: string) -> ScopeName | not {
         for (const fs of lk.scopes) {
             if (fs.file == file) {
-                for (const n of fs.names) {
-                    if (n.name == name && n.kind == k) return n
+                const pre: string = name + sepChar() + kindTag(k) + sepChar()
+                let lo: int = 0
+                let hi: int = fs.ix.length
+                while (lo < hi) {
+                    const mid: int = Math.floor((lo + hi) / 2)
+                    if (fs.ix[mid] < pre) {
+                        lo = mid + 1
+                    } else {
+                        hi = mid
+                    }
                 }
+                if (lo < fs.ix.length && fs.ix[lo].startsWith(pre)) return fs.names[parseInt(fs.ix[lo].substring(pre.length), 10)]
                 return not
             }
         }
         return not
+    }
+
+    fn kindTag(k: NameKind) -> string {
+        return match k {
+            .KType :> "t"
+            .KFn :> "f"
+            .KDecl :> "d"
+            .KConst :> "c"
+        }
+    }
+
+    // `name ␁ kind ␁ position` of every entry of `names`, sorted.
+    fn scopeIndex(names: ScopeName[]) -> string[] {
+        return scopeKeysOf(names, 0, names.length).sort()
+    }
+
+    fn scopeKeysOf(names: ScopeName[], lo: int, hi: int) -> string[] {
+        if (hi - lo <= 8) {
+            let out: string[] = []
+            let i: int = lo
+            while (i < hi) {
+                const n: ScopeName = names[i]
+                out = out.concat([n.name + sepChar() + kindTag(n.kind) + sepChar() + padPos(i)])
+                i = i + 1
+            }
+            return out
+        }
+        const mid: int = lo + Math.floor((hi - lo) / 2)
+        return scopeKeysOf(names, lo, mid).concat(scopeKeysOf(names, mid, hi))
     }
 
     // s474 — every LOCAL name under which `file` binds the `k` declaration
@@ -1771,7 +1941,7 @@ ${
                     }
                 }
             }
-            scopes = scopes.concat([{ file: f.path, names: names }])
+            scopes = scopes.concat([{ file: f.path, names: names, ix: scopeIndex(names) }])
         }
         return { lk: { own: own, scopes: scopes, nss: nss, exps: exps }, st: st }
     }
@@ -2658,10 +2828,40 @@ ${
         const from: string = scopeFrom(g.te.link, file, NameKind.KFn, name)
         if (from == "") return not
         const orig: string = scopeOrig(g.te.link, file, NameKind.KFn, name)   // s474: an alias names its export
-        for (const f of g.fns) {
-            if (f.info.name == orig && f.info.file == from && f.info.outer < 0) return f.info   // s477: a nested function is in no file scope
+        // the first function named `orig` declared in `from` outside any function (s477: a nested
+        // function is in no file scope) — a binary search of g.fnIx
+        const pre: string = orig + sepChar() + from + sepChar()
+        let lo: int = 0
+        let hi: int = g.fnIx.length
+        while (lo < hi) {
+            const mid: int = Math.floor((lo + hi) / 2)
+            if (g.fnIx[mid] < pre) {
+                lo = mid + 1
+            } else {
+                hi = mid
+            }
         }
+        if (lo < g.fnIx.length && g.fnIx[lo].startsWith(pre)) return g.fns[parseInt(g.fnIx[lo].substring(pre.length), 10)].info
         return not
+    }
+
+    fn fnIndex(fs: FnSrc[]) -> string[] {
+        return fnKeysOf(fs, 0, fs.length).sort()
+    }
+
+    fn fnKeysOf(fs: FnSrc[], lo: int, hi: int) -> string[] {
+        if (hi - lo <= 8) {
+            let out: string[] = []
+            let i: int = lo
+            while (i < hi) {
+                const f: FnSrc = fs[i]
+                if (f.info.outer < 0) out = out.concat([f.info.name + sepChar() + f.info.file + sepChar() + padPos(i)])
+                i = i + 1
+            }
+            return out
+        }
+        const mid: int = lo + Math.floor((hi - lo) / 2)
+        return fnKeysOf(fs, lo, mid).concat(fnKeysOf(fs, mid, hi))
     }
 
     // ---- declarations -----------------------------------------------------------
@@ -8525,12 +8725,12 @@ ${
                              errorSym: builtinSym(rs.stubs, "Error"), sqlErrorSym: builtinSym(rs.stubs, "SqlError"),
                              sceSym: builtinSym(rs.stubs, serverCallErrorName()), voids: voidFns(rf.fs, lk), hostSites: rh.sites, consts: rk.cs,
                              succs: failableSuccs(icx, rf.fs, ownTab), singles: singleCells(decls, program), hostImps: hostImportsByFile(files),
-                             printCalls: pscan.calls, cycles: importCycles(files), rows: [] }
+                             printCalls: pscan.calls, cycles: importCycles(files), rows: [], fnIx: fnIndex(rf.fs), fnSyms: symIxOf(fnSrcSymsOf(rf.fs, 0, rf.fs.length)) }
         // s478-boot-sql-row-types: the §39.11 / §14.8 row types, once every function is known
         const rw: RRows = rowTypes(g, files, st)
         const g2: Globals = { program: g.program, entry: g.entry, te: g.te, types: g.types.concat(rw.types), decls: g.decls, fns: g.fns, handles: g.handles, files: g.files,
                               errorSym: g.errorSym, sqlErrorSym: g.sqlErrorSym, sceSym: g.sceSym, voids: g.voids, hostSites: g.hostSites, consts: g.consts, succs: g.succs,
-                              singles: g.singles, hostImps: g.hostImps, printCalls: g.printCalls, cycles: g.cycles, rows: rw.rows }
+                              singles: g.singles, hostImps: g.hostImps, printCalls: g.printCalls, cycles: g.cycles, rows: rw.rows, fnIx: g.fnIx, fnSyms: g.fnSyms }
         return { g: g2, st: rw.st }
     }
 
@@ -10355,6 +10555,12 @@ ${
 
     // The fact recorded so far for node `nid` (the binder's names list, unindexed).
     fn nameFactIn(st: AS, nid: int) -> NameFact | not {
+        for (const c of st.facts.old) {
+            if (chunkMay(c, 0, nid)) {
+                const j: int = c.names.nids.indexOf(nid)
+                if (j >= 0) return c.names.facts[j]
+            }
+        }
         const i: int = st.facts.names.nids.indexOf(nid)
         if (i < 0) return not
         return st.facts.names.facts[i]
@@ -10938,10 +11144,23 @@ ${
     }
 
     fn fnOfSym(g: Globals, s: Sym) -> FnInfo | not {
-        for (const f of g.fns) {
-            if (f.info.sym.id == s.id) return f.info
+        const i: int = ixGet(g.fnSyms, s.id)
+        if (i < 0) return not
+        return g.fns[i].info
+    }
+
+    fn fnSrcSymsOf(fs: FnSrc[], lo: int, hi: int) -> int[] {
+        if (hi - lo <= 8) {
+            let out: int[] = []
+            let i: int = lo
+            while (i < hi) {
+                out = out.concat([fs[i].info.sym.id])
+                i = i + 1
+            }
+            return out
         }
-        return not
+        const mid: int = lo + Math.floor((hi - lo) / 2)
+        return fnSrcSymsOf(fs, lo, mid).concat(fnSrcSymsOf(fs, mid, hi))
     }
 
     // r2 F4 — a call is judged by where it stands, like `Date.now()` itself:
@@ -11188,10 +11407,9 @@ ${
     }
 
     fn fnSrcOfSym(g: Globals, sym: int) -> FnSrc | not {
-        for (const fs of g.fns) {
-            if (fs.info.sym.id == sym) return fs
-        }
-        return not
+        const i: int = ixGet(g.fnSyms, sym)     // S480: the first function with Sym `sym`, by index
+        if (i < 0) return not
+        return g.fns[i]
     }
 
     fn constIndexOf(g: Globals, sym: int) -> int {
@@ -18626,7 +18844,7 @@ ${
         for (const a of st.annots) {
             if (a.sym.id == s.id) return a.ty
         }
-        for (const f of st.facts.binds.facts) {
+        for (const f of bindFactsNow(st)) {
             const bs: Sym | not = bindSym(f)
             if (bs is given) {
                 if (bs.id == s.id) return boundParamType(f)
@@ -23718,9 +23936,44 @@ ${
     }
 
     fn effectFactIn(st: AS, nid: int) -> EffectFact | not {
+        for (const c of st.facts.old) {
+            if (chunkMay(c, 1, nid)) {
+                const j: int = c.effects.nids.indexOf(nid)
+                if (j >= 0) return c.effects.facts[j]
+            }
+        }
         const i: int = st.facts.effects.nids.indexOf(nid)
         if (i < 0) return not
         return st.facts.effects.facts[i]
+    }
+
+    // The first bind fact recorded so far for `nid` (the binder's binds, unindexed).
+    fn bindFactNow(st: AS, nid: int) -> BindFact | not {
+        for (const c of st.facts.old) {
+            if (chunkMay(c, 2, nid)) {
+                const j: int = c.binds.nids.indexOf(nid)
+                if (j >= 0) return c.binds.facts[j]
+            }
+        }
+        const i: int = st.facts.binds.nids.indexOf(nid)
+        if (i < 0) return not
+        return st.facts.binds.facts[i]
+    }
+
+    // Every bind / name / effect fact recorded so far, in order.
+    fn bindFactsNow(st: AS) -> BindFact[] {
+        if (st.facts.old.length == 0) return st.facts.binds.facts
+        return joinedFacts(st.facts).binds.facts
+    }
+
+    fn nameFactsNow(st: AS) -> NameFact[] {
+        if (st.facts.old.length == 0) return st.facts.names.facts
+        return joinedFacts(st.facts).names.facts
+    }
+
+    fn effectFactsNow(st: AS) -> EffectFact[] {
+        if (st.facts.old.length == 0) return st.facts.effects.facts
+        return joinedFacts(st.facts).effects.facts
     }
 
     fn isLocalRebind(f: EffectFact | not) -> boolean {
@@ -24390,9 +24643,9 @@ ${
             .HCounted(init: i) :> not
         }
         if (bnd is not) return st0
-        const bi: int = st0.facts.binds.nids.indexOf(bnd.nid)
-        if (bi < 0) return st0
-        const bf: BindFact = st0.facts.binds.facts[bi]
+        const bf0: BindFact | not = bindFactNow(st0, bnd.nid)
+        if (bf0 is not) return st0
+        const bf: BindFact = bf0
         const sym: Sym | not = match bf {
             .BBind(sym: s) :> s
             .BParam(sym: s) :> not
@@ -24750,9 +25003,9 @@ ${
     }
 
     fn loopSymIn(st: AS, nid: int) -> Sym | not {
-        const i: int = st.facts.binds.nids.indexOf(nid)
-        if (i < 0) return not
-        return loopLabelOf(st.facts.binds.facts[i])
+        const bf: BindFact | not = bindFactNow(st, nid)
+        if (bf is not) return not
+        return loopLabelOf(bf)
     }
 
     fn loopLabelOf(f: BindFact) -> Sym | not {
@@ -25731,6 +25984,17 @@ ${
         while (i >= 0) {
             if (t.nids[i] == nid) return t.facts[i]
             i = i - 1
+        }
+        let c: int = st.facts.old.length - 1
+        while (c >= 0) {
+            const ct: ElemTable = st.facts.old[c].elems
+            let j: int = ct.nids.length - 1
+            if (!chunkMay(st.facts.old[c], 3, nid)) j = -1
+            while (j >= 0) {
+                if (ct.nids[j] == nid) return ct.facts[j]
+                j = j - 1
+            }
+            c = c - 1
         }
         return not
     }
@@ -29267,7 +29531,7 @@ ${
     fn withConsts(g: Globals, cs: ConstInfo[]) -> Globals {
         return { program: g.program, entry: g.entry, te: g.te, types: g.types, decls: g.decls, fns: g.fns, handles: g.handles, files: g.files,
                  errorSym: g.errorSym, sqlErrorSym: g.sqlErrorSym, sceSym: g.sceSym, voids: g.voids, hostSites: g.hostSites, consts: cs, succs: g.succs,
-                 singles: g.singles, hostImps: g.hostImps, printCalls: g.printCalls, cycles: g.cycles, rows: g.rows }
+                 singles: g.singles, hostImps: g.hostImps, printCalls: g.printCalls, cycles: g.cycles, rows: g.rows, fnIx: g.fnIx, fnSyms: g.fnSyms }
     }
 
     fn constAs(c: ConstInfo, ty: Type | not, ready: boolean, ok: boolean) -> ConstInfo {
@@ -31031,12 +31295,12 @@ ${
     fn unusedBindings(st: AS) -> Diag[] {
         if (st.locs.length == 0) return []
         let read: int[] = minusOnes(st.nextSym)
-        for (const f of st.facts.names.facts) {
+        for (const f of nameFactsNow(st)) {
             const k: int = nlocalSymId(f)
             if (k >= 0 && k < read.length) read[k] = 1
         }
         let wrote: int[] = minusOnes(st.nextSym)
-        for (const e of st.facts.effects.facts) {
+        for (const e of effectFactsNow(st)) {
             const w: int = wholeLocalWrite(e)
             if (w >= 0 && w < wrote.length) wrote[w] = 1
         }
@@ -31623,7 +31887,32 @@ ${
     // `contribs`: every value an UNANNOTATED `let` local is given — its
     // initializer and each later assignment (a local's type is their join).
     // `presence`: the presence-test condition nodes (Typing.presence).
-    type TypeState:struct = { exprs: ExprType[], diags: Diag[], contribs: LocalT[], presence: int[], quiet: int[], bounds: BoundAt[], refines: RefineAt[] }
+    // S480 (s480-boot-fn-count-perf): `exprs` — every typed node's type, in typing order — is an
+    // ExprLog: full chunks (never edited; a TypeState is shared by every copy the typer threads)
+    // then a short tail. A `concat` per typed node over the whole list was O(nodes²) per pass.
+    type ExprLog:struct = { old: ExprType[][], tail: ExprType[] }
+
+    fn emptyExprLog() -> ExprLog { return { old: [], tail: [] } }
+
+    fn exprLogAdd(l: ExprLog, x: ExprType) -> ExprLog {
+        const t: ExprType[] = l.tail.concat([x])
+        if (t.length >= 256) return { old: l.old.concat([t]), tail: [] }
+        return { old: l.old, tail: t }
+    }
+
+    // Every entry, in order.
+    fn exprLogAll(l: ExprLog) -> ExprType[] {
+        if (l.old.length == 0) return l.tail
+        return exprChunks(l.old, 0, l.old.length).concat(l.tail)
+    }
+
+    fn exprChunks(cs: ExprType[][], lo: int, hi: int) -> ExprType[] {
+        if (hi - lo == 1) return cs[lo]
+        const mid: int = lo + Math.floor((hi - lo) / 2)
+        return exprChunks(cs, lo, mid).concat(exprChunks(cs, mid, hi))
+    }
+
+    type TypeState:struct = { exprs: ExprLog, diags: Diag[], contribs: LocalT[], presence: int[], quiet: int[], bounds: BoundAt[], refines: RefineAt[] }
     // s478 (s478-boot-refinement-runtime) — a boundary-zone refinement the typer met
     // (a parameter's, a `const` local's); `file` / `offset` locate it (refineChecks).
     type RefineAt:struct = { nid: int, base: string, pred: string, what: string, file: string, offset: int }
@@ -31643,7 +31932,7 @@ ${
     // `blame`: what has already been reported (see Blame) — read only by the
     // condition rule (checkCond), never by another check.
     type TEnv:struct = { t: Tables, file: string, errs: ASpan[], locals: LocalT[], settled: LocalT[], narrowed: string[],
-                         fnw: FnW[], rows: Alias[], fret: Type | not, blame: Blame }
+                         fnw: FnWIx, rows: Alias[], fret: Type | not, blame: Blame }
     // s460 — §42.4 statement 6 ("no second report"): a CONDITION whose type is
     // unresolved BECAUSE of an error already reported is not reported again.
     // `spans`: the Error diagnostics the passes before the typer (binder, scope,
@@ -32278,7 +32567,7 @@ ${
 
     // s477 (s477-boot-compile-perf): fnwIn(ws, lk, file) for each file a function with a call
     // key (`()…`) is declared in — what one fixpoint pass of fnWrites reads.
-    type FnWScope:struct = { file: string, ws: FnW[] }
+    type FnWScope:struct = { file: string, ws: FnWIx }
 
     fn fnwScopes(ws: FnW[], lk: Linkage) -> FnWScope[] {
         let out: FnWScope[] = []
@@ -32286,7 +32575,7 @@ ${
         for (const w of ws) {
             if (files.indexOf(w.file) < 0 && hasCallKey(w.keys)) {
                 files = files.concat([w.file])
-                out = out.concat([{ file: w.file, ws: fnwIn(ws, lk, w.file) }])
+                out = out.concat([{ file: w.file, ws: fnwIx(fnwIn(ws, lk, w.file)) }])
             }
         }
         return out
@@ -32300,11 +32589,71 @@ ${
     }
 
     // fnwIn(ws, lk, file), read from `scoped` when it holds `file`
-    fn fnwScoped(scoped: FnWScope[], ws: FnW[], lk: Linkage, file: string) -> FnW[] {
+    fn fnwScoped(scoped: FnWScope[], ws: FnW[], lk: Linkage, file: string) -> FnWIx {
         for (const s of scoped) {
             if (s.file == file) return s.ws
         }
-        return fnwIn(ws, lk, file)
+        return fnwIx(fnwIn(ws, lk, file))
+    }
+
+    // S480 (s480-boot-fn-count-perf): a file's write sets with two sorted indexes — `byName`
+    // (`name ␁ position`) for callKeys, `byNid` (`nid ␁ position`) for the argument checks —
+    // each a binary search where callKeys / checkArgs / fnValueVType scanned every function
+    // per call (O(calls × functions)). Lookups return the entries in `ws` order.
+    type FnWIx:struct = { ws: FnW[], byName: string[], byNid: string[] }
+
+    fn fnwIx(ws: FnW[]) -> FnWIx {
+        return { ws: ws, byName: fnwKeysOf(ws, false, 0, ws.length).sort(), byNid: fnwKeysOf(ws, true, 0, ws.length).sort() }
+    }
+
+    fn fnwKeysOf(ws: FnW[], byNid: boolean, lo: int, hi: int) -> string[] {
+        if (hi - lo <= 8) {
+            let out: string[] = []
+            let i: int = lo
+            while (i < hi) {
+                let k: string = ws[i].name
+                if (byNid) k = padPos(ws[i].nid)
+                out = out.concat([k + sepChar() + padPos(i)])
+                i = i + 1
+            }
+            return out
+        }
+        const mid: int = lo + Math.floor((hi - lo) / 2)
+        return fnwKeysOf(ws, byNid, lo, mid).concat(fnwKeysOf(ws, byNid, mid, hi))
+    }
+
+    // The entries of `ws` keyed `key` in `keys` (sorted `key ␁ position`), in `ws` order.
+    fn fnwRun(ws: FnW[], keys: string[], key: string) -> FnW[] {
+        const pre: string = key + sepChar()
+        let lo: int = 0
+        let hi: int = keys.length
+        while (lo < hi) {
+            const mid: int = Math.floor((lo + hi) / 2)
+            if (keys[mid] < pre) {
+                lo = mid + 1
+            } else {
+                hi = mid
+            }
+        }
+        let out: FnW[] = []
+        while (lo < keys.length && keys[lo].startsWith(pre)) {
+            out = out.concat([ws[parseInt(keys[lo].substring(pre.length), 10)]])
+            lo = lo + 1
+        }
+        return out
+    }
+
+    fn fnwByNid(ix: FnWIx, nid: int) -> FnW[] {
+        return fnwRun(ix.ws, ix.byNid, padPos(nid))
+    }
+
+    // callKeys(ix.ws, name), read through the index.
+    fn callKeysIx(ix: FnWIx, name: string) -> string[] {
+        const named: FnW[] = fnwRun(ix.ws, ix.byName, name)
+        if (named.length == 0) return ["*"]
+        let out: string[] = []
+        for (const w of named) { out = out.concat(w.keys) }
+        return out
     }
 
     export fn callKeys(ws: FnW[], name: string) -> string[] {
@@ -32409,7 +32758,7 @@ ${
                     if (k.indexOf("()") == 0) {
                         // the callee's own `()` keys name functions in ITS file's scope — they reach
                         // this set already resolved (the callee's closure), never re-read here
-                        for (const c of callKeys(fnwScoped(scoped, ws, lk, w.file), k.substring(2))) {
+                        for (const c of callKeysIx(fnwScoped(scoped, ws, lk, w.file), k.substring(2))) {
                             if (keys.indexOf(c) < 0 && c.indexOf("()") != 0) {
                                 keys = keys.concat([c])
                                 changed = true
@@ -32498,7 +32847,7 @@ ${
             // over — a binding no write set names — so it ends every narrowing
             if (eff.indexOf("()") == 0 && nestedNamed(env.t, env.file, eff.substring(2))) return tNoNarrow(out)
             if (eff.indexOf("()") == 0) {
-                for (const k of callKeys(env.fnw, eff.substring(2))) {
+                for (const k of callKeysIx(env.fnw, eff.substring(2))) {
                     if (k == "*") out = tUnnarrowCells(out)
                     if (k.indexOf("@") == 0) out = tUnnarrow(out, k)
                 }
@@ -32525,7 +32874,7 @@ ${
     }
 
     fn record(ts: TypeState, nid: int, vt: VType) -> TypeState {
-        return { exprs: ts.exprs.concat([{ nid: nid, vt: vt }]), diags: ts.diags, contribs: ts.contribs, presence: ts.presence, quiet: ts.quiet, bounds: ts.bounds, refines: ts.refines }
+        return { exprs: exprLogAdd(ts.exprs, { nid: nid, vt: vt }), diags: ts.diags, contribs: ts.contribs, presence: ts.presence, quiet: ts.quiet, bounds: ts.bounds, refines: ts.refines }
     }
 
     // =========================================================================
@@ -36454,11 +36803,9 @@ ${
         const name: string = fi.name
         let pnids: int[] = []
         let prefs: RefineTop[] = []
-        for (const w of env.fnw) {
-            if (w.nid == fi.nid) {
-                pnids = w.params     // s472: THE callee's parameters (by its node), never the last function of that name
-                prefs = w.prefs
-            }
+        for (const w of fnwByNid(env.fnw, fi.nid)) {
+            pnids = w.params     // s472: THE callee's parameters (by its node), never the last function of that name
+            prefs = w.prefs
         }
         if (pnids.length != args.length) return ts
         let i = 0
@@ -36651,7 +36998,7 @@ ${
         if (fi.outer >= 0 || fi.host is given) return VType.Unknown    // refused by the binder (fnNameRef)
         let ps: Type[] = []
         let found = false
-        for (const w of env.fnw) {
+        for (const w of fnwByNid(env.fnw, fi.nid)) {
             if (w.nid == fi.nid) {
                 found = true
                 for (const pn of w.params) {
@@ -38205,10 +38552,21 @@ ${
 
     // The type recorded for a node this pass already typed.
     fn exprType0(ts: TypeState, nid: int) -> VType {
-        let i: int = ts.exprs.length - 1
+        const t: ExprType[] = ts.exprs.tail
+        let i: int = t.length - 1
         while (i >= 0) {
-            if (ts.exprs[i].nid == nid) return ts.exprs[i].vt
+            if (t[i].nid == nid) return t[i].vt
             i = i - 1
+        }
+        let c: int = ts.exprs.old.length - 1
+        while (c >= 0) {
+            const xs: ExprType[] = ts.exprs.old[c]
+            let j: int = xs.length - 1
+            while (j >= 0) {
+                if (xs[j].nid == nid) return xs[j].vt
+                j = j - 1
+            }
+            c = c - 1
         }
         return VType.Unknown
     }
@@ -38994,13 +39352,13 @@ ${
             const ts: TypeState = typePass(files, t, settled, prior, lk)
             const next: LocalT[] = joinContribs(ts.contribs)
             if (pass == 0) bound = 3 * next.length + 2
-            if (sameLocals(next, settled)) return { typing: typingOf(ts.exprs, ts.presence, boundChecks(files, ts.bounds), refineChecks(files, ts.refines)), diags: ts.diags }
+            if (sameLocals(next, settled)) return { typing: typingOf(exprLogAll(ts.exprs), ts.presence, boundChecks(files, ts.bounds), refineChecks(files, ts.refines)), diags: ts.diags }
             prev = settled
             settled = next
             pass = pass + 1
         }
         const last: TypeState = typePass(files, t, unknownWhereChanged(prev, settled), prior, lk)
-        return { typing: typingOf(last.exprs, last.presence, boundChecks(files, last.bounds), refineChecks(files, last.refines)), diags: last.diags }
+        return { typing: typingOf(exprLogAll(last.exprs), last.presence, boundChecks(files, last.bounds), refineChecks(files, last.refines)), diags: last.diags }
     }
 
     fn unknownWhereChanged(prev: LocalT[], cur: LocalT[]) -> LocalT[] {
@@ -39019,24 +39377,54 @@ ${
     }
 
     fn typePass(files: FileAst[], t: Tables, settled: LocalT[], prior: Diag[], lk: Linkage) -> TypeState {
-        let ts: TypeState = { exprs: [], diags: [], contribs: [], presence: [], quiet: [], bounds: [], refines: [] }
+        let ts: TypeState = { exprs: emptyExprLog(), diags: [], contribs: [], presence: [], quiet: [], bounds: [], refines: [] }
         const fnw: FnW[] = fnWrites(files, lk)
         const fns: int[] = refusedReturns(files, t)
         for (const f of files) {
             const blame: Blame = { spans: errorSpansIn(prior, f.path), syms: [], fns: fns }
-            const env: TEnv = { t: t, file: f.path, errs: f.errs, locals: [], settled: settled, narrowed: [], fnw: fnwIn(fnw, lk, f.path), rows: [], fret: not, blame: blame }
+            const env: TEnv = { t: t, file: f.path, errs: f.errs, locals: [], settled: settled, narrowed: [], fnw: fnwIx(fnwIn(fnw, lk, f.path)), rows: [], fret: not, blame: blame }
             for (const it of f.items) { ts = typeItem(env, it, ts) }
         }
         return ts
     }
 
     // s460 (Blame.spans): the spans of the Error diagnostics in file `path`.
+    // S480 (s480-boot-fn-count-perf): by halves (one concat per diagnostic was O(errors²)).
     fn errorSpansIn(ds: Diag[], path: string) -> ASpan[] {
-        let out: ASpan[] = []
-        for (const d of ds) {
-            if (d.file == path && d.severity == Severity.Error) out = out.concat([d.span])
+        return errorSpansOf(ds, path, 0, ds.length)
+    }
+
+    fn errorSpansOf(ds: Diag[], path: string, lo: int, hi: int) -> ASpan[] {
+        if (hi - lo <= 8) {
+            let out: ASpan[] = []
+            let i: int = lo
+            while (i < hi) {
+                const d: Diag = ds[i]
+                if (d.file == path && d.severity == Severity.Error) out = out.concat([d.span])
+                i = i + 1
+            }
+            return out
         }
+        const mid: int = lo + Math.floor((hi - lo) / 2)
+        return errorSpansOf(ds, path, lo, mid).concat(errorSpansOf(ds, path, mid, hi))
+    }
+
+    // S480 (s480-boot-fn-count-perf): errorSpansIn(prior, file) for every file, each read once —
+    // linPass asked it per function (O(functions × diagnostics)).
+    type FileSpans:struct = { file: string, spans: ASpan[] }
+
+    fn errorSpansByFile(ds: Diag[], files: FileAst[]) -> FileSpans[] {
+        let out: FileSpans[] = []
+        for (const f of files) { out = out.concat([{ file: f.path, spans: errorSpansIn(ds, f.path) }]) }
         return out
+    }
+
+    // errorSpansIn(ds, file), read from `by` when it holds `file`.
+    fn errorSpansAt(by: FileSpans[], ds: Diag[], file: string) -> ASpan[] {
+        for (const b of by) {
+            if (b.file == file) return b.spans
+        }
+        return errorSpansIn(ds, file)
     }
 
     // s460 (Blame.fns): the functions whose WRITTEN return type was refused —
@@ -44010,10 +44398,9 @@ ${
     }
 
     fn fnSrcOf(g: Globals, sym: int) -> FnSrc | not {
-        for (const fs of g.fns) {
-            if (fs.info.sym.id == sym) return fs
-        }
-        return not
+        const i: int = ixGet(g.fnSyms, sym)     // S480: the first function with Sym `sym`, by index
+        if (i < 0) return not
+        return g.fns[i]
     }
 
     // One `?{}` in a function body: its database (§8.1.1), the failable rule
@@ -47269,11 +47656,22 @@ ${
         return not
     }
 
+    // S480 (s480-boot-fn-count-perf): the greatest fixpoint by a worklist — a member is re-checked
+    // only when a function it is referred to by leaves the set — over Sym-indexed lookups. The
+    // pass-until-stable loop dropped one link of a call chain per pass, each pass re-scanning every
+    // member's referrers with `inh.indexOf` / placeOf: O(callables³) on a chain of helpers. The set
+    // the worklist settles on is then confirmed by one pass of the old loop (it is the greatest
+    // fixpoint: a member leaves only when it fails against a superset of the fixpoint), which
+    // runs on until stable should a check fail. Same members, in the same order.
     fn inheritedFns(nodes: Callable[], places: PlaceFact[], rev: int[][], prefs: PosRef[]) -> int[] {
+        const n: int = nodes.length
+        const six: SymIx = nodeSymIx(nodes)
+        const pix: SymIx = placeSymIx(places)
+        const rix: SymIx = symIxOf(posRefSymsOf(prefs, 0, prefs.length))
         let inh: int[] = []
         let j: int = 0
         for (const c of nodes) {
-            if (c.kind == CallableK.KFn && placeOf(places, c.f.sym) == PlaceK.Ambient && posRefTo(prefs, c.f.sym) is not) {
+            if (c.kind == CallableK.KFn && placeOfIx(pix, places, c.f.sym) == PlaceK.Ambient && ixGet(rix, c.f.sym) < 0) {
                 let others = false
                 let fnsOnly = true
                 for (const i of rev[j]) {
@@ -47284,26 +47682,83 @@ ${
             }
             j = j + 1
         }
+        if (inh.length == 0) return inh
+        // `member[k]` 1: the node of a member Sym (by six, as nodeIdx finds it)
+        let member: int[] = minusOnes(n)
+        for (const sym of inh) { member[ixGet(six, sym)] = 1 }
+        const fwd: int[][] = referrers(nodes, rev)        // fwd[i]: the k whose referrers include i
+        let queue: int[] = minusOnes(n + inh.length)
+        let qn: int = 0
+        for (const sym of inh) {
+            queue[qn] = ixGet(six, sym)
+            qn = qn + 1
+        }
+        let qi: int = 0
+        while (qi < qn) {
+            const k: int = queue[qi]
+            qi = qi + 1
+            if (member[k] == 1 && !inheritOk(nodes, rev, pix, places, six, member, k)) {
+                member[k] = -1
+                for (const k2 of fwd[k]) {
+                    if (member[k2] == 1) {
+                        if (qn >= queue.length) queue = queue.concat(minusOnes(queue.length))
+                        queue[qn] = k2
+                        qn = qn + 1
+                    }
+                }
+            }
+        }
+        let cur: int[] = []
+        for (const sym of inh) {
+            if (member[ixGet(six, sym)] == 1) cur = cur.concat([sym])
+        }
+        // the old loop, from the worklist's set: one pass confirms it
+        // (`isym` is in the set iff its node is marked: a node's Sym is the one marked there)
         let changed = true
         while (changed) {
             changed = false
             let keep: int[] = []
-            for (const sym of inh) {
-                const k: int = nodeIdx(nodes, sym)
-                let ok = true
-                for (const i of rev[k]) {
-                    const isym: int = nodes[i].f.sym
-                    if (i != k && placeOf(places, isym) != PlaceK.Server && inh.indexOf(isym) < 0) ok = false
-                }
-                if (ok) {
+            let drop: int[] = []
+            for (const sym of cur) {
+                const k: int = ixGet(six, sym)
+                if (inheritOk(nodes, rev, pix, places, six, member, k)) {
                     keep = keep.concat([sym])
                 } else {
+                    drop = drop.concat([k])
                     changed = true
                 }
             }
-            inh = keep
+            for (const k of drop) { member[k] = -1 }
+            cur = keep
         }
-        return inh
+        return cur
+    }
+
+    // Is node `k` still inherited while the members are `member` (each referrer other than
+    // itself server-placed or a member)?
+    fn inheritOk(nodes: Callable[], rev: int[][], pix: SymIx, places: PlaceFact[], six: SymIx, member: int[], k: int) -> boolean {
+        for (const i of rev[k]) {
+            const isym: int = nodes[i].f.sym
+            if (i != k && placeOfIx(pix, places, isym) != PlaceK.Server) {
+                const m: int = ixGet(six, isym)
+                if (m < 0 || member[m] != 1) return false
+            }
+        }
+        return true
+    }
+
+    fn posRefSymsOf(ps: PosRef[], lo: int, hi: int) -> int[] {
+        if (hi - lo <= 8) {
+            let out: int[] = []
+            let i: int = lo
+            while (i < hi) {
+                out = out.concat([ps[i].sym])
+                i = i + 1
+            }
+            return out
+        }
+        const mid: int = lo + Math.floor((hi - lo) / 2)
+        return posRefSymsOf(ps, lo, mid).concat(posRefSymsOf(ps, mid, hi))
     }
 
     // §19.9.10: "When a helper's placement flips because a client caller was
@@ -47315,16 +47770,19 @@ ${
     // that is still client-placed: the FIRST client referrer is the cause.
     fn clientCauses(g: Globals, nodes: Callable[], places: PlaceFact[], rev: int[][], prefs: PosRef[], inh: int[]) -> Cause[] {
         let out: Cause[] = []
+        // S480 (s480-boot-fn-count-perf): Sym-indexed lookups (placeOf / `inh.indexOf` per referrer were scans)
+        const pix: SymIx = placeSymIx(places)
+        const iix: SymIx = symIxOf(inh)
         let j: int = 0
         for (const c of nodes) {
-            if (c.kind == CallableK.KFn && placeOf(places, c.f.sym) == PlaceK.Ambient && inh.indexOf(c.f.sym) < 0) {
+            if (c.kind == CallableK.KFn && placeOfIx(pix, places, c.f.sym) == PlaceK.Ambient && ixGet(iix, c.f.sym) < 0) {
                 let serverSide = false
                 let who: string = ""
                 let at: string = ""
                 for (const i of rev[j]) {
                     const n: Callable = nodes[i]
                     const isym: int = n.f.sym
-                    const onServer: boolean = n.kind == CallableK.KFn && (placeOf(places, isym) == PlaceK.Server || inh.indexOf(isym) >= 0)
+                    const onServer: boolean = n.kind == CallableK.KFn && (placeOfIx(pix, places, isym) == PlaceK.Server || ixGet(iix, isym) >= 0)
                     if (i != j && onServer) serverSide = true
                     if (i != j && !onServer && who == "") {
                         who = "`" + n.label + "`"
@@ -49855,8 +50313,9 @@ ${
     fn linPass(g: Globals, t: Tables, prior: Diag[]) -> Diag[] {
         let st: LinSt = { vars: [], diags: [], reported: [], scopes: 0 }
         const rls: RunLin[] = runLinsOf(g)
+        const errBy: FileSpans[] = errorSpansByFile(prior, g.files)
         for (const fs of g.fns) {
-            const cx: LinCx ={ t: t, file: fs.info.file, depth: 0, loops: [], scope: 0, errs: errorSpansIn(prior, fs.info.file),
+            const cx: LinCx ={ t: t, file: fs.info.file, depth: 0, loops: [], scope: 0, errs: errorSpansAt(errBy, prior, fs.info.file),
                                 failable: fs.info.failable, caller: fs.info.sym.id }
             let s: LinSt = linOuterRunLins(g, rls, fs.info.file, fs.f.span.start, { vars: [], diags: st.diags, reported: st.reported, scopes: st.scopes })
             for (const p of fs.f.params) {
@@ -49879,14 +50338,14 @@ ${
                 .NoValue :> not
             }
             if (b is given) {
-                const cx2: LinCx = { t: t, file: a.file, depth: 0, loops: [], scope: 0, errs: errorSpansIn(prior, a.file), failable: false, caller: -1 }
+                const cx2: LinCx = { t: t, file: a.file, depth: 0, loops: [], scope: 0, errs: errorSpansAt(errBy, prior, a.file), failable: false, caller: -1 }
                 const s2: LinSt = linOuterRunLins(g, rls, a.file, b.span.start, { vars: [], diags: st.diags, reported: st.reported, scopes: st.scopes })
                 st = linBlockAt(cx2, b, s2, 0).st
             }
         }
         // s475 (S3a): a `<request>` body — its `lin`s are consumed by its one assignment (§6.7.7 S469)
         for (const rq of t.requests) {
-            const cx3: LinCx = { t: t, file: rq.file, depth: 0, loops: [], scope: 0, errs: errorSpansIn(prior, rq.file), failable: false, caller: -1 }
+            const cx3: LinCx = { t: t, file: rq.file, depth: 0, loops: [], scope: 0, errs: errorSpansAt(errBy, prior, rq.file), failable: false, caller: -1 }
             const s3: LinSt = { vars: [], diags: st.diags, reported: st.reported, scopes: st.scopes }
             st = linBlockAt(cx3, rq.req.body, s3, 0).st
         }
@@ -52817,11 +53276,11 @@ ${
     }
 
     fn originPass(files: FileAst[], t: Tables, prior: Diag[]) -> Diag[] {
-        let ts: TypeState = { exprs: [], diags: prior, contribs: [], presence: [], quiet: [], bounds: [], refines: [] }
+        let ts: TypeState = { exprs: emptyExprLog(), diags: prior, contribs: [], presence: [], quiet: [], bounds: [], refines: [] }
         const fns: int[] = refusedReturns(files, t)
         for (const di of t.decls) {
             const blame: Blame = { spans: errorSpansIn(prior, di.file), syms: [], fns: fns }
-            const env: TEnv = { t: t, file: di.file, errs: fileErrs(files, di.file), locals: [], settled: [], narrowed: [], fnw: [], rows: [], fret: not, blame: blame }
+            const env: TEnv = { t: t, file: di.file, errs: fileErrs(files, di.file), locals: [], settled: [], narrowed: [], fnw: fnwIx([]), rows: [], fret: not, blame: blame }
             for (const f of di.fields) { ts = originReport(env, di, f, ts) }
         }
         return ts.diags.slice(prior.length)

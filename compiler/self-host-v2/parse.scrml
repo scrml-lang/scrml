@@ -10001,28 +10001,37 @@ ${
 
     // `tp` without the E-STMT-NO-EFFECT report (made since `from`) on the LAST
     // statement of block `b`.
+    // S480 (s480-boot-fn-count-perf): the diagnostics before `from` are kept whole (a slice), and
+    // only those after it are filtered — every diagnostic of the file so far was copied one
+    // concat at a time, per function (O(functions × diagnostics²) on an error-heavy file).
     fn dropTailNoEffect(tp: TP, b: ABlock, from: int) -> TP {
         if (b.stmts.length == 0) return tp
         const last: AStmt = b.stmts[b.stmts.length - 1]
         let ds: Diag[] = []
-        let i: int = 0
-        for (const d of tp.diags) {
-            if (i < from || d.code != "E-STMT-NO-EFFECT" || d.span.end != last.span.end) ds = ds.concat([d])
+        let k: int = from
+        if (k < 0) k = 0
+        let i: int = k
+        while (i < tp.diags.length) {
+            const d: Diag = tp.diags[i]
+            if (d.code != "E-STMT-NO-EFFECT" || d.span.end != last.span.end) ds = ds.concat([d])
             i = i + 1
         }
-        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: ds, file: tp.file, ns: tp.ns, inFn: tp.inFn }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.slice(0, k).concat(ds), file: tp.file, ns: tp.ns, inFn: tp.inFn }
     }
 
     // `tp` without the E-STMT-NO-EFFECT reports made since it had `from` diagnostics
     // (a region whose statements are not a statement list: see the callers).
     fn dropNoEffect(tp: TP, from: int) -> TP {
         let ds: Diag[] = []
-        let i: int = 0
-        for (const d of tp.diags) {
-            if (i < from || d.code != "E-STMT-NO-EFFECT") ds = ds.concat([d])
+        let k: int = from
+        if (k < 0) k = 0
+        let i: int = k
+        while (i < tp.diags.length) {
+            const d: Diag = tp.diags[i]
+            if (d.code != "E-STMT-NO-EFFECT") ds = ds.concat([d])
             i = i + 1
         }
-        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: ds, file: tp.file, ns: tp.ns, inFn: tp.inFn }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.slice(0, k).concat(ds), file: tp.file, ns: tp.ns, inFn: tp.inFn }
     }
 
     fn parseQuoted(mp: MP, q: string) -> RValue {
