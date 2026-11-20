@@ -509,8 +509,8 @@ The first commitment step is to name the screen's phases as an enum and dispatch
   <status:string=(match @phase {
     .Idle        :> "idle",
     .Loading     :> "loading",
-    .Loaded(n)   :> "loaded",
-    .Failed(msg) :> "failed",
+    .Loaded(_)   :> "loaded",
+    .Failed(_)   :> "failed",
   })/>
 
   <p>Status: ${@status}</p>
@@ -910,7 +910,7 @@ Some operations can fail: a network call, a database query, a parsing pass. scrm
       .InvalidEmail(e)   :> { @phase = Phase.Errored("Not an email: " + e); return; },
       .DuplicateEmail(e) :> { @phase = Phase.Errored(e + " is already taken."); return; },
       .Storage           :> { @phase = Phase.Errored("The database is unavailable."); return; },
-      .Transport(t)      :> { @phase = Phase.Errored("Could not reach the server."); return; },
+      .Transport(_)      :> { @phase = Phase.Errored("Could not reach the server."); return; },
     };
     @phase = .Saved;
   }
@@ -940,7 +940,7 @@ The shape:
 - **`function persistUser(name: string, email: string)! -> SaveError`** — the `!` after the parameter list marks the function as failable. The arrow names the error enum type. The body uses `fail SaveError.Variant;` (or `fail SaveError.Variant(payload);`) to raise a specific error, and `return` for the success value.
 - **`!{ .Variant :> { ... }, ... }`** at the call site — pattern-match each error variant. Arms are a comma-separated list (a trailing comma is allowed). The match is **exhaustive**; if a new variant is added to `SaveError`, the compiler tells you which call sites need a new arm. A `_ :>` arm catches whatever is left.
 - **`?{}` is failable too.** Inside `persistUser`, each query has its own `!{ _ :> { fail SaveError.Storage; } }`, turning a database failure into the function's own error type. ("No row" is not a failure: `.get()` returns `not`.)
-- **A call from the browser to the server can fail on the wire.** `save()` runs in the browser and `persistUser` on the server, so the handler also covers `.Transport(t)` — the network failing, rather than the function. The compiler requires it (`E-ERROR-002` names the missing arm).
+- **A call from the browser to the server can fail on the wire.** `save()` runs in the browser and `persistUser` on the server, so the handler also covers `.Transport(_)` — the network failing, rather than the function. The compiler requires it (`E-ERROR-002` names the missing arm).
 - **Errors propagate when not handled.** Inside another `!` function, `persistUser(…)?` passes a failure up instead of handling it; the error types must be compatible.
 
 Notice what is NOT in this code: no `try` / `catch`, no `throw`, no `Promise.reject`. Failures are values; they flow through ordinary control flow. The signature of every failable function tells you exactly which errors can come out — there are no hidden exceptions.
@@ -1079,7 +1079,7 @@ The compiler emits the WebSocket endpoint (`/_scrml_ws/chat` for this channel), 
 
   function refresh() {
     // A server call can fail on the wire; the handler says what to show then.
-    @report = loadAdminReport() !{ .Transport(t) :> "Could not load the report." };
+    @report = loadAdminReport() !{ .Transport(_) :> "Could not load the report." };
   }
 
   <div>
@@ -1093,7 +1093,7 @@ The compiler emits the WebSocket endpoint (`/_scrml_ws/chat` for this channel), 
 
 What this does and does not give you:
 
-1. **The role check runs on the server.** Reading `session` makes `loadAdminReport` a server function — `session` exists only on the server, so the compiler places any function that reads it there. A non-admin's response simply does not contain the admin text; it never reaches their browser. `session.userId`, `session.role`, and `session.isAuth` describe the signed-in user. Because `refresh()` calls it from the browser, the call can fail on the wire, and the `!{ .Transport(t) :> … }` handler says what to show then.
+1. **The role check runs on the server.** Reading `session` makes `loadAdminReport` a server function — `session` exists only on the server, so the compiler places any function that reads it there. A non-admin's response simply does not contain the admin text; it never reaches their browser. `session.userId`, `session.role`, and `session.isAuth` describe the signed-in user. Because `refresh()` calls it from the browser, the call can fail on the wire, and the `!{ .Transport(_) :> … }` handler says what to show then.
 2. **You still need a login page.** Until one exists at `/login`, the compiler warns (`W-AUTH-LOGIN-MISSING`): the redirect would land on a 404.
 3. **`<auth role="Admin">` is not a secrecy control.** You may see markup wrapped in `<auth role="...">`. That element does not hide its content: the wrapped markup is sent to every visitor in the page HTML, whatever their role, and the compiler says so with `W-AUTH-CONTENT-NOT-GATED` at each use. Keep secrets in server functions, as above.
 
@@ -1183,7 +1183,7 @@ By now you have seen every primitive you need to build a working scrml app. Here
       .TooShort     :> { @phase = Phase.Failed("Too short."); return; },
       .Duplicate(b) :> { @phase = Phase.Failed(b + " is already saved."); return; },
       .Storage      :> { @phase = Phase.Failed("The database is unavailable."); return; },
-      .Transport(t) :> { @phase = Phase.Failed("Could not reach the server."); return; },
+      .Transport(_) :> { @phase = Phase.Failed("Could not reach the server."); return; },
     };
     @saved.append(@draft.note);
     reset(@draft.note);

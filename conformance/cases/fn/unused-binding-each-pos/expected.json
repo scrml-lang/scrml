@@ -1,0 +1,33 @@
+{
+  "id": "fn-unused-binding-each-pos",
+  "description": "§7.3.5 (S480) — two unread `<each>` binders, each W-UNUSED-BINDING (a Warning): `r` of a flat `<each … as r>` whose row reads nothing, and `cell` of a nested `<each>` whose row reads only the outer binder. The outer `row` is read (`title=row.name`, and as the inner `in=`) and is not reported. The program compiles; the warnings do not change it.",
+  "language-version": "1.0",
+  "spec": "§7.3.5, §17.7.2, §17.7.3",
+  "provenance": "ruling:user-voice-scrml.md-S480-each-binders (item 1: \"Unread `<each>` binders are reported\" — RULED yes)",
+  "rationale": "§7.3.5: \"The name an `<each>` binds with `as name` (§17.7.2, §17.7.3) that nothing in the row reads … SHALL be reported as W-UNUSED-BINDING.\" One report per binder.",
+  "expect": {
+    "codes": [
+      "W-UNUSED-BINDING"
+    ],
+    "severity": {
+      "W-UNUSED-BINDING": "warning"
+    },
+    "codeCounts": {
+      "W-UNUSED-BINDING": 2
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-w-unused-binding-s480",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'W-UNUSED-BINDING' fired 0 time(s), expected exactly 2",
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-STATE-UNDECLARED=2",
+          "missing:W-UNUSED-BINDING",
+          "severity:code 'W-UNUSED-BINDING' did not fire (expected severity warning)"
+        ]
+      }
+    }
+  }
+}

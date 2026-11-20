@@ -884,7 +884,7 @@ ${
     // `const` / keywordless declaration (a destructured name included), an iterate-head binder,
     // a counted head's `let`, a loop bound as a value. unusedBindings judges them once the
     // program is bound. File-scope bindings and parameters are never recorded; an arm's
-    // pattern binders are, by addArmLoc.
+    // pattern binders are, by addArmLoc, and an `<each>`'s `as name`, by addEachLoc.
     fn addLoc(st: AS, file: string, nid: int, s: Sym, name: string, span: ASpan) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets,
                  locs: st.locs.concat([{ file: file, nid: nid, sym: s.id, name: name, span: span, arm: 0 }]) }
@@ -897,6 +897,38 @@ ${
         if (b.name == "_") return st
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets,
                  locs: st.locs.concat([{ file: file, nid: b.nid, sym: s.id, name: b.name, span: b.span, arm: arm }]) }
+    }
+
+    // s480-unused-sweep (review of #2009, LOW): the payload binders a `<match>` arm (§18.7)
+    // recorded since locs[from] — plainArm binds them as a `match` arm's (arm 1) — are
+    // re-marked arm 3, so their message spells the fix in markup (`<V(_)>`, not `.V(_)`).
+    fn markMarkupArmLocs(st: AS, from: int) -> AS {
+        if (st.locs.length <= from) return st
+        let ls: LocDecl[] = st.locs.slice(0, from)
+        let i: int = from
+        while (i < st.locs.length) {
+            const l: LocDecl = st.locs[i]
+            if (l.arm == 1) {
+                ls = ls.concat([{ file: l.file, nid: l.nid, sym: l.sym, name: l.name, span: l.span, arm: 3 }])
+            } else {
+                ls = ls.concat([l])
+            }
+            i = i + 1
+        }
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets,
+                 locs: ls }
+    }
+
+    // s480-unused-sweep (`ruling:user-voice-scrml.md-S480-each-binders` item 1): an `<each>`
+    // row binder written `as name` (§17.7.3) — arm 4. Recorded at the `as` attribute (nid / its
+    // value's span). The implicit binder of an `<each>` with no `as` is not the author's and is
+    // never recorded; a read through `@.` reads the same Sym (resolveAtItem), so it counts.
+    fn addEachLoc(st: AS, file: string, a: AAttr, s: Sym, name: string) -> AS {
+        let sp: ASpan = a.span
+        const ve: AExpr | not = valueExpr(a.value)
+        if (ve is given) sp = ve.span
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets,
+                 locs: st.locs.concat([{ file: file, nid: a.nid, sym: s.id, name: name, span: sp, arm: 4 }]) }
     }
 
     fn localIsLin(s: AStmt) -> boolean {
@@ -19531,7 +19563,7 @@ ${
         // as a handler reference (§19.4.3 … apply unchanged — a server function is
         // now a failable function for both)"; design §2.2: "a handler REFERENCE
         // `onclick=saveNote` → E-ERROR-002 … the dispatcher discards the result".
-        if (f.serverOwn && !f.failable) return addDiag(st, env.file, e.span, "E-ERROR-002", "Server function '" + f.name + "' is passed as an event-handler reference: the event would call it on the client and discard the result, but a client call of a server function can fail on the wire (§19.9.10). Call it in a handler that handles it (e.g. '{ " + f.name + "() !{ .Transport(t) :> … } }'), or wire a function that handles it (§19.4.3)")
+        if (f.serverOwn && !f.failable) return addDiag(st, env.file, e.span, "E-ERROR-002", "Server function '" + f.name + "' is passed as an event-handler reference: the event would call it on the client and discard the result, but a client call of a server function can fail on the wire (§19.9.10). Call it in a handler that handles it (e.g. '{ " + f.name + "() !{ .Transport(_) :> … } }'), or wire a function that handles it (§19.4.3)")
         if (!f.failable) {
             if (f.arity == 0) return st
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "an event-handler reference to `" + f.name + "`, which takes parameters — the event would be its argument, which the bootstrap does not model; write the call: `{ " + f.name + "(…) }`")
@@ -20027,7 +20059,7 @@ ${
         let minted = true
         if (named is given) minted = named.id != err.id
         if (!minted) return head + "`" + err.hint + "` — write `" + err.hint + "." + pn.name + "` or `." + pn.name + "` (§18.13)"
-        const noName: string = ", and no declared enum names `Transport` there — write `.Transport(t)` (§18.13, §19.9.10)"
+        const noName: string = ", and no declared enum names `Transport` there — write `.Transport(_)` (or `.Transport(t)` to read the failure; §18.13, §19.9.10)"
         if (own is given) {
             const set: string = "`" + own.hint + "` plus the wire's `Transport`"
             if (pn.name == "Transport") return head + set + noName
@@ -20580,10 +20612,10 @@ ${
 
     fn unhandledRemoteDiag(env: Env, e: AExpr, f: FnInfo) -> Diag {
         if (env.fx.defer) return newDiag("E-DEFER-UNHANDLED-FAILABLE", "`" + f.name + "(…)` is a server function and this call is made on the client, so it can fail on the wire (§19.9.10) — and this is a deferred statement: handle it in place with a total `!{ … | _ :> … }` (§19.16.3 rule 3)", env.file, e.span)
-        if (env.fx.inFn) return newDiag("E-ERROR-002", "Result of failable call '" + f.name + "(…)' is not handled: '" + f.name + "' is a server function and this call is made on the client, so it can fail on the wire (§19.9.10). Handle it: '" + f.name + "(…) !{ .Transport(t) :> … }', a 'match' on the result, or '?' inside a '!' function whose error enum declares 'Transport(t: ServerCallError)'", env.file, e.span)
+        if (env.fx.inFn) return newDiag("E-ERROR-002", "Result of failable call '" + f.name + "(…)' is not handled: '" + f.name + "' is a server function and this call is made on the client, so it can fail on the wire (§19.9.10). Handle it: '" + f.name + "(…) !{ .Transport(_) :> … }', a 'match' on the result, or '?' inside a '!' function whose error enum declares 'Transport(t: ServerCallError)'", env.file, e.span)
         let owner: string = "an event handler"
         if (env.inEffect) owner = "an `<effect>` body"
-        return newDiag("E-ERROR-002", "Result of failable call '" + f.name + "(…)' is not handled here: '" + f.name + "' is a server function and " + owner + " runs on the client, so the call can fail on the wire (§19.9.10). Catch it with '!{}' (e.g. '{ " + f.name + "(…) !{ .Transport(t) :> … } }'), match the result, or call it from a function that handles it (§19.4.3)", env.file, e.span)
+        return newDiag("E-ERROR-002", "Result of failable call '" + f.name + "(…)' is not handled here: '" + f.name + "' is a server function and " + owner + " runs on the client, so the call can fail on the wire (§19.9.10). Catch it with '!{}' (e.g. '{ " + f.name + "(…) !{ .Transport(_) :> … } }'), match the result, or call it from a function that handles it (§19.4.3)", env.file, e.span)
     }
 
     // E-ERROR-016 at a client call site (transportConflict's rule), as a diagnostic list.
@@ -20682,8 +20714,8 @@ ${
         const ti: TypeInfo | not = typeInfoOf(g.types, into)
         let builtin = false
         if (ti is given) builtin = ti.file == builtinFile()
-        if (builtin) return "`" + into.hint + "` is built in and takes no variant: handle the call here with `!{ … .Transport(t) :> … }`, or declare an error enum holding `" + into.hint + "`'s variants and `Transport(t: ServerCallError)` and use it"
-        return "Add `Transport(t: ServerCallError)` to `" + into.hint + "`, or handle the call here with `!{ … .Transport(t) :> … }`"
+        if (builtin) return "`" + into.hint + "` is built in and takes no variant: handle the call here with `!{ … .Transport(_) :> … }`, or declare an error enum holding `" + into.hint + "`'s variants and `Transport(t: ServerCallError)` and use it"
+        return "Add `Transport(t: ServerCallError)` to `" + into.hint + "`, or handle the call here with `!{ … .Transport(_) :> … }`"
     }
 
     fn withTport(st: AS, fnSym: int, d: Diag) -> AS {
@@ -28635,6 +28667,7 @@ ${
         let srcTy: Type | not = not
         let srcVia: string = ""
         let asName: string = ""
+        let asA: AAttr | not = not
         for (const a of e.attrs) {
             if (a.name == "in") {
                 const ex: AExpr | not = valueExpr(a.value)
@@ -28649,6 +28682,7 @@ ${
                 st = addAttr(st, a.nid, AttrKind.AEachIn)
             } else if (a.name == "as") {
                 asName = bareName(a.value)
+                asA = a
                 st = addAttr(st, a.nid, AttrKind.AEachAs)
             }
         }
@@ -28657,6 +28691,8 @@ ${
         if (srcTy is given) elemTy = seqElem(unMaybe(srcTy))    // `S | not` iterates `S` (§17.7.2)
         const rs: RSym = mint(reservedName(st, env.file, e.span, asName), asName)
         st = rs.st
+        const aa: AAttr | not = asA
+        if (aa is given && bareName(aa.value) != "") st = addEachLoc(st, env.file, aa, rs.s, asName)   // s480-unused-sweep: W-UNUSED-BINDING (§7.3.5)
         let rowHandles: HandleInfo[] = []
         let hsyms: Sym[] = []
         for (const h of env.g.handles) {
@@ -28962,8 +28998,9 @@ ${
         let pat: APat = APat.PWild
         if (!isWild) pat = APat.PName(ae.tag, ae.binds, ae.parens, "")
         const arm: AArm = { nid: ae.nid, span: ae.span, pat: pat, body: AArmBody.ArmExpr({ nid: -1, span: ae.span, k: AExprK.Recovered }), legacy: false, lifted: false, bare: false }
+        const l0: int = st.locs.length
         const ra: RPArm = plainArm(env, arm, sk, vs, st)
-        st = ra.st
+        st = markMarkupArmLocs(ra.st, l0)   // s480-unused-sweep: the `<match>` arm's own message
         if (wildBefore) st = addDiag(st, env.file, ae.span, "E-SYNTAX-010", afterWildMsg(false))
         if (ra.idx >= 0 && covered.indexOf(ra.idx) >= 0 && !wildBefore) st = addDiag(st, env.file, ae.span, "E-TYPE-023", "a second arm for the same variant — the first `<" + ae.tag + ">` arm already takes it, so this one is unreachable (§18.14.2 E-TYPE-023: duplicate match arm)")
         if (isWild && !wildBefore && allCovered(covered, vs.length)) st = addDiag(st, env.file, ae.span, "W-MATCH-001", "the wildcard arm `<_>` is unreachable: every variant of " + en + " already has an arm (§18.6)")
@@ -28992,7 +29029,7 @@ ${
     // its body is still checked once, without a cascade on its binder names.
     fn resolveMatchArmBody(env: Env, ae: AElem, st: AS) -> AS {
         const rb: RBinds = bindArm(withSubject(withWhole(env, -1), -1), ae.binds, [], st)
-        return resolveNodes(rb.env, ae.kids, rb.st)
+        return resolveNodes(rb.env, ae.kids, markMarkupArmLocs(rb.st, st.locs.length))
     }
 
     fn resolveArmsUntyped(env: Env, e: AElem, st0: AS) -> AS {
@@ -30846,7 +30883,9 @@ ${
     // declaration — a destructured name included —, an iterate-head binder, a counted
     // head's `let`, a loop bound as a value) and, by S480 ruling item 2
     // (`ruling:user-voice-scrml.md-S480-unused-binding-six`), an arm's pattern binders
-    // (addArmLoc: a `match` / `!{}` arm, a `<match>` arm, §18.7); parameters, `given`
+    // (addArmLoc: a `match` / `!{}` arm, a `<match>` arm, §18.7) and, by
+    // `ruling:user-voice-scrml.md-S480-each-binders` item 1, an `<each>`'s `as name`
+    // (addEachLoc, §17.7.3); parameters, nested `function` declarations (item 2), `given`
     // names and file-scope bindings are never recorded. A binding is READ when any
     // name the binder resolved denotes its Sym (NameFact NLocal) — a whole-assignment
     // target `x = v` records no name (placeName), so a write-only binding is unread;
@@ -30885,10 +30924,15 @@ ${
             const skip: boolean = l.name.substring(0, 1) == "_" || l.name.indexOf("#") >= 0 || l.sym >= read.length || l.nid < 0
             if (!skip && read[l.sym] != 1 && mark[l.nid] == -1) {
                 mark[l.nid] = 2
+                const arm: string = "`" + l.name + "` is bound by this arm's pattern, but nothing in the arm reads it (§7.3.5). Read it, or, if the value is deliberately unread, "
                 if (l.arm == 2) {
-                    out = out.concat([mkDiag(l.file, l.span, "W-UNUSED-BINDING", "`" + l.name + "` is bound by this arm's pattern, but nothing in the arm reads it (§7.3.5). Read it, or write the arm as a bare `_` (in place of `_ " + l.name + "`) if the value is deliberately unread")])
+                    out = out.concat([mkDiag(l.file, l.span, "W-UNUSED-BINDING", arm + "write the arm as a bare `_` (in place of `_ " + l.name + "`) or name it `_" + l.name + "`")])
                 } else if (l.arm == 1) {
-                    out = out.concat([mkDiag(l.file, l.span, "W-UNUSED-BINDING", "`" + l.name + "` is bound by this arm's pattern, but nothing in the arm reads it (§7.3.5). Read it, or write `_` in its place (`.V(_)`) if the value is deliberately unread")])
+                    out = out.concat([mkDiag(l.file, l.span, "W-UNUSED-BINDING", arm + "write `_` in its place (`.V(_)`) or name it `_" + l.name + "`")])
+                } else if (l.arm == 3) {
+                    out = out.concat([mkDiag(l.file, l.span, "W-UNUSED-BINDING", arm + "write `_` in its place (`<V(_)>`) or name it `_" + l.name + "`")])
+                } else if (l.arm == 4) {
+                    out = out.concat([mkDiag(l.file, l.span, "W-UNUSED-BINDING", "`" + l.name + "` is bound by this `<each>`'s `as " + l.name + "`, but nothing in the row reads it (§7.3.5). Read it, remove `as " + l.name + "` (the row's value is still `@.`), or name it `_" + l.name + "` if it is deliberately unread")])
                 } else {
                     const what: string = wrote[l.sym] == 1 ? "is assigned, but nothing reads it before its scope ends — every value written to it is lost" : "is declared, but nothing reads it before its scope ends"
                     out = out.concat([mkDiag(l.file, l.span, "W-UNUSED-BINDING", "`" + l.name + "` " + what + " (§7.3.5). Read it, remove it, or name it `_" + l.name + "` if it is deliberately unread")])

@@ -76,7 +76,7 @@
       .TooShort     :> { @phase = Phase.Failed("Too short."); return; },
       .Duplicate(b) :> { @phase = Phase.Failed(b + " is already saved."); return; },
       .Storage      :> { @phase = Phase.Failed("The database is unavailable."); return; },
-      .Transport(t) :> { @phase = Phase.Failed("Could not reach the server."); return; },
+      .Transport(_) :> { @phase = Phase.Failed("Could not reach the server."); return; },
     };
     @saved.append(@draft.note);
     reset(@draft.note);

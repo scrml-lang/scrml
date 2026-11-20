@@ -6,7 +6,7 @@
         return ?{`SELECT id, name FROM users WHERE role = ${role} ORDER BY id`}.all() !{ _ :> [] };
     }
     <main>
-        <button id="load" onclick={ @admins = loadByRole("admin") !{ .Transport(t) :> return }; }>Load admins</button>
+        <button id="load" onclick={ @admins = loadByRole("admin") !{ .Transport(_) :> return }; }>Load admins</button>
         <p class="read">${@admins.length}</p>
     </main>
 </program>
