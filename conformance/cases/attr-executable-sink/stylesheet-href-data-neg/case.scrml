@@ -1,0 +1,12 @@
+<program>
+<u> = "https://evil.example/a.css"
+<r> = "stylesheet"
+function sheet() { return "https://evil.example/b.css"; }
+<link rel="stylesheet" href=(@u)>
+<link rel="alternate STYLESHEET" href=(@u)>
+<link rel="preload stylesheet" as="style" href=(@u)>
+<link href=(@u) rel="Stylesheet">
+<link rel=(@r) href=(@u)>
+<link rel="style&#115;heet" href=(@u)>
+<link rel="stylesheet" href=sheet()>
+</program>

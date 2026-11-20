@@ -48,7 +48,7 @@ import { isUserComponentMarkup } from "../component-expander.ts";
 import { isGateableIfValue, IF_GATE_BYPASS_TAGS } from "./emit-html.ts";
 import { lookupStateCell, getCellKind } from "../symbol-table.ts";
 import { nsId } from "./chunk-namespace.ts";
-import { quotedUrlAttrNeedsGuard, urlGuardTarget, wrapUrlGuard, dynamicUrlAttrNeedsGuard } from "./url-attr-guard.ts";
+import { quotedUrlAttrNeedsGuard, urlGuardTarget, wrapUrlGuard, dynamicUrlAttrNeedsGuard, dataAttrWriteGuard } from "./url-attr-guard.ts";
 import { URL_GUARD_RUNTIME_SOURCE } from "../runtime-template.js";
 import { aliasHostGlobalsInRuntimeText } from "./host-global-alias.ts";
 
@@ -205,6 +205,7 @@ function attrValueParts(valNode: any, iterVarName: string | null, tag = "", name
     const segs: string[] = valNode.mdSegs.map((sg: any) =>
       typeof sg.lit === "string" ? JSON.stringify(sg.lit) : `_scrml_g.String((${resolveRowRead(String(sg.slot), iterVarName)}) ?? "")`);
     const joined = segs.length > 0 ? segs.join(" + ") : JSON.stringify("");
+    if (name && dataAttrWriteGuard(tag, name, attrs) !== null) throw new SsrUnsupported("CSS-url / link href attribute from data");
     if (name && urlGuardTarget(tag, name, attrs) === null && dynamicUrlAttrNeedsGuard(tag, name, attrs)) {
       return [`_scrml_esc_attr(${wrapUrlGuard("null", name, joined, null)})`];
     }
@@ -227,6 +228,11 @@ function attrValueParts(valNode: any, iterVarName: string | null, tag = "", name
   // the one boundary reader the client emitter and the failable-call check use (acorn's, under
   // both goals). Before, `indexOf("}")` closed `${ "}" + x }` at the string's brace — a second
   // reader of the text that agreed with neither the browser nor the check.
+  // §5.2 (S479 carve-out 2) — a CSS-url attribute (`fill="${@.paint}"`), an SVG animation value that
+  // may write one, or a `<link>`'s `href` from row data: a refused value is REMOVED, which a server
+  // string cannot express attribute by attribute — the each falls back to the client renderer, whose
+  // write is the guarded setter (fail closed: no first-paint write of the value).
+  if (name && dataAttrWriteGuard(tag, name, attrs) !== null) throw new SsrUnsupported("CSS-url / link href attribute from data");
   const sliced = sliceTemplateText(raw, { bare: true });
   if (sliced.unreadable !== null) throw new SsrUnsupported("unreadable interpolation in attribute");
   const interior = (inner: string): string => {

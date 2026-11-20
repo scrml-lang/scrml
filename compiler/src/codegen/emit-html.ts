@@ -38,14 +38,14 @@ import { deriveHtmlAttrs, htmlPredicateOf, refinementAtPath } from "./emit-predi
 // keyed by var-name (mirrors emit-bindings.ts §53.7.2 path for runtime gating).
 // S458 one reader — `cellRefinement` reads the TS-resolved refinement off that map.
 import { buildReactiveTypeMap, cellRefinement, lowerClassDirectiveCondition, lowerAttrTemplateValue } from "./emit-bindings.ts";
-import { dynamicUrlAttrNeedsGuard, quotedUrlAttrNeedsGuard, refuseExecutableDataWrite, urlGuardTarget } from "./url-attr-guard.ts";
+import { dataAttrWriteGuard, dynamicUrlAttrNeedsGuard, quotedUrlAttrNeedsGuard, refuseExecutableDataWrite, urlGuardTarget } from "./url-attr-guard.ts";
 import { _SCRML_SVG_ANIMATION_ELEMENTS } from "../runtime-url-guard.js";
 // errorBoundary (SPEC §19.6 + §19.6.8) — markup-context error catch support.
 // `collectEnumRenders` builds the file's variant -> renders-markup map;
 // `compileBoundaryMarkup` + `emitBoundaryMarkupExpr` lower fallback / renders
 // markup to a runtime HTML expression. emit-event-wiring.ts consumes the
 // boundary fields these stamp onto each logic binding.
-import { collectEnumRenders, compileBoundaryMarkup, emitBoundaryMarkupExpr } from "./emit-error-boundary.ts";
+import { boundaryFallbackRaw, collectEnumRenders, compileBoundaryMarkup, emitBoundaryMarkupExpr } from "./emit-error-boundary.ts";
 
 // Supported bind: attribute names per SPEC §5.4
 const SUPPORTED_BIND_NAMES = new Set(["value", "valueAsNumber", "checked", "selected", "files", "group"]);
@@ -2173,13 +2173,10 @@ export function generateHtml(
         let fallbackExpr = '""';
         let hasFallback = false;
         if (fallbackAttr && fallbackAttr.value) {
-          const fv: any = fallbackAttr.value;
           // The attr value is an `expr` wrapper whose `raw` holds the markup
           // source (e.g. `<div>Something went wrong</>`), or an escape-hatch
-          // node carrying the same in `.raw`.
-          const rawMarkup: string =
-            (typeof fv.raw === "string" ? fv.raw : undefined) ??
-            (fv.exprNode && typeof fv.exprNode.raw === "string" ? fv.exprNode.raw : "") ?? "";
+          // node carrying the same in `.raw` (one reader, shared with VP-3's §5.2 check).
+          const rawMarkup: string = boundaryFallbackRaw(fallbackAttr.value);
           if (rawMarkup.trim() !== "") {
             const tpl = compileBoundaryMarkup(rawMarkup, generateHtml);
             fallbackExpr = emitBoundaryMarkupExpr(tpl, "_scrml_eb_result && _scrml_eb_result.data");
@@ -3443,6 +3440,10 @@ export function generateHtml(
                 ...(urlGuardTarget(String(tag), name, attrs) !== null
                   ? { directiveUrlGuardTarget: urlGuardTarget(String(tag), name, attrs)! }
                   : {}),
+                // §5.2 (S479 carve-out 2) — a CSS-url attribute / a `<link>`'s `href`.
+                ...(dataAttrWriteGuard(String(tag), name, attrs) !== null
+                  ? { directiveWriteGuard: dataAttrWriteGuard(String(tag), name, attrs)! }
+                  : {}),
               });
             }
           } else {
@@ -3753,6 +3754,10 @@ export function generateHtml(
                 ...(dynamicUrlAttrNeedsGuard(tag, name, attrs) ? { valueAttrUrlGuard: true } : {}),
                 ...(urlGuardTarget(tag, name, attrs) !== null
                   ? { valueAttrUrlGuardTarget: urlGuardTarget(tag, name, attrs)! }
+                  : {}),
+                // §5.2 (S479 carve-out 2) — a CSS-url attribute / a `<link>`'s `href`.
+                ...(dataAttrWriteGuard(tag, name, attrs) !== null
+                  ? { valueAttrWriteGuard: dataAttrWriteGuard(tag, name, attrs)! }
                   : {}),
                 refs: val.refs,
               });

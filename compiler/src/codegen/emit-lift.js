@@ -15,7 +15,7 @@ import { CGError } from "./errors.ts";
 import { refuseElementLowering, refuseRawContentLowering, refuseStaticAttrWrite, refuseUnloweredElseChain, recordRefusedLowering, refuseIfOnUngatedHost } from "./refused-lowering-errors.ts";
 import { isRawContentElement, rawContentDomLines, sealRawContentBody, unsealRawContentBody } from "../raw-content-encode.ts";
 import { isExecutableEventHandlerAttrName } from "../attr-injection-sink.ts";
-import { dynamicUrlAttrNeedsGuard, quotedUrlAttrNeedsGuard, refuseExecutableDataWrite, urlGuardTarget, wrapUrlGuard } from "./url-attr-guard.ts";
+import { dataAttrWriteGuard, dynamicUrlAttrNeedsGuard, guardedAttrWrite, quotedUrlAttrNeedsGuard, refuseExecutableDataWrite, urlGuardTarget, wrapUrlGuard } from "./url-attr-guard.ts";
 import * as acorn from "acorn";
 
 /**
@@ -1860,10 +1860,16 @@ function emitSetAttrs(elVar, attrs, engineCtx = null, tag = "", mount = null) {
         // §5.2 rule 3 (S457) — a URL attribute whose literal prefix commits to no scheme
         // (`href="${it.url}"`, `href=${it.url}`): the data supplies the scheme; guard the write.
         // S457 — an SVG animation value (`to="${it.url}"` animating `href`) likewise.
-        if (quotedUrlAttrNeedsGuard(tag, attr.name, attr.value, attrs)) {
-          tpl = wrapUrlGuard(elVar, attr.name, tpl, urlGuardTarget(tag, attr.name, attrs));
+        // §5.2 (S479 carve-out 2) — a CSS-url attribute / a `<link>`'s `href`: the guarded setter.
+        const _wg = dataAttrWriteGuard(tag, attr.name, attrs);
+        if (_wg !== null) {
+          pushLiftAttrSet(lines, `${guardedAttrWrite(elVar, attr.name, tpl, _wg)};`);
+        } else {
+          if (quotedUrlAttrNeedsGuard(tag, attr.name, attr.value, attrs)) {
+            tpl = wrapUrlGuard(elVar, attr.name, tpl, urlGuardTarget(tag, attr.name, attrs));
+          }
+          pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(attr.name)}, ${tpl});`);
         }
-        pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(attr.name)}, ${tpl});`);
       } else {
         lines.push(`${elVar}.setAttribute(${JSON.stringify(attr.name)}, ${JSON.stringify(attr.value)});`);
       }
@@ -2108,8 +2114,14 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         tpl += "`";
         // §5.2 rule 3 (S457) — guard a URL attribute whose literal prefix commits to no scheme.
         // S457 — an SVG animation value (`to="${it.url}"` animating `href`) likewise.
-        if (quotedUrlAttrNeedsGuard(tag, name, sv, attrs)) tpl = wrapUrlGuard(elVar, name, tpl, urlGuardTarget(tag, name, attrs));
-        pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(name)}, ${tpl});`);
+        // §5.2 (S479 carve-out 2) — a CSS-url attribute / a `<link>`'s `href`: the guarded setter.
+        const _wg = dataAttrWriteGuard(tag, name, attrs);
+        if (_wg !== null) {
+          pushLiftAttrSet(lines, `${guardedAttrWrite(elVar, name, tpl, _wg)};`);
+        } else {
+          if (quotedUrlAttrNeedsGuard(tag, name, sv, attrs)) tpl = wrapUrlGuard(elVar, name, tpl, urlGuardTarget(tag, name, attrs));
+          pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(name)}, ${tpl});`);
+        }
       } else {
         lines.push(`${elVar}.setAttribute(${JSON.stringify(name)}, ${JSON.stringify(val.value)});`);
       }
@@ -2142,7 +2154,11 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
           const _v = dynamicUrlAttrNeedsGuard(tag, name, attrs)
             ? wrapUrlGuard(elVar, name, rewritten, urlGuardTarget(tag, name, attrs))
             : rewritten;
-          pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(name)}, ${_v});`);
+          // §5.2 (S479 carve-out 2) — a CSS-url attribute / a `<link>`'s `href`: the guarded setter.
+          const _wg = dataAttrWriteGuard(tag, name, attrs);
+          pushLiftAttrSet(lines, _wg !== null
+            ? `${guardedAttrWrite(elVar, name, rewritten, _wg)};`
+            : `${elVar}.setAttribute(${JSON.stringify(name)}, ${_v});`);
         }
       }
     } else if (val.kind === "call-ref") {
@@ -2188,7 +2204,11 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
           const _gv = dynamicUrlAttrNeedsGuard(tag, name, attrs)
             ? wrapUrlGuard(elVar, name, _cv, urlGuardTarget(tag, name, attrs))
             : _cv;
-          pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(name)}, ${_gv});`);
+          // §5.2 (S479 carve-out 2) — a CSS-url attribute / a `<link>`'s `href`: the guarded setter.
+          const _wg = dataAttrWriteGuard(tag, name, attrs);
+          pushLiftAttrSet(lines, _wg !== null
+            ? `${guardedAttrWrite(elVar, name, _cv, _wg)};`
+            : `${elVar}.setAttribute(${JSON.stringify(name)}, ${_gv});`);
         }
       }
     } else if (typeof val === "string") {
@@ -2310,7 +2330,11 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
           const _gv = dynamicUrlAttrNeedsGuard(tag, name, attrs)
             ? wrapUrlGuard(elVar, name, _ev, urlGuardTarget(tag, name, attrs))
             : _ev;
-          pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(name)}, ${_gv});`);
+          // §5.2 (S479 carve-out 2) — a CSS-url attribute / a `<link>`'s `href`: the guarded setter.
+          const _wg = dataAttrWriteGuard(tag, name, attrs);
+          pushLiftAttrSet(lines, _wg !== null
+            ? `${guardedAttrWrite(elVar, name, _ev, _wg)};`
+            : `${elVar}.setAttribute(${JSON.stringify(name)}, ${_gv});`);
         }
       }
     } else if (val && val.kind) {
@@ -3955,7 +3979,11 @@ function _emitConsolidatedLift(body, opts = {}) {
                     const _gv = dynamicUrlAttrNeedsGuard(_bt, attrName, _ba)
                       ? wrapUrlGuard(elVar, attrName, _bv, urlGuardTarget(_bt, attrName, _ba))
                       : _bv;
-                    lines.push(`${elVar}.setAttribute(${JSON.stringify(attrName)}, ${_gv});`);
+                    // §5.2 (S479 carve-out 2) — a CSS-url attribute / a `<link>`'s `href`.
+                    const _wg = dataAttrWriteGuard(_bt, attrName, _ba);
+                    lines.push(_wg !== null
+                      ? `${guardedAttrWrite(elVar, attrName, _bv, _wg)};`
+                      : `${elVar}.setAttribute(${JSON.stringify(attrName)}, ${_gv});`);
                   }
                 }
               }

@@ -1,0 +1,10 @@
+<program>
+<u> = "/favicon.png"
+<bad> = "javascript:alert(1)"
+<link rel="stylesheet" href="/app.css">
+<link id="icon" rel="icon" href=(@u)>
+<link id="pre" rel="preload" as="style" href=(@u)>
+<link id="bare" href=(@u)>
+<link id="ib" rel="icon" href=(@bad)>
+<p id="ok">ok</p>
+</program>

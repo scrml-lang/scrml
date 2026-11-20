@@ -52,7 +52,11 @@ import {
   isQuotedStaticHandler,
   quotedHandlerMessage,
   attrSinkKey,
+  ATTR_STYLESHEET_HREF_CODE,
+  stylesheetHrefFromData,
+  stylesheetHrefMessage,
 } from "../attr-injection-sink.ts";
+import { boundaryFallbackRaw, extractVariantRenders, rendersStylesheetHrefHits } from "../codegen/emit-error-boundary.ts";
 
 // ---------------------------------------------------------------------------
 // Diagnostic shape
@@ -257,6 +261,31 @@ export function collectExecutableSinkErrors(
       // refused; prop substitution copies the attribute with `{...attr}`, so the stamp travels
       // with every expanded copy whose definition text was itself a sink).
       if ((attr as { _execSinkReportedAtDef?: boolean })._execSinkReportedAtDef === true) continue;
+      // §5.2 "Data-supplied stylesheets (S472)" (S480 r2 N1) — an `<errorBoundary fallback={…}>`
+      // template is raw text until codegen re-parses it (emit-error-boundary.ts), so this walk never
+      // sees its elements: a `<link>` there whose `href` takes a payload field and whose `rel` loads a
+      // stylesheet is E-ATTR-STYLESHEET-HREF, reported at the boundary's `fallback=`.
+      if (attr.name === "fallback" && String(node.tag ?? "").toLowerCase() === "errorboundary") {
+        rendersStylesheetHrefHits(boundaryFallbackRaw(v)).forEach((hit, i) => {
+          const own: Span = attr.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+          const inExpansion = spanFileIsSynthesized(own.file) && ctx.anchor !== null;
+          const span = opts.spanOverride ?? (inExpansion ? (ctx.anchor as Span) : own);
+          const key = `fallback|${span.file ?? filePath}:${span.start}:${span.end}|${own.file ?? filePath}:${own.start}:${own.end}|${i}`;
+          if (reported.has(key)) return;
+          reported.add(key);
+          const err: AttrInterpError = {
+            code: ATTR_STYLESHEET_HREF_CODE,
+            message: stylesheetHrefMessage(hit.name, hit.tag,
+              (opts.where ? opts.where + " " : "") + "in an `<errorBoundary>` `fallback=` template (a payload field)"),
+            span,
+            severity: "error",
+          };
+          // One report per refused attribute across VP-3 and the post-meta check (api.js dedupe).
+          (err as { attrSinkKey?: string }).attrSinkKey = attrSinkKey(own, `fallback|${hit.name}|${i}`, filePath);
+          errors.push(err);
+        });
+        continue;
+      }
       let sink: ReturnType<typeof classifyInterpolatedAttrSink> = null;
       let form: "quoted" | "data" = "quoted";
       let quotedHandler = false;
@@ -289,7 +318,12 @@ export function collectExecutableSinkErrors(
         const s = executableDataWriteSink(attr.name);
         if (s && s.kind === "srcdoc") { sink = s; form = "data"; }
       }
-      if (!sink && !quotedHandler && !staticSink) continue;
+      // §5.2 "Data-supplied stylesheets (S472)" — impl#1 under the S479 carve-out 2: a `<link>`
+      // whose `href` is not static and whose `rel` loads a stylesheet (or is computed).
+      const sheetHref = !sink && !quotedHandler && !staticSink &&
+        dataValueReachesElementAttr(node, attr.name) &&
+        stylesheetHrefFromData(node.tag, attr.name, v, node.attrs);
+      if (!sink && !quotedHandler && !staticSink && !sheetHref) continue;
       // A value written verbatim by the author (no caller substitution): anchored where it is written.
       const staticText = quotedHandler || staticSink !== null;
       if (opts.markReported) (attr as { _execSinkReportedAtDef?: boolean })._execSinkReportedAtDef = true;
@@ -325,10 +359,12 @@ export function collectExecutableSinkErrors(
       reported.add(key);
       const err: AttrInterpError = {
         code: quotedHandler ? ATTR_QUOTED_HANDLER_CODE
-          : staticSink ? ATTR_STATIC_EXECUTABLE_CODE : ATTR_INTERP_EXECUTABLE_CODE,
+          : staticSink ? ATTR_STATIC_EXECUTABLE_CODE
+          : sheetHref ? ATTR_STYLESHEET_HREF_CODE : ATTR_INTERP_EXECUTABLE_CODE,
         message: quotedHandler
           ? quotedHandlerMessage(attr.name, node.tag ?? "", where)
           : staticSink ? staticExecutableMessage(staticSink, attr.name, node.tag ?? "", where)
+          : sheetHref ? stylesheetHrefMessage(attr.name, node.tag ?? "", where)
           : interpolatedAttrSinkMessage(sink!, attr.name, node.tag ?? "", where, form),
         span,
         severity: "error",
@@ -665,6 +701,48 @@ function collectEscapeHatchQuotedHandlerErrors(root: unknown, filePath: string, 
   return errors;
 }
 
+/**
+ * §5.2 "Data-supplied stylesheets (S472)" — impl#1 under the S479 carve-out 2 (S480 r1 F1): an enum
+ * variant's `renders` template is raw text until codegen re-parses it (emit-error-boundary.ts), so
+ * the markup walk never sees it. A `<link>` there whose `href` takes a payload field (`"${f}"` or
+ * `=${f}`) and whose `rel` loads a stylesheet is E-ATTR-STYLESHEET-HREF, reported ONCE, at the enum
+ * declaration (however many `<render of=…/>` / `<errorBoundary>` sites show it) — the bootstrap's
+ * "a declaration's field (reported once, at the definition)".
+ */
+export function collectRendersStylesheetHrefErrors(root: unknown, filePath: string): AttrInterpError[] {
+  const errors: AttrInterpError[] = [];
+  const seen = new Set<unknown>();
+  const visit = (n: any): void => {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { n.forEach(visit); return; }
+    if (n.kind === "type-decl" && n.typeKind === "enum" && typeof n.name === "string") {
+      const info = extractVariantRenders(n);
+      for (const [variant, raw] of info.renders) {
+        rendersStylesheetHrefHits(raw).forEach((hit, i) => {
+          const span: Span = n.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+          const err: AttrInterpError = {
+            code: ATTR_STYLESHEET_HREF_CODE,
+            message: stylesheetHrefMessage(hit.name, hit.tag,
+              "in the `renders` clause of `" + n.name + "." + variant + "` (a payload field)"),
+            span,
+            severity: "error",
+          };
+          // One report per refused attribute (api.js dedupes on this identity): the declaration's
+          // span is shared by all its variants.
+          (err as { attrSinkKey?: string }).attrSinkKey = `renders|${filePath}|${n.name}.${variant}|${i}`;
+          errors.push(err);
+        });
+      }
+    }
+    for (const k of ["nodes", "children", "body", "branches", "arms", "armBody", "typeDecls"]) {
+      if (n[k] && typeof n[k] === "object") visit(n[k]);
+    }
+  };
+  visit(root);
+  return errors;
+}
+
 function validateExecutableSinks(
   ast: FileAST,
   filePath: string,
@@ -672,6 +750,7 @@ function validateExecutableSinks(
   source?: string,
 ): void {
   errors.push(...collectExecutableSinkErrors(ast.nodes, filePath));
+  errors.push(...collectRendersStylesheetHrefErrors(ast, filePath));
   errors.push(...collectEscapeHatchQuotedHandlerErrors(ast.nodes, filePath, source));
 }
 
