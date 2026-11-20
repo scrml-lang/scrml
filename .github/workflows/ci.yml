@@ -20,7 +20,8 @@
 #                     `tracking` before — so the security pack gated nothing).
 #   • browser       — TodoMVC gauntlet build + the browser tier's failure NAME-SET gate (once; it used to
 #                     run in both `gate` and `tracking`).
-#   • slices        — the self-host-v2 bootstrap slices + the e2e-render-map tier.
+#   • slices        — the self-host-v2 bootstrap slices + the e2e-render-map tier, sharded (S480:
+#                     scripts/ci-slices.ts; slice-m4 by bun --shard, every other step whole in one leg).
 #   • host-global   — the S457 host-global alias scan, sharded BY EMISSION MODE (each leg a full corpus pass
 #                     in its own modes — the scan already supports `--modes`, and its KNOWN_THROWS bookkeeping
 #                     is scoped to the modes a run covers).
@@ -500,11 +501,29 @@ jobs:
         run: bun scripts/browser-baseline.ts --check
 
   # ───────────────────────────────────────────────────────────────────────────────────────────────
-  # slices — the native bootstrap (impl#2, compiler/self-host-v2/) + the e2e-render-map tier.
+  # slices — the native bootstrap (impl#2, compiler/self-host-v2/) + the e2e-render-map tier, SHARDED.
+  #
+  # S480 (s480-ci-slices-timeout) — WHY SHARDED. As one job it ran 908–1180 s against a 20-min timeout
+  # and was CANCELLED at the timeout on 12 of 39 runs (merge-queue runs for PRs 2006/2007/2008/2010/2011
+  # among them; `gate` then fails and the PR leaves the queue). slice-m4 alone is ~756 s of it.
+  # WHAT EACH LEG RUNS lives in scripts/ci-slices.ts (its header): slice-m4 is split by bun's own
+  # `--shard=i/N` (balanced by scripts/ci-test-timings.json, as unit/integration are), and every other
+  # step — the no-default-arm lint (dpa-051 §3.4), the duplicate-fn lint (S473), slice-m1, slice-m2
+  # (M1's suite re-run on the LOWERED core, SLICE_CORE=lowered, is its own step), slice-m3, slice-codec
+  # (§57), and the e2e-render-map tier's assertions (S427) — runs WHOLE in exactly one leg (a pure deal
+  # of the script's list over N). `gate` reconciles the slice-m4 junit reports as an exact partition.
+  # 2 legs ≈ 9–10 min each; the leg COUNT is written once, as the matrix list. (S437: the native
+  # bootstrap lives outside the bunfig test root, so a plain `bun test` never runs it; S468:
+  # self-host-v2-lexer runs in `integration`, not here.)
   # ───────────────────────────────────────────────────────────────────────────────────────────────
   slices:
+    name: slices (${{ matrix.leg }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        leg: [1, 2]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -512,31 +531,20 @@ jobs:
           bun-version: "1.4.3"   # PINNED (S469) — see the header note on bun
       - name: Install deps (incl. Chromium — slice-m3's css oracle drives puppeteer)
         run: bun install --frozen-lockfile
-      # S437 — the native bootstrap lives outside the bunfig test root, so a plain `bun test` never runs
-      # it. The no-default-arm lint enforces dpa-051 §3.4 (total matches over IR enums); the duplicate-fn
-      # lint (S473) refuses two top-level functions of one name in a bootstrap file, which impl#1 builds
-      # silently, binding every call to the last one (g-impl1-bootstrap-duplicate-fn-last-wins-s473); the slice
-      # suite is M1's oracle for M2's `lower`. M2: parse → analyze → lower, plus the M1 suite re-run on
-      # the LOWERED programs (SLICE_CORE=lowered). S444 slice-m4 (§66.19 programs compiled from source
-      # and run). S446 slice-codec (§57 wire codec). (S468: `compiler/tests/integration/self-host-v2-lexer`
-      # is no longer run here — the `integration` job runs it as part of the integration suite.)
-      - name: Bootstrap slice (self-host-v2) — no-default-arm + duplicate-fn lints + M1 + M2 front end + M3 + M4 §66.19 programs + §57 codec
-        run: |
-          bun scripts/lint-no-default-arm.js
-          bun scripts/lint-duplicate-fn.js
-          bun test ./compiler/self-host-v2/slice-m1/
-          bun test ./compiler/self-host-v2/slice-m2/
-          SLICE_CORE=lowered bun test ./compiler/self-host-v2/slice-m1/
-          bun test ./compiler/self-host-v2/slice-m3/
-          bun test ./compiler/self-host-v2/slice-m4/
-          bun test ./compiler/self-host-v2/slice-codec/
-      # S427: the e2e-render-map tier ran in NO job and NO hook (the root glob does not descend and the
-      # pre-commit globs stop at the same depth). What is BLOCKING is the tier's ASSERTIONS; the
-      # fast-slice green->red delta is WARN-only by design. Happy-dom only. See
-      # g-e2e-render-map-tier-runs-in-no-ci-job-at-all.
-      - name: e2e-render-map tier assertions (S427 — previously ran in no job)
-        if: ${{ !cancelled() }}
-        run: bun test compiler/tests/e2e-render-map/
+      - name: Bootstrap slices + e2e-render-map — leg ${{ strategy.job-index }}+1 of ${{ strategy.job-total }} (scripts/ci-slices.ts)
+        run: >-
+          bun scripts/ci-slices.ts run $(( ${{ strategy.job-index }} + 1 ))/${{ strategy.job-total }}
+          --reports "$RUNNER_TEMP"
+      - name: Upload shard report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report-slices-${{ strategy.job-index }}
+          path: |
+            ${{ runner.temp }}/junit-slice-m4-*.xml
+            ${{ runner.temp }}/timings.json
+          retention-days: 14
+          if-no-files-found: warn
 
   # ───────────────────────────────────────────────────────────────────────────────────────────────
   # host-global — S457 2a / S458: compiler references to host globals go through the `_scrml_g`
@@ -627,6 +635,7 @@ jobs:
           bun scripts/ci-shards.ts reconcile "$RUNNER_TEMP/reports"
           unit=compiler/tests/unit,compiler/tests/conformance
           integration=compiler/tests/integration,compiler/tests/lsp,compiler/tests/commands
+          slice-m4=compiler/self-host-v2/slice-m4
 
   # ───────────────────────────────────────────────────────────────────────────────────────────────
   # tracking — NON-BLOCKING. Backlog reports that must stay visible but must never gate (a red gate
