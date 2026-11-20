@@ -15,7 +15,7 @@
 
   function refresh() {
     // A server call can fail on the wire; the handler says what to show then.
-    @report = loadAdminReport() !{ .Transport(t) :> "Could not load the report." };
+    @report = loadAdminReport() !{ .Transport(_) :> "Could not load the report." };
   }
 
   <div>

@@ -8739,13 +8739,28 @@ a `lin` binding's use. A lint never rejects: the program compiles (§34, Severit
   (`const xs = for (…) { … }`, §49.6).
 - **Arm binders (S480).** Each binder of a `match` arm or a `!{}` arm (`.V(x)`, `.Ok(v)`, a whole-error `_ err`)
   and of a `<match>` arm (§18.7) that nothing in the arm reads SHALL be reported as W-UNUSED-BINDING. The fix is
-  `_` in its place (`.V(_)`; `_` for `_ err`), or a `_`-prefixed name.
+  `_` in its place (`.V(_)`; `<V(_)>` in a `<match>` arm; `_` for `_ err`), or a `_`-prefixed name.
+- **`<each>` binders (S480).** The name an `<each>` binds with `as name` (§17.7.2, §17.7.3) that nothing in the row
+  reads — its markup, attributes, handlers, a nested `<each>` or component inside it, and the `<each>`'s own
+  `key=` — SHALL be reported as W-UNUSED-BINDING. §17.7.3 makes `name` and `@.` aliases of the one current
+  iteration value, so a read of `@.` in the row is a read of the binding. The fix is to drop `as name` (`@.` still
+  names the row's value) or a `_`-prefixed name. An `<each>` written without `as` binds no name of the author's and
+  is not reported.
+- **Not reported by this lint:** a nested `function` declaration — a declaration rather than a value; an unused
+  one is dead code for a different lint to catch (S480). The arm binders of a channel's `<onchange>` handler
+  (`<Inserted(row) : …>`, §38.13) are not yet reported: they are outside both S480 rulings
+  (`g-boot-unused-binding-onchange-arm-binders-s480`).
 
 *Population and reading — ruled (S480).* `ruling:user-voice-scrml.md-S480-unused-binding-six`:
 - *Parameters are not reported* (PERMANENT): an unread function or lambda parameter is not reported — *"a
   signature is a contract (handlers, `!` carriers, endpoints)"*.
 - *`given` is not reported*: a `given` name narrows an existing name; it is not a new binding.
 - *Arm binders are reported* (the bullet above).
+- *`<each>` binders are reported* (the bullet above), `ruling:user-voice-scrml.md-S480-each-binders` item 1: *"report
+  them, for the same reason you gave for loop binders (item 5)."*
+- *Nested `function` declarations are not reported* by W-UNUSED-BINDING, `ruling:user-voice-scrml.md-S480-each-binders`
+  item 2: *"leave them out — they are declarations rather than values, and an unused one is dead code a different
+  lint should catch."*
 - *Loop binders are reported*: an iterate-head binder and a counted head's `let` are warned like any other
   local (S422: *"you cannot split on "was the keyword written""*); a repeat loop that does not read its binder
   writes `for (_i of 0..3)`.
@@ -8758,10 +8773,6 @@ a `lin` binding's use. A lint never rejects: the program compiles (§34, Severit
   both hide real dead code (a never-read counter, a lost write to a value copy). Before any severity bump, a
   self-referential write and a part write SHALL stop counting as reads (`g-boot-unused-binding-self-write-read-interim-s480`).
 
-*Lane reading (S480, owner veto):* not covered by the S480 ruling; the implementing lane's reading, which the
-owner may overturn. An `<each>` binder and a nested `function` declaration are not yet reported. The S422 ruling
-said *"Population: ALL binding forms"*; this is a narrowing pending the owner, not a ruled exclusion.
-
 > **Provenance:** ruling:user-voice-scrml.md "⭐ RULED — unused-binding lint code: W-UNUSED-BINDING (S479,
 > 2026-11-18)" — *"a Warning; a §7 sentence — any local binding (`let`, `const`, keywordless; `lin` excluded
 > because §35 governs it) not read before its scope ends gets the warning, and a `_` prefix exempts it — plus the
@@ -8773,6 +8784,9 @@ said *"Population: ALL binding forms"*; this is a narrowing pending the owner, n
 > (S480, 2026-11-19)" (`ruling:user-voice-scrml.md-S480-unused-binding-six`) — parameters *"RULED: excluded
 > (PERMANENT)"*; arm binders *"RULED yes"*; `given` *"RULED: excluded"*; self-referential and part writes as reads
 > *"RULED yes (INTERIM)"*; loop binders *"RULED yes"*; withheld under an analysis Error *"RULED yes"*.
+> · ruling:user-voice-scrml.md "⭐ RULED — W-UNUSED-BINDING: `<each>` binders and nested `function` declarations
+> (#2009), PA recs adopted (S480, 2026-11-19)" (`ruling:user-voice-scrml.md-S480-each-binders`) — unread `<each>`
+> binders reported *"RULED yes"*; nested `function` declarations not reported *"RULED yes"*.
 > **Direction of change:** newly-warning (no program changes acceptance). Emitted by the bootstrap; Nominal on
 > impl#1, which still reports E-MU-001 for an unread keywordless binding (`g-impl1-e-mu-001-unread-binding-s479`).
 
@@ -30938,7 +30952,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | W-LIN-001 | §35.7 | `lin` variable passed to server-escalated function; guarantee does not extend to server copy | Warning |
 | W-MATCH-001 | §18.6 | Unreachable default `else` arm (all variants already covered) | Warning |
 | W-LOOP-COPY-WRITE-UNREAD | §66.10 | A part write to a `for … of` binder (`p.name = v` — the binder is a copy of the element, §66.10) that no later read of the binder observes: the write changes nothing, and the iterated cell or tape is unchanged. Write the source (`@ps[i].name = …`, or rebuild it with `.map(…)`), or read the changed copy. Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4. Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`loopCopyFor`); Nominal on impl#1 (§34.0). | Warning |
-| W-UNUSED-BINDING | §7.3.5 | A local binding — `let`, `const` or keywordless (§50.8.5), including a destructured name, an iterate-head binder, a counted head's `let` and a loop bound as a value — and, ruled S480, each binder of a `match` / `!{}` arm and of a `<match>` arm (§18.7) — that nothing reads before its scope ends (a write-only binding included). A `_`-prefixed name is exempt; `lin` is excluded (§35); a binding at the top level of a file-scope logic block is not local and is not reported. Ruled S480 (`ruling:user-voice-scrml.md-S480-unused-binding-six`): parameters are not reported (PERMANENT); `given` names are not reported; loop binders are reported; withheld when analysis reports an Error; a self-referential write (`x = x + 1`) and a part write (`p.f = v`) count as reads — INTERIM, to stop before any severity bump (`g-boot-unused-binding-self-write-read-interim-s480`). `<each>` binders and nested `function` declarations are not yet reported — a lane reading under owner veto, §7.3.5. A lint: the program compiles. Provenance: ruling:user-voice-scrml.md "⭐ RULED — unused-binding lint code: W-UNUSED-BINDING (S479, 2026-11-18)"; completes ruling:user-voice-scrml.md S422 "CALL 3 — unused-binding is a LINT across all binding forms". Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`unusedBindings`); Nominal on impl#1 (§34.0), which reports E-MU-001 for an unread keywordless binding instead (`g-impl1-e-mu-001-unread-binding-s479`). | Warning |
+| W-UNUSED-BINDING | §7.3.5 | A local binding — `let`, `const` or keywordless (§50.8.5), including a destructured name, an iterate-head binder, a counted head's `let` and a loop bound as a value — and, ruled S480, each binder of a `match` / `!{}` arm and of a `<match>` arm (§18.7) and the `as name` of an `<each>` (§17.7.3; a read of `@.` reads it) — that nothing reads before its scope ends (a write-only binding included). A `_`-prefixed name is exempt; `lin` is excluded (§35); a binding at the top level of a file-scope logic block is not local and is not reported. Ruled S480 (`ruling:user-voice-scrml.md-S480-unused-binding-six`): parameters are not reported (PERMANENT); `given` names are not reported; loop binders are reported; withheld when analysis reports an Error; a self-referential write (`x = x + 1`) and a part write (`p.f = v`) count as reads — INTERIM, to stop before any severity bump (`g-boot-unused-binding-self-write-read-interim-s480`). Ruled S480 (`ruling:user-voice-scrml.md-S480-each-binders`): `<each>` binders are reported; nested `function` declarations are not reported by this lint. The arm binders of a channel `<onchange>` handler are not yet reported (`g-boot-unused-binding-onchange-arm-binders-s480`). A lint: the program compiles. Provenance: ruling:user-voice-scrml.md "⭐ RULED — unused-binding lint code: W-UNUSED-BINDING (S479, 2026-11-18)"; completes ruling:user-voice-scrml.md S422 "CALL 3 — unused-binding is a LINT across all binding forms". Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`unusedBindings`); Nominal on impl#1 (§34.0), which reports E-MU-001 for an unread keywordless binding instead (`g-impl1-e-mu-001-unread-binding-s479`). | Warning |
 | W-MATCH-002 | §18.16 | Non-exhaustive literal match (string/number/boolean without `_` arm) | Warning |
 | W-DERIVED-001 | §6.6.11 | `const <name> = expr` has no `@variable` references; value never re-evaluates | Warning |
 | E-ERROR-001 | §19.3.3, §19.10.4 | `fail` used in non-`!` function; ALSO a `transaction { }` block **outside a `!` function** — inside a function not declared `!` (S450), or **at the top level of a `${}` logic block, outside any function (S453/B1b)**. §19.10.4: *"`transaction { }` SHALL be valid only inside `!` functions"* — outside one, a failure inside the block has nowhere to go, so its commit-or-rollback promise has no failure path to keep (the same reason manual transaction control there is E-ERROR-015, §19.10.4 S451). One code for one condition; B1b mints no new code. Fires once per block — a NESTED block's placement is reported by E-ERROR-007 on the inner block, not by a second E-ERROR-001 per nesting level. Direction of change: **newly-rejecting** for the top-level case; **migration MEASURED at 0 pre-existing sources** across 2,321 corpus `.scrml` files (the one top-level occurrence is `conformance/cases/error/transaction-top-level-neg`, added by the change). ⛑ **Not reached** for a `transaction` inside a LAMBDA arrow body: the parser never builds a `transaction-block` there (a lambda body is an EXPRESSION, and `parseTransactionBlock()` is called from the top-level loop and `parseOneStatement` only), so no §19.10.4 check sees it. ⛑ **THAT SHAPE IS NOT ACCEPTED SILENTLY, AND AN EARLIER REVISION OF THIS ROW SAID IT WAS.** It claimed the block "degrades to a `bare-expr` at exit 0". That is true only of the AST and of this §19.10.4 checker; through the FULL pipeline the shape is **LOUD** — **E-CODEGEN-INVALID-LOGIC**, measured on both `origin/main` and the S453 head, with a control proving the `transaction` is the cause (the same lambda body without it compiles clean). A codegen refusal is a far smaller problem than the silent-wrong-data exception the struck wording implied, and the distinction matters to anyone triaging it: **loud at the pipeline level; the missing `transaction-block` node is the AST-level fact.** ⚠ A `write: false` compile cannot surface it, because E-CODEGEN-INVALID-LOGIC is a codegen-stage code — which is how the struck claim survived its first measurement. The AST-level fact is pinned by `compiler/tests/unit/transaction-in-function-body.test.js`; a pre-existing parse gap of the class S450 closed for function bodies, not something B1b changes. Provenance: ruling:user-voice-scrml.md S449 (B1b) — *"a top-level `transaction` is rejected (§19.10.4 already says `!` functions only)"* (emitted at `compiler/src/type-system.ts` for `fail`, and `compiler/src/validators/lint-transaction.ts` for `transaction`.) | Error |

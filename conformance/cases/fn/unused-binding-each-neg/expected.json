@@ -1,0 +1,14 @@
+{
+  "id": "fn-unused-binding-each-neg",
+  "description": "§7.3.5 (S480) clean neg — no W-UNUSED-BINDING: every `<each>` binder is read — in an interpolation, an attribute, an event handler's argument, a row `if=`, the `<each>`'s own `key=`, inside a nested `<each>` (as its `in=` and in its row), or through `@.` (an alias of the binding, §17.7.3) — or is `_`-prefixed (`as _row`), or is not written (an `<each>` with no `as`).",
+  "language-version": "1.0",
+  "spec": "§7.3.5, §17.7.2, §17.7.3",
+  "provenance": "ruling:user-voice-scrml.md-S480-each-binders (item 1: unread `<each>` binders reported)",
+  "rationale": "§7.3.5: an `<each>` binder is reported only when \"nothing in the row reads\" it — \"its markup, attributes, handlers, a nested `<each>` or component inside it, and the `<each>`'s own `key=`\"; \"a read of `@.` in the row is a read of the binding\"; \"An `<each>` written without `as` binds no name of the author's and is not reported.\"",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "W-UNUSED-BINDING"
+    ]
+  }
+}

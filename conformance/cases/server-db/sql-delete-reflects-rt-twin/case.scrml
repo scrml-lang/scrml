@@ -10,10 +10,10 @@
         return c.n;
     }
     function onDelete() {
-        removeTask(2) !{ .Transport(t) :> return };
+        removeTask(2) !{ .Transport(_) :> return };
     }
     function onCount() {
-        @_remaining = countTasks() !{ .Transport(t) :> return };
+        @_remaining = countTasks() !{ .Transport(_) :> return };
     }
     <main>
         <button id="del" onclick=onDelete()>Delete task 2</button>

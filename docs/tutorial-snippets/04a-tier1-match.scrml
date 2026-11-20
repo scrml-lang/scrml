@@ -20,8 +20,8 @@
   <status:string=(match @phase {
     .Idle        :> "idle",
     .Loading     :> "loading",
-    .Loaded(n)   :> "loaded",
-    .Failed(msg) :> "failed",
+    .Loaded(_)   :> "loaded",
+    .Failed(_)   :> "failed",
   })/>
 
   <p>Status: ${@status}</p>
