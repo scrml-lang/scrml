@@ -149,6 +149,8 @@ const POST_EMIT_HELPER_CHUNK_GATES: ReadonlyArray<readonly [string, string]> = [
   ["_scrml_css_attr_html(", "cssattrguard"],
   // S480 r2 N1 — a `<link>`'s `href` from a payload field in the same templates.
   ["_scrml_link_href_html(", "cssattrguard"],
+  // S480 (carve-out 2 widened) — a URL attribute from a payload field in the same templates.
+  ["_scrml_url_attr_html(", "cssattrguard"],
   // §53.6.1 (S457 "6a") — a `string(url)` boundary check calls `_scrml_url_shape_ok(`
   // (emit-predicates.ts), defined in the same `urlguard` chunk (runtime-url-guard.js). The check is
   // emitted from let/state decls, function params and bind:value handlers alike, so the emitted text

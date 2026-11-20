@@ -109,7 +109,8 @@ export const LINK_HREF_SET_FN = "_scrml_link_href_set";
  *     a CSS-url attribute or `style` (local part after any `prefix:`), or is computed, or is absent.
  *     `target` is the URL attribute the animation may ALSO write (`""` when `attributeName` is
  *     computed — both guards judge, rule 3's first), else null;
- *   - `{ kind: "link-href" }` — `href` (any case, any `prefix:href`) on a `<link>` (any case);
+ *   - `{ kind: "link-href" }` — `href` (any case, any `prefix:href`) on a `<link>` or a `<base>` (any
+ *     case);
  *   - null — neither (the emitter's write is unchanged).
  */
 export type AttrWriteGuard = { kind: "css"; target: string | null } | { kind: "link-href" };
@@ -150,6 +151,11 @@ export function dataAttrWriteGuard(
   }
   if (_SCRML_CSS_URL_ATTRS.has(lower)) return { kind: "css", target: null };
   if (t === "link" && isHrefAttrName(lower)) return { kind: "link-href" };
+  // S480 (carve-out 2 widened — ruling:user-voice-scrml.md-S480-census-recs item 5): a `<base>`'s `href`
+  // is never written from data (§5.2 "Data never moves the document base (S473)"). VP-3 refuses it
+  // (E-ATTR-BASE-HREF); the `<link>` setter is the runtime wall behind it (it removes a `<base>`'s
+  // `href`, as the bootstrap's `rt.attr` does).
+  if (t === "base" && isHrefAttrName(lower)) return { kind: "link-href" };
   return null;
 }
 

@@ -418,6 +418,31 @@ export function stylesheetHrefMessage(name: string, tag: string, where: string):
 }
 
 /**
+ * SPEC §5.2 "Data never moves the document base (S473)" — impl#1 under the S479 carve-out 2 as widened
+ * S480 (ruling:user-voice-scrml.md-S480-census-recs item 5; gap g-impl1-renders-href-unguarded-s480):
+ * "A `<base>` (tag compared case-insensitively) whose `href` (any case) is not a static string … SHALL
+ * be a compile error (E-ATTR-BASE-HREF)." The bootstrap's shape (analyze.scrml `baseHrefFromData`:
+ * `href` exactly, any case, on a `<base>` in any case), read over impl#1's attribute values.
+ */
+export const ATTR_BASE_HREF_CODE = "E-ATTR-BASE-HREF";
+
+/** Is `name=value` on `<tag>` a `<base>`'s `href` written from data — E-ATTR-BASE-HREF? */
+export function baseHrefFromData(tag: string | null | undefined, name: string, value: unknown): boolean {
+  if (typeof name !== "string" || String(tag ?? "").toLowerCase() !== "base") return false;
+  if (name.toLowerCase() !== "href") return false;
+  return !attrValueIsStatic(value);
+}
+
+/** The E-ATTR-BASE-HREF message (the bootstrap's text, with impl#1's `where`). */
+export function baseHrefMessage(name: string, tag: string, where: string): string {
+  const at = where ? ` ${where}` : "";
+  return "`" + name + "=` on `<" + tag + ">`" + at + " takes its value from data (an expression, a variable, a call, " +
+    "a field or an interpolated string) — data never chooses the document's base URL: it resolves every relative " +
+    "URL on the page (links, forms, fetches), so a data base moves them to another origin. Write the `href` as a " +
+    "static string (`href=\"/app/\"`), or build the URLs that need a varying prefix where they are used (§5.2)";
+}
+
+/**
  * SPEC §5.2 rule 1 (S464) — a QUOTED event-handler attribute with no `${…}` (`onclick="alert(1)"`).
  * The browser would run its text as raw JavaScript, unchecked by scrml. (Code name owner-ruled,
  * S464.)
