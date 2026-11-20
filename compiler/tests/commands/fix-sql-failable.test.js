@@ -444,7 +444,9 @@ describe("sql-failable — chaining (fix-s66)", () => {
       "  <button onclick={ @out = a() !{ .Transport(_) :> { return } } }>a</button>",
     ]);
     const r = fixS66(src, { filePath: "/virtual/app.scrml", rules: [...IMPL1_SAFE_RULES] });
-    expect(r.output).toContain(`.get() ${NOT}\n`);
+    // S480: the chain now ends with the S469 terminator rules (stmt-semi / arm-comma), so the
+    // rewritten statement carries its `;`.
+    expect(r.output).toContain(`.get() ${NOT};\n`);
     expect(r.applied.some((a) => a.rule === "sql-failable")).toBe(true);
     expect(r.infos.some((i) => i.rule === "sql-failable")).toBe(true);
     const off = fixS66(src, { filePath: "/virtual/app.scrml", rules: ["pre-migrate"] });

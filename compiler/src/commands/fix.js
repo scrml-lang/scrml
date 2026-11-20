@@ -15,7 +15,9 @@
  *     unhandled client call of a server function → `!{ .Transport(_) :> return }` —
  *     commands/fix-client-server-call.js), sql-failable (§19.8.3, an unhandled `?{}` READ outside a
  *     `!` function → `!{ _ :> not }` / `!{ _ :> [] }`; every write is listed, never rewritten — S455
- *     "b your rec on R11" — commands/fix-sql-failable.js), program-wrap, program-move, unwrap-logic. Each is verified per file by an impl#1 compile of the file IN ITS PROJECT
+ *     "b your rec on R11" — commands/fix-sql-failable.js), stmt-semi / arm-comma (S469 dpa-073: the
+ *     `;` statement terminator and the `,` arm separator at impl#1-legacy's boundaries; S480 Track M —
+ *     commands/fix-terminators.js), program-wrap, program-move, unwrap-logic. Each is verified per file by an impl#1 compile of the file IN ITS PROJECT
  *     (entry + resolved imports) and withdrawn on any diagnostic change.
  *   - `--s66` — adds the §66 declaration rules (rhs-decl, const-cell, engine-simple). Their output
  *     is the §66 dialect, which impl#1 CANNOT compile; `--s66` is dry-run unless `--write` is also
@@ -67,7 +69,9 @@ and the validator \`<x is some>\` → \`is given\`, §42.2.2a / §55.1; given-pr
 unhandled client call of a server function → \`f() !{ .Transport(_) :> return }\`, §19.9.10;
 sql-failable: an unhandled \`?{}\` READ in a server function that is not \`!\` →
 \`?{…}.get() !{ _ :> not }\` / \`.all() !{ _ :> [] }\`, §19.8.3; every WRITE — any \`.run()\`, a bare
-\`?{}\` statement, any query not provably a pure read — is LISTED for a human, never rewritten).
+\`?{}\` statement, any query not provably a pure read — is LISTED for a human, never rewritten;
+stmt-semi / arm-comma: the S469 \`;\` after every non-block statement and \`,\` between arms, at the
+statement / arm boundaries today's compiler reads).
 A construct that is not mechanically rewritable is left untouched and reported; an "info" line
 marks a rewrite whose meaning differs (a client function's callers no longer abort; a failed read
 no longer throws on today's compiler — it yields \`not\` / \`[]\`).

@@ -575,7 +575,8 @@ type User:struct = { name: string }
   test("chained in fixS66 by default: `scrml fix` rewrites the guard", () => {
     const src = LOGIC("    given x :> { let _a = x }");
     const r = fixS66(src, { filePath: join(TMP, "c/chain.scrml"), rules: [...IMPL1_SAFE_RULES] });
-    expect(r.output).toContain("if (x is given) { let _a = x }");
+    // S480: the chain now ends with the S469 terminator rules (stmt-semi), so the body carries its `;`
+    expect(r.output).toContain("if (x is given) { let _a = x; }");
     expect(r.applied.some((a) => a.rule === "given-presence")).toBe(true);
   });
 });

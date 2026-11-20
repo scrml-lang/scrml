@@ -28,7 +28,10 @@ import { compileScrml } from "../../src/api.js";
 import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 
-const fix = (src, opts = {}) => fixS66(src, { filePath: "t.scrml", ...opts });
+// The §66 rules are tested here on their own; the S469 terminator rules (stmt-semi / arm-comma, S480)
+// have their own file (fix-terminators.test.js), so the default run here leaves them out.
+const NO_TERMINATORS = S66_RULES.filter((r) => r !== "stmt-semi" && r !== "arm-comma");
+const fix = (src, opts = {}) => fixS66(src, { filePath: "t.scrml", rules: NO_TERMINATORS, ...opts });
 
 /**
  * Run `scrml fix <target> --s66 --write` and return the text of `file`. When `refused`, the project
@@ -364,7 +367,7 @@ describe("§6 canonical §66 input is left alone", () => {
     expect(r.blockers).toEqual([]);
   });
   test("S66_RULES is the stable rule-id list", () => {
-    expect([...S66_RULES]).toEqual(["pre-migrate", "arm-pipe", "client-server-call", "sql-failable", "is-some", "given-presence", "rhs-decl", "const-cell", "engine-simple", "program-wrap", "program-move", "unwrap-logic"]);
+    expect([...S66_RULES]).toEqual(["pre-migrate", "arm-pipe", "client-server-call", "sql-failable", "is-some", "given-presence", "stmt-semi", "arm-comma", "rhs-decl", "const-cell", "engine-simple", "program-wrap", "program-move", "unwrap-logic"]);
   });
   test("a rules subset applies only those rules", () => {
     const r = fix("${\n    <count> = 0\n}\n<p>${@count}</p>\n", { rules: ["program-wrap"] });
