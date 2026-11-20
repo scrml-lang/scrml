@@ -16,3 +16,10 @@ Ruling: user-voice-scrml.md S480 "⭐ RULED — what a trap renders when "nothin
 - [x] F3: no writer runs inside another's run any more, so a non-trap throw stays with the writer that threw.
 - [x] SPEC §19.17: sentence on "evaluated before any is written / nothing written or removed while out" added; the "never in the page with a stale or absent value" sentence holds.
 - [x] Tests: r1 F1/F2/F3 unit + F1/F2 compiled (6 red on 9ba5b9c7c incl. the updated "nothing is written" unit test).
+
+## r2 fix round (re-review of #2017, head 6817c0f34)
+- [x] N1: a writer's run ends in `settleElement` (the Effect's `after`): the element's other queued writers run then (sequential Effect runs), then commit — writes land at the first queued writer, as on base (select/range regressions fixed).
+- [x] N2: the queued-sibling-disposed case vanishes (siblings run immediately); pinned via the runtime API.
+- [x] N3: `template`'s ns path makes the view a shallow clone of the template content (inert document) instead of a live-document fragment. First-run deferral was tried and rejected: `rt.attr` would stop writing synchronously (≈140 direct-API test failures) and a never-flushed pending commit is an absent `sandbox` in the page.
+- [x] SPEC §19.17 sentences scoped (mount = inert copy, both paths; re-evaluation = evaluate-all-then-write at the first; "while out" = data-bound attributes only).
+- [x] Tests: 6 new (3 compiled N1, N1/N2/N3 runtime), all red on 6817c0f34.

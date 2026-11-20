@@ -418,10 +418,12 @@ export class Derived {
 }
 
 class Effect {
-  constructor(scope, fn, blank = null) {
+  constructor(scope, fn, blank = null, after = null) {
     this.fn = fn;
     // s480 — a HOLE's effect (`hole`, below) carries the way its hole renders nothing; null otherwise
     this.blank = blank;
+    // s480 r2 — run once a run has ended (untracked, after `fn` or `blank`), unless it rethrew; null otherwise
+    this.after = after;
     this.disposed = false;
     this.sources = new Set();
     stats.effects++;
@@ -448,6 +450,7 @@ class Effect {
       if (!isTrap(err)) throw err;
       reportLater(err);                              // a trap: reported once, and it ends here
     } finally { tracking = saved; }
+    if (this.after !== null) this.after();
   }
   markStale() {
     queue.add(this);
@@ -3718,7 +3721,12 @@ export function template(id) {
   }
   checkShape(t, id, n);
   const inner = n.cloneNode(true);
-  const frag = document.createDocumentFragment();
+  // s480 r2 (review N3): the view is a fragment of the template content's INERT document (a
+  // shallow clone of the content, as the HTML path's view is a deep one) — never of the live
+  // document — so a bound attribute written at the mount (an `<img>`'s `src` in a
+  // `<foreignObject>`) loads nothing until `insert` adopts the view into the page (an element a
+  // trap holds is out of the fragment before that).
+  const frag = t.content.cloneNode(false);
   while (inner.firstChild) frag.appendChild(inner.firstChild);
   return frag;
 }
@@ -3836,16 +3844,17 @@ export function attr(scope, el, name, fn) {
   const tok = {};
   h.writers.set(tok, slot);                        // before the first run, which commits
   scope.own(() => { h.writers.delete(tok); h.trapped.delete(tok); });
-  // A run only EVALUATES its attribute (the value is kept in `slot`); `commitElement` writes. So
-  // every writer of the element is evaluated before any of them writes, and a throw stays with
-  // the writer that threw (its own `Effect` run — never another writer's blank).
+  // A run only EVALUATES its attribute (the value is kept in `slot`); `settleElement` (the run's
+  // `after`) runs the element's other queued writers, then `commitElement` writes. So every writer
+  // of the element is evaluated before any of them writes, and a throw stays with the writer that
+  // threw (its own `Effect` run — never another writer's blank).
   slot.effect = new Effect(scope, () => {
     slot.refused = sheetHref && linkLoadsSheet(el);
     slot.v = slot.refused ? undefined : fn();
     slot.dirty = true;
     h.trapped.delete(tok);
-    commitElement(el, h);
-  }, () => holdElement(el, h, tok));               // the element leaves the page; nothing is written to it
+  }, () => holdElement(el, h, tok),                // the element leaves the page; nothing is written to it
+  () => settleElement(el, h));
 }
 
 function writeAttr(el, name, v, guard) {
@@ -3866,16 +3875,18 @@ function writeAttr(el, name, v, guard) {
 //
 // When an `rt.attr` run throws, the element (with its subtree) is replaced in
 // place by a placeholder comment — at the mount that is inside the template
-// clone, BEFORE the view is inserted, so a trapped `<iframe>` never starts
-// loading without its `sandbox`; on a re-run it leaves the live page. Nothing
+// clone (inert, on both template paths: `template`), BEFORE the view is
+// inserted, so a trapped `<iframe>` never starts loading without its `sandbox`
+// (nor an `<img>` with a `src` before its policy); on a re-run it leaves the
+// live page. Nothing
 // is removed from it (a removed `referrerpolicy` / `crossorigin` on a live
 // `<img>` is a refetch without the policy): the stale value leaves the page
 // with the element. The run is an `Effect` hole (`blank` = hold), so a trap
 // is reported once per trapped run and any other throw is rethrown after the
 // hold, exactly as `hole()`'s — from the run of the writer that threw.
-// A writer's run only EVALUATES its attribute; `commitElement` writes, once
-// every writer of the element queued in the flush has been evaluated and none
-// traps. So nothing is written to an element that is out, a live element is
+// A writer's run only EVALUATES its attribute; then (`settleElement`) the
+// element's other writers queued in the flush run, and `commitElement` writes
+// if none traps — where the first of them stood in the flush. So nothing is written to an element that is out, a live element is
 // never left with some attributes new and one stale, and when the last
 // trapped attribute reads again every changed attribute is written before the
 // element goes back in the placeholder's place. So the element is never in
@@ -3894,7 +3905,7 @@ const holeMate = new WeakMap();
 function elementHoleOf(el) {
   let h = elementHoles.get(el);
   if (h === undefined) {
-    h = { writers: new Map(), trapped: new Set(), ph: null, out: false };
+    h = { writers: new Map(), trapped: new Set(), ph: null, out: false, settling: false };
     elementHoles.set(el, h);
   }
   return h;
@@ -3912,11 +3923,38 @@ function holdElement(el, h, tok) {
   if (el.parentNode) el.parentNode.replaceChild(h.ph, el);
 }
 
+// The end of a writer's run (s480 r2, review N1). The element's writers still queued in this flush
+// (their input changed too) are taken out of the queue and run NOW, one after another — each its
+// own `Effect` run, so a throw stays with the writer that threw — and then the element is
+// committed. So every writer of the element is evaluated before any of them writes, and the
+// writes land where the element's FIRST queued writer stands in the flush, as an unheld
+// attribute's write always did: a render effect queued after it (a `bind:value` that selects an
+// `<option>` by its new `value`, a range input's value against its new `max`) sees the new
+// attributes. A writer run here ends in this function too, which returns at once (`settling`):
+// the writer that began the settle commits. A non-trap throw of a writer run here is rethrown
+// after the commit (the first; any later one is reported), as the flush does.
+function settleElement(el, h) {
+  if (h.settling) return;
+  h.settling = true;
+  let first = null;
+  let failed = false;
+  try {
+    for (const s of h.writers.values()) {
+      const e = s.effect;
+      if (e === null || !queue.has(e)) continue;
+      queue.delete(e);
+      if (e.disposed) continue;
+      try { e.run(); } catch (err) { if (!failed) { failed = true; first = err; } else reportLater(err); }
+    }
+  } finally { h.settling = false; }
+  commitElement(el, h);
+  if (failed) throw first;
+}
+
 // Writes the element's evaluated attributes — only when EVERY writer of the element has been
 // evaluated for the current state and none of them traps:
-//  - a writer still queued in this flush (its input changed too) has not been evaluated yet, so
-//    nothing is written now; the last of the element's writers to run commits (so a live element
-//    is never left with some attributes new and one stale because a later writer trapped);
+//  - a writer still queued (its input changed during the settle) has not been evaluated for the
+//    current state, so nothing is written now; it commits when it runs;
 //  - while any writer traps, the element is held out of the page and NOTHING is written to it (a
 //    detached `<img>` still fetches a written `src`; a removed `referrerpolicy` is a refetch).
 // Then every changed attribute is written, and a held element goes back in its placeholder's

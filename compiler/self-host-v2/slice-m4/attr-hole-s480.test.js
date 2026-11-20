@@ -431,3 +431,159 @@ describe("S480 attr-hole: runtime, unit level", () => {
     expect($("#w").childNodes.length).toBe(1);
   });
 });
+
+// r2 (re-review of #2017, 6817c0f34) — N1 (a regression on the NON-trapping path): deferring an
+// element's writes until its LAST queued writer ran let a render effect queued between them (a
+// `bind:value`) run against stale attributes. The element's other queued writers now run right
+// after the first one, and the element is committed there — where an unheld write always landed.
+describe("S480 attr-hole r2: an element's writes land at its first queued writer (non-trapping path)", () => {
+  async function run(src, steps, probe) {
+    const log = [];
+    await load(src);
+    log.push(probe());
+    for (const s of steps) { click(btn(s)); log.push(probe()); }
+    return log;
+  }
+
+  test("N1: `<select bind:value>` selects an `<option>` by the `value` written in the same flush", async () => {
+    const log = await run(`<program>
+    let <v:string="a"/>
+    let <t:string="ta"/>
+    let <sel:string="a"/>
+    function go() { @v = "b"; @sel = "b"; @t = "tb"; }
+    <main>
+        <button onclick=go()>go</button>
+        <select id="s" bind:value=@sel><option value="z">z</option><option id="o" value=(@v) title=(@t)>opt</option></select>
+    </main>
+</program>
+`, ["go"], () => `${$("#s").value}/${$("#s").selectedIndex} ${$("#o").getAttribute("value")} ${$("#o").getAttribute("title")}`);
+    expect(log).toEqual(["z/0 a ta", "b/1 b tb"]);
+  });
+
+  test("N1: a range input's `bind:value` is judged against the `max` written in the same flush", async () => {
+    const log = await run(`<program>
+    let <hi:int=10/>
+    let <lo:int=0/>
+    let <x:string="5"/>
+    function go() { @hi = 100; @x = "50"; @lo = 1; }
+    <main>
+        <button onclick=go()>go</button>
+        <input id="r" type="range" min=(@lo) max=(@hi) bind:value=@x/>
+    </main>
+</program>
+`, ["go"], () => `${$("#r").value} ${$("#r").getAttribute("min")} ${$("#r").getAttribute("max")}`);
+    expect(log).toEqual(["5 0 10", "50 1 100"]);
+  });
+
+  // What every `value` write observes, and the final DOM, are the base's (origin/main before #2017,
+  // measured): each element's attributes are now written together, at its first queued writer.
+  test("N1: multi-attribute elements interleaved with binds — every bind observes what it did on the base", async () => {
+    await load(`<program>
+    let <lo:int=0/>
+    let <hi:int=10/>
+    let <x:string="5"/>
+    let <v:string="a"/>
+    let <t:string="ta"/>
+    let <sel:string="a"/>
+    let <h:string="/h0"/>
+    let <w:string="w0"/>
+    function go() { @hi = 100; @v = "b"; @x = "50"; @sel = "b"; @h = "/h1"; @w = "w1"; @lo = 1; @t = "tb"; }
+    <main>
+        <button onclick=go()>go</button>
+        <input id="r" type="range" min=(@lo) max=(@hi) bind:value=@x/>
+        <select id="s" bind:value=@sel><option value="z">z</option><option id="o" value=(@v) title=(@t)>opt</option></select>
+        <a id="a" href=(@h) title=(@w)>x</a>
+        <input id="i" bind:value=@w/>
+        <img id="d1" alt=(@w) title=(@t)/><img id="d2" alt=(@t) title=(@w)/>
+    </main>
+</program>
+`);
+    const log = [];
+    const P = window.Element.prototype;
+    const sa = P.setAttribute;
+    const d = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
+    P.setAttribute = function (n, v) { log.push(`${this.id}.${n}=${v}`); return sa.call(this, n, v); };
+    Object.defineProperty(window.HTMLInputElement.prototype, "value", { configurable: true, get: d.get, set(v) {
+      log.push(`${this.id}.value:=${v} (r.max=${$("#r").getAttribute("max")} o.value=${$("#o").getAttribute("value")})`);
+      d.set.call(this, v);
+    } });
+    try { click(btn("go")); } finally {
+      P.setAttribute = sa;
+      Object.defineProperty(window.HTMLInputElement.prototype, "value", d);
+    }
+    expect(log.filter((l) => l.includes(":="))).toEqual([
+      "r.value:=50 (r.max=100 o.value=b)",
+      "i.value:=w1 (r.max=100 o.value=b)",
+    ]);
+    expect(log.filter((l) => !l.includes(":=")).sort()).toEqual([
+      "a.href=/h1", "a.title=w1", "d1.alt=w1", "d1.title=tb", "d2.alt=tb", "d2.title=w1",
+      "o.title=tb", "o.value=b", "r.max=100", "r.min=1",
+    ]);
+    // one element's writes are contiguous (written together)
+    const ids = log.filter((l) => !l.includes(":=")).map((l) => l.split(".")[0]);
+    expect(ids.filter((x, j) => j === 0 || ids[j - 1] !== x)).toEqual(["r", "o", "a", "d1", "d2"]);
+    expect(`${$("#r").value} ${$("#s").value}/${$("#s").selectedIndex} ${$("#i").value}`).toBe("50 b/1 w1");
+  });
+
+  test("N1 runtime: a render effect queued between two writers of one element sees both new values", () => {
+    document.body.innerHTML = '<div><img id="p"></div>';
+    const img = $("#p");
+    const s = new rtm.Scope(rtm.root);
+    const a = new rtm.Cell(1), b = new rtm.Cell(1), m = new rtm.Cell(1);
+    const seen = [];
+    rtm.attr(s, img, "src", () => "/p" + a.get());
+    rtm.effect(s, () => { m.get(); seen.push(`${img.getAttribute("src")} ${img.getAttribute("alt")}`); });
+    rtm.attr(s, img, "alt", () => "x" + b.get());
+    seen.length = 0;
+    rtm.batch(() => { a.set(2); m.set(2); b.set(2); });
+    expect(seen).toEqual(["/p2 x2"]);
+    s.dispose();
+  });
+
+  // N2: a queued sibling disposed before it would have run no longer strands the element's value
+  test("N2 runtime: a queued sibling writer disposed mid-flush — the element's new value is written", () => {
+    document.body.innerHTML = '<div><img id="p"></div>';
+    const img = $("#p");
+    const s = new rtm.Scope(rtm.root);
+    const s2 = s.child();
+    const c = new rtm.Cell(1);
+    rtm.attr(s, img, "src", () => "/p" + c.get());
+    rtm.effect(s, () => { if (c.get() === 2) s2.dispose(); });
+    rtm.attr(s2, img, "title", () => "t" + c.get());
+    rtm.batch(() => c.set(2));
+    expect(img.getAttribute("src")).toBe("/p2");
+    expect(img.isConnected).toBe(true);
+    s.dispose();
+  });
+
+  // N3: a `data-scrml-ns` template's view (svg / math content, unwrapped) is a fragment of the
+  // template content's document — inert in a browser, like the HTML path's clone — never one made by
+  // the live document, where an `<img>` written at the mount would load before `insert`. happy-dom
+  // has no inert template documents (a template's content, and every fragment, belongs to the live
+  // one), so this pins the mechanism: the view is the content's own (shallow) clone, and `insert`
+  // adopts the subtree into the page with its namespaces.
+  test("N3 runtime: an svg template's view is a clone of the template content, adopted on insert", () => {
+    const SVG = "http://www.w3.org/2000/svg";
+    document.body.innerHTML = '<template id="ns-t" data-scrml-ns="svg"><svg><foreignObject><img></foreignObject></svg></template><div id="host"></div>';
+    const content = $("#ns-t").content;
+    const clone = content.cloneNode.bind(content);
+    const made = [];
+    content.cloneNode = (deep) => { const c = clone(deep); made.push([deep, c]); return c; };
+    const frag = rtm.template("ns-t");
+    expect(made.length).toBe(1);
+    expect(made[0][0]).toBe(false);
+    expect(frag).toBe(made[0][1]);
+    const fo = frag.firstChild;
+    const img = fo.firstChild;
+    const s = new rtm.Scope(rtm.root);
+    rtm.attr(s, img, "src", () => "/x.png");
+    rtm.insert(s, frag, rtm.mount($("#host")));
+    expect(img.ownerDocument).toBe(document);
+    expect(img.isConnected).toBe(true);
+    expect(img.getAttribute("src")).toBe("/x.png");
+    expect($("#host").firstChild).toBe(fo);
+    expect(fo.namespaceURI).toBe(SVG);
+    expect(fo.localName).toBe("foreignObject");
+    s.dispose();
+  });
+});
