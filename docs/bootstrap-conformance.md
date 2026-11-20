@@ -7,11 +7,11 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1947 of 1947 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1948 of 1948 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 752 | 38.6% |
+| PASS | 753 | 38.7% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 0 | 0.0% |
 | LEGACY | 0 | 0.0% |
@@ -20,9 +20,9 @@ Scope: **1947 of 1947 cases attempted** — every attempted case reached the pur
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 752; of those, 752 hold (100.0%). Runtime half executed on the bootstrap for 240 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 753; of those, 753 hold (100.0%). Runtime half executed on the bootstrap for 240 case(s).
 
-- **Vacuous** passes: 16 of 752 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **736**.
+- **Vacuous** passes: 16 of 753 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **737**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 0 of 0; the other 0 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
@@ -109,7 +109,7 @@ NOT-TWINNED by reason (638 cases; a case counts once per distinct reason):
 | capability | 12 | 7 | · | · | · | · | 5 | · | · |
 | channel | 49 | 11 | · | · | · | 37 | 1 | · | · |
 | codegen | 4 | 1 | · | · | · | 3 | · | · | · |
-| components | 71 | 4 | · | · | · | 65 | 2 | · | · |
+| components | 72 | 5 | · | · | · | 65 | 2 | · | · |
 | condition | 36 | 25 | · | · | · | 2 | 9 | · | · |
 | control-flow | 76 | 43 | · | · | · | 24 | 9 | · | · |
 | defer | 51 | 26 | · | · | · | 4 | 21 | · | · |
@@ -179,7 +179,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (752)
+### PASS / CODES-ONLY (753)
 
 - `attr-executable-sink/base-href-data-neg` — PASS · TWIN
 - `attr-executable-sink/base-href-static-pos` — PASS · TWIN
@@ -255,6 +255,7 @@ none
 - `channel/watches-no-pk` — PASS (also emitted, unasserted: W-SCHEMA-001)
 - `channel/watches-unknown-table` — PASS
 - `codegen/cg-export-enum-library-rep` — PASS · TWIN
+- `components/name-collides-reserved-cell-full-neg` — PASS
 - `components/name-collides-reserved-cell-neg` — PASS
 - `components/name-collides-reserved-cell-pos` — PASS
 - `components/name-collides-reserved-db-neg` — PASS
