@@ -208,6 +208,10 @@ const R3_CASES = [
     prog("${ let n: number = 1 }", "${ function bump() -> number { n = 10; return 0 } }", "${", "    <d>: number = n * 2", "}", "${ let k: number = bump() }", '<p id="c">${@d} ${n} ${k}</p>'), "2 1 0"],
   ["r05 — the same block's later `const k = bump()` (split)",
     prog("${ let n: number = 1 }", "${ function bump() -> number { n = 10; return 0 } }", "${", "    <d>: number = n * 2", "    const k: number = bump()", "}", '<p id="c">${@d} ${n} ${k}</p>'), "2 1 0"],
+  // r3 probe x02: a `const` in a LATER markup interpolation is a file-scope binding too (the artifact
+  // prints `const w = bump();` at module initialization) — on 1caa16f4c "20 10 0"
+  ["x02 — a later markup interpolation's `const w = bump()`",
+    prog("${ let n: number = 1 }", "${ function bump() -> number { n = 10; return 0 } }", "${", "    <d>: number = n * 2", "}", "<div>${ const w: number = bump() }</div>", '<p id="c">${@d} ${n} ${w}</p>'), "2 1 0"],
 ];
 
 describe("r3 — the seed comes after EVERY file-scope binding on the CLI artifact (re-review F1)", () => {
@@ -219,7 +223,7 @@ describe("r3 — the seed comes after EVERY file-scope binding on the CLI artifa
     }, 120000);
     test(`${name}: refused (left in \`\${}\` with the note)`, () => {
       const fx = fixS66(src, { filePath: F, entry: true, rules: S66_RULES, allowNonCompiling: true });
-      expect(fx.blockers.map((b) => b.reason).join("\n")).toMatch(/file-scope binding on line \d+ is not provably free of writes and calls/);
+      expect(fx.blockers.map((b) => b.reason).join("\n")).toMatch(/(file-scope binding|expression) on line \d+ is not provably free of writes and calls/);
     });
   }
 
