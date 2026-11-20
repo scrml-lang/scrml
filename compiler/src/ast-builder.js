@@ -22992,6 +22992,11 @@ function readEndpointOpenerAttrs(header) {
         if (p >= 0 && p < end && !covered[p]) entry = { kind: "unread", value: null, at: at(t) };
       }
     }
+    // A name written flush against a character the reader dropped (`'POST'`, `y'` in
+    // `note='x cors="*" y'`) is the text of the dropped run, already refused above as
+    // E-ATTR-001 — not an attribute the author wrote (E-ENDPOINT-ATTR-INVALID skips it).
+    const dropped = (i) => i >= BEFORE && i < end && !covered[i] && !/\s/.test(synthetic[i]);
+    if (t.span && (dropped(t.span.start - 1) || dropped(t.span.end))) entry.inDropped = true;
     if (!attrs.has(name)) attrs.set(name, []);
     attrs.get(name).push(entry);
   }
@@ -23889,6 +23894,28 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
               `\`${name}=\` (§61.2 \`endpoint-attrs ::= path-attr method-attr accepts-attr cors-attr?\`); it is ` +
               `refused rather than read first-wins. Keep one.`,
               span,
+            ));
+          }
+        }
+        // §61.2 — an attribute whose NAME is outside `endpoint-attrs` is refused, whatever
+        // its value (ruling:user-voice-scrml.md-S480-four-recs-2 item 1): a misspelled
+        // `cor="*"` was read and ignored, so the endpoint silently served no CORS. The name
+        // is matched exactly — `CORS=`, `x:cors=`, `data-cors=` are not `cors=`. Reported at
+        // the attribute, once per written occurrence — not for a name that is the inside of
+        // a run the reader dropped (`method='POST'`), which E-ATTR-001 already refused.
+        const ENDPOINT_ATTR_NAMES = new Set(["path", "method", "accepts", "cors"]);
+        for (const [name, list] of epAttrs) {
+          if (ENDPOINT_ATTR_NAMES.has(name)) continue;
+          for (const a of list) {
+            if (a.inDropped) continue;
+            errors.push(new TABError(
+              "E-ENDPOINT-ATTR-INVALID",
+              `E-ENDPOINT-ATTR-INVALID: \`${name}\` is not an \`<endpoint>\` attribute. An \`<endpoint>\` opener ` +
+              `carries \`path="…"\`, \`method=…\`, \`accepts=Enum\` and an optional \`cors="…"\` only (§61.2 ` +
+              `\`endpoint-attrs ::= path-attr method-attr accepts-attr cors-attr?\`); any other attribute is ` +
+              `refused rather than ignored, so a misspelling such as \`cor="*"\` is not compiled as an endpoint ` +
+              `with no CORS. Remove it, or correct its name.`,
+              headerSpanAt(a.at),
             ));
           }
         }

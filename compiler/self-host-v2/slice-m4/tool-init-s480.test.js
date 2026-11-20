@@ -108,3 +108,63 @@ describe("§7.6 rule (a) in a tool — synchronous initializers run at module lo
     expect(codes(r)).toEqual(["E-FILE-SCOPE-SERVER-ONLY-REACH"]);
   });
 });
+
+// S480 (s480-ruled-followups) — ruling:user-voice-scrml.md-S480-four-recs-2 item 3: "in a tool,
+// evaluate every file-scope initializer in source order" (#1999 review: an UNREAD initializer was
+// elided by the tool printer's constsReadIn / serverReach, so a `tick()` counter was
+// order-dependent). Red on base 71f68da72: `U` was not printed, so B was 20 and calls 2 (exit 32 for 43), and `bump` was not printed (exit 0 for 5).
+describe("a tool evaluates every file-scope initializer, in source order (ruling S480 four-recs-2 item 3)", () => {
+  const UNREAD = `<program kind="tool" lang="js">
+    \${
+        let calls = 0;
+        function tick() -> int { calls = calls + 1; return calls * 10; }
+        const A = tick();
+        const U = tick();
+        const B = tick();
+    }
+    function main(args: string[]) -> number {
+        return A + B + calls;
+    }
+</program>
+`;
+  // `bump` is called ONLY by the unread initializer — it must still be printed and run.
+  const ONLY_INIT = `<program kind="tool" lang="js">
+    \${
+        let hits = 0;
+        function bump() -> int { hits = hits + 5; return hits; }
+        const U = bump();
+    }
+    function main(args: string[]) -> number {
+        return hits;
+    }
+</program>
+`;
+
+  let tmp;
+  let compileFile;
+  beforeAll(async () => {
+    tmp = mkdtempSync(join(tmpdir(), "s480-tool-every-init-"));
+    ({ compileFile } = await import("../../../scripts/scrml-boot.ts"));
+  });
+  afterAll(() => { if (tmp) rmSync(tmp, { recursive: true, force: true }); });
+
+  const runTool = async (name, src) => {
+    const file = join(tmp, name + ".scrml");
+    writeFileSync(file, src);
+    const out = join(tmp, "out-" + name);
+    const r = await compileFile(file, { outDir: out });
+    expect(r.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+    expect(r.ok).toBe(true);
+    const p = Bun.spawnSync(["bun", join(out, name + ".js")], { cwd: tmp, stdout: "pipe", stderr: "pipe", env: { ...process.env, NO_COLOR: "1" } });
+    expect(p.stderr.toString()).toBe("");
+    return p.exitCode;
+  };
+
+  test("an unread initializer between two read ones runs in its place: A=10, U=20, B=30, calls=3 → exit 43", async () => {
+    expect(await runTool("unread", UNREAD)).toBe(43);
+  }, 120000);
+
+  test("a function only an unread initializer calls is printed and run at module load: hits=5 → exit 5", async () => {
+    expect(await runTool("onlyinit", ONLY_INIT)).toBe(5);
+  }, 120000);
+});

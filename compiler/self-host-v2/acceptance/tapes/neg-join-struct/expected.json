@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-tapes-neg-join-struct",
+  "description": "E-TYPE-031: `join` on a struct tape.",
+  "language-version": "1.0",
+  "spec": "§66.12.6 rule 3 · §20.7.2 · ruling:user-voice-scrml.md-S479-3B-rest-item-13",
+  "rationale": "A struct has no one honest text, so `join` has nothing to join; the alternative is `xs.map(fmt).join(sep)`.",
+  "expect": {
+    "codes": [
+      "E-TYPE-031"
+    ],
+    "codeCounts": {
+      "E-TYPE-031": 1
+    }
+  }
+}

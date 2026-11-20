@@ -87,7 +87,7 @@ ${
         const epRefused: string[] = endpointRefusal(p).concat(channelRefusal(p))
         if (epRefused.length > 0) return { js: "", refused: epRefused, routes: [] }
         const ctx: Ctx = serverCtx(p)
-        const reach: int[] = serverReach(p, routed.concat(endpointFns(p)))
+        const reach: int[] = serverReach(p, routed.concat(endpointFns(p)), false)
 
         // s472 (boot-math-port): the host modules the reached functions call (§21.3.1 —
         // imported from `./_scrml/<module>/<file>`, the same copy the client artifact imports)
@@ -272,7 +272,10 @@ ${
         const refused: string[] = serverPrintRefusal(p)
         if (refused.length > 0) return { js: "", refused: refused }
         const ctx: Ctx = serverCtx(p)
-        const reach: int[] = serverReach(p, [mf])
+        // S480 (ruling:user-voice-scrml.md-S480-four-recs-2 item 3): a tool evaluates EVERY
+        // file-scope initializer, in source order — not only those `main` reads — so an
+        // unread initializer's effect (a `tick()` counter) is not elided (§7.6 rule (b), §64.1).
+        const reach: int[] = serverReach(p, [mf], true)
         let reachedFns: Fn[] = []
         for (const rf of p.fns) {
             if (reach.indexOf(rf.sym.id) >= 0) reachedFns = reachedFns.concat([rf])
@@ -284,11 +287,10 @@ ${
         ]
         body = body.concat(hostImports(p, reachedFns))
 
-        // the constants the reached functions read
-        let roots: Node[] = []
-        for (const sf2 of p.server) { if (reach.indexOf(sf2.sym.id) >= 0) roots = roots.concat([Node.NServerFn(sf2)]) }
-        for (const f2 of p.fns) { if (reach.indexOf(f2.sym.id) >= 0) roots = roots.concat([Node.NFn(f2)]) }
-        body = body.concat(constStmts(ctx, constsReadIn(p, roots)))
+        // the file-scope bindings: EVERY one, in Core (source) order, each initializer
+        // evaluated once at module load whether or not `main` reads it (S480 — see the
+        // serverReach call above; a web artifact keeps only what its code reads, constsReadIn)
+        body = body.concat(constStmts(ctx, p.consts))
 
         // the queries' text, frozen once at load (§8.1)
         const queries: SqlQuery[] = queriesIn(p, reach)
@@ -701,7 +703,10 @@ ${
     // s479: and the functions the initializers of the file-scope bindings that reached code
     // reads call — each such initializer runs in this artifact at module initialization
     // (§7.6 S478 rule (b)), so its callees are server-artifact code too.
-    fn serverReach(p: CoreProgram, routed: ServerFn[]) -> int[] {
+    // S480: `everyInit` (a tool) — every file-scope initializer runs at module load, so the
+    // functions EVERY initializer calls are reached, not only those of the bindings reached
+    // code reads (ruling:user-voice-scrml.md-S480-four-recs-2 item 3).
+    fn serverReach(p: CoreProgram, routed: ServerFn[], everyInit: boolean) -> int[] {
         let out: int[] = []
         let todo: int[] = []
         for (const sf of routed) {
@@ -715,7 +720,9 @@ ${
             let roots: Node[] = []
             for (const sf2 of p.server) { if (out.indexOf(sf2.sym.id) >= 0) roots = roots.concat([Node.NServerFn(sf2)]) }
             for (const f2 of p.fns) { if (out.indexOf(f2.sym.id) >= 0) roots = roots.concat([Node.NFn(f2)]) }
-            for (const k of constsReadIn(p, roots)) {
+            let inits: CoreConst[] = p.consts
+            if (!everyInit) inits = constsReadIn(p, roots)
+            for (const k of inits) {
                 for (const n of allNodes(Node.NExpr(k.init))) {
                     const c: Sym | not = nodeCallee(n)
                     if (c is given) {

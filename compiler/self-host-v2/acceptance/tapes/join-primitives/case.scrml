@@ -1,0 +1,14 @@
+// `join(sep)` on a primitive or unit-enum tape joins each element's one honest text (§20.7.2, S479 item 13).
+<program>
+    type C:enum = { Red, Green }
+    <ns:int[]=([10, -9, 0])/>
+    <fs:number[]=([0.5, 1e21, -0.0])/>
+    <bs:bool[]=([true, false])/>
+    <cs:C[]=([C.Red, C.Green])/>
+    <main>
+        <p id="ns">${@ns.sort().join(",")}</p>
+        <p id="fs">${@fs.join(" ")}</p>
+        <p id="bs">${@bs.join("/")}</p>
+        <p id="cs">${@cs.join("+")}</p>
+    </main>
+</program>

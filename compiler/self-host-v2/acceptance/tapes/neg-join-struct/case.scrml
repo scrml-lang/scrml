@@ -1,0 +1,8 @@
+// `join` joins its elements' one honest text (§20.7.2); a struct has none — map it first: `xs.map(fmt).join(sep)` (S479 item 13).
+<program>
+    type P:struct = { n: int }
+    <ps:P[]=([{ n: 1 }, { n: 2 }])/>
+    <main>
+        <p>${@ps.join(",")}</p>
+    </main>
+</program>
