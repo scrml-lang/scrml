@@ -10,7 +10,7 @@ ${
     }
     function outer(n: number)! E2 {
         match risky(n) {
-            .Ok(x) :> @seen = "ok",
+            .Ok(_) :> @seen = "ok",
             .Boom(m) :> { fail .Wrapped(m); },
             .Other :> @seen = "other"
         }

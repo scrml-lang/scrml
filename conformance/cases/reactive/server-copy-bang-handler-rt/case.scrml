@@ -12,7 +12,7 @@
     function pick(n: int) -> int {
         const r = look(n) !{
             .Gone :> -1,
-            .Transport(t) :> -2
+            .Transport(_) :> -2
         };
         return r * 10;
     }

@@ -341,6 +341,83 @@ export function attrSinkKey(
 export const ATTR_INTERP_EXECUTABLE_CODE = "E-ATTR-INTERP-EXECUTABLE";
 
 /**
+ * SPEC §5.2 "Data-supplied stylesheets (S472)" — impl#1 under the S479 carve-out 2
+ * (ruling:user-voice-scrml.md-S479-3B-rest-item-21). "A `<link>` (tag compared case-insensitively)
+ * whose `href` (any case) is not a static string … and whose `rel` contains the text `stylesheet`
+ * (ASCII case-insensitive, anywhere in the value …) or is not a static string … SHALL be a compile
+ * error (E-ATTR-STYLESHEET-HREF)." The bootstrap's shape (analyze.scrml `sheetHrefFromData` /
+ * `linkRelLoadsSheet`), read over impl#1's attribute values.
+ */
+export const ATTR_STYLESHEET_HREF_CODE = "E-ATTR-STYLESHEET-HREF";
+
+/**
+ * The marker an enum variant's `renders` template (and an `<errorBoundary>` `fallback=`) carries in
+ * place of a payload-field interpolation `${field}` once codegen/emit-error-boundary.ts
+ * `compileBoundaryMarkup` has captured it: `<SENTINEL>field<SENTINEL>`. A private-use code point, so
+ * no source text spells it. An attribute value holding it is written from the variant's payload —
+ * data, not static text (S480 r1 F1).
+ */
+export const RENDERS_FIELD_SENTINEL = "\uE000";
+
+/**
+ * A static attribute value: a quoted string with no `${…}` and no captured `renders` payload field
+ * (`RENDERS_FIELD_SENTINEL`), or a bare (valueless) attribute.
+ */
+function attrValueIsStatic(v: unknown): boolean {
+  const val = (typeof v === "string" ? { kind: "string-literal", value: v } : v) as { kind?: string; value?: unknown } | null | undefined;
+  if (!val || val.kind === "absent") return true;
+  return val.kind === "string-literal" && typeof val.value === "string" && firstInterpolationIndex(val.value) < 0 &&
+    val.value.indexOf(RENDERS_FIELD_SENTINEL) < 0;
+}
+
+/**
+ * Does this `<link>`'s `rel` load (or may it load) a stylesheet? A static `rel` whose text holds
+ * `stylesheet` anywhere (ASCII case-insensitive — a superset of the token test) or a `&` (a character
+ * reference: `style&#115;heet`), or any `rel` that is not static. A valueless `rel` loads nothing.
+ */
+export function linkRelLoadsSheet(attrs: ReadonlyArray<unknown> | null | undefined): boolean {
+  for (const a of attrs ?? []) {
+    const attr = a as { name?: unknown; value?: unknown } | null;
+    if (!attr || typeof attr.name !== "string" || attr.name.toLowerCase() !== "rel") continue;
+    const raw: unknown = attr.value;
+    const v = (typeof raw === "string" ? { kind: "string-literal", value: raw } : raw) as { kind?: string; value?: unknown } | null | undefined;
+    if (!v || v.kind === "absent") continue;
+    if (!attrValueIsStatic(v)) return true;
+    const text = String(v.value);
+    if (text.toLowerCase().indexOf("stylesheet") >= 0 || text.indexOf("&") >= 0) return true;
+  }
+  return false;
+}
+
+/**
+ * Is `name=value` on `<tag>` a stylesheet `href` written from data — E-ATTR-STYLESHEET-HREF? `name` is
+ * `href` in any case (or a prefixed `…:href`, fail closed), `tag` is `link` in any case, the value is
+ * not static, and the element's `rel` loads a stylesheet (`linkRelLoadsSheet`).
+ */
+export function stylesheetHrefFromData(
+  tag: string | null | undefined,
+  name: string,
+  value: unknown,
+  attrs: ReadonlyArray<unknown> | null | undefined,
+): boolean {
+  if (typeof name !== "string" || String(tag ?? "").toLowerCase() !== "link") return false;
+  const n = name.toLowerCase();
+  if (n !== "href" && !n.endsWith(":href")) return false;
+  if (attrValueIsStatic(value)) return false;
+  return linkRelLoadsSheet(attrs);
+}
+
+/** The E-ATTR-STYLESHEET-HREF message (the bootstrap's text, with impl#1's `where`). */
+export function stylesheetHrefMessage(name: string, tag: string, where: string): string {
+  const at = where ? ` ${where}` : "";
+  return "`" + name + "=` on `<" + tag + ">`" + at + " takes its value from data (an expression, a variable, a call, " +
+    "a field or an interpolated string), and this `<link>`'s `rel` loads a stylesheet (it contains `stylesheet`, or " +
+    "is computed) — data never chooses a stylesheet: a whole sheet can read the page (attribute-selector `url(…)` " +
+    "fetches) and cover it. Write the `href` as a static string (`href=\"/theme.css\"`), switch between static " +
+    "`<link>`s with `if=`, or put the dynamic part in a `#{…}` rule as `@cell` (§25.7) (§5.2)";
+}
+
+/**
  * SPEC §5.2 rule 1 (S464) — a QUOTED event-handler attribute with no `${…}` (`onclick="alert(1)"`).
  * The browser would run its text as raw JavaScript, unchecked by scrml. (Code name owner-ruled,
  * S464.)

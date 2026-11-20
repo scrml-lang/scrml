@@ -96,7 +96,7 @@ import { guardDetachedListener } from "./detached-listener.ts";
 import type { CompileContext } from "./context.ts";
 import { ENGINE_STATE_CHILD_RESERVED_ATTRS, STATE_CHILD_STRUCTURAL_TAGS } from "../engine-statechild-grammar.ts";
 import { emitValueAttrApply, armHandlerFactoryName, armWalkerPropName, armLogicFactoryName } from "./emit-event-wiring.ts";
-import { wrapUrlGuard } from "./url-attr-guard.ts";
+import { guardedAttrWrite, wrapUrlGuard } from "./url-attr-guard.ts";
 import { colorActiveHandler, activeHandlerStatementListColor } from "./js-async-analysis.ts";
 
 // ---------------------------------------------------------------------------
@@ -937,9 +937,14 @@ function emitArmWireFunction(
       const valueJs = binding.directiveUrlGuard === true
         ? wrapUrlGuard(EL, attrName, jsExpr, binding.directiveUrlGuardTarget ?? null)
         : jsExpr;
-      lines.push(`      ${EL}.setAttribute(${JSON.stringify(attrName)}, ${valueJs});`);
+      // §5.2 (S479 carve-out 2) — a CSS-url attribute / a `<link>`'s `href` (`directiveWriteGuard`,
+      // stamped by emit-html): the guarded setter, which removes a refused value.
+      const write = binding.directiveWriteGuard
+        ? `${guardedAttrWrite(EL, attrName, jsExpr, binding.directiveWriteGuard)};`
+        : `${EL}.setAttribute(${JSON.stringify(attrName)}, ${valueJs});`;
+      lines.push(`      ${write}`);
       if (refs.length > 0 || readsRow(jsExpr)) {
-        lines.push(`      ${DS}.push(_scrml_effect(function() { ${EL}.setAttribute(${JSON.stringify(attrName)}, ${valueJs}); }));`);
+        lines.push(`      ${DS}.push(_scrml_effect(function() { ${write} }));`);
       }
     }
     lines.push(`    }`);
@@ -999,6 +1004,7 @@ function emitArmWireFunction(
       EL,
       binding.valueAttrUrlGuard === true,
       binding.valueAttrUrlGuardTarget ?? null,
+      binding.valueAttrWriteGuard ?? null,
     );
     lines.push(`  {`);
     lines.push(`    const ${EL} = ${R}.querySelector(${JSON.stringify(selector)});`);

@@ -61,7 +61,7 @@ import {
   ATTR_INTERP_EXECUTABLE_CODE,
   attrSinkKey,
 } from "../attr-injection-sink.ts";
-import { dynamicUrlAttrNeedsGuard, quotedUrlAttrNeedsGuard, refuseExecutableDataWrite, urlGuardTarget, wrapUrlGuard } from "./url-attr-guard.ts";
+import { dataAttrWriteGuard, dynamicUrlAttrNeedsGuard, guardedAttrWrite, quotedUrlAttrNeedsGuard, refuseExecutableDataWrite, urlGuardTarget, wrapUrlGuard } from "./url-attr-guard.ts";
 // The markup-return detection (same-file + the transitive fixpoint) lives in one
 // shared module so codegen and module-resolver.js classify identically — an
 // IMPORTED markup fn is flagged on its export-registry entry and mounts across
@@ -2983,6 +2983,13 @@ function renderTemplateAttrToJs(
     dynamicUrlAttrNeedsGuard(_elTag, aName, _elAttrs as unknown[])
       ? wrapUrlGuard(elVar, aName, valueJs, urlGuardTarget(_elTag, aName, _elAttrs as unknown[]))
       : valueJs;
+  // §5.2 (S479 carve-out 2) — a CSS-url attribute (`fill=it.paint`) or a `<link>`'s `href`: the
+  // guarded setter (a refused value REMOVES the attribute). Otherwise the write is unchanged.
+  const _writeGuard = dataAttrWriteGuard(_elTag, aName, _elAttrs as unknown[]);
+  const _dataWrite = (valueJs: string): string =>
+    _writeGuard !== null
+      ? `${guardedAttrWrite(elVar, aName, valueJs, _writeGuard)};`
+      : `${elVar}.setAttribute(${JSON.stringify(aName)}, ${_urlValue(valueJs)});`;
   // §5.2 (S457) — a `srcdoc` (an HTML document) or an event-handler attribute is never
   // written from row data: refused here (VP-3 refuses the srcdoc forms first; event names
   // are wired as listeners above, so this is the backstop).
@@ -2997,14 +3004,14 @@ function renderTemplateAttrToJs(
   if (valKind === "expr") {
     const expr = lowerEachExpr(String(val.raw ?? ""), iterVarName);
     for (const _l of maybeWrapEachPerItemEffect(
-      [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, ${_urlValue(`_scrml_g.String(${expr})`)});`], iterVarName, indent,
+      [`${indent}${_dataWrite(`_scrml_g.String(${expr})`)}`], iterVarName, indent,
     )) lines.push(_l);
     return;
   }
   if (valKind === "variable-ref") {
     const expr = lowerEachExpr(String(val.name ?? ""), iterVarName);
     for (const _l of maybeWrapEachPerItemEffect(
-      [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, ${_urlValue(`_scrml_g.String(${expr})`)});`], iterVarName, indent,
+      [`${indent}${_dataWrite(`_scrml_g.String(${expr})`)}`], iterVarName, indent,
     )) lines.push(_l);
     return;
   }
@@ -3016,7 +3023,7 @@ function renderTemplateAttrToJs(
     // class — the generic value-attribute sibling of the class: arm.)
     const expr = lowerEachExpr(`${String(val.name ?? "")}(${serializeCallArgs(val, iterVarName)})`, iterVarName);
     for (const _l of maybeWrapEachPerItemEffect(
-      [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, ${_urlValue(`_scrml_g.String(${expr})`)});`], iterVarName, indent,
+      [`${indent}${_dataWrite(`_scrml_g.String(${expr})`)}`], iterVarName, indent,
     )) lines.push(_l);
     return;
   }
@@ -3056,7 +3063,7 @@ function renderTemplateAttrToJs(
         ? wrapUrlGuard(elVar, aName, tpl, urlGuardTarget(_elTag, aName, _elAttrs as unknown[]))
         : tpl;
       for (const _l of maybeWrapEachPerItemEffect(
-        [`${indent}${elVar}.setAttribute(${JSON.stringify(aName)}, ${_tplValue});`], iterVarName, indent,
+        [`${indent}${_writeGuard !== null ? `${guardedAttrWrite(elVar, aName, tpl, _writeGuard)};` : `${elVar}.setAttribute(${JSON.stringify(aName)}, ${_tplValue});`}`], iterVarName, indent,
       )) lines.push(_l);
       return;
     }

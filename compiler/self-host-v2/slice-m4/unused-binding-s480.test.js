@@ -189,4 +189,73 @@ describe("§7.3.5 — arm binders (S480 ruling item 2)", () => {
     const src = `<program>\n${TY}    <t:T=.B/>\n    <match for=T on=@t>\n        <A(v)><p>a</p></>\n        <B><p>b</p></>\n        <C(x, y)><p title=x>\${y}</p></>\n    </match>\n</program>\n`;
     expect(unused(src)).toEqual(["v"]);
   });
+
+  // s480-unused-sweep (review of #2009, LOW): the fix is spelled in the arm's own syntax, and every arm
+  // message names the `_`-prefixed-name alternative (§7.3.5 "or a `_`-prefixed name").
+  test("a `<match>` arm's message spells the fix in markup (`<V(_)>`), not `.V(_)`; both arm forms name `_v`", () => {
+    const mk = `<program>\n${TY}    <t:T=.B/>\n    <match for=T on=@t>\n        <A(v)><p>a</p></>\n        <B><p>b</p></>\n        <C(_, _)><p>c</p></>\n    </match>\n</program>\n`;
+    const [m] = unusedMsgs(mk);
+    expect(m).toContain("`<V(_)>`");
+    expect(m).not.toContain("`.V(_)`");
+    expect(m).toContain("`_v`");
+    const [v] = unusedMsgs(valueProg(`            .A(v) :> 1,\n            .B :> 0,\n            .C(_, _) :> 2`));
+    expect(v).toContain("`.V(_)`");
+    expect(v).toContain("`_v`");
+    const ws = unusedMsgs(errProg(`g(1) !{ .Bad(_) :> 1, _ err :> 2 }`));
+    expect(ws.length).toBe(1);
+    expect(ws[0]).toContain("`_err`");
+  });
+});
+
+// S480 ruling (`ruling:user-voice-scrml.md-S480-each-binders`) item 1: "Unread `<each>` binders are
+// reported … for the same reason you gave for loop binders"; item 2: nested `function` declarations are not.
+describe("§7.3.5 — `<each>` binders (S480 each-binders ruling)", () => {
+  const RT = `    type R:struct = { id: int, name: string, on: boolean, cells: string[] }\n    <rs:R[]=([])/>\n`;
+  const eachProg = (body, decls = "") => `<program>\n${RT}${decls}    <ul>\n${body}\n    </ul>\n</program>\n`;
+
+  test("an unread `as name` warns, at the name, with the `<each>` message", () => {
+    const src = eachProg(`        <each in=@rs as r>\n            <li>row</li>\n        </each>`);
+    expect(unused(src)).toEqual(["r"]);
+    const [m] = unusedMsgs(src);
+    expect(m).toContain("`r` is bound by this `<each>`'s `as r`, but nothing in the row reads it (§7.3.5)");
+    expect(m).toContain("remove `as r`");
+    expect(m).toContain("`_r`");
+  });
+
+  test("a binder read in an interpolation, attribute, handler, row `if=`, or its `<each>`'s `key=` is read", () => {
+    const decls = `    let <pick:int=0/>\n    function sel(i: int) { @pick = i; }\n    <p>\${@pick}</p>\n`;
+    const rows = [
+      `<each in=@rs as a>\n            <li>\${a.name}</li>\n        </each>`,
+      `<each in=@rs as b>\n            <li title=b.name>x</li>\n        </each>`,
+      `<each in=@rs as c>\n            <li onclick=sel(c.id)>x</li>\n        </each>`,
+      `<each in=@rs as d>\n            <li onclick={ @pick = d.id; }>x</li>\n        </each>`,
+      `<each in=@rs as e>\n            <li if=e.on>x</li>\n        </each>`,
+      `<each in=@rs as f key=f.id>\n            <li>x</li>\n        </each>`,
+    ];
+    for (const r of rows) expect(unused(eachProg(`        ${r}`, decls))).toEqual([]);
+  });
+
+  test("nested `<each>`: an outer binder read in the inner row (or as its source) is read; an unread inner one warns", () => {
+    expect(unused(eachProg(`        <each in=@rs as f>\n            <each in=@rs as g>\n                <li>\${f.name} \${g.name}</li>\n            </each>\n        </each>`))).toEqual([]);
+    expect(unused(eachProg(`        <each in=@rs as row>\n            <each in=row.cells as cell>\n                <li>c</li>\n            </each>\n        </each>`))).toEqual(["cell"]);
+  });
+
+  test("a binder read by a component's prop, or inside a `<match>` arm in the row, is read", () => {
+    const card = `<card t:string/>\nrenders <div class="c"><span>\${t}</span></div>\n`;
+    expect(unused(card + eachProg(`        <each in=@rs as r>\n            <li><card t=r.name/></li>\n        </each>`))).toEqual([]);
+    const P = `    type P:enum = { A(v: int), B }\n    <p:P=.B/>\n`;
+    expect(unused(eachProg(`        <each in=@rs as r>\n            <match for=P on=@p>\n                <A(v)><li>\${v} \${r.name}</li></>\n                <B><li>b</li></>\n            </match>\n        </each>`, P))).toEqual([]);
+  });
+
+  test("a read through `@.` reads the binding (§17.7.3: `name` and `@.` are aliases)", () => {
+    expect(unused(eachProg(`        <each in=@rs as r>\n            <li>\${@.name}</li>\n        </each>`))).toEqual([]);
+  });
+
+  test("an `<each>` with no `as`, and a `_`-prefixed `as _r`, are not reported", () => {
+    expect(unused(eachProg(`        <each in=@rs>\n            <li>row</li>\n        </each>\n        <each in=@rs as _r>\n            <li>row</li>\n        </each>`))).toEqual([]);
+  });
+
+  test("item 2: an unused nested `function` declaration is not reported by W-UNUSED-BINDING", () => {
+    expect(unused(fnProg(`        function helper() -> int { return 1; }\n        @n = 2;`))).toEqual([]);
+  });
 });

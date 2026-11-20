@@ -1,6 +1,6 @@
 import { guardDetachedListener } from "./detached-listener.ts";
 import { rewriteReactiveRefs, rewriteExprArrowBody } from "./rewrite.js";
-import { wrapUrlGuard } from "./url-attr-guard.ts";
+import { guardedAttrWrite, wrapUrlGuard, type AttrWriteGuard } from "./url-attr-guard.ts";
 import { rewriteBlockBody, emitMatchExpr, emitIfValueExpr, hasFailableMatchStamp, type EngineRewriteCtx } from "./emit-control-flow.ts";
 import { emitHandlerStatementList } from "./emit-logic.ts";
 import { emitExprField, reparseRequestRefEscapeHatch, withBoundaryCatchSite, boundaryChecksEmittedCount } from "./emit-expr.ts";
@@ -118,6 +118,8 @@ interface LogicBinding {
   valueAttrUrlGuard?: boolean;
   /** S457: an SVG animation value → the animated URL attribute, the guard's 4th argument. */
   valueAttrUrlGuardTarget?: string;
+  /** §5.2 (S479 carve-out 2): a CSS-url attribute / a `<link>`'s `href` → the guarded setter. */
+  valueAttrWriteGuard?: AttrWriteGuard;
   /** Phase 2 if/show split: mount/unmount semantics. See binding-registry.ts. */
   isMountToggle?: boolean;
   templateId?: string;
@@ -456,6 +458,9 @@ function buildServerFnNames(fnNameMap: Map<string, string>): Set<string> {
  *   removes the attribute.
  * @param urlGuardTarget S457 — for an SVG animation value (`binding.valueAttrUrlGuardTarget`):
  *   the animated URL attribute, passed to the guard as its 4th argument.
+ * @param writeGuard  §5.2 (S479 carve-out 2) — `binding.valueAttrWriteGuard` (a CSS-url attribute, an
+ *   animation value that may write one, or a `<link>`'s `href`): the write is the guarded setter,
+ *   which removes a refused value; `urlGuard` is then not consulted. Absence still removes.
  */
 export function emitValueAttrApply(
   compiled: string,
@@ -464,13 +469,17 @@ export function emitValueAttrApply(
   el = "_scrml_el",
   urlGuard = false,
   urlGuardTarget: string | null = null,
+  writeGuard: AttrWriteGuard | null = null,
 ): string {
   const strValue = urlGuard ? wrapUrlGuard(el, attrName, "_scrml_g.String(_scrml_x)", urlGuardTarget) : "_scrml_g.String(_scrml_x)";
+  const setWrite = writeGuard !== null
+    ? `${guardedAttrWrite(el, attrName, "_scrml_g.String(_scrml_x)", writeGuard)};`
+    : `${el}.setAttribute(${JSON.stringify(attrName)}, ${strValue});`;
   const write = isFormValue
     ? `const _scrml_s = (_scrml_x === null || _scrml_x === undefined) ? "" : _scrml_g.String(_scrml_x); ` +
       `if (${el}.value !== _scrml_s) { ${el}.value = _scrml_s; }`
     : `if (_scrml_x === null || _scrml_x === undefined) { ${el}.removeAttribute(${JSON.stringify(attrName)}); } ` +
-      `else { ${el}.setAttribute(${JSON.stringify(attrName)}, ${strValue}); }`;
+      `else { ${setWrite} }`;
   return (
     `{ const _scrml_w = function(_scrml_x) { ${write} }; ` +
     `const _scrml_v = (${compiled}); ` +
@@ -2069,6 +2078,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
             armEl(),
             binding.valueAttrUrlGuard === true,
             binding.valueAttrUrlGuardTarget ?? null,
+            binding.valueAttrWriteGuard ?? null,
           );
           // Rebindable — re-binds the attr effect scoped to a swapped region and
           // is region-tracked for teardown (same contract as the bool path).

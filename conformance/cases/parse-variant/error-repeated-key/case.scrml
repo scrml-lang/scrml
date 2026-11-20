@@ -13,9 +13,9 @@ ${
     function decode() {
         @result = parseVariant('{"tag":"Success","rows":42,"rows":7}', LoadResult) !{
             ::MissingDiscriminator          :> { @parseError = "missing-discriminator"; return; },
-            ::UnknownVariant(tag)           :> { @parseError = "unknown-variant"; return; },
-            ::InvalidPayload(field, reason) :> { @parseError = "invalid-payload:" + field; return; },
-            ::Malformed(reason)             :> { @parseError = "malformed"; return; }
+            ::UnknownVariant(_)             :> { @parseError = "unknown-variant"; return; },
+            ::InvalidPayload(field, _)      :> { @parseError = "invalid-payload:" + field; return; },
+            ::Malformed(_)                  :> { @parseError = "malformed"; return; }
         };
     }
 }

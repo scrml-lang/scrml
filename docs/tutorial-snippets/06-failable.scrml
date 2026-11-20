@@ -64,7 +64,7 @@
       .InvalidEmail(e)   :> { @phase = Phase.Errored("Not an email: " + e); return; },
       .DuplicateEmail(e) :> { @phase = Phase.Errored(e + " is already taken."); return; },
       .Storage           :> { @phase = Phase.Errored("The database is unavailable."); return; },
-      .Transport(t)      :> { @phase = Phase.Errored("Could not reach the server."); return; },
+      .Transport(_)      :> { @phase = Phase.Errored("Could not reach the server."); return; },
     };
     @phase = .Saved;
   }

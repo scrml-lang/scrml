@@ -98,9 +98,10 @@ describe("§5 applyChunkDependencies — fixed-point shape", () => {
   });
 
   test("multi-pass closure: changes propagate transitively", () => {
-    // meta → metaemit → urlguard → errors is a depth-3 chain in today's table.
+    // meta → metaemit → urlguard → errors is a depth-3 chain in today's table (S480 r1: metaemit
+    // also pulls cssattrguard, the CSS-url attribute reader its gate calls).
     const chunks = new Set(["meta"]);
     applyChunkDependencies(chunks);
-    expect([...chunks].sort()).toEqual(["errors", "meta", "metaemit", "urlguard"]);
+    expect([...chunks].sort()).toEqual(["cssattrguard", "errors", "meta", "metaemit", "urlguard"]);
   });
 });

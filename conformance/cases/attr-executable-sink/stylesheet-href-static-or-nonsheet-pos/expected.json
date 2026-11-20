@@ -1,0 +1,11 @@
+{
+  "id": "attr-executable-sink-stylesheet-href-static-or-nonsheet-pos",
+  "description": "§5.2 \"Data-supplied stylesheets (S472)\" — what is NOT refused: a static `href` on a stylesheet `<link>`, and a data `href` on a `<link>` whose static `rel` holds no `stylesheet` (an icon, a `preload` with `as=\"style\"`, a `<link>` with no `rel`). Codes only: the runtime write of a `<link>`'s data `href` is not asserted here (impl#1 does not lower a parenthesized `href=(…)` on `<link>` at all — it writes no `href`; §5.2 rule 3 judges the scheme where it is written). impl#1 built under the S479 carve-out 2 (ruling:user-voice-scrml.md-S479-3B-rest-item-21).",
+  "language-version": "1.0",
+  "spec": "§5.2",
+  "rationale": "§5.2: \"Not refused: a static `href` (`<link rel=\\\"stylesheet\\\" href=\\\"/app.css\\\">`), and a data `href` on a `<link>` whose static `rel` holds no `stylesheet` (an icon — rule 3 still judges its scheme).\"",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ATTR-STYLESHEET-HREF", "E-ATTR-INTERP-EXECUTABLE"]
+  }
+}

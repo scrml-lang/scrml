@@ -1,0 +1,18 @@
+<program>
+    type Row:struct = { id: int, name: string, cells: string[] }
+    <rows:Row[]=([])/>
+    <ul id="flat">
+        <each in=@rows as r>
+            <li>row</li>
+        </each>
+    </ul>
+    <table id="grid">
+        <each in=@rows as row>
+            <tr title=row.name>
+                <each in=row.cells as cell>
+                    <td>cell</td>
+                </each>
+            </tr>
+        </each>
+    </table>
+</program>

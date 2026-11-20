@@ -6,7 +6,7 @@ import type { ExprNode } from "../types/ast.ts";
 import { collectMarkupNodes } from "./collect.ts";
 import { getNodes } from "./collect.ts";
 import { rewriteTemplateAttrValue, rewriteReactiveRefs, rewriteVariantTagReads } from "./rewrite.js";
-import { quotedUrlAttrNeedsGuard, urlGuardTarget, wrapUrlGuard } from "./url-attr-guard.ts";
+import { dataAttrWriteGuard, guardedAttrWrite, quotedUrlAttrNeedsGuard, urlGuardTarget, wrapUrlGuard } from "./url-attr-guard.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
 import { refinementOf, refinementAtPath, judgeBaseType, judgeTypeExpr, type Refinement } from "./emit-predicates.ts";
@@ -1050,10 +1050,16 @@ export function emitBindings(ctx: CompileContext): string[] {
           const valueJs = quotedUrlAttrNeedsGuard(mkTag, attrName, rawValue, nodeAttrs)
             ? wrapUrlGuard(tplElemId, attrName, jsExpr, urlGuardTarget(mkTag, attrName, nodeAttrs))
             : jsExpr;
-          lines.push(`    ${tplElemId}.setAttribute(${JSON.stringify(attrName)}, ${valueJs});`);
+          // §5.2 (S479 carve-out 2) — a CSS-url attribute (`fill="${@c}"`) or a `<link>`'s `href`:
+          // the guarded setter (a refused value REMOVES the attribute). Otherwise unchanged.
+          const writeGuard = dataAttrWriteGuard(mkTag, attrName, nodeAttrs);
+          const write = writeGuard !== null
+            ? `${guardedAttrWrite(tplElemId, attrName, jsExpr, writeGuard)};`
+            : `${tplElemId}.setAttribute(${JSON.stringify(attrName)}, ${valueJs});`;
+          lines.push(`    ${write}`);
           // Auto-tracking effect handles all reactive dependencies automatically
           if (reactiveVars.size > 0) {
-            lines.push(`    _scrml_mount_track(_scrml_effect(() => { ${tplElemId}.setAttribute(${JSON.stringify(attrName)}, ${valueJs}); }));`);
+            lines.push(`    _scrml_mount_track(_scrml_effect(() => { ${write} }));`);
           }
         }
         lines.push(`  }`);
