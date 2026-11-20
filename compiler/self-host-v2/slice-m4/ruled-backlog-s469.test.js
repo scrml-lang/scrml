@@ -338,7 +338,7 @@ describe("A — block arms yield with `lift` (§18.5); the value-form `if` branc
   });
   test("`lift` anywhere but an arm block's last statement is refused by name; so is one in a statement-position arm", () => {
     expect(diag(fn(`        const r = load(id) !{ _ :> {\n            lift "a"\n            @_out = "b";\n        } }\n        return r;`), "E-BOOTSTRAP-UNSUPPORTED")?.message).toContain("`lift`");
-    expect(diag(fn(`        load(id) !{ _ :> {\n            @_out = "e";\n            lift "e";\n        } };\n        return "s";`), "E-BOOTSTRAP-UNSUPPORTED")?.message).toContain("yields to nothing");
+    expect(diag(fn(`        load(id) !{ _ :> {\n            @_out = "e";\n            lift "e";\n        } };\n        return "s";`), "E-BOOTSTRAP-UNSUPPORTED")?.message).toContain("nearest enclosing bound loop");   // s480: §49.6 rule 7 — none encloses it
     // s469-boot-loop-value-form: a `lift` in a bare `function` outside any bound loop is §10.4's E-SYNTAX-002
     expect(diag(fn(`        lift "x";\n        return "s";`), "E-SYNTAX-002")?.message).toContain("`lift`");
   });

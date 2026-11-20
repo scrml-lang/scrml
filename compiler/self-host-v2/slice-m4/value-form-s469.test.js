@@ -157,10 +157,13 @@ describe("refused by name (E-BOOTSTRAP-UNSUPPORTED) — not in the SPEC's words 
     expect(codes(prog(ZS + `\n    fn g(ys: int[]) -> int {\n        for (y of ys) { lift y; }\n        return 1;\n    }`, `        <p>\${g(@zs)}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(codes(prog(ZS, `        <button onclick={ for (y of @zs) { lift y; } }>b</button>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
-  test("a `lift` inside an arm block of a bound loop's body (§49.6 rule 7 vs §18.5 — an open reading)", () => {
+  // s480 (RULED S479 §3.B item 17): §49.6 rule 7 is built for a STATEMENT-position arm — its `lift`s go to
+  // the bound loop (slice-m4/stmt-arm-lift-s480.test.js); this one now runs: [3, 0, 4, 0, 5, 0] → 6
+  test("a `lift` inside a statement-position arm block of a bound loop's body goes to the loop (§49.6 rule 7, built S480)", async () => {
     const T = `    type E:enum = { A, B }`;
     const src = prog(`${ZS}\n${T}\n    function f(ys: int[], e: E) -> int {\n        const xs = for (y of ys) {\n            match e {\n                .A :> { lift y; lift 0; },\n                .B :> { }\n            }\n        };\n        return xs.length;\n    }`, `        <p>\${f(@zs, E.A)}</p>`);
-    expect(codes(src)).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    await load(src);
+    expect($("p").textContent).toBe("6");
   });
   test("lifted MARKUP in a statement-bound loop (markup is not a value in the bootstrap's logic)", () => {
     // (a function body is lexed as logic, so the element's text cascades — the refusal is the first report)
