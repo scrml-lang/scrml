@@ -292,3 +292,79 @@ describe("E — served through scrml-boot (compile = production, --dev / dev = d
     expect(readFileSync(join(work, "cli-prod", "program.server.js"), "utf8")).not.toContain("devBuild");
   }, 300000);
 });
+
+// s480 r1 (review #2011): F1 — a DEVELOPMENT build defaults to its own folder (`dist/<name>.dev/`),
+// never the production `dist/<name>/`, and says "do not deploy" when it starts; F2/F3 — with no
+// AsyncLocalStorage the server refuses to start (no process-wide fallback record to flood or share).
+describe("F — r1: the dev build never lands in the production folder; it warns; no ALS, no server", () => {
+  let work;
+  beforeAll(() => {
+    work = mkdtempSync(join(tmpdir(), "s480-r1-"));
+    DDL(join(work, "app.db"));
+    writeFileSync(join(work, "app.scrml"), PROGRAM);
+  });
+  afterAll(() => rmSync(work, { recursive: true, force: true }));
+  const DEV_WARN = "DEVELOPMENT build — do not deploy";
+
+  test("a dev artifact's createServer logs one loud do-not-deploy line; a production artifact logs nothing new", async () => {
+    const devLogs = [];
+    await serve(core, sql, devLogs, { dev: true });
+    expect(devLogs.filter((l) => l.includes(DEV_WARN)).length).toBe(1);
+    const prodLogs = [];
+    await serve(core, sql, prodLogs, {});
+    expect(prodLogs).toEqual([]);
+  });
+
+  test("`compile` then `scrml-boot dev` (no -o): dist/app/ is still the production build; the dev build is in dist/app.dev/ and warns", async () => {
+    const c = Bun.spawnSync(["bun", CLI, "compile", join(work, "app.scrml")], { stdout: "pipe", stderr: "pipe" });
+    expect(c.exitCode).toBe(0);
+    const prodJs = join(work, "dist", "app", "program.server.js");
+    expect(readFileSync(prodJs, "utf8")).not.toContain("devBuild");
+    const p = Bun.spawn(["bun", CLI, "dev", join(work, "app.scrml"), "--port", "0"], {
+      env: { ...process.env, NO_COLOR: "1" }, stdout: "pipe", stderr: "pipe",
+    });
+    const reader = p.stderr.getReader();
+    let log = "";
+    try {
+      const end = Date.now() + 120000;
+      while (!/✓ .*compiled/.test(log)) {
+        if (Date.now() > end) throw new Error("dev server: timed out\n" + log);
+        const { value, done } = await reader.read();
+        if (done) throw new Error("dev server exited:\n" + log);
+        log += new TextDecoder().decode(value);
+      }
+    } finally {
+      p.kill();
+      await p.exited;
+    }
+    expect(log).toContain(DEV_WARN);
+    expect(readFileSync(prodJs, "utf8")).not.toContain("devBuild");
+    expect(readFileSync(join(work, "dist", "app.dev", "program.server.js"), "utf8")).toContain("rt.devBuild(host$)");
+  }, 300000);
+
+  test("`compile --dev` with no -o also writes dist/app.dev/, not dist/app/", async () => {
+    const { compileFile, defaultOutDir } = await import(CLI);
+    expect(defaultOutDir(join(work, "app.scrml"), true)).toBe(join(work, "dist", "app.dev"));
+    expect(defaultOutDir(join(work, "app.scrml"))).toBe(join(work, "dist", "app"));
+    const r = await compileFile(join(work, "app.scrml"), { dev: true });
+    expect(r.ok).toBe(true);
+    expect(r.outDir).toBe(join(work, "dist", "app.dev"));
+  }, 300000);
+
+  test("no AsyncLocalStorage on the host: createServer throws (dev and production) — no unscoped fallback", async () => {
+    const { compileFile } = await import(CLI);
+    for (const dev of [false, true]) {
+      const out = join(work, dev ? "noals-dev" : "noals-prod");
+      expect((await compileFile(join(work, "app.scrml"), { outDir: out, dev })).ok).toBe(true);
+      // a fresh process: the runtime caches its store once it has one
+      const script = `process.getBuiltinModule = undefined;
+        const m = await import(${JSON.stringify(pathToFileURL(join(out, "program.server.js")).href)});
+        try { m.createServer({ root: ${JSON.stringify(work)}, log: () => {} }); console.log("SERVED"); }
+        catch (e) { console.log("REFUSED " + e.message); }`;
+      const r = Bun.spawnSync(["bun", "-e", script], { stdout: "pipe", stderr: "pipe" });
+      const outText = r.stdout.toString();
+      expect(outText).toContain("REFUSED scrml server: no AsyncLocalStorage");
+      expect(outText).not.toContain("SERVED");
+    }
+  }, 300000);
+});

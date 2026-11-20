@@ -1237,11 +1237,13 @@ function constraintField(e, msg) {
 //    `scrml-boot dev`, `scrml-boot compile --dev` — wraps its host in `devBuild`): delivered
 //    unchanged. Every other artifact is production, whatever its host passes (a host's own
 //    `dev: true` decides nothing — ruling item 10: "the deployed artifact fails safe").
-// Fail closed: with no AsyncLocalStorage the request's texts cannot be told
-// apart, so a production build blanks EVERY string of a failure payload; a
-// returned value is checked against every driver text the process recorded
-// outside a request scope (`UNSCOPED`, bounded) — never blanked wholesale, so an
-// ordinary returned string is the author's.
+// Fail closed: with no AsyncLocalStorage one request's driver texts cannot be told
+// apart from another's, so the server REFUSES TO START (`server` → `requestStore`
+// throws) rather than serve — the same way an envelope requires its scope store.
+// s480 r1 (review #2011 F2/F3): there is no process-wide fallback record — one could
+// be flooded until a text was evicted (then delivered), and blanked request B's own
+// string that equalled request A's token. A text noted outside every request scope
+// (a module-level query) is recorded nowhere: no route delivers from it.
 // The full text was already logged where the query failed (runQuery).
 // ---------------------------------------------------------------------------
 const DEV_BUILD = Symbol("scrml.devBuild");
@@ -1255,29 +1257,26 @@ export function devBuild(host) {
 function isDevBuild(host) {
   return host !== null && typeof host === "object" && host[DEV_BUILD] === true;
 }
-// driver texts recorded where no request scope is open (no AsyncLocalStorage on this host)
-const UNSCOPED = { texts: [], messages: [], tokens: [], unknown: false };
-const UNSCOPED_MAX = 256;
 let reqScope = null;
 function requestStore() {
   if (reqScope === null) {
     const hooks = globalThis.process && typeof globalThis.process.getBuiltinModule === "function"
       ? globalThis.process.getBuiltinModule("node:async_hooks") : null;
-    if (!hooks || typeof hooks.AsyncLocalStorage !== "function") return null;
+    if (!hooks || typeof hooks.AsyncLocalStorage !== "function") {
+      throw new Error("scrml server: no AsyncLocalStorage — one request's database driver text cannot be told apart from another's, so it cannot be withheld from what a route delivers (§19.8.4); refusing to serve");
+    }
     reqScope = new hooks.AsyncLocalStorage();
   }
   return reqScope;
 }
 
 function noteDriverText(e, err) {
-  const scoped = reqScope === null ? undefined : reqScope.getStore();
-  const rec = scoped === undefined ? UNSCOPED : scoped;
+  const rec = reqScope === null ? undefined : reqScope.getStore();
+  if (rec === undefined) return;   // outside every request: no route delivers from it
   const addTo = (list, t) => {
     if (typeof t !== "string" || t === "" || list.includes(t)) return;
     list.push(t);
     rec.texts.push(t);
-    if (rec === UNSCOPED && list.length > UNSCOPED_MAX) list.shift();
-    if (rec === UNSCOPED && rec.texts.length > UNSCOPED_MAX * 2) rec.texts.shift();
   };
   const msg = messageOf(e);
   addTo(rec.messages, msg);
@@ -1336,29 +1335,22 @@ function taintedBy(rec) {
 // What a route of a PRODUCTION build delivers in place of `v` (its §57 table `table`): `v` with the
 // request's driver text withheld (S474 ruling 2; S480 ruling item 16 — "every value a route
 // delivers, returned as well as failed"). `what` names the delivery in the log line. A dev build
-// delivers `v` unchanged. `failure`: with no request scope a failure payload is blanked whole.
-function deliverable(host, rec, table, v, failure, where, what) {
+// delivers `v` unchanged.
+function deliverable(host, rec, table, v, where, what) {
   if (isDevBuild(host)) return v;
-  let tainted;
-  if (rec.unknown && failure) tainted = () => true;
-  else {
-    const r = rec.unknown ? UNSCOPED : rec;
-    if (r.texts.length === 0) return v;
-    tainted = taintedBy(r);
-  }
-  const w = withheldValue(table, v, tainted);
+  if (rec.texts.length === 0) return v;
+  const w = withheldValue(table, v, taintedBy(rec));
   if (w.changed) {
     logLine(host, `scrml server: ${where} — ${what} carried database driver text; blanked in the response (production build, S474 ruling 2 / S480 ruling item 16) — the full text is logged above`);
   }
   return w.value;
 }
 
-// A fresh request record, and the scope it is noted in (`unknown`: no AsyncLocalStorage on this host).
+// A fresh request record, and the scope it is noted in (`server` has already required the store).
 function requestRecord() {
-  const rec = { texts: [], messages: [], tokens: [], unknown: false };
+  const rec = { texts: [], messages: [], tokens: [] };
   const rs = requestStore();
-  if (rs === null) rec.unknown = true;
-  return { rec, run: (fn) => (rs === null ? fn() : rs.run(rec, fn)) };
+  return { rec, run: (fn) => rs.run(rec, fn) };
 }
 
 // ---------------------------------------------------------------------------
@@ -1597,6 +1589,11 @@ export function tenantGate(host, conns) {
 // `websocket` handlers as Bun.serve's `websocket:` option (§38.8: "a `_scrml_ws_handlers`
 // export for `Bun.serve()`'s `websocket:` option").
 export function server(host, routes, conns = [], endpoints = [], channels = []) {
+  // s480 r1 (review #2011 F2/F3): fail closed — no per-request scope, no server (see deliverable)
+  requestStore();
+  // s480 r1 (review #2011 F1): a DEVELOPMENT build says so, loudly, once, when it starts — a
+  // production build logs nothing new
+  if (isDevBuild(host)) logLine(host, "scrml server: DEVELOPMENT build — do not deploy (database driver text reaches the client, §19.8.4)");
   const byPath = new Map();
   for (const r of routes) byPath.set(r.path, r);
   // s478 (s478-boot-endpoint): the §61 endpoints, by path, then method (§61.7 — "mounted for
@@ -2544,7 +2541,7 @@ async function handleEndpoint(host, ep, request) {
     logLine(host, `scrml server: ${ep.method} ${ep.path} <${variant.name}> has no result table`);
     return jsonResponse(host, 500, FIXED[500]);
   }
-  const out = encode(arm.result, deliverable(host, rec, arm.result, result, false, `${ep.method} ${ep.path} <${variant.name}>`, "its answer"));
+  const out = encode(arm.result, deliverable(host, rec, arm.result, result, `${ep.method} ${ep.path} <${variant.name}>`, "its answer"));
   if (!out.ok) {
     logLine(host, `scrml server: ${ep.method} ${ep.path} <${variant.name}> — its answer does not encode (${out.error.reason})`);
     return jsonResponse(host, 500, FIXED[500]);
@@ -2596,7 +2593,7 @@ async function handle(host, r, request) {
       return jsonResponse(host, 500, FIXED[500]);
     }
     const ev = result.error;
-    const errv = deliverable(host, rec, r.desc.error, ev, true, r.path, `its failure (${String(ev !== null && typeof ev === "object" ? ev.variant : ev)})`);
+    const errv = deliverable(host, rec, r.desc.error, ev, r.path, `its failure (${String(ev !== null && typeof ev === "object" ? ev.variant : ev)})`);
     const env = encodeError(r.desc.error, errv);
     if (!env.ok) {
       logLine(host, `scrml server: ${r.path} — its error does not encode (${env.error.reason})`);
@@ -2606,7 +2603,7 @@ async function handle(host, r, request) {
     return jsonResponse(host, failStatus(out.variant), out);
   }
   if (r.desc.result === null) return noContent(host);
-  const out = encode(r.desc.result, deliverable(host, rec, r.desc.result, result, false, r.path, "its returned value"));
+  const out = encode(r.desc.result, deliverable(host, rec, r.desc.result, result, r.path, "its returned value"));
   if (!out.ok) {
     logLine(host, `scrml server: ${r.path} — its answer does not encode (${out.error.reason})`);
     return jsonResponse(host, 500, FIXED[500]);

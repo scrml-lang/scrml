@@ -16,7 +16,8 @@
  *   bun run boot:compile <file.scrml>          (package script → `compile`)
  *   bun run boot:dev <file.scrml>              (package script → `dev`)
  *
- * OUTPUT (default `<dir of file>/dist/<name>/`; `--output-dir` writes into that dir directly):
+ * OUTPUT (default `<dir of file>/dist/<name>/` — a DEVELOPMENT build (`dev`, `compile --dev`) `dist/<name>.dev/`;
+ *   `--output-dir` writes into that dir directly):
  *   index.html               the page: the program's <template>s + <script type="module" src="program.client.js">
  *   program.client.js        the client artifact (print.scrml printProgram)
  *   scrml-runtime.js         the bootstrap runtime (slice-m1/runtime/runtime.js)
@@ -391,8 +392,12 @@ export type CompileResult = {
   ms: { boot: number; compile: number };
 };
 
-export function defaultOutDir(entryAbs: string): string {
-  return join(dirname(entryAbs), "dist", basename(entryAbs, extname(entryAbs)));
+// s480 r1 (review #2011 F1): a DEVELOPMENT build (`scrml-boot dev`, `compile --dev`) defaults to its
+// OWN folder, `dist/<name>.dev/`, never the production `dist/<name>/` — so deploying `dist/<name>/`
+// after a dev session ships the production build `compile` wrote, not a dev build's driver text
+// (S480 ruling item 10: "the deployed artifact fails safe").
+export function defaultOutDir(entryAbs: string, dev = false): string {
+  return join(dirname(entryAbs), "dist", basename(entryAbs, extname(entryAbs)) + (dev ? ".dev" : ""));
 }
 
 /** A compile with nothing written: the diagnostics, and the printed artifacts when it got that far. */
@@ -705,7 +710,7 @@ async function compileTool(
 
 export async function compileFile(file: string, opts: { outDir?: string; rebuild?: boolean; log?: (s: string) => void; stdlibRoot?: string; dev?: boolean } = {}): Promise<CompileResult> {
   const entryAbs = resolve(file);
-  const outDir = opts.outDir ? resolve(opts.outDir) : defaultOutDir(entryAbs);
+  const outDir = opts.outDir ? resolve(opts.outDir) : defaultOutDir(entryAbs, opts.dev === true);
   const c = await compileSource(entryAbs, { rebuild: opts.rebuild, log: opts.log, stdlibRoot: opts.stdlibRoot, dev: opts.dev === true });
   const result = (ok: boolean, written: string[] = [], server = false): CompileResult =>
     ({ ok, diagnostics: c.diagnostics, sources: c.sources, files: c.files, outDir, written, server, tool: c.tool?.file, ms: c.ms });
@@ -1437,7 +1442,8 @@ Usage:
   scrml-boot dev <file.scrml> [options]       Compile a DEVELOPMENT build, serve on 127.0.0.1, recompile + reload on save
 
 Options:
-  --output-dir, -o <dir>   Output directory (default: dist/<name>/ next to the file). scrml-boot records
+  --output-dir, -o <dir>   Output directory (default: dist/<name>/ next to the file; a DEVELOPMENT build —
+                           \`dev\`, \`compile --dev\` — dist/<name>.dev/, never the production folder). scrml-boot records
                            what it writes there (.scrml-boot-manifest.json), later overwrites or deletes
                            only those files, and refuses a directory holding an unrecorded file it would write
   --format <pretty|line>   Diagnostic format (default pretty; line = file:line:col: error [CODE]: msg)

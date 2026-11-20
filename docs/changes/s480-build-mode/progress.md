@@ -18,3 +18,13 @@ Rulings: user-voice-scrml.md "⭐ RULED — the rest of S478 hand-off §3.B, PA 
   exit 0; host-global-scan 1/2 + 2/2 clean (new case pinned in known-throws). Byte-compare over 1921 conformance
   cases: html / client / codes identical; the 36 server artifacts differ ONLY in the createServer comment line.
   Corpus: no new refusal (diagnostic codes identical on every case) — newly-rejecting 0.
+
+## r1 fix round (security review #2011, LAND-W-F/U)
+- [x] F1 (MED): a DEVELOPMENT build (`scrml-boot dev`, `compile --dev`) defaults to `dist/<name>.dev/`
+  (scripts/scrml-boot.ts `defaultOutDir(entry, dev)`), never the production `dist/<name>/`; a dev
+  artifact's server logs "scrml server: DEVELOPMENT build — do not deploy …" once at createServer
+  (server-runtime.js `server`); production logs nothing new.
+- [x] F2+F3 (LOW): no AsyncLocalStorage → `server` throws (fail closed); the UNSCOPED process-wide
+  fallback is removed. SPEC §19.9.1 "Every value a route delivers": one sentence.
+- [x] F4 (INFO): note on g-boot-refinement-runtime-checks-s478.
+- Tests: build-mode-s480.test.js describe F (4 tests, all red on d5fda3557).
