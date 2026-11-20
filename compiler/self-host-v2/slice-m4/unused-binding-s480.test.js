@@ -133,14 +133,60 @@ describe("§7.3.5 — the forms that are not warned", () => {
     expect(unused(`<program>\n    \${ const k = 1; let m = 2; }\n    <p>x</p>\n</program>\n`)).toEqual([]);
   });
 
-  test("an unread `match` arm binder is not reported (a pattern binder, §18.7)", () => {
-    const src = `<program>\n    type T:enum = { A(v: int), B }\n    function f(t: T) -> int {\n        return match t {\n            .A(v) :> 1,\n            .B :> 0\n        };\n    }\n    <p>\${f(T.B)}</p>\n</program>\n`;
-    expect(unused(src)).toEqual([]);
-  });
-
   test("a compile with an Error reports no W-UNUSED-BINDING (the reads inside a refused construct are not known)", () => {
     const ds = diags(fnProg(`        const a = 1;\n        @n = nope;`));
     expect(ds.some((d) => d.severity === "Error")).toBe(true);
     expect(ds.map((d) => d.code)).not.toContain("W-UNUSED-BINDING");
+  });
+});
+
+// S480 ruling item 2 (`ruling:user-voice-scrml.md-S480-unused-binding-six`): "Unread `match` / `!{}` /
+// `<match>` arm binders ARE reported … they are binding forms and `.A(_)` is the cheap fix".
+describe("§7.3.5 — arm binders (S480 ruling item 2)", () => {
+  const TY = `    type T:enum = { A(v: int), B, C(x: int, y: int) }\n`;
+  const valueProg = (arms) => `<program>\n${TY}    function f(t: T) -> int {\n        return match t {\n${arms}\n        };\n    }\n    <p>\${f(T.B)}</p>\n</program>\n`;
+  const stmtProg = (arms) => `<program>\n${TY}    let <n:int=0/>\n    function go(t: T) {\n        match t {\n${arms}\n        };\n    }\n    <p>\${@n}</p>\n    <button onclick=go(T.B)>go</button>\n</program>\n`;
+  const ERR = `    type E:enum = { Bad(why: string), Gone }\n    let <n:int=0/>\n    let <s:string=""/>\n    function g(k: int)! E { if (k > 0) { fail E.Gone; } return k; }\n`;
+  const errProg = (rhs) => `<program>\n${ERR}    function go() {\n        const a: int = ${rhs};\n        @n = a;\n    }\n    <p>\${@n} \${@s}</p>\n    <button onclick=go()>go</button>\n</program>\n`;
+
+  test("an unread `match` arm binder warns, at the binder; the read one does not", () => {
+    expect(unused(valueProg(`            .A(v) :> 1,\n            .B :> 0,\n            .C(x, y) :> x`))).toEqual(["v", "y"]);
+  });
+
+  test("the arm message names the `_` fix", () => {
+    const [m] = unusedMsgs(valueProg(`            .A(v) :> 1,\n            .B :> 0,\n            .C(_, _) :> 2`));
+    expect(m).toContain("`v` is bound by this arm's pattern, but nothing in the arm reads it (§7.3.5)");
+    expect(m).toContain("`.V(_)`");
+  });
+
+  test("`_` and a `_`-prefixed arm binder are exempt", () => {
+    expect(unused(valueProg(`            .A(_) :> 1,\n            .B :> 0,\n            .C(_x, _) :> 2`))).toEqual([]);
+  });
+
+  test("an arm binder read in a block arm, by a closure, or in a loop's `lift` is read", () => {
+    expect(unused(stmtProg(`            .A(v) :> { const w = v + 1; @n = w; },\n            .B :> { @n = 0; },\n            .C(x, y) :> { const h = () => x + y; @n = h(); }`))).toEqual([]);
+    expect(unused(stmtProg(`            .A(v) :> { const xs = for (i of [1, 2]) { lift v + i; }; @n = xs.length; },\n            .B :> { @n = 0; },\n            .C(_, _) :> { @n = 2; }`))).toEqual([]);
+  });
+
+  test("an arm binder used to rebuild a value is read", () => {
+    const src = `<program>\n${TY}    function f(t: T) -> T {\n        return match t {\n            .A(v) :> T.A(v + 1),\n            .B :> T.B,\n            .C(x, y) :> T.C(y, x)\n        };\n    }\n    function k(t: T) -> int {\n        return match f(t) {\n            .A(_) :> 1,\n            .B :> 0,\n            .C(_, _) :> 2\n        };\n    }\n    <p>\${k(T.B)}</p>\n</program>\n`;
+    expect(unused(src)).toEqual([]);
+  });
+
+  test("an arm binder read only by an unread local's initializer is read; the local warns (and an unread one still does)", () => {
+    expect(unused(stmtProg(`            .A(v) :> { @n = 1; },\n            .B :> { @n = 0; },\n            .C(x, y) :> { let z = x; z = y; @n = 2; }`))).toEqual(["v", "let z = x"]);
+  });
+
+  test("an unread `!{}` arm binder warns; a whole-error `_ err` binder too", () => {
+    expect(unused(errProg(`g(1) !{ .Bad(why) :> 1, _ err :> 2 }`))).toEqual(["why", "err"]);
+  });
+
+  test("a failable `match`: `.Ok(v)` and payload binders read do not warn; an unread `_ err` does", () => {
+    expect(unused(errProg(`match g(1) { .Ok(v) :> v, .Bad(why) :> { @s = why; lift 1; }, _ err :> 2 }`))).toEqual(["err"]);
+  });
+
+  test("a `<match>` arm binder unread in its markup warns; one read in an interpolation or attribute does not", () => {
+    const src = `<program>\n${TY}    <t:T=.B/>\n    <match for=T on=@t>\n        <A(v)><p>a</p></>\n        <B><p>b</p></>\n        <C(x, y)><p title=x>\${y}</p></>\n    </match>\n</program>\n`;
+    expect(unused(src)).toEqual(["v"]);
   });
 });

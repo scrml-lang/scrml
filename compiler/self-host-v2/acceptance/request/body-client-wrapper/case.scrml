@@ -9,7 +9,7 @@
         return u.name;
     }
     function pick(id: int) -> string {
-        return loadName(id) !{ .Transport(t) :> "?" };
+        return loadName(id) !{ .Transport(_) :> "?" };
     }
     <request id="userReq">${ @userName = pick(@userId); }</request>
     <main>

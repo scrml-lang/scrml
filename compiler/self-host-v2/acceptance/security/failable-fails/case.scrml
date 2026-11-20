@@ -9,7 +9,7 @@
     }
     function attempt(pw: string) -> string {
         return match role(pw) {
-            .Ok(v) :> "welcome",
+            .Ok(_) :> "welcome",
             .Bad :> "denied"
         };
     }

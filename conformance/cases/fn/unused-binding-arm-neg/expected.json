@@ -1,0 +1,14 @@
+{
+  "id": "fn-unused-binding-arm-neg",
+  "description": "§7.3.5 (S480) clean neg — no W-UNUSED-BINDING: every arm binder is read (`w` as the arm's value, `why` in a block arm, `r` / `h` in a `<match>` arm's interpolation, `w` in an attribute) or written `_` / `_`-prefixed (`.Circle(_)`, `_h`, the `!{}` wildcard `_`).",
+  "language-version": "1.0",
+  "spec": "§7.3.5, §18.7",
+  "provenance": "ruling:user-voice-scrml.md-S480-unused-binding-six (item 2: arm binders reported; \"`.A(_)` is the cheap fix\")",
+  "rationale": "§7.3.5: an arm binder is reported only when \"nothing in the arm reads\" it; \"The fix is `_` in its place (`.V(_)`; `_` for `_ err`), or a `_`-prefixed name.\" A reference in a markup interpolation `${x}` or an attribute value counts as a read.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "W-UNUSED-BINDING"
+    ]
+  }
+}
