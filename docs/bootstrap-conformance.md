@@ -7,30 +7,30 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1928 of 1928 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1933 of 1933 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 734 | 38.1% |
+| PASS | 738 | 38.2% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 0 | 0.0% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 638 | 33.1% |
-| UNSUPPORTED | 556 | 28.8% |
+| NOT-TWINNED | 638 | 33.0% |
+| UNSUPPORTED | 557 | 28.8% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 734; of those, 734 hold (100.0%). Runtime half executed on the bootstrap for 238 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 738; of those, 738 hold (100.0%). Runtime half executed on the bootstrap for 239 case(s).
 
-- **Vacuous** passes: 16 of 734 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **718**.
+- **Vacuous** passes: 16 of 738 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **722**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 0 of 0; the other 0 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 556.
+UNSUPPORTED by reason: bootstrap-unsupported 557.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **889** — PASS 475 · UNSUPPORTED 414. Twin holds 475 (non-vacuous 462). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **890** — PASS 475 · UNSUPPORTED 415. Twin holds 475 (non-vacuous 462). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 5 replace a twin's expectations · 14 exclude a case.
 - Superseded-code mappings applied: 8 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -116,21 +116,21 @@ NOT-TWINNED by reason (638 cases; a case counts once per distinct reason):
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
 | element-refusal | 39 | 26 | · | · | · | 11 | 2 | · | · |
-| endpoint | 25 | 24 | · | · | · | · | 1 | · | · |
+| endpoint | 26 | 25 | · | · | · | · | 1 | · | · |
 | engine | 101 | 31 | · | · | · | 50 | 20 | · | · |
 | enum | 1 | 1 | · | · | · | · | · | · | · |
 | equality | 10 | 6 | · | · | · | 4 | · | · | · |
 | error | 80 | 56 | · | · | · | 5 | 19 | · | · |
 | error-boundary | 11 | 1 | · | · | · | · | 10 | · | · |
 | files | 1 | 1 | · | · | · | · | · | · | · |
-| fn | 27 | 19 | · | · | · | 1 | 7 | · | · |
+| fn | 29 | 21 | · | · | · | 1 | 7 | · | · |
 | foreign | 16 | 8 | · | · | · | 7 | 1 | · | · |
 | form-for | 16 | · | · | · | · | · | 16 | · | · |
 | forms | 66 | 15 | · | · | · | 49 | 2 | · | · |
 | hostmethod | 1 | 1 | · | · | · | · | · | · | · |
 | input | 2 | · | · | · | · | · | 2 | · | · |
 | lifecycle | 69 | 35 | · | · | · | 22 | 12 | · | · |
-| linear | 15 | 6 | · | · | · | · | 9 | · | · |
+| linear | 16 | 6 | · | · | · | · | 10 | · | · |
 | loop | 8 | 3 | · | · | · | 3 | 2 | · | · |
 | maps | 13 | · | · | · | · | 13 | · | · | · |
 | markup-handler | 89 | 36 | · | · | · | 40 | 13 | · | · |
@@ -159,7 +159,7 @@ NOT-TWINNED by reason (638 cases; a case counts once per distinct reason):
 | schema-for | 15 | · | · | · | · | · | 15 | · | · |
 | server-db | 92 | 15 | · | · | · | 17 | 60 | · | · |
 | server-fn | 29 | 15 | · | · | · | 7 | 7 | · | · |
-| sql | 21 | 7 | · | · | · | 9 | 5 | · | · |
+| sql | 22 | 8 | · | · | · | 9 | 5 | · | · |
 | ssr | 14 | · | · | · | · | 14 | · | · | · |
 | style | 27 | 2 | · | · | · | 24 | 1 | · | · |
 | table-for | 14 | · | · | · | · | 11 | 3 | · | · |
@@ -179,7 +179,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (734)
+### PASS / CODES-ONLY (738)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -378,6 +378,7 @@ none
 - `endpoint/accepts-unknown-name` — PASS
 - `endpoint/arm-body-undefined-scope` — PASS (also emitted, unasserted: E-TYPE-STRUCT-CONTEXT)
 - `endpoint/arm-body-valid-scope-clean` — PASS (also emitted, unasserted: E-TYPE-043)
+- `endpoint/attr-invalid-misspelled-cors` — PASS
 - `endpoint/dead-arm` — PASS
 - `endpoint/duplicate-arm` — PASS
 - `endpoint/endpoint-clean` — PASS
@@ -464,14 +465,14 @@ none
 - `error/failable-match-else-after-error-arms-rt` — PASS · TWIN
 - `error/failable-match-nonexhaustive-err` — PASS · TWIN
 - `error/failable-match-nonexhaustive-ok` — PASS · TWIN
-- `error/failable-match-whole-error-binder-rt` — PASS · TWIN
+- `error/failable-match-whole-error-binder-rt` — PASS · TWIN (also emitted, unasserted: W-UNUSED-BINDING)
 - `error/failable-match-wildcard-absorbs-error-neg` — PASS · TWIN
 - `error/for-await-not-in-scrml` — PASS · TWIN
 - `error/handler-else-covers-errors-rt` — PASS · TWIN
 - `error/handler-failable-guard-and-plain-reference-neg` — PASS · TWIN
 - `error/handler-guard-in-arrow-rt` — PASS · TWIN
 - `error/handler-guard-in-match-arm-rt` — PASS · TWIN
-- `error/handler-pipeless-arms-rt` — PASS · TWIN
+- `error/handler-pipeless-arms-rt` — PASS · TWIN (also emitted, unasserted: W-UNUSED-BINDING)
 - `error/handler-recovery-into-cell` — PASS · TWIN
 - `error/handler-unhandled-failable-bare-and-expr-pos` — PASS · TWIN
 - `error/handler-unhandled-failable-multi-stmt-pos` — PASS · TWIN
@@ -509,6 +510,8 @@ none
 - `fn/scope-redeclare-neg` — PASS · TWIN
 - `fn/scope-redeclare-nested-ok` — PASS · TWIN
 - `fn/sync-decl-clean` — PASS · TWIN
+- `fn/unused-binding-arm-neg` — PASS
+- `fn/unused-binding-arm-pos` — PASS
 - `fn/unused-binding-neg` — PASS
 - `fn/unused-binding-pos` — PASS
 - `foreign/foreign-crossing-shadow-in-block-neg` — PASS
@@ -648,18 +651,18 @@ none
 - `match-codes/e-type-025-enum-subject-neg` — PASS · TWIN · VACUOUS
 - `match-codes/e-type-026-match-in-logic-neg` — PASS · TWIN · VACUOUS
 - `match-codes/e-type-026-match-in-markup-pos` — PASS · TWIN
-- `match-leave/dpa068-failable-decl-bare-return` — PASS · TWIN (also emitted, unasserted: E-DG-002)
-- `match-leave/dpa068-failable-stmt-bare-fail` — PASS · TWIN (also emitted, unasserted: E-DG-002)
-- `match-leave/dpa068-failable-stmt-bare-return` — PASS · TWIN (also emitted, unasserted: E-DG-002)
+- `match-leave/dpa068-failable-decl-bare-return` — PASS · TWIN (also emitted, unasserted: E-DG-002, W-UNUSED-BINDING)
+- `match-leave/dpa068-failable-stmt-bare-fail` — PASS · TWIN (also emitted, unasserted: E-DG-002, W-UNUSED-BINDING)
+- `match-leave/dpa068-failable-stmt-bare-return` — PASS · TWIN (also emitted, unasserted: E-DG-002, W-UNUSED-BINDING)
 - `match-leave/dpa068-guard-bare-fail` — PASS · TWIN (also emitted, unasserted: E-DG-002)
-- `match-leave/dpa068-guard-bare-return-stmt` — PASS · TWIN (also emitted, unasserted: E-DG-002)
+- `match-leave/dpa068-guard-bare-return-stmt` — PASS · TWIN (also emitted, unasserted: E-DG-002, W-UNUSED-BINDING)
 - `match-leave/dpa068-guard-bare-return-valuepos` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `match-leave/dpa068-guard-stmt-bare-fail-then-after` — PASS · TWIN (also emitted, unasserted: E-DG-002)
-- `match-leave/dpa068-handler-value-bare-return` — PASS · TWIN (also emitted, unasserted: E-DG-002)
+- `match-leave/dpa068-handler-value-bare-return` — PASS · TWIN (also emitted, unasserted: E-DG-002, W-UNUSED-BINDING)
 - `match-leave/dpa068-stmt-bare-fail` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `match-leave/dpa068-stmt-bare-return` — PASS · TWIN (also emitted, unasserted: E-DG-002)
-- `match-leave/failable-stmt-arm-braced-fail-propagates` — PASS · TWIN (also emitted, unasserted: E-DG-002)
-- `match-leave/failable-stmt-arm-braced-return-leaves-fn` — PASS · TWIN (also emitted, unasserted: E-DG-002)
+- `match-leave/failable-stmt-arm-braced-fail-propagates` — PASS · TWIN (also emitted, unasserted: E-DG-002, W-UNUSED-BINDING)
+- `match-leave/failable-stmt-arm-braced-return-leaves-fn` — PASS · TWIN (also emitted, unasserted: E-DG-002, W-UNUSED-BINDING)
 - `match-leave/given-arm-body-lowered` — PASS · TWIN (also emitted, unasserted: W-GIVEN-PRESENCE-DEPRECATED)
 - `match-leave/given-arm-legacy-arrow-keeps-body` — PASS · TWIN (also emitted, unasserted: W-GIVEN-PRESENCE-DEPRECATED, W-MATCH-ARROW-LEGACY)
 - `match-leave/given-arm-malformed-heads-in-assignment-match-neg` — PASS · TWIN
@@ -719,18 +722,18 @@ none
 - `parse-syntax/e-syntax-042-not-value-position-neg` — PASS · TWIN · VACUOUS
 - `parse-syntax/e-syntax-042-null-value-position-pos` — PASS · TWIN
 - `parse-variant/alias-of-struct-neg` — PASS · TWIN
-- `parse-variant/alias-type-arg` — PASS · TWIN
-- `parse-variant/error-extra-key` — PASS · TWIN
-- `parse-variant/error-invalid-payload` — PASS · TWIN
-- `parse-variant/error-malformed-json` — PASS · TWIN
-- `parse-variant/error-missing-discriminator` — PASS · TWIN
-- `parse-variant/error-repeated-key` — PASS · TWIN
-- `parse-variant/error-unknown-variant` — PASS · TWIN
-- `parse-variant/happy-payload-variant` — PASS · TWIN
-- `parse-variant/happy-unit-variant` — PASS · TWIN
+- `parse-variant/alias-type-arg` — PASS · TWIN (also emitted, unasserted: W-UNUSED-BINDING)
+- `parse-variant/error-extra-key` — PASS · TWIN (also emitted, unasserted: W-UNUSED-BINDING)
+- `parse-variant/error-invalid-payload` — PASS · TWIN (also emitted, unasserted: W-UNUSED-BINDING)
+- `parse-variant/error-malformed-json` — PASS · TWIN (also emitted, unasserted: W-UNUSED-BINDING)
+- `parse-variant/error-missing-discriminator` — PASS · TWIN (also emitted, unasserted: W-UNUSED-BINDING)
+- `parse-variant/error-repeated-key` — PASS · TWIN (also emitted, unasserted: W-UNUSED-BINDING)
+- `parse-variant/error-unknown-variant` — PASS · TWIN (also emitted, unasserted: W-UNUSED-BINDING)
+- `parse-variant/happy-payload-variant` — PASS · TWIN (also emitted, unasserted: W-UNUSED-BINDING)
+- `parse-variant/happy-unit-variant` — PASS · TWIN (also emitted, unasserted: W-UNUSED-BINDING)
 - `parse-variant/misuse-non-enum-type` — PASS · TWIN
 - `parse-variant/non-exhaustive-handler-neg` — PASS · TWIN
-- `parse-variant/single-field-payload-bind` — PASS · TWIN
+- `parse-variant/single-field-payload-bind` — PASS · TWIN (also emitted, unasserted: W-UNUSED-BINDING)
 - `persist/counter-persist-local-pos` — PASS
 - `persist/hold-without-persist-neg` — PASS
 - `persist/key-required-neg` — PASS
@@ -803,7 +806,7 @@ none
 - `reactive/reset-init-after-assignment-rt` — PASS · TWIN
 - `reactive/reset-reserved-identifier` — PASS · TWIN
 - `reactive/s437-r5-template-cell-read-value-attr` — PASS · TWIN
-- `reactive/server-copy-bang-handler-rt` — PASS
+- `reactive/server-copy-bang-handler-rt` — PASS (also emitted, unasserted: W-UNUSED-BINDING)
 - `reactive/server-copy-chain-rt` — PASS
 - `reactive/server-copy-markup-and-server-rt` — PASS
 - `reactive/server-fn-mutual-recursion-clean` — PASS
@@ -858,16 +861,16 @@ none
 - `server-db/event-control-after-await-neg` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
 - `server-db/event-control-in-suspending-loop-neg` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
 - `server-db/inline-handler-server-call-condition-runtime` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
-- `server-db/sql-aggregate-group-rt-twin` — PASS
-- `server-db/sql-all-array-shape-rt-twin` — PASS
-- `server-db/sql-delete-reflects-rt-twin` — PASS
+- `server-db/sql-aggregate-group-rt-twin` — PASS (also emitted, unasserted: W-UNUSED-BINDING)
+- `server-db/sql-all-array-shape-rt-twin` — PASS (also emitted, unasserted: W-UNUSED-BINDING)
+- `server-db/sql-delete-reflects-rt-twin` — PASS (also emitted, unasserted: W-UNUSED-BINDING)
 - `server-db/sql-get-single-row-rt-twin` — PASS
-- `server-db/sql-join-two-tables-rt-twin` — PASS
-- `server-db/sql-multi-table-sequence-rt-twin` — PASS
-- `server-db/sql-order-limit-rt-twin` — PASS
-- `server-db/sql-select-hydrate-rt-twin` — PASS
-- `server-db/sql-update-returning-rt-twin` — PASS
-- `server-db/sql-where-filter-rt-twin` — PASS
+- `server-db/sql-join-two-tables-rt-twin` — PASS (also emitted, unasserted: W-UNUSED-BINDING)
+- `server-db/sql-multi-table-sequence-rt-twin` — PASS (also emitted, unasserted: W-UNUSED-BINDING)
+- `server-db/sql-order-limit-rt-twin` — PASS (also emitted, unasserted: W-UNUSED-BINDING)
+- `server-db/sql-select-hydrate-rt-twin` — PASS (also emitted, unasserted: W-UNUSED-BINDING)
+- `server-db/sql-update-returning-rt-twin` — PASS (also emitted, unasserted: W-UNUSED-BINDING)
+- `server-db/sql-where-filter-rt-twin` — PASS (also emitted, unasserted: W-UNUSED-BINDING)
 - `server-fn/branch-declared-server-fn-routes-to-server` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
 - `server-fn/cell-assign-failable-arm-return-live` — PASS · TWIN (also emitted, unasserted: E-DG-002, W-DEPRECATED-SERVER-MODIFIER)
 - `server-fn/cell-assign-failable-recovery-value` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
@@ -884,6 +887,7 @@ none
 - `server-fn/session-value-in-tool-neg` — PASS (also emitted, unasserted: E-PRINT-NON-PRIMITIVE)
 - `server-fn/value-server-call-interp-neg` — PASS · TWIN (also emitted, unasserted: W-DEPRECATED-SERVER-MODIFIER)
 - `sql/bare-identifier-body-e-sql-003-neg` — PASS · TWIN
+- `sql/driver-text-returned-withheld-rt` — PASS
 - `sql/e-file-scope-server-only-reach-pos` — PASS
 - `sql/multiple-statements-neg` — PASS · TWIN
 - `sql/one-statement-trailing-semicolon-pos` — PASS · TWIN
@@ -916,7 +920,7 @@ none
 - `type-state-codes/e-type-any-forbidden-pos` — PASS · TWIN
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (556)
+### UNSUPPORTED (557)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1126,6 +1130,7 @@ none
 - `lifecycle/request-refetch-fn-body-stmt-rt` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the str
 - `lifecycle/request-settle-error-rt` — twin · bootstrap-unsupported: an index read `xs[i]` is in the bootstrap on a value of tape type (`T[…]`) — this value's type is not known to be one; annotate it
 - `lifecycle/request-settle-success-rt` — twin · bootstrap-unsupported: an index read `xs[i]` is in the bootstrap on a value of tape type (`T[…]`) — this value's type is not known to be one; annotate it
+- `linear/bare-arrow-binding-called-pos` — twin · bootstrap-unsupported: the initializer of the file-scope constant `fmt` holds a function value — the bootstrap does not judge a function value's body per artifact at module initialization yet (INTERIM, g-boot-file-scope-ini
 - `linear/lin-001-never-consumed-pos` — twin · bootstrap-unsupported: the type of the file-scope `let` `result` is not known from its initializer — write it: `let result: T = …;`
 - `linear/lin-002-consumed-in-loop-neg` — twin · bootstrap-unsupported: the type of the file-scope `let` `items` is not known from its initializer — write it: `let items: T = …;`
 - `linear/lin-002-consumed-in-loop-pos` — twin · bootstrap-unsupported: the type of the file-scope `let` `items` is not known from its initializer — write it: `let items: T = …;`
