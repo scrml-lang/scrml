@@ -1,0 +1,8 @@
+{
+  "expect": {
+    "codes": ["E-TYPE-062", "E-MARKUP-STATEMENT-NOT-RENDERED"],
+    "notCodes": [],
+    "severity": { "E-TYPE-062": "error", "E-MARKUP-STATEMENT-NOT-RENDERED": "error" }
+  },
+  "reason": "S480 (s480-boot-cheap-wins — `x is .V` built in the bootstrap): the §66 twin is graded on every Error it emits (twin-extra-error). Its `${ if (name is .Admin) { <p id=\"p\">admin</> } }` puts markup in a body-top `${ }` as a statement, which the bootstrap refuses by the SPEC's own rule — §17.6.10.1 E-MARKUP-STATEMENT-NOT-RENDERED (\"markup stands as a statement and no `lift` names it\"; §17.3: a body-top `${ … }` is evaluated, not rendered). Until `is .V` was built the twin stopped at the named refusal (UNSUPPORTED) and never reached that rule. The `is` half is the case's contract and holds: `name` is a string, so §18.17's E-TYPE-062 fires. The legacy contract (E-TYPE-062, a superset check on impl#1) is unchanged. A rewrite that both implementations read alike was tried and is not available: impl#1 reports E-TYPE-062 only in this file-scope `${ if … }` shape (a parameter or local gives E-VARIANT-AMBIGUOUS; `if=` gives nothing)."
+}

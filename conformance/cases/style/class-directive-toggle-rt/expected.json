@@ -1,0 +1,17 @@
+{
+  "id": "style-class-directive-toggle-rt",
+  "description": "§5.5.2 — three `class:` directives beside a static `class=\"card\"`: on mount only `idle` holds (#box.card.idle); after #go, `active` and `big` are on and `idle` is off (#box.card.active.big, no .idle). The static class stays throughout.",
+  "language-version": "1.0",
+  "spec": "§5.5.2",
+  "rationale": "§5.5.2: \"The class named in the directive SHALL be applied on initial mount if the expression is truthy at mount time. It SHALL be absent on initial mount if the expression is falsy.\" · \"The compiler SHALL emit client-side wiring that calls `classList.toggle(name, !!condition)` on the target element when any dependency changes.\" · \"Multiple `class:` directives MAY appear on the same element. Each is independent.\" · \"`class:` directives and a static `class=` attribute MAY coexist on the same element. The static class is always present\".",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-"],
+    "input": [{ "click": "#go" }],
+    "state": { "active": true, "count": 3 },
+    "domAnchored": [
+      { "selector": "#box.card.active.big", "count": 1 },
+      { "selector": "#box.idle", "count": 0 }
+    ]
+  }
+}

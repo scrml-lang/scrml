@@ -1387,6 +1387,7 @@ ${
             .IsSome :> "IsSome"
             .IsNot :> "IsNot"
             .Concat :> "Concat"
+            .Coalesce :> "Coalesce"
             .Length :> "Length"
             .StrUpper :> "StrUpper"
             .StrLower :> "StrLower"

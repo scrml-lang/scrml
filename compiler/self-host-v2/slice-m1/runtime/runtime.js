@@ -4174,6 +4174,19 @@ export function visibility(scope, el, fn) {
 }
 
 /**
+ * s480 (s480-boot-cheap-wins) — `class:name=cond` (SPEC §5.5.2): "The compiler SHALL emit
+ * client-side wiring that calls `classList.toggle(name, !!condition)` on the target element when
+ * any dependency changes", applied on mount when the condition holds and absent when it does not.
+ * Only `name` is touched: the static `class` and every other `class:` directive are independent.
+ * A view hole (§19.17): a throw removes the class (fail closed, as `visibility` hides).
+ */
+export function classOn(scope, el, name, fn) {
+  hole(scope, () => {
+    el.classList.toggle(name, !!fn());
+  }, () => { el.classList.remove(name); });
+}
+
+/**
  * An event listener owned by `scope`; the handler runs as one batch.
  * s454 (U1b, design §2.3): each invocation runs in its OWN task, passed as the
  * handler's first argument — a handler that suspends (it calls a server

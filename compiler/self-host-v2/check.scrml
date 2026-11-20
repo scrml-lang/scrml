@@ -1838,6 +1838,7 @@ ${
             .Static(name: x) :> []
             .Bound(name: x) :> []
             .Show(test: x) :> []
+            .ClassOn(test: x) :> []
             .On(event: x) :> []
             .Gate(values: x, fields: fs) :> checkGateFields(p, encl, fs)
         }
@@ -2110,6 +2111,7 @@ ${
             .Static(name: x) :> false
             .Bound(name: x) :> false
             .Show(test: x) :> false
+            .ClassOn(test: x) :> false
             .On(event: x) :> false
             .Bind(kind: x) :> false
         }
@@ -2161,6 +2163,7 @@ ${
             .Static(name: n, value: v) :> { name: n, value: v }
             .Bound(name: x) :> not
             .Show(test: x) :> not
+            .ClassOn(test: x) :> not
             .On(event: x) :> not
             .Bind(kind: x) :> not
             .Gate(values: x) :> not
@@ -2175,6 +2178,7 @@ ${
             .Static(name: n, value: v) :> [{ name: n, text: v, computed: false }]
             .Bound(name: n) :> [{ name: n, text: not, computed: true }]
             .Show(test: x) :> []
+            .ClassOn(test: x) :> []
             .On(event: x) :> []
             .Bind(kind: x) :> []
             .Gate(values: x) :> []
@@ -3415,6 +3419,7 @@ ${
             .Static(name: x) :> []
             .Bound(name: x) :> []
             .Show(test: x) :> []
+            .ClassOn(test: x) :> []
             .Gate(values: x) :> []
         }
     }
@@ -4801,6 +4806,7 @@ ${
             .Static(name: x) :> []
             .Bound(name: x) :> []
             .Show(test: x) :> []
+            .ClassOn(test: x) :> []
             .Gate(values: x) :> []
         }
     }
@@ -4995,6 +5001,7 @@ ${
             .Static(name: x) :> []
             .Bound(name: x) :> []
             .Show(test: x) :> []
+            .ClassOn(test: x) :> []
             .Gate(values: x) :> []
         }
     }

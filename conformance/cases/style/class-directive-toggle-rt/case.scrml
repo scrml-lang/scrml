@@ -1,0 +1,13 @@
+// §5.5.2 — `class:name=cond` toggles one class beside a static class; several directives are independent.
+<program>
+<active>: bool = false
+<count>: int = 0
+${
+    function bump() {
+        @active = true;
+        @count = @count + 3;
+    }
+}
+<button id="go" onclick=bump()>go</button>
+<div id="box" class="card" class:active=@active class:big=(@count > 2) class:idle=(!@active)>box</div>
+</program>

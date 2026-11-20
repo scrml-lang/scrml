@@ -1,0 +1,14 @@
+// §17.7.3 — a bare `@.` is the current item as a whole value (here a string): in an interpolation and as an argument.
+<program>
+<items>: string[] = ["ab", "c"]
+${
+    function up(s: string) -> string {
+        return s.toUpperCase();
+    }
+}
+<ul>
+    <each in=@items>
+        <li class="row">${@.}-${up(@.)}</li>
+    </each>
+</ul>
+</program>

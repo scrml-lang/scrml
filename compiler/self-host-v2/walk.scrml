@@ -431,6 +431,7 @@ ${
             .Static(name: name, value: value) :> []
             .Bound(name: name, e: e) :> [Node.NExpr(e)]
             .Show(test: t) :> [Node.NExpr(t)]
+            .ClassOn(test: t) :> [Node.NExpr(t)]
             .On(event: event, body: body) :> [Node.NBlock(body)]
             .Bind(kind: k, read: r, sink: sk, write: w) :> [Node.NExpr(r), Node.NBlock(w)]
             .Gate(values: vs, fields: fs) :> validityNodes(fs)
@@ -635,6 +636,7 @@ ${
             .Static(name: x) :> []
             .Bound(name: x) :> []
             .Show(test: x) :> []
+            .ClassOn(test: x) :> []
             .On(event: x) :> []
             .Gate(values: x) :> []
         }

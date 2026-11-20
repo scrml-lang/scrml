@@ -1,0 +1,19 @@
+{
+  "id": "match-codes-is-variant-test-rt",
+  "description": "§18.17 — `@phase is .Busy` / `@phase is .Idle` over an enum with a unit and a payload variant: a `bool` in a `const`, a ternary test and an `if=`. After #go sets `.Busy(2)`, @label is \"busy\", #t shows \"B\" and #w renders.",
+  "language-version": "1.0",
+  "spec": "§18.17",
+  "rationale": "§18.17: \"`expr is .V` evaluates to `true` if and only if `expr`'s runtime value is the variant `V` of its enum type. It evaluates to `false` for all other variants. No payload is bound\"; \"`expression is .VariantName` SHALL have result type `boolean`\"; \"`is` MAY be used in: `if` conditions, … ternary expressions, … and any position where a boolean expression is valid.\"",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-062", "E-TYPE-063"],
+    "notCodePrefixes": ["E-"],
+    "input": [{ "click": "#go" }],
+    "state": { "label": "busy" },
+    "domAnchored": [
+      { "selector": "#out", "text": "busy" },
+      { "selector": "#t", "text": "B" },
+      { "selector": "#w", "text": "working" }
+    ]
+  }
+}

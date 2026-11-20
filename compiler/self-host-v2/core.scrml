@@ -162,6 +162,10 @@ ${
         EqPrim, NeqPrim, EqStruct, NeqStruct,
         IsSome, IsNot,
         Concat, Length,
+        // s480 (s480-boot-cheap-wins) — Coalesce(a, b): `a ?? b` — `a` when it is present,
+        // else `b`, which runs only then (JavaScript's `??`, which tests `null` AND `undefined`
+        // as `is not` does, §42.8).
+        Coalesce,
         // s469 (strings + tape methods) — typed built-in method calls; `args[0]`
         // is the receiver. Each makes a NEW value (R3). String positions count
         // CODE POINTS — everywhere (S469, bryan: "code points everywhere,
@@ -804,6 +808,11 @@ ${
         // false the element's inline `display` is `none`; while true it is the
         // element's own (its static `style`'s `display`, else none set).
         Show(test: Expr),
+        // s480 (s480-boot-cheap-wins) — `class:name=cond` (§5.5.2): while `test` is true the
+        // element's class list holds `name`, while false it does not ("call
+        // `classList.toggle(name, !!condition)` on the target element when any dependency
+        // changes"); the static `class` is untouched.
+        ClassOn(name: string, test: Expr),
         On(event: string, body: Block),
         Bind(kind: BindKind, read: Expr, sink: Sym, write: Block),
         // s449 — the form's submit listener for the §55 surface, on every

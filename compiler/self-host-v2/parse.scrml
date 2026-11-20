@@ -437,8 +437,13 @@ ${
         if (isCompoundAssign(tp)) return 0
         // s449: `<effect deps=…` on the next line opens an element, not a comparison
         if (effectTagAhead(tp) && tp.i > 0 && tp.toks[tp.i - 1].line != t.line) return 0
+        // s480 (s480-boot-cheap-wins): `??` — at `||`'s level, where JavaScript's grammar places it
+        // (§34 E-EXPR-NULLISH-MIX: "a JS grammar restriction scrml inherits"); a mix with `&&` /
+        // `||` is refused in parseBinaryTop. `??=` (touching `=`) is not built: it ends the expression.
+        if (t.text == "??" && tk(peekAt(tp, 1), "=") && touching(t, peekAt(tp, 1))) return 0
         return match t.text {
             "||"  :> 1
+            "??"  :> 1
             "&&"  :> 2
             "|"   :> 3
             "=="  :> 4
@@ -461,6 +466,7 @@ ${
     fn binOpOf(text: string) -> BinOp {
         return match text {
             "||" :> BinOp.Or
+            "??" :> BinOp.Nullish
             "&&" :> BinOp.And
             "|"  :> BinOp.Pipe
             "==" :> BinOp.Eq
@@ -629,9 +635,17 @@ ${
         return mkE(hi.tp, start, AExprK.Recovered)
     }
 
-    fn parseBinary(tp: TP, minPrec: int) -> RExpr {
+    fn parseBinary(tp: TP, minPrec: int) -> RExpr { return parseBinaryTop(tp, minPrec).r }
+
+    // s480 (s480-boot-cheap-wins): `top` — the operator text of the binary node this call built
+    // last, which is the result's root ("" — none: the result is an operand read whole, a
+    // parenthesized group included). It is how an UNPARENTHESIZED `??` beside `&&` / `||` is seen.
+    type RBin:struct = { r: RExpr, top: string }
+
+    fn parseBinaryTop(tp: TP, minPrec: int) -> RBin {
         const start: int = cur(tp).start
         let left: RExpr = parseUnary(tp)
+        let last: string = ""
         let going = true
         while (going) {
             const prec: int = binPrec(left.tp)
@@ -643,11 +657,31 @@ ${
                 if (tk(opTok, "===") || tk(opTok, "!==")) {
                     t1 = diagAt(t1, "E-PARSE-STRICT-EQ", "`" + opTok.text + "` is not scrml — `==` is already strict and structural (§45)", opTok)
                 }
-                const right: RExpr = parseBinary(adv(t1), prec + 1)
-                left = mkE(right.tp, start, AExprK.Binary(binOpOf(opTok.text), left.e, right.e))
+                const rb: RBin = parseBinaryTop(adv(t1), prec + 1)
+                let t2: TP = rb.r.tp
+                // §34 E-EXPR-NULLISH-MIX: "`??` cannot be combined with `&&` or `||` without
+                // parentheses (a JS grammar restriction scrml inherits)."
+                // The report spans the mixed OPERAND (the unparenthesized inner `&&` / `||` / `??`),
+                // so no check downstream judges the grouping JavaScript would have refused — the
+                // operand and the whole both hold it (Rule C, analyze hasErrIn).
+                let mixAt: ASpan | not = not
+                if (nullishMix(opTok.text, last)) mixAt = left.e.span
+                if (nullishMix(opTok.text, rb.top)) mixAt = rb.r.e.span
+                if (mixAt is given) {
+                    const dm: Diag = newDiag("E-EXPR-NULLISH-MIX", "`??` cannot be combined with `&&` or `||` without parentheses — say which is meant: `(a ?? b) || c` or `a ?? (b || c)` (§34)", t2.file, mkSpan(mixAt.start, mixAt.end))
+                    t2 = { toks: t2.toks, i: t2.i, nid: t2.nid, diags: t2.diags.concat([dm]), file: t2.file, ns: t2.ns, inFn: t2.inFn }
+                }
+                left = mkE(t2, start, AExprK.Binary(binOpOf(opTok.text), left.e, rb.r.e))
+                last = opTok.text
             }
         }
-        return left
+        return { r: left, top: last }
+    }
+
+    fn nullishMix(a: string, b: string) -> boolean {
+        const logicA: boolean = a == "&&" || a == "||"
+        const logicB: boolean = b == "&&" || b == "||"
+        return (a == "??" && logicB) || (b == "??" && logicA)
     }
 
     fn parseUnary(tp: TP) -> RExpr {
@@ -726,6 +760,9 @@ ${
             } else if (isPropagate(r.tp)) {
                 // s451 (Ue): `expr?` — propagation (§19.5)
                 r = handledExpr(adv(r.tp), start, r.e, AHow.Propagate)
+            } else if (isVariantTest(r.tp)) {
+                // s480 (s480-boot-cheap-wins): `expr is .V` — the single-variant test (§18.17)
+                r = variantTest(r, start)
             } else if (isPresenceTest(r.tp)) {
                 // s460: `expr is given` / `expr is not` — a postfix presence
                 // test (§42.2.2, §42.2.4), binding tighter than a prefix `!`
@@ -1088,6 +1125,44 @@ ${
     // (§42.2.2a, §63.1 Stage 1): it reads as `is given` and surfaces
     // W-IS-SOME-DEPRECATED (`someLint`). §63.5: rejecting it would be a
     // conformance bug in this implementation, not a stricter language.
+    // =========================================================================
+    // s480 (s480-boot-cheap-wins, g-boot-is-variant-unbuilt-s480) — THE SINGLE-VARIANT TEST,
+    // `expr is .V` (SPEC §18.17):
+    //   is-expression ::= expression 'is' '.' VariantName
+    // "`expr is .V` evaluates to `true` if and only if `expr`'s runtime value is the variant `V`
+    // of its enum type. It evaluates to `false` for all other variants. No payload is bound or
+    // accessible by the `is` expression itself." "`expression is .VariantName` SHALL have result
+    // type `boolean`." "The `is` operator provides NO exhaustiveness guarantee."
+    //
+    // The bootstrap reads it as the `match` that says exactly that — `match expr { .V :> true,
+    // else :> false }`: the subject evaluated once, the variant resolved against the subject's
+    // enum (§18.17 "SHALL be resolved against the enum type of the left-hand operand"), no
+    // payload bound, a `bool`, and an `else` arm, so no exhaustiveness. Its arms are marked
+    // `test`, so analyze reports the §18.17 codes for it — E-TYPE-062 (the operand is not an
+    // enum) and E-TYPE-063 (an unknown variant) — in place of a `match`'s E-TYPE-VARIANT.
+    // A postfix, as the presence tests are: `!x is .V` is `!(x is .V)`.
+    // =========================================================================
+    fn isVariantTest(tp: TP) -> boolean {
+        if (!isWord(tp, "is")) return false
+        if (tp.i == 0) return false
+        return peekAt(tp, 1).cls == TC.Variant
+    }
+
+    fn variantTest(r: RExpr, start: int) -> RExpr {
+        const vt: PTok = peekAt(r.tp, 1)
+        let t: TP = adv(adv(r.tp))
+        const vspan: ASpan = mkSpan(vt.start, vt.end)
+        const yes: AExpr = { nid: t.nid, span: vspan, k: AExprK.Bool(true) }
+        t = bumpId(t)
+        const no: AExpr = { nid: t.nid, span: vspan, k: AExprK.Bool(false) }
+        t = bumpId(t)
+        const armV: AArm = { nid: t.nid, span: vspan, pat: APat.PName(vt.v, [], false, ""), body: AArmBody.ArmExpr(yes), legacy: false, lifted: false, bare: false, test: true }
+        t = bumpId(t)
+        const armE: AArm = { nid: t.nid, span: vspan, pat: APat.PWild, body: AArmBody.ArmExpr(no), legacy: false, lifted: false, bare: false, test: true }
+        t = bumpId(t)
+        return handledExpr(t, start, r.e, AHow.MatchOn([armV, armE]))
+    }
+
     fn isPresenceTest(tp: TP) -> boolean {
         if (!isWord(tp, "is")) return false
         if (tp.i == 0) return false
@@ -1281,7 +1356,7 @@ ${
                 if (isGiven) gheads = gheads.concat([gh])
                 const rb: RArmBody = parseArmBody(t, !guard)
                 t = rb.tp
-                const arm: AArm = { nid: t.nid, span: spanFrom(t, astart), pat: rp.pat, body: rb.body, legacy: legacy, lifted: rb.lifted, bare: rb.bare }
+                const arm: AArm = { nid: t.nid, span: spanFrom(t, astart), pat: rp.pat, body: rb.body, legacy: legacy, lifted: rb.lifted, bare: rb.bare, test: false }
                 arms = arms.concat([arm])
                 t = bumpId(t)
                 lastComma = false
@@ -1465,7 +1540,7 @@ ${
                 if (x == k) off = true
             }
             if (off) {
-                out = out.concat([{ nid: a.nid, span: a.span, pat: a.pat, body: a.body, legacy: false, lifted: a.lifted, bare: a.bare }])
+                out = out.concat([{ nid: a.nid, span: a.span, pat: a.pat, body: a.body, legacy: false, lifted: a.lifted, bare: a.bare, test: a.test }])
             } else {
                 out = out.concat([a])
             }
@@ -1479,7 +1554,7 @@ ${
     // the refusal, an Error, stops the build), no legacy mark.
     fn refusedArm(a: AArm, tp: TP) -> RArms {
         const r: RExpr = mkE(tp, a.span.start, AExprK.Recovered)
-        const arm: AArm = { nid: a.nid, span: a.span, pat: a.pat, body: AArmBody.ArmExpr(r.e), legacy: false, lifted: false, bare: false }
+        const arm: AArm = { nid: a.nid, span: a.span, pat: a.pat, body: AArmBody.ArmExpr(r.e), legacy: false, lifted: false, bare: false, test: a.test }
         return { arms: [arm], tp: r.tp }
     }
 
@@ -3315,7 +3390,15 @@ ${
             return mkE(adv(adv(tp)), at.start, AExprK.At(nx.v))
         }
         if (touching(at, nx) && nx.cls == TC.Punct && tk(nx, ".")) {
-            return mkE(adv(tp), at.start, AExprK.AtItem)
+            // s480 (s480-boot-cheap-wins, g-boot-at-dot-bare-unparsed-s480): §17.7.3 — `@.` IS the
+            // current item. A name touching the `.` is a member read of it (`@.name`, left to the
+            // postfix loop); otherwise the `.` belongs to `@.` and is consumed here (`${@.}`,
+            // `f(@.)`) — before, it was left behind and read as a member dot with no name.
+            const n2: PTok = peekAt(tp, 2)
+            if (touching(nx, n2) && (n2.cls == TC.Ident || n2.cls == TC.Keyword)) {
+                return mkE(adv(tp), at.start, AExprK.AtItem)
+            }
+            return mkE(adv(adv(tp)), at.start, AExprK.AtItem)
         }
         const bad: TP = diagAt(tp, "E-PARSE-AT", "`@` must be followed by a name (`@count`) or `.` (`@.field`)", at)
         return mkE(adv(bad), at.start, AExprK.Recovered)
@@ -3649,7 +3732,7 @@ ${
     }
 
     fn withArmBlock(a: AArm, b: ABlock, lifted: boolean, bare: boolean) -> AArm {
-        return { nid: a.nid, span: a.span, pat: a.pat, body: AArmBody.ArmBlock(b), legacy: a.legacy, lifted: lifted, bare: bare }
+        return { nid: a.nid, span: a.span, pat: a.pat, body: AArmBody.ArmBlock(b), legacy: a.legacy, lifted: lifted, bare: bare, test: a.test }
     }
 
     // The expression statement `s` (its expression `x` a `match` / `!{}`) with its arms replaced.
