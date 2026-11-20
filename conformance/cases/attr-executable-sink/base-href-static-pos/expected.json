@@ -1,0 +1,11 @@
+{
+  "id": "attr-executable-sink-base-href-static-pos",
+  "description": "§5.2 \"Data never moves the document base (S473)\" — what is NOT refused: a static `href` on a `<base>`, and a data `href` on another element (an `<a>`, judged by rule 3 at run time). Codes only. impl#1 built under the S479 carve-out 2 as widened S480 (ruling:user-voice-scrml.md-S480-census-recs item 5).",
+  "language-version": "1.0",
+  "spec": "§5.2",
+  "rationale": "§5.2: \"A static `href` (`<base href=\\\"/app/\\\">`) stays legal.\"",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ATTR-BASE-HREF", "E-ATTR-INTERP-EXECUTABLE"]
+  }
+}
