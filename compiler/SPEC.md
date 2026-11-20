@@ -25111,13 +25111,32 @@ S440, are earlier runtime errors at a value boundary. They keep their own sectio
   *(Provenance: ruling:user-voice-scrml.md S479 "⭐ RULED — the rest of S478 hand-off §3.B" item 20 — "the trap
   unit is the effect, not the mount — the failing hole renders nothing, the trap is reported once, the rest of
   the mount proceeds"; direction of change: semantics-changed — before it, one trap left the whole view
-  unmounted.)* ⚑ **OPEN (not ruled):** a data-bound attribute's value that traps — with the attribute absent,
-  some attributes (an `<iframe>`'s `sandbox`) are in their less safe state, so the bootstrap does not make an
-  attribute a hole of its own: a trapping attribute at the top level of the view still ends the mount; one inside
-  a hole (an `if=` arm, an `<each>` row, a loop row) ends that hole, which renders nothing (the arm, or every row,
-  with the element carrying the attribute); and on a re-run an attribute whose value now traps keeps its previous
-  value (`g-boot-mount-trap-attr-hole-unruled-s480`). A body-top statement is a top-level logic block, its
-  own unit above, not a hole.
+  unmounted.)* A body-top statement is a top-level logic block, its own unit above, not a hole.
+- *(S480.)* **The hole of a data-bound attribute is the element that carries it.** An absent attribute is not
+  the safe state for every attribute (an `<iframe>` without its `sandbox` is unsandboxed), so when a data-bound
+  attribute's value traps, the element carrying it, with its subtree, SHALL be replaced in place by a
+  placeholder that renders nothing, the trap SHALL be reported once as above, and the rest of the mount — the
+  element's siblings, and the rest of an enclosing `if=` arm or list row — proceeds. This holds on the mount
+  (the element is never inserted, so a trapped frame never starts loading) and on every re-run (the element
+  leaves the page; it is never left showing the value it had before the trap). When every data-bound attribute
+  of the element reads again, the element SHALL be restored in the placeholder's place with each of those
+  attributes written from its current value before it is back in the page. An element is never in the page
+  with a stale or absent value of a data-bound attribute because of a trap. The restored element may lose
+  focus, selection and scroll position, and a frame or media element reloads. *(Provenance:
+  ruling:user-voice-scrml.md S480 "⭐ RULED — what a trap renders when "nothing" is not safe (#2008, item 20
+  follow-up)" item 1 — "the element is replaced by a placeholder, the trap is reported once, and the element is
+  restored on recovery — on mount and on every re-run. Removing the element is the only state that is safe for
+  every attribute; the cost is that a trapped element loses focus, scroll and input state when it comes back,
+  which is acceptable on a trap path"; direction of change: semantics-changed — before it, a trapping attribute
+  at the top level ended the mount, one inside an `if=` arm or list row blanked the whole arm or list, and on a
+  re-run the attribute kept its previous value.)*
+- *(S480.)* **A client-side condition is not a security boundary.** A masking hole whose test traps — a
+  `show=(@locked)` overlay, an `if=(not @authorized)` curtain — renders nothing as above, so the content it
+  covered is visible. That is the ruled behaviour: content a client condition covers is already in the page,
+  and whatever must not reach a user is protected by a server check (a server function, §12; the request
+  pipeline, §40) that never sends it, not by a condition in the view. *(Provenance: ruling:user-voice-scrml.md S480 "⭐ RULED — what a trap renders when
+  "nothing" is not safe" item 2 — "accept it as ruled, and add a SPEC note that a client-side condition is not a
+  security boundary — the covered content is already in the page; server checks are what protect data.")*
 - *(S473, DRAFT.)* In a `kind="service"` program (§68) the unit of execution is the **turn**: a trap ends its turn
   only, is reported to stderr with its code and location, and the program carries on with its next event, unless
   the program declares `on-trap="stop"` (then it stops with exit code 70). §68.6 is the full rule.

@@ -473,14 +473,15 @@ export function effect(scope, fn) {
 // trap SHALL be reported … It SHALL NOT be swallowed silently"), and the mount —
 // every other hole, and the insertion of the view — proceeds. Any other throw (a
 // bootstrap defect, a template the HTML parser restructured) is still rethrown
-// after the blank, as before. NOT a hole here (unchanged — the throw goes on to
-// the nearest enclosing hole, which blanks, or, at the top level, ends the
-// mount): a data-bound ATTRIBUTE (`rt.attr` — with the attribute removed, a
-// value such as an `<iframe>`'s `sandbox` would be the less safe state; on a
-// re-run a trapping attribute keeps its stale value; owner question in
-// g-boot-mount-trap-attr-hole-unruled-s480), a body-top statement
-// (`rt.run` — a top-level logic block, its own unit in §19.17, and a guard the
-// page must not render past), and an `<effect>` body.
+// after the blank, as before. A data-bound ATTRIBUTE's hole is its ELEMENT
+// (`rt.attr`, `elementHole` below; ruling user-voice-scrml.md S480 "⭐ RULED —
+// what a trap renders when "nothing" is not safe" item 1): an absent attribute
+// is not safe for every name (an `<iframe>`'s `sandbox`), so the element that
+// carries it is replaced by a placeholder. NOT a hole here (unchanged — the
+// throw goes on to the nearest enclosing hole, which blanks, or, at the top
+// level, ends the mount): a body-top statement (`rt.run` — a top-level logic
+// block, its own unit in §19.17, and a guard the page must not render past),
+// and an `<effect>` body.
 // ---------------------------------------------------------------------------
 
 /** A trap (§19.17): the runtime's `ScrmlTrap`, or a host file's error carrying the same name and a code (stdlib/math/host.js). */
@@ -3733,7 +3734,14 @@ export function at(node, ...path) {
 export function insert(scope, frag, anchor) {
   const nodes = [...frag.childNodes];
   anchor.parentNode.insertBefore(frag, anchor);
-  scope.own(() => { for (const n of nodes) if (n.parentNode) n.parentNode.removeChild(n); });
+  scope.own(() => {
+    for (const n of nodes) {
+      if (n.parentNode) n.parentNode.removeChild(n);
+      // s480 — a top-level element held out by a trapped attribute, or the placeholder holding its place
+      const m = holeMate.get(n);
+      if (m !== undefined && m.parentNode) m.parentNode.removeChild(m);
+    }
+  });
 }
 
 /** A comment anchor appended to `parent` — the mount point of the program's view. */
@@ -3822,15 +3830,101 @@ export function attr(scope, el, name, fn) {
   }
   const guard = writeGuardOf(el, name);
   const sheetHref = isLinkElement(el) && isHrefName(name);
-  effect(scope, () => {
-    if (sheetHref && linkLoadsSheet(el)) { refuseLinkHref(el, name); return; }
-    const v = fn();
-    if (v === null || v === undefined || v === false) { el.removeAttribute(name); return; }
-    const s = v === true ? "" : String(v);
-    const w = guard === null ? s : guard(s);
-    if (w === null) { el.removeAttribute(name); return; }
-    el.setAttribute(name, w);
+  requireScope(scope, "a bound attribute");
+  const h = elementHoleOf(el);
+  const tok = {};
+  const e = new Effect(scope, () => {
+    const refused = sheetHref && linkLoadsSheet(el);
+    const v = refused ? undefined : fn();
+    // This run read a value. While ANOTHER of the element's attributes traps, the element
+    // stays out of the page and nothing is written to it (a detached `<img>` still fetches
+    // a written `src`); every attribute is written when it comes back (`releaseElement`).
+    const mine = h.trapped.delete(tok);
+    if (h.trapped.size > 0 && !h.restoring) return;
+    if (refused) refuseLinkHref(el, name);
+    else writeAttr(el, name, v, guard);
+    if (mine && !h.restoring) releaseElement(el, h, tok);
+  }, () => {
+    el.removeAttribute(name);                         // never a stale value, in or out of the page
+    holdElement(el, h, tok);
   });
+  h.writers.set(tok, e);
+  scope.own(() => { h.writers.delete(tok); h.trapped.delete(tok); });
+}
+
+function writeAttr(el, name, v, guard) {
+  if (v === null || v === undefined || v === false) { el.removeAttribute(name); return; }
+  const s = v === true ? "" : String(v);
+  const w = guard === null ? s : guard(s);
+  if (w === null) { el.removeAttribute(name); return; }
+  el.setAttribute(name, w);
+}
+
+// ---------------------------------------------------------------------------
+// s480 — A TRAPPED DATA-BOUND ATTRIBUTE: THE ELEMENT CARRYING IT IS THE HOLE
+// (SPEC §19.17; ruling user-voice-scrml.md S480 "⭐ RULED — what a trap renders
+// when "nothing" is not safe" item 1: "the element is replaced by a
+// placeholder, the trap is reported once, and the element is restored on
+// recovery — on mount and on every re-run. Removing the element is the only
+// state that is safe for every attribute").
+//
+// When an `rt.attr` run throws, the attribute is removed and the element (with
+// its subtree) is replaced in place by a placeholder comment — at the mount
+// that is inside the template clone, BEFORE the view is inserted, so a
+// trapped `<iframe>` never starts loading without its `sandbox`; on a re-run it
+// leaves the live page. The run is an `Effect` hole (`blank` = hold), so a trap
+// is reported once per trapped run and any other throw is rethrown after the
+// hold, exactly as `hole()`'s. While ANY of the element's attributes traps it
+// stays out and its other attributes are not written; when the last one reads
+// again, every attribute of the element is re-run (its fresh values written),
+// and only if none traps does the element go back in the placeholder's place.
+// So the element is never in the page with a stale or absent value of a
+// data-bound attribute (`sandbox`, `href`, `src`, `referrerpolicy`, `allow` …).
+//
+// The element that comes back is the SAME node: its listeners, its own holes
+// and child scopes, and a control's value are kept (nothing is registered
+// twice). The cost, on a trap path only: focus, selection and scroll position
+// are lost, and a frame or media element reloads, when it returns.
+// `insert`'s cleanup removes a held element's placeholder (`holeMate`).
+// ---------------------------------------------------------------------------
+const elementHoles = new WeakMap();
+const holeMate = new WeakMap();
+
+function elementHoleOf(el) {
+  let h = elementHoles.get(el);
+  if (h === undefined) {
+    h = { writers: new Map(), trapped: new Set(), ph: null, out: false, restoring: false };
+    elementHoles.set(el, h);
+  }
+  return h;
+}
+
+function holdElement(el, h, tok) {
+  h.trapped.add(tok);
+  if (h.out) return;
+  h.out = true;
+  if (h.ph === null) {
+    h.ph = document.createComment("trapped");
+    holeMate.set(el, h.ph);
+    holeMate.set(h.ph, el);
+  }
+  if (el.parentNode) el.parentNode.replaceChild(h.ph, el);
+}
+
+function releaseElement(el, h, tok) {
+  if (h.trapped.size > 0 || !h.out) return;
+  // every attribute of the element is evaluated (and written) before it returns
+  h.restoring = true;
+  try {
+    for (const [t, w] of h.writers) {
+      if (t === tok || w.disposed) continue;
+      queue.delete(w);
+      w.run();
+    }
+  } finally { h.restoring = false; }
+  if (h.trapped.size > 0) return;
+  h.out = false;
+  if (h.ph.parentNode) h.ph.parentNode.replaceChild(el, h.ph);
 }
 
 /**
@@ -4429,8 +4523,9 @@ function reconcileKeyed(scope, anchor, oldRows, lifted) {
 }
 
 /**
- * s480 r1 (#2008 review F1) — a row's render threw (e.g. an `rt.attr` trap in
- * the row): every row this run created is disposed (its DOM, effects and
+ * s480 r1 (#2008 review F1) — a row's render threw (a non-trap throw out of a
+ * hole in the row; since s480-trap-attr-hole an `rt.attr` trap is held at its
+ * own element and no longer reaches here): every row this run created is disposed (its DOM, effects and
  * listeners) before the throw reaches the list's hole, whose blank then
  * disposes the rows it already held — a trapped list hole shows NO rows
  * (§19.17, s480 item 20), and a later recovering run starts from none.
