@@ -25,7 +25,9 @@
 //
 // This file is inlined into the client runtime verbatim (runtime-template.js, chunk 'metaemit',
 // `export ` stripped) after the 'urlguard' chunk, whose scheme reader it calls (`_scrml_is_url_attr`,
-// `_scrml_url_value_admitted` — runtime-url-guard.js; do NOT write a second URL reader here), and
+// `_scrml_url_value_admitted` — runtime-url-guard.js; do NOT write a second URL reader here), the
+// 'cssattrguard' chunk (`_SCRML_CSS_URL_ATTRS`, `_scrml_css_attr_value_admitted` —
+// runtime-css-attr-guard.js, the CSS-url attribute reader; S480 r1 F3), and
 // after the `_SCRML_EMIT_FORM_MEMBERS` declaration of dom-named-property-members.js (the only one the
 // runtime carries — S460 N6) and
 // markup-attr-allow-list.js (`_scrml_emit_attr_name_verdict`, `_scrml_emit_attr_value_verdict`,
@@ -208,6 +210,13 @@ function _scrml_meta_emit_violation(root, inPageForm) {
         if (_scrml_is_url_attr("", name) && !_scrml_url_value_admitted(name, value)) {
           return "a " + name + "= URL on <" + tag + "> whose scheme is not admitted";
         }
+        // §5.2 "Data-supplied CSS-url attributes" (S479 carve-out 2; S480 r1 F3) — `fill=`, `filter=`,
+        // … are read as CSS: judged by the same reader as every other data write of one
+        // (runtime-css-attr-guard.js, chunk 'cssattrguard'). `name` is already folded.
+        if (_SCRML_CSS_URL_ATTRS.has(name) && !_scrml_css_attr_value_admitted(value, false)) {
+          return "a " + name + "= value on <" + tag + "> that is not a plain CSS value (the browser reads it as CSS; " +
+            "no url() other than a same-document url(#id))";
+        }
       }
       // A radio button outside any form joins the radio group of every form-less radio of the same
       // name in the page — checking it unchecks the page's (S460 N2a). Inside an emitted `<form>` its
@@ -247,7 +256,8 @@ function _scrml_meta_emit_report(scopeId, violation) {
     "§22.4.1, §22.12). Runtime meta.emit() admits the same closed markup as compile-time emit(): " +
     "standard elements, attributes on the admitted list (no event handlers, no data-scrml or " +
     "data-scrml-* name), and URL attributes with http:, https:, ftp:, mailto:, tel:, sms:, a relative " +
-    "URL, or a raster data:image on an image source. Nothing was written.",
+    "URL, or a raster data:image on an image source, and CSS-url attributes (fill=, filter=, …) holding " +
+    "a plain CSS value. Nothing was written.",
   );
   if (typeof _scrml_error_boundary_log === "function") {
     _scrml_error_boundary_log("meta-emit", err);

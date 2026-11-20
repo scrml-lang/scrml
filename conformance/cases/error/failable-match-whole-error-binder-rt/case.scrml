@@ -18,8 +18,8 @@ ${
     // `_ e` takes every error variant and never `.Ok`, so one arm handles all errors.
     function attempt(pw: string) -> string {
         return match check(pw) {
-            ::Ok(v) :> "LOGGED IN",
-            _ e     :> "denied"
+            ::Ok(_) :> "LOGGED IN",
+            _ _e    :> "denied"
         };
     }
     function login() {

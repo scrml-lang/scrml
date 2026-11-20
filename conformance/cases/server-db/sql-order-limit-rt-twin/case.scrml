@@ -6,7 +6,7 @@
         return ?{`SELECT player, points FROM scores ORDER BY points DESC LIMIT 2`}.all() !{ _ :> [] };
     }
     function onLoad() {
-        @_top = topTwo() !{ .Transport(t) :> return };
+        @_top = topTwo() !{ .Transport(_) :> return };
     }
     <main>
         <button id="load" onclick=onLoad()>Top two</button>

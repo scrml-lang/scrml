@@ -370,6 +370,8 @@ describe("runtime size", () => {
     //
     // 44 post-S462 md phase 1: 'stdlib-md' (the scrml:md reader's client chunk).
     //   46 chunks post-S469: 'ifrow' — `_scrml_ifrow_apply`, the §17.1 if= swap, in its own chunk.
+    //   47 chunks post-S480: 'cssattrguard' — the §5.2 CSS-url attribute / stylesheet <link> href
+    //   write guards (S479 carve-out 2), gated on `_scrml_css_attr_set(` / `_scrml_link_href_set(`.
     //
     // Prior milestones:
     //   19 chunks post-A-4.3: 'prefetch' chunk for §40.9.7 tier-1 idle-
@@ -377,6 +379,6 @@ describe("runtime size", () => {
     //   18 chunks post-C13: 'engine' chunk for §51.0.F + §51.0.G engine
     //   state-machine runtime hooks.
     //   17 chunks post-C10: 'messages' chunk for §55.10.
-    expect(RUNTIME_CHUNK_ORDER.length).toBe(46);
+    expect(RUNTIME_CHUNK_ORDER.length).toBe(47);
   });
 });

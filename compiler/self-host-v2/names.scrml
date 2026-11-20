@@ -30,7 +30,92 @@ ${
     // (s477-boot-compile-perf): two parallel tapes, searched by indexOf — a tape of
     // { key, name } entries was walked entry by entry on every mint and lookup.
     // `nexts[j]`: where mint resumes its candidate search for the hint `bases[j]` (see mint).
-    export type NameTable:struct = { keys: string[], names: string[], bases: string[], nexts: int[] }
+    // S480 (s480-boot-fn-count-perf): `kix` / `nix` / `bix` index `keys` / `names` / `bases`
+    // (text → position) — an indexOf per mint, per candidate and per lookup made printing
+    // O(names²). Each is a SIdx: sorted LEVELS whose sizes are distinct powers of two, the
+    // smallest last (an add merges equal levels, as a binary counter carries), so an add
+    // copies each entry O(log n) times and a lookup is a binary search per level.
+    export type NameTable:struct = { keys: string[], names: string[], bases: string[], nexts: int[], kix: SIdx, nix: SIdx, bix: SIdx }
+
+    // A set of distinct texts, each with a value (here: its position in a tape).
+    type SIdx:struct = { ks: string[][], vs: int[][] }
+
+    fn sixEmpty() -> SIdx { return { ks: [], vs: [] } }
+
+    // `ix` with `k` (not present) → `v`.
+    fn sixAdd(ix: SIdx, k: string, v: int) -> SIdx {
+        let ck: string[] = [k]
+        let cv: int[] = [v]
+        let n: int = ix.ks.length
+        while (n > 0 && ix.ks[n - 1].length == ck.length) {
+            const m: SIdx = sixMerge(ix.ks[n - 1], ix.vs[n - 1], ck, cv)
+            ck = m.ks[0]
+            cv = m.vs[0]
+            n = n - 1
+        }
+        return { ks: ix.ks.slice(0, n).concat([ck]), vs: ix.vs.slice(0, n).concat([cv]) }
+    }
+
+    // Two sorted levels merged into one (returned as the one level of an SIdx), into
+    // fresh tapes written in place.
+    fn sixMerge(ak: string[], av: int[], bk: string[], bv: int[]) -> SIdx {
+        const n: int = ak.length + bk.length
+        let mk: string[] = blanks(n)
+        let mv: int[] = minusOnes(n)
+        let i: int = 0
+        let j: int = 0
+        let o: int = 0
+        while (o < n) {
+            if (j >= bk.length || (i < ak.length && ak[i] < bk[j])) {
+                mk[o] = ak[i]
+                mv[o] = av[i]
+                i = i + 1
+            } else {
+                mk[o] = bk[j]
+                mv[o] = bv[j]
+                j = j + 1
+            }
+            o = o + 1
+        }
+        return { ks: [mk], vs: [mv] }
+    }
+
+    // The value of `k` in `ix`, else -1.
+    fn sixFind(ix: SIdx, k: string) -> int {
+        let l: int = 0
+        while (l < ix.ks.length) {
+            const ks: string[] = ix.ks[l]
+            let lo: int = 0
+            let hi: int = ks.length
+            while (lo < hi) {
+                const mid: int = Math.floor((lo + hi) / 2)
+                const x: string = ks[mid]
+                if (x == k) return ix.vs[l][mid]
+                if (x < k) {
+                    lo = mid + 1
+                } else {
+                    hi = mid
+                }
+            }
+            l = l + 1
+        }
+        return -1
+    }
+
+    // Fresh tapes of `n` entries (by doubling, not one concat per entry).
+    fn blanks(n: int) -> string[] {
+        if (n <= 0) return []
+        let out: string[] = [""]
+        while (out.length + out.length <= n) { out = out.concat(out) }
+        return out.concat(blanks(n - out.length))
+    }
+
+    fn minusOnes(n: int) -> int[] {
+        if (n <= 0) return []
+        let out: int[] = [-1]
+        while (out.length + out.length <= n) { out = out.concat(out) }
+        return out.concat(minusOnes(n - out.length))
+    }
 
     // A total, injective encoding of a key (compared as a string).
     export fn keyText(k: NameKey) -> string {
@@ -45,7 +130,7 @@ ${
         }
     }
 
-    export fn emptyNames() -> NameTable { return { keys: [], names: [], bases: [], nexts: [] } }
+    export fn emptyNames() -> NameTable { return { keys: [], names: [], bases: [], nexts: [], kix: sixEmpty(), nix: sixEmpty(), bix: sixEmpty() } }
 
     // JavaScript reserved words + the globals emitted code references.
     export fn isReserved(n: string) -> boolean {
@@ -120,11 +205,11 @@ ${
     }
 
     fn taken(t: NameTable, n: string) -> boolean {
-        return t.names.indexOf(n) >= 0
+        return sixFind(t.nix, n) >= 0
     }
 
     fn hasKey(t: NameTable, k: string) -> boolean {
-        return t.keys.indexOf(k) >= 0
+        return sixFind(t.kix, k) >= 0
     }
 
     // Mint a name for `key` from `hint` (idempotent per key): the first of `base`,
@@ -137,7 +222,7 @@ ${
         const k: string = keyText(key)
         if (hasKey(t, k)) return t
         const base: string = sanitize(hint)
-        const bi: int = t.bases.indexOf(base)
+        const bi: int = sixFind(t.bix, base)
         let cand: string = base
         let n = 1
         if (bi >= 0) {
@@ -149,18 +234,22 @@ ${
             cand = base + "_" + n
             n = n + 1
         }
+        const at: int = t.keys.length
+        const kix: SIdx = sixAdd(t.kix, k, at)
+        const nix: SIdx = sixAdd(t.nix, cand, at)
         if (bi >= 0) {
             return { keys: t.keys.concat([k]), names: t.names.concat([cand]), bases: t.bases,
-                     nexts: t.nexts.slice(0, bi).concat([n]).concat(t.nexts.slice(bi + 1)) }
+                     nexts: t.nexts.slice(0, bi).concat([n]).concat(t.nexts.slice(bi + 1)), kix: kix, nix: nix, bix: t.bix }
         }
-        return { keys: t.keys.concat([k]), names: t.names.concat([cand]), bases: t.bases.concat([base]), nexts: t.nexts.concat([n]) }
+        return { keys: t.keys.concat([k]), names: t.names.concat([cand]), bases: t.bases.concat([base]), nexts: t.nexts.concat([n]),
+                 kix: kix, nix: nix, bix: sixAdd(t.bix, base, t.bases.length) }
     }
 
     // The minted name for `key`. An unminted key is a printer bug; it prints as
     // a name that cannot be a minted one and will fail loudly when run.
     export fn nameOf(t: NameTable, key: NameKey) -> string {
         const k: string = keyText(key)
-        const i: int = t.keys.indexOf(k)
+        const i: int = sixFind(t.kix, k)
         if (i >= 0) return t.names[i]
         return "unminted$" + k.replaceAll(":", "_").replaceAll(".", "_")
     }

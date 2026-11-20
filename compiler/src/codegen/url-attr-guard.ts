@@ -20,7 +20,8 @@
  */
 
 import { commentText } from "./comment-text.ts";
-import { _scrml_is_url_attr } from "../runtime-url-guard.js";
+import { _scrml_is_url_attr, _SCRML_SVG_ANIMATION_ELEMENTS, _SCRML_SVG_ANIMATION_VALUE_ATTRS } from "../runtime-url-guard.js";
+import { _SCRML_CSS_URL_ATTRS } from "../runtime-css-attr-guard.js";
 import {
   ATTR_INTERP_EXECUTABLE_CODE,
   animationUrlTarget,
@@ -85,6 +86,81 @@ export function quotedUrlAttrNeedsGuard(
 export function wrapUrlGuard(elExpr: string, name: string, valueJs: string, target?: string | null): string {
   const extra = typeof target === "string" ? `, ${JSON.stringify(target)}` : "";
   return `${URL_GUARD_FN}(${elExpr}, ${JSON.stringify(name)}, ${valueJs}${extra})`;
+}
+
+// ---------------------------------------------------------------------------
+// §5.2 (S479 carve-out 2 — ruling:user-voice-scrml.md-S479-3B-rest-item-21; gap
+// g-impl1-svg-css-url-attr-and-link-stylesheet-href-unguarded-s473) — the CSS-url attributes and a
+// `<link>`'s `href`. Every emitter that writes an attribute from data asks `dataAttrWriteGuard`
+// first; a non-null answer replaces its `el.setAttribute(name, …)` with `guardedAttrWrite`'s setter
+// call (defined in `../runtime-css-attr-guard.js`, the 'cssattrguard' chunk), which REMOVES a refused
+// attribute rather than writing it. A null answer leaves the write — and its bytes — as they were.
+// ---------------------------------------------------------------------------
+
+/** The setter a data write of a CSS-url attribute (or an animation value that may write one) uses. */
+export const CSS_ATTR_SET_FN = "_scrml_css_attr_set";
+/** The setter a data write of a `<link>`'s `href` uses. */
+export const LINK_HREF_SET_FN = "_scrml_link_href_set";
+
+/**
+ * How a data write of `name` on `tag` is guarded beyond rule 3's value wrapper:
+ *   - `{ kind: "css", target }` — a CSS-url attribute (`fill`, `filter`, … — any element, lowercased
+ *     name), or an SVG animation value (`to` / `from` / `by` / `values`) whose `attributeName` names
+ *     a CSS-url attribute or `style` (local part after any `prefix:`), or is computed, or is absent.
+ *     `target` is the URL attribute the animation may ALSO write (`""` when `attributeName` is
+ *     computed — both guards judge, rule 3's first), else null;
+ *   - `{ kind: "link-href" }` — `href` (any case, any `prefix:href`) on a `<link>` (any case);
+ *   - null — neither (the emitter's write is unchanged).
+ */
+export type AttrWriteGuard = { kind: "css"; target: string | null } | { kind: "link-href" };
+
+function isHrefAttrName(lower: string): boolean {
+  return lower === "href" || lower.endsWith(":href");
+}
+
+/** Does this animation element's `attributeName` (static, computed or absent) write CSS with a URL? */
+function animationWritesCss(attrs: ElementAttrs): boolean {
+  let seen = false;
+  for (const a of attrs ?? []) {
+    const attr = a as { name?: unknown; value?: unknown } | null;
+    if (!attr || typeof attr.name !== "string" || attr.name.toLowerCase() !== "attributename") continue;
+    const rawValue: unknown = attr.value;
+    const v: { kind?: string; value?: unknown } | undefined = typeof rawValue === "string"
+      ? { kind: "string-literal", value: rawValue }
+      : (rawValue as { kind?: string; value?: unknown } | undefined);
+    if (!v || v.kind === "absent") continue;
+    seen = true;
+    if (v.kind !== "string-literal" || typeof v.value !== "string" || v.value.includes("${")) return true; // computed
+    const t = v.value.trim().toLowerCase().replace(/^.*:/, "");
+    if (_SCRML_CSS_URL_ATTRS.has(t) || t === "style") return true;
+  }
+  return !seen; // absent: any attribute may be animated (fail closed, as the bootstrap)
+}
+
+export function dataAttrWriteGuard(
+  tag: string | null | undefined,
+  name: string,
+  attrs?: ElementAttrs,
+): AttrWriteGuard | null {
+  if (typeof name !== "string") return null;
+  const lower = name.toLowerCase();
+  const t = String(tag ?? "").toLowerCase();
+  if (_SCRML_SVG_ANIMATION_ELEMENTS.has(t) && _SCRML_SVG_ANIMATION_VALUE_ATTRS.has(lower)) {
+    return animationWritesCss(attrs) ? { kind: "css", target: urlGuardTarget(tag, name, attrs) } : null;
+  }
+  if (_SCRML_CSS_URL_ATTRS.has(lower)) return { kind: "css", target: null };
+  if (t === "link" && isHrefAttrName(lower)) return { kind: "link-href" };
+  return null;
+}
+
+/**
+ * The setter statement (no trailing `;`) for a guarded data write: `valueJs` is the UNGUARDED value
+ * expression (the setter applies rule 3's URL guard itself where it is due).
+ */
+export function guardedAttrWrite(elExpr: string, name: string, valueJs: string, guard: AttrWriteGuard): string {
+  if (guard.kind === "link-href") return `${LINK_HREF_SET_FN}(${elExpr}, ${JSON.stringify(name)}, ${valueJs})`;
+  const extra = typeof guard.target === "string" ? `, ${JSON.stringify(guard.target)}` : "";
+  return `${CSS_ATTR_SET_FN}(${elExpr}, ${JSON.stringify(name)}, ${valueJs}${extra})`;
 }
 
 /**

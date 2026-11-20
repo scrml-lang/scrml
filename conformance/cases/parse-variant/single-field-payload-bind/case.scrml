@@ -13,8 +13,8 @@ ${
         parseVariant('{"tag":"Archived"}', LoadResult) !{
             ::MissingDiscriminator          :> { @parseError = "missing-discriminator"; },
             ::UnknownVariant(tag)           :> { @parseError = "unknown: " + tag; },
-            ::InvalidPayload(field, reason) :> { @parseError = "invalid-payload:" + field; },
-            ::Malformed(reason)             :> { @parseError = "malformed"; }
+            ::InvalidPayload(field, _)      :> { @parseError = "invalid-payload:" + field; },
+            ::Malformed(_)                  :> { @parseError = "malformed"; }
         };
     }
 }

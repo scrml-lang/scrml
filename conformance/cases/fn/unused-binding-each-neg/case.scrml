@@ -1,0 +1,40 @@
+<program>
+    type Row:struct = { id: int, name: string, on: boolean, cells: string[] }
+    <rows:Row[]=([])/>
+    let <pick:int=0/>
+    function choose(i: int) { @pick = i; }
+    <p id="pick">${@pick}</p>
+    <ul id="read">
+        <each in=@rows as a>
+            <li>${a.name}</li>
+        </each>
+        <each in=@rows as b>
+            <li title=b.name>x</li>
+        </each>
+        <each in=@rows as c>
+            <li onclick=choose(c.id)>x</li>
+        </each>
+        <each in=@rows as d>
+            <li if=d.on>x</li>
+        </each>
+        <each in=@rows as e key=e.id>
+            <li>x</li>
+        </each>
+        <each in=@rows as f>
+            <each in=f.cells>
+                <li>${f.name}</li>
+            </each>
+        </each>
+        <each in=@rows as g>
+            <li>${@.name}</li>
+        </each>
+    </ul>
+    <ul id="unbound">
+        <each in=@rows as _row>
+            <li>row</li>
+        </each>
+        <each in=@rows>
+            <li>row</li>
+        </each>
+    </ul>
+</program>

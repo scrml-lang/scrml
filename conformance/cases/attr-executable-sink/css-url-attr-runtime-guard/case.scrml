@@ -1,0 +1,23 @@
+<program>
+<bad> = "url(https://evil.example/x.svg#p)"
+<red> = "red"
+<blur> = "blur(2px) drop-shadow(1px 1px 2px red)"
+<frag> = "url(#grad)"
+<fallback> = "url(#grad) red"
+<js> = "javascript:alert(1)"
+<p> = "red"
+function flip() { @p = "url(https://evil.example/y)"; }
+<svg>
+  <path id="pb" d="M0 0" fill=(@bad)></path>
+  <path id="pr" d="M0 0" fill=(@red)></path>
+  <rect id="rs" stroke=(@bad) filter=(@blur)></rect>
+  <rect id="rf" fill=(@frag) clip-path=(@fallback)></rect>
+  <rect id="rm" mask=(@bad) marker-start=(@bad) cursor=(@bad)></rect>
+  <rect id="rp" fill=(@p)></rect>
+  <rect id="ra"><set id="sa" attributeName="fill" to=(@js)></set></rect>
+  <rect id="rb"><set id="sb" attributeName="fill" to=(@red)></set></rect>
+</svg>
+<div id="hd" filter=(@bad)></div>
+<div id="hc" FILL=(@bad)></div>
+<button id="flip" onclick=flip()>flip</button>
+</program>

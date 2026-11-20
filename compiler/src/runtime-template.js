@@ -53,6 +53,16 @@ export const URL_GUARD_RUNTIME_SOURCE = readFileSync(
 ).replace(/^export /gm, "");
 
 /**
+ * SPEC §5.2 (S479 carve-out 2) — the CSS-url attribute and stylesheet-`<link>` `href` write guards.
+ * `runtime-css-attr-guard.js` is inlined verbatim here (chunk 'cssattrguard', `export ` stripped); it
+ * calls `_scrml_safe_url` from 'urlguard' (CHUNK_DEPENDENCIES cssattrguard → urlguard).
+ */
+export const CSS_ATTR_GUARD_RUNTIME_SOURCE = readFileSync(
+  join(__runtime_template_dir, "runtime-css-attr-guard.js"),
+  "utf8",
+).replace(/^export /gm, "");
+
+/**
  * S460 N6 — the runtime's copy of the ONE table of the generated dom-named-property-members.js it
  * needs: `_SCRML_EMIT_FORM_MEMBERS`. The `_SCRML_EMIT_DOCUMENT_MEMBERS` half stays compile-time only
  * (the runtime gate passes `document: null`, which judges fail-closed).
@@ -8109,6 +8119,13 @@ ${URL_GUARD_RUNTIME_SOURCE}
 // compiler/src/markup-attr-allow-list.js + compiler/src/runtime-meta-emit-gate.js. Pulled with the
 // 'meta' chunk (CHUNK_DEPENDENCIES).
 ${META_EMIT_GATE_RUNTIME_SOURCE}
+// §5.2 CSS-url attribute and stylesheet href write guards (chunk: 'cssattrguard')
+//
+// _scrml_css_attr_set(el, name, value, target) / _scrml_link_href_set(el, name, value) — every data
+// write of fill= / stroke= / filter= / mask= / clip-path= / marker*= / cursor= / color-profile= (and of
+// an SVG animation value that may animate one), and of a <link>'s href. Inlined verbatim from
+// compiler/src/runtime-css-attr-guard.js. Activated by a POST-EMIT scan (emit-client.ts).
+${CSS_ATTR_GUARD_RUNTIME_SOURCE}
 ${_STDLIB_COMPILER_CHUNK}${_STDLIB_CRYPTO_CHUNK}${_STDLIB_DATA_CHUNK}${_STDLIB_FORMAT_CHUNK}${_STDLIB_HOST_CHUNK}${_STDLIB_HTTP_CHUNK}${_STDLIB_MATH_CHUNK}${_STDLIB_MD_CHUNK}${_STDLIB_RANDOM_CHUNK}${_STDLIB_REGEX_CHUNK}${_STDLIB_ROUTER_CHUNK}${_STDLIB_TEST_CHUNK}${_STDLIB_TIME_CHUNK}`;
 
 /**
