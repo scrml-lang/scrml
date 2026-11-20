@@ -73,9 +73,9 @@ function flip() { @o = .B(1); }`, `<p id="h">\${hasB() ? "y" : "n"}</p>`));
 
 describe("§18.17 — the codes", () => {
   const rule = (fn) => prog(fn + "\nfunction flip() { }");
-  test("E-TYPE-062: a non-enum operand; an un-narrowed `E | not` operand", () => {
+  test("E-TYPE-062: a non-enum operand (an `E | not` operand is valid — see the S480 ruling below)", () => {
     expect(codes(rule(`fn f() -> bool { return @name is .B; }`))).toEqual(["E-TYPE-062"]);
-    expect(codes(rule(`fn f() -> bool { return @o is .B; }`))).toEqual(["E-TYPE-062"]);
+    expect(codes(rule(`fn f() -> bool { return @o is .B; }`))).toEqual([]);
   });
   test("E-TYPE-063: an unknown variant name", () => {
     expect(codes(rule(`fn f() -> bool { return @s is .Zed; }`))).toEqual(["E-TYPE-063"]);
@@ -123,5 +123,35 @@ ${fn}
       expect(ds.map((d) => d.code)).toEqual(["E-PARSE-EXPECTED"]);
       expect(ds[0].message).toContain("`is` binds no payload");
     }
+  });
+});
+
+// RULED S480 (ruling:user-voice-scrml.md-S480-is-not-nullish-type item 1): "`x is .V` and `x == .V`
+// are both allowed when `x : E | not`. An absent value is not `.V`, so the result is `false`." The
+// bootstrap's E-TYPE-062 for an un-narrowed `E | not` operand (ae5d75802 typer testMaybeCheck) is
+// withdrawn; E-TYPE-062 still applies to a non-enum operand (above). On ae5d75802 every `is` below
+// was E-TYPE-062.
+describe("§18.17 — `x is .V` over `E | not`: an absent value is `false` (S480 ruling)", () => {
+  test("in logic, a ternary, `if=`: false while absent (no throw), true once it is `.V`", async () => {
+    await run(prog(`fn hasB() -> bool { return @o is .B; }
+fn eqA() -> bool { return @o == .A; }
+function flip() { @o = .B(2); }`,
+    `<p id="h">\${hasB() ? "y" : "n"}\${eqA() ? "y" : "n"}\${@o is .A ? "a" : "-"}</p><b id="w" if=(@o is .B)>w</b>`));
+    expect($("#h").textContent).toBe("nn-");
+    expect($("#w")).toBeNull();
+    click($("#b"));
+    expect($("#h").textContent).toBe("yn-");
+    expect($("#w").textContent).toBe("w");
+  });
+  test("still checked: an unknown variant of `E | not` is E-TYPE-063; `string | not` is E-TYPE-062", () => {
+    const rule = (fn) => prog(fn + "\nfunction flip() { }");
+    expect(codes(rule(`fn f() -> bool { return @o is .Zed; }`))).toEqual(["E-TYPE-063"]);
+    expect(codes(`<program>
+type S:enum = { A }
+let <n:string | not=(not)/>
+fn f() -> bool { return @n is .A; }
+<p>\${f() ? "y" : "n"}</p>
+</program>
+`)).toEqual(["E-TYPE-062"]);
   });
 });

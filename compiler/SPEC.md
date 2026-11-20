@@ -21523,9 +21523,20 @@ Error E-TYPE-062 at line 2: `is` operator requires an enum-typed left-hand opera
 
 **Normative statements:**
 
-- The `is` operator SHALL be valid only when the left-hand operand is of an enum type. If
-  the operand is not an enum type, this SHALL be a compile error (E-TYPE-062: `is` operator
-  requires an enum-typed operand).
+- The `is` operator SHALL be valid only when the left-hand operand is of an enum type `E`,
+  or of `E | not`. If the operand is not an enum type (nor an enum type with `| not`), this
+  SHALL be a compile error (E-TYPE-062: `is` operator requires an enum-typed operand).
+- *(S480.)* When the left-hand operand is `E | not` and its value is `not`, `x is .V` SHALL be
+  `false`: an absent value is not `.V`. No narrowing (`x is given`) is required first. The same
+  holds for `x == .V` (§45): an absent value is not equal to `.V`, so the comparison is `false`.
+
+  > **Provenance:** ruling:user-voice-scrml.md S480 "⭐ RULED — `is .V` / `== .V` on an `E | not`
+  > operand, and the type of `a ?? b` (#2028)" item 1 — *"`x is .V` and `x == .V` are both allowed
+  > when `x : E | not`. An absent value is not `.V`, so the result is `false`."* (`ruling:user-voice-scrml.md-S480-is-not-nullish-type`).
+  > **supersedes (text):** ~~"The `is` operator SHALL be valid only when the left-hand operand is of an
+  > enum type. If the operand is not an enum type, this SHALL be a compile error"~~ (which did not say
+  > whether `E | not` is "of an enum type"). **Direction of change: newly-accepting** (the bootstrap
+  > refused an un-narrowed `E | not` operand of `is` with E-TYPE-062 before this ruling; impl#1 did not).
 - The `.VariantName` on the right-hand side of `is` SHALL be resolved against the enum type
   of the left-hand operand. An unknown variant name SHALL be a compile error (E-TYPE-063:
   unknown variant name in `is` expression).
@@ -30765,7 +30776,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-TYPE-027 | §18.13 | Shorthand pattern used when enum type cannot be inferred. *(impl#1, S469: emitted at `compiler/src/codegen/emit-control-flow.ts` `planPayloadBinders` for a POSITIONAL payload binder whose variant's declaring enum — so its field order — cannot be determined at the arm (an undeclared or ambiguous variant name); named binders, or a declared subject type, resolve it.)* | Error |
 | E-TYPE-028 | §18.16 | Literal arm used over an enum type *(S469: also a literal arm in `match err { … }` on a `!{}` whole-error binder `_ err :>`, §18.6.1 — emitted at `compiler/src/type-system.ts` `auditWholeErrorBinderText`.)* | Error |
 | E-TYPE-061 | §14.5 | Shorthand `.VariantName` in a position where the enum type cannot be inferred | Error |
-| E-TYPE-062 | §18.17 | `is` operator applied to a non-enum-typed operand | Error |
+| E-TYPE-062 | §18.17 | `is` operator applied to a non-enum-typed operand. An `E \| not` operand is NOT this error: an absent value is not `.V`, so the test is `false` (S480, `ruling:user-voice-scrml.md-S480-is-not-nullish-type`). | Error |
 | E-TYPE-063 | §18.17 | Unknown variant name in `is` expression | Error |
 | E-TYPE-LIFECYCLE-ON-ENGINE-CELL | §14.12.4 | Lifecycle annotation `(A to B)` declared on an engine cell (the auto-declared variable of an `<engine>` declaration, including any `var=` override). Engines own variant-graph progression via `rule=` / `initial=` / `<onTransition>` (§51.0); a lifecycle annotation on the same cell would create a second, redundant progression mechanism. Resolution: for variant-graph state, use the engine. For value-shape progression, declare as a plain reactive cell (not an engine cell). (S130 — HU-1 Q5=a, Lifecycle Landing 2.) | Error |
 | E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED | §14.12.6.2 | A variant-progression lifecycle-annotated value (e.g., `(.Draft to .Published)`) is accessed at a post-transition variant field after the source-variant discrimination, but without an intervening `transition(<var>)` call. The hybrid mechanism (§14.12.6) requires explicit `transition()` for variant-progression cases (the discrimination-IS-transition rule applies only to presence-progression `(not to T)` per §14.12.6.1). Resolution: call `transition(<var>)` immediately after the discriminating `if (<var> is .SourceVariant) {}` / `match` arm, before accessing post-transition fields. (S131 — HU-2 hybrid, Lifecycle Landing 2.5.) | Error |
@@ -31818,6 +31829,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-EXPR-TEMPLATE-CHUNK | §4 | Expected a template chunk after an interpolation. | Error |
 | E-EXPR-UNARY-EXPONENT | §4 | A unary operator cannot directly precede `**`; the operand must be parenthesized (a JS grammar restriction scrml inherits). | Error |
 | E-EXPR-NULLISH-MIX | §4 | `??` cannot be combined with `&&` or `\|\|` without parentheses (a JS grammar restriction scrml inherits). | Error |
+| W-NULLISH-NEVER-ABSENT | §42.11 | The left operand of `a ?? b` has a known type with no `\| not`, so it can never be absent: the right operand never runs and only widens the result's type (`t ?? 3` with `t: int`; `@c ?? "x"` with `@c: int` is `int \| string` for no reason). Drop the `?? …`, or give the left operand a `T \| not` type. An unresolved left operand is not reported (provable-or-silent). (S480, `ruling:user-voice-scrml.md-S480-is-not-nullish-type` item 2; emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` `nullishNeverAbsent`; Nominal on impl#1.) | Warning |
 | E-EXPR-YIELD-STAR-NO-ARG | §4 | `yield*` requires an operand. Generators (`yield` / `function*`) are preserved scrml vocabulary per S114. | Error |
 | E-EXPR-IS-SUFFIX | §18.17 | Expected `not`, `some`, `given`, or a `.Variant` after the `is` operator. scrml-specific `is` operator grammar. | Error |
 | E-EXPR-QUALIFIED-VARIANT | §14.5, §18.17 | Expected `.` or `::` after the enum-type name in a qualified-variant reference. | Error |
@@ -37186,6 +37198,7 @@ unresolved source statement 5 lists, so the example still shows case 3.)*
 | E-TYPE-045 | `not` used in prefix position as boolean negation — bare `not @x` OR parenthesized `not (expr)`, in any expression position (S188) | Error |
 | E-TYPE-046 | Member access (`.field` / `[key]` / `.method(...)`) through a plain-optional (`T \| not` / `T?`) receiver without optional-chain (`?.`) or narrowing (`if=` / `given` / `is not` / `match`) — §42.3.5 (S237); a write to the narrowed place (direct, nested, or by a call that writes it or whose write set cannot be determined) ends the narrowing (S462); so does a suspension point, and a function body created in a narrowed scope does not inherit a reactive cell's narrowing (S462 "a"), except an event handler for a user-input event (an allow-list, §42.3.5) inside an `if=` gate on that cell (S462 "a", Q18). (Emitted at `compiler/src/type-system.ts` `checkOptionalMemberAccess`.) | Error |
 | E-MATCH-012 | `match` on `T | not` type lacks a `not` arm and lacks an `else` arm | Error |
+| W-NULLISH-NEVER-ABSENT | The left operand of `a ?? b` can never be `not` (a known type without `\| not`) — §42.11; full row §34 | Warning |
 | E-COND-NOT-BOOLEAN | A condition (`if` / `while` / ternary test / `if=` / `else-if=`) whose value is not shown to be a `bool` or a bare `T \| not` presence test: a bare `bool \| not`, any other known type, or a type the compiler cannot resolve — as the whole condition or as an operand of its `!` / `&&` / `||` chain (§42.4 statements 5 and 10; S460 "a′, go", "a on F2, go"). Nominal on impl#1; emitted by the bootstrap | Error |
 | W-IS-SOME-DEPRECATED | The soft-deprecated presence spelling `x is some` (or the §55.1 validator `<x is some>`); parses identically to `is given` (§42.2.2a; S462). Full text §34 (emitted at `compiler/src/api.js:1855` via `compiler/src/is-some-deprecation.ts` `isSomeDeprecationDiagnostics`.) | Info |
 | E-IS-SOME-DEPRECATED | **Reserved** (§63.2) end-of-window code for the `is some` spelling; not scheduled, never fired (§63.7) | Error |
@@ -37288,6 +37301,26 @@ The keyword `not` serves exactly one role in scrml: it is the absence value. It 
 | E-TYPE-045 | `not` used in prefix position as boolean negation — bare `not @x` OR parenthesized `not (expr)`, in any expression position (broadened S188) | Error |
 
 **E-TYPE-045 message:** `not` is the absence value, not a negation operator. Use `!` for boolean negation: `!expr` (bare) or `!(expr)` (parenthesized). To check for absence, use `x is not`.
+
+### 42.11 `a ?? b` — a default for an absent value
+
+> **Provenance:** ruling:user-voice-scrml.md S480 "⭐ RULED — `is .V` / `== .V` on an `E | not` operand, and the type of `a ?? b` (#2028)" item 2 — *"The type of `a ?? b` is the type of `a` with `not` removed, joined with the type of `b`. Write it as a §42 subsection."* and the rec it adopted, *"plus a warning when the left side can never be absent"* (`ruling:user-voice-scrml.md-S480-is-not-nullish-type`). Keeps: S440 Gotcha Q2 (*"defaults use `??`"*). **Direction of change: inert for acceptance** (no program is newly rejected; a warning is added). **Nominal on impl#1** (impl#1 emits JavaScript `??` and neither types the result by this rule nor emits the warning); enforced by the bootstrap (`compiler/self-host-v2/analyze.scrml` `nullishVT`, `nullishNeverAbsent`).
+
+`a ?? b` is the value of `a` where `a` is present, else the value of `b`.
+
+**Normative statements:**
+
+1. **Evaluation.** `a` SHALL be evaluated first. When its value is not `not`, that value is the result and `b` SHALL NOT be evaluated. When it is `not`, `b` SHALL be evaluated and its value is the result. (Absence is `null` / `undefined` at run time, §42.8, exactly what JavaScript's `??` tests.)
+2. **Type.** The type of `a ?? b` SHALL be the type of `a` with `not` removed, joined with the type of `b`. For `a: T | not` and `b: T`, it is `T`; for `a: T | not` and `b: U | not`, it is `T | U | not` joined as any two types are; when `a` is the `not` literal, it is the type of `b`. Where the two types have no join, the result is not one type and is judged where it lands (an assignment, a return, a condition — §42.4 statement 5).
+3. **A left operand that can never be absent.** When the type of `a` is known and does not include `| not`, the compiler SHALL emit **W-NULLISH-NEVER-ABSENT** (Warning): `b` never runs, and it only widens the type of the result. The program still compiles. A left operand whose type the compiler cannot resolve is not reported.
+4. **Mixing.** `??` SHALL NOT be combined with `&&` or `||` without parentheses (E-EXPR-NULLISH-MIX, §34).
+
+```scrml
+let <name:string | not=(not)/>
+let <count:int=0/>
+<p>${@name ?? "anonymous"}</p>        // a string
+<p>${@count ?? 0}</p>                 // W-NULLISH-NEVER-ABSENT — @count is an int, never absent
+```
 
 ---
 

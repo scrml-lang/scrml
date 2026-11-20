@@ -24,3 +24,8 @@ Census (as-written, 40 programs mentioning a construct): clean 0 → 1 (tutorial
 | F5 LOW e-type-062 neg override | kept; dialect.s66 reason states the PASS no longer proves a clean compile, and why the markup rewrite was not taken |
 | F6 LOW `int|not ?? bool` condition "cannot be resolved" | `condMixed`: names the mix ("either `int` or `bool`"), keeps §42.4 st.5's "cannot resolve (to one type)" + fixes |
 | SPEC | §42.4 positions + provenance; §5.5.2 `!!value` → condition; §19.17 class: sentence |
+
+## r1b — owner rulings folded in (ruling:user-voice-scrml.md-S480-is-not-nullish-type)
+
+- (b) `x is .V` / `x == .V` over `E | not`: valid, absent → `false`. Typer `testMaybeCheck` (E-TYPE-062 for an un-narrowed `E | not`) removed; E-TYPE-062 stays for non-enum operands. SPEC §18.17 + §34 E-TYPE-062 row.
+- (c) `a ?? b` type = `a` without `not`, joined with `b` — SPEC §42.11 (new). New W-NULLISH-NEVER-ABSENT (no §34 code fit) — §34 + §42.6 rows; severity.scrml regenerated. Corpus (30 files with `??`): as-written 1 newly warns (phase3-nullish-with-not-literal-036); twin lens 2 (+ conformance condition/nullish-coalesce-default-rt, whose `@n` was just written). Nothing newly rejected.

@@ -20401,8 +20401,10 @@ ${
         return sk
     }
 
-    // The typer's half (an operand's narrowing is the typer's, §42.4): a `E | not` operand that
-    // no enclosing test narrowed is not "of an enum type" — E-TYPE-062, naming the narrowing.
+    // Is this handled expression the parser's reading of `x is .V`? (An `E | not` operand is valid:
+    // an absent value is not `.V`, so the test is `false` — RULED S480, ruling:user-voice-scrml.md-
+    // S480-is-not-nullish-type item 1, which withdrew the typer's E-TYPE-062 for an un-narrowed
+    // `E | not` operand. The `else` arm of the reading takes `not`.)
     fn handledIsTest(h: AHandled) -> boolean {
         const how: AHow = h.how
         return match how {
@@ -20410,21 +20412,6 @@ ${
             // no-default-arm: only the `match` reading of `x is .V` is a test
             _ :> false
         }
-    }
-
-    fn testMaybeCheck(env: TEnv, subj: AExpr, h: AHandled, m: PlainMatch, v: VType, ts: TypeState) -> TypeState {
-        if (!handledIsTest(h)) return ts
-        const t: Type | not = knownOf(v)
-        if (t is not) return ts
-        const mi: Type | not = maybeInner(t)
-        if (mi is not) return ts
-        // s480 r1 (#2028 F3): a `T | not` over a type that is not the tested enum is
-        // plainSubjectCheck's E-TYPE-062 / E-TYPE-063 (narrowing would not help) — one report
-        const es: Sym | not = m.es
-        const ns: Sym | not = namedOf(mi)
-        if (es is given && (ns is not || ns.id != es.id)) return ts
-        const name: string = testVariantName(h)
-        return report(ts, env, subj.span, "E-TYPE-062", "`is " + name + "` requires an enum-typed left-hand operand, and this one is `" + typeName(t) + "`, which may be `not` — narrow it first: `x is given && x is " + name + "` (§18.17, §42.4)")
     }
 
     // `.V` of `x is .V` (its first arm's variant), or "" when it has none
@@ -35900,7 +35887,7 @@ ${
         if (isOr) renv = tCallUnnarrow(tNarrow(env, condNarrowing(env, l).no), l)
         if (bop == BinOp.Nullish) renv = tCallUnnarrow(env, l)
         const rr: RVT = typeExpr(renv, r, rl.ts)
-        if (bop == BinOp.Nullish) return rvt(nullishVT(rl.vt, rr.vt), rr.ts)
+        if (bop == BinOp.Nullish) return rvt(nullishVT(rl.vt, rr.vt), nullishNeverAbsent(env, l, rl.vt, rr.ts))
         const op: PrimOp | not = opOf(f)
         if (op is not) return rvt(VType.Unknown, rr.ts)
         const ts2: TypeState = checkOperands(env, e, op, l, r, rl.vt, rr.vt, rr.ts)
@@ -35922,6 +35909,22 @@ ${
             .OneOf(ts: xs) :> joinVT(VType.OneOf(unMaybeAll(xs)), b)
             .Partial(ts: xs) :> joinVT(VType.Partial(unMaybeAll(xs)), b)
         }
+    }
+
+    // s480 r1 — §42.11 (RULED S480, ruling:user-voice-scrml.md-S480-is-not-nullish-type item 2: "plus
+    // a warning when the left side can never be absent"): a left operand of `??` whose type is KNOWN
+    // and has no `| not` can never be `not`, so the right operand never runs (and only widens the
+    // result's type) — W-NULLISH-NEVER-ABSENT. An unresolved left operand stays silent
+    // (provable-or-silent); the `not` literal is the other way round (always absent) and is not this.
+    fn nullishNeverAbsent(env: TEnv, l: AExpr, v: VType, ts: TypeState) -> TypeState {
+        const t: Type | not = match v {
+            .Known(t: x) :> x
+            // no-default-arm: only a known type proves "never absent"
+            _ :> not
+        }
+        if (t is not) return ts
+        if (maybeInner(t) is given) return ts
+        return report(ts, env, l.span, "W-NULLISH-NEVER-ABSENT", "the left operand of `??` is `" + typeName(t) + "`, which can never be `not` — the right operand never runs (it only widens the result's type); drop the `?? …`, or give the left operand a `" + typeName(t) + " | not` type if it can be absent (§42.11)")
     }
 
     fn unMaybeAll(ts: Type[]) -> Type[] {
@@ -37626,7 +37629,7 @@ ${
     // not know the subject's type, the arms are checked against it here.
     fn typePlain(env: TEnv, e: AExpr, h: AHandled, m: PlainMatch, ts0: TypeState) -> RVT {
         const rs: RVT = typeExpr(env, h.subject, quietPlace(ts0, h.subject))     // s475: a `match` discriminates (§13.9.3)
-        let ts: TypeState = testMaybeCheck(env, h.subject, h, m, rs.vt, plainSubjectCheck(env, e, h.subject, h, m, rs.vt, rs.ts))
+        let ts: TypeState = plainSubjectCheck(env, e, h.subject, h, m, rs.vt, rs.ts)
         let present: string[] = []
         const st0: Type | not = knownOf(rs.vt)
         let subjMaybe: boolean = m.maybe

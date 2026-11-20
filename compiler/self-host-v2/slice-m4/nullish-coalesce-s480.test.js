@@ -124,3 +124,29 @@ describe("`??` as a condition — r1 F6", () => {
     expect(codes(prog(`function go() { }`, `<p if=(@ok ?? @flag)>x</p>`))).toEqual([]);
   });
 });
+
+// RULED S480 (ruling:user-voice-scrml.md-S480-is-not-nullish-type item 2; SPEC §42.11): "The type of
+// `a ?? b` is the type of `a` with `not` removed, joined with the type of `b`" — "plus a warning when
+// the left side can never be absent". On ae5d75802 `t ?? 3` with `t: int` was silent.
+describe("§42.11 — W-NULLISH-NEVER-ABSENT (S480 ruling)", () => {
+  const warns = (src) => fe(src).diags.filter((d) => d.code === "W-NULLISH-NEVER-ABSENT");
+  test("a left operand that can never be `not` warns (a cell, a local, a literal); the program still compiles", async () => {
+    const src = prog(`function go() { const t: int = 4; const a: int = t ?? 3; const b: int = @ri ?? 1; const c: int = 7 ?? 0; @ri = a + b + c; }`);
+    const ws = warns(src);
+    expect(ws.length).toBe(3);
+    expect(ws.every((d) => d.severity === "Warning")).toBe(true);
+    expect(ws[0].message).toContain("`int`, which can never be `not`");
+    await run(src);
+    click($("#b"));
+    expect($("#i").textContent).toBe("11");
+  });
+  test("no warning where the left can be absent, or is the `not` literal", () => {
+    expect(warns(prog(`function go() { @ri = @n ?? 3; const s: string = @name ?? "x"; @out = s; }`))).toEqual([]);
+    expect(warns(prog(`function go() { @ri = not ?? 3; }`))).toEqual([]);
+  });
+  test("the type: `a`'s type without `not`, joined with `b`'s", () => {
+    expect(codes(rule(`function f() -> int { return @n ?? 0; }`))).toEqual([]);
+    expect(codes(rule(`function f() -> string { return @name ?? "x"; }`))).toEqual([]);
+    expect(codes(rule(`function f() -> int { return not ?? 2; }`))).toEqual([]);
+  });
+});
