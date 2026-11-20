@@ -19,9 +19,9 @@
 // g-boot-wire-driver-text-transformed-not-tracked-s474) a transformed driver text.
 //
 // The bootstrap's one path that serializes a server-side failure to a client is server-runtime.js
-// `handle` (a route's `fail` answer, §19.9.1 / §57.8); a throw answers the fixed 500 body. Production
-// is every host that does not pass `dev: true` (a deployed `scrml-boot compile` output); `scrml-boot
-// dev` passes it. Against a real SQLite FILE, the RESPONSE BODY (the bytes the client receives) and
+// `handle` (a route's `fail` answer, §19.9.1 / §57.8); a throw answers the fixed 500 body. S480: the
+// build mode is the ARTIFACT's — production unless printed as a dev build (`scrml-boot dev`, `compile
+// --dev`; the harness's `dev` option); returned values are build-mode-s480.test.js. Against a real SQLite FILE, the RESPONSE BODY (the bytes the client receives) and
 // the SERVER LOG are read.
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";

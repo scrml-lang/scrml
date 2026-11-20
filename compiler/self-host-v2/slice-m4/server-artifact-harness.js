@@ -44,11 +44,12 @@ export function check(core) {
   return mods().check.checkCore(core);
 }
 
-/** Both artifacts of a lowered Core. */
-export function artifacts(core) {
+/** Both artifacts of a lowered Core. `opts.dev`: a DEVELOPMENT build's server (S480 — the build
+ *  mode is the artifact's, print-server.scrml printServerBuild); otherwise production. */
+export function artifacts(core, opts = {}) {
   const m = mods();
   const client = m.print.printProgram(core, "app.client.js", "scrml-runtime.js");
-  const server = m["print-server"].printServer(core, "app.server.js", "scrml-server-runtime.js");
+  const server = m["print-server"].printServerBuild(core, "app.server.js", "scrml-server-runtime.js", opts.dev === true);
   return { client, server };
 }
 
@@ -113,13 +114,14 @@ export function plainRespond(status, headers, body) {
 
 /** A server over `driver` (a Bun.SQL or a spy) — the host injects the connection and builds responses. */
 export async function serve(core, driver, logs = [], opts = {}) {
-  const { server } = artifacts(core);
+  const { server } = artifacts(core, { dev: opts.dev === true });
   if (server.refused.length > 0) throw new Error("the server printer refused: " + server.refused.join("; "));
   const mod = await loadServer(server.js, core, opts.stdlibRoot);
   // s473: a spy / test driver has no catalogue — the host answers the tenant gate's question itself
   // (server-runtime.js tenantGate; `opts.tenantRelations` to exercise it)
-  // `opts.dev`: a DEV build's host (scrml-boot dev passes `dev: true` — S474 ruling 2 as amended)
-  const srv = mod.createServer({ connect: () => driver, log: (l) => logs.push(l), respond: plainRespond, tenantRelations: opts.tenantRelations ?? (async () => []), ...(opts.dev === true ? { dev: true } : {}) });
+  // `opts.dev`: a DEV build (S480: printed as one — the artifact decides, never the host; `opts.hostDev`
+  // passes the old host flag `dev: true`, which a production artifact ignores)
+  const srv = mod.createServer({ connect: () => driver, log: (l) => logs.push(l), respond: plainRespond, tenantRelations: opts.tenantRelations ?? (async () => []), ...(opts.hostDev === true ? { dev: true } : {}) });
   return { srv, mod, js: server.js, routes: server.routes, logs };
 }
 

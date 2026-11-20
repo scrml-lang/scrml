@@ -1,0 +1,54 @@
+{
+  "id": "sql-driver-text-returned-withheld-rt",
+  "description": "§19.9.1 \"Every value a route delivers (S480)\" — a server function handles its failed `?{}` where it is written (`.QueryFailed(m) :> { out = m; }`) and RETURNS the driver message. In a production build (every build but a dev one) the delivered string is blanked: the client's cell holds \"\", never \"no such column: secret_col\". RUNTIME, sqlEngine \"real\" (the users table has no `secret_col` column, so the query fails in the driver).",
+  "language-version": "1.0",
+  "spec": "§19.9.1",
+  "provenance": "ruling:user-voice-scrml.md S479 \"⭐ RULED — the rest of S478 hand-off §3.B, PA recs adopted\" item 16 (gap g-impl1-sql-driver-text-reraised-crosses-wire-s474)",
+  "rationale": "ruling item 16: \"the production-build withhold applies to every value a route delivers, returned as well as failed\". §19.9.1: a delivered string \"is blanked (the empty string) when it contains a whole driver message the request's failed queries produced\".",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "sqlEngine": "real",
+    "serverDb": {
+      "users": [
+        {
+          "id": 1,
+          "name": "a"
+        }
+      ]
+    },
+    "input": [
+      {
+        "click": "#go"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "state": {
+      "said": ""
+    },
+    "domAnchored": [
+      {
+        "selector": "#said",
+        "text": "[]"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-sql-driver-text-reraised-crosses-wire-s474",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-STATE-UNDECLARED=2",
+          "prefix:E-MARKUP-001 (matches forbidden E-*)",
+          "prefix:E-STATE-UNDECLARED (matches forbidden E-*)"
+        ],
+        "runtime": "sha256:b7624df35ef5d3f8"
+      }
+    }
+  }
+}

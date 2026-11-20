@@ -61,6 +61,17 @@ ${
     // has no server half to serve); `refused` names anything this printer will
     // not print (fail closed — nothing is printed then).
     export fn printServer(p: CoreProgram, jsFile: string, runtimeFile: string) -> ServerOutput {
+        return printServerBuild(p, jsFile, runtimeFile, false)
+    }
+
+    // S480 (s480-build-mode; ruling:user-voice-scrml.md-S479-3B-rest-item-10, PERMANENT): the build
+    // mode is the ARTIFACT's. `dev` true prints a DEVELOPMENT build's server — `scrml-boot dev`, or
+    // `scrml-boot compile --dev`; every other caller (printServer above, plain `scrml-boot compile`)
+    // prints a PRODUCTION build, the safe default ("the deployed artifact fails safe"). The one thing
+    // the server half keys off it today: a dev build's createServer wraps its host in `rt.devBuild`, so
+    // database driver text reaches the client (§19.8.4 / §19.9.1 S474); a production artifact prints no
+    // marker and withholds that text whatever its host passes (server-runtime.js `isDevBuild`).
+    export fn printServerBuild(p: CoreProgram, jsFile: string, runtimeFile: string, dev: boolean) -> ServerOutput {
         // s468 fix round 1 (F3): the gate at emission — a Core checkCore rejects is never printed
         const ill: string[] = coreRefusal(p)
         if (ill.length > 0) return { js: "", refused: ill, routes: [] }
@@ -179,7 +190,9 @@ ${
         }
         // s473: the databases go to the server too — it checks each for an undeclared tenant
         // relation before it serves (SPEC §14.8.10 item (3); server-runtime.js tenantGate)
-        let serverArgs: JsExpr[] = [jid("host$"), JsExpr.JArray(routeExprs), JsExpr.JArray(conns)]
+        let hostArg: JsExpr = jid("host$")
+        if (dev) hostArg = jcall(jmember(jid("rt"), "devBuild"), [jid("host$")])
+        let serverArgs: JsExpr[] = [hostArg, JsExpr.JArray(routeExprs), JsExpr.JArray(conns)]
         if (epExprs.length > 0 || p.channels.length > 0) serverArgs = serverArgs.concat([JsExpr.JArray(epExprs)])
         // s478 (s478-boot-channel): the channels (server-runtime.js `channel` / `server`)
         if (p.channels.length > 0) {
@@ -194,7 +207,8 @@ ${
         inner = inner.concat([JsStmt.SReturn(jcall(jmember(jid("rt"), "server"), serverArgs))])
         // s478 #1928 fix r1 (LOW-7): the channel sentence only in a program that has a channel — a
         // program without one prints the comment it printed before channels, byte for byte
-        let csNote: string = "createServer(host$) — host$.connect(desc) supplies each database's driver (Bun.SQL by default); host$.log the server log; host$.dev true only in a dev build (a failed query's driver text is then kept in a failure answer — S474 ruling 2)"
+        let csNote: string = "createServer(host$) — host$.connect(desc) supplies each database's driver (Bun.SQL by default); host$.log the server log. A production build: database driver text is withheld from every value a route delivers (§19.8.4), whatever the host passes"
+        if (dev) csNote = "createServer(host$) — host$.connect(desc) supplies each database's driver (Bun.SQL by default); host$.log the server log. A DEVELOPMENT build (rt.devBuild): database driver text reaches the client — do not deploy it"
         if (p.channels.length > 0) csNote = csNote + ". A program with a §38 channel is served by `Bun.serve({ fetch: (req, s) => srv.fetch(req, s), websocket: srv.websocket })`"
         body = body.concat([
             JsStmt.SBlank,
