@@ -2945,7 +2945,12 @@ ${
 
     fn userDeclStub(d: ADecl, file: string, st0: AS) -> RDeclStubs {
         let st: AS = st0
-        if (reservedElementName(d.name)) {
+        if (d.name == "endpoint" && d.attrs.length > 0) {
+            // §61.2 (ruling:user-voice-scrml.md-S480-endpoint-typed-attr): "A typed attribute
+            // … makes the opener a declaration (§66.2.2 …), and a declaration named `endpoint`
+            // is `E-NAME-COLLIDES-RESERVED` (§4.15)" — said in the author's terms
+            st = addDiag(st, file, d.span, "E-NAME-COLLIDES-RESERVED", "`<endpoint>` with a typed attribute (`name:type=…`) — a typed attribute makes this a declaration (§66.2.2), and `endpoint` is a reserved scrml structural-element name (§4.15); an `<endpoint>` opener carries path/method/accepts/cors only (§61.2 `endpoint-attrs ::= path-attr method-attr accepts-attr cors-attr?`). Remove the `:type` from the attribute, or remove the attribute")
+        } else if (reservedElementName(d.name)) {
             st = addDiag(st, file, d.span, "E-NAME-COLLIDES-RESERVED", "`<" + d.name + ">` is a reserved scrml structural-element name (§4.15, §24.4: a user declaration named `engine`, `match`, `each`, `errors`, `render`, `page`, `onMount`, `md`, `schema`, `db`, … is E-NAME-COLLIDES-RESERVED) — a use `<" + d.name + ">` names the structural element, not this declaration. Rename the declaration")
         }
         const r: RSym = mint(reservedName(st, file, d.span, d.name), d.name)
@@ -8400,6 +8405,11 @@ ${
     fn openerWordDiags(te: TypeEnv, file: string, errs: ASpan[], d: ADecl, cell: boolean, st0: AS) -> AS {
         let st: AS = st0
         if (hasErrIn(errs, d.span)) return st
+        // ruling:user-voice-scrml.md-S480-endpoint-typed-attr: an `<endpoint>` opener made a
+        // declaration by a typed attribute is E-NAME-COLLIDES-RESERVED (userDeclStub), whose
+        // message names path/method/accepts/cors — its route words are not also each reported
+        // as an unknown declaration-opener word (one report per fault)
+        if (d.name == "endpoint" && d.attrs.length > 0) return st
         st = repeatedWordDiags(file, d, st)
         st = stampNoDefaultDiag(te, file, d, st)
         for (const a of d.mods) {
@@ -51811,6 +51821,12 @@ ${
                         }
                         seen = seen.concat([key])
                     }
+                    // s480 r1 (F1 b) — defense in depth: an `<endpoint>` whose `path=` / `method=` /
+                    // `accepts=` the parser left "" with no Error in its opener is refused here under
+                    // that attribute's §61.2 code, never compiled with its route silently unmounted
+                    // (§61.2: "a `path=` / `method=` / `accepts=` … written with no value, or with a
+                    // value that is not its production's form, is that attribute's code").
+                    if (!ep.opErr) diags = diags.concat(endpointUnreadDiags(f.path, ep))
                     diags = diags.concat(endpointNoValueDiags(g, f.path, ep))
                     const ra: REpAccepts = endpointAccepts(g, f.path, ep)
                     diags = diags.concat(ra.diags)
@@ -51826,6 +51842,16 @@ ${
             }
         }
         return { diags: diags, eps: out }
+    }
+
+    // s480 r1 (F1 b) — the opener attributes the parser read as "" with no Error reported
+    fn endpointUnreadDiags(file: string, ep: AEndpoint) -> Diag[] {
+        let out: Diag[] = []
+        const tail: string = " was not read from the `<endpoint>` opener and no error was reported for it — the route would not be served; refused rather than compiled unmounted (§61.2)"
+        if (ep.path == "") out = out.concat([mkDiag(file, ep.opener, "E-ENDPOINT-PATH-MISSING", "`path=\"…\"`" + tail)])
+        if (ep.method == "") out = out.concat([mkDiag(file, ep.opener, "E-ENDPOINT-METHOD-INVALID", "`method=`" + tail)])
+        if (ep.accepts == "") out = out.concat([mkDiag(file, ep.opener, "E-ENDPOINT-ACCEPTS-MISSING", "`accepts=`" + tail)])
+        return out
     }
 
     // s478-ruled-endpoint — §61.2 (S478 open-Qs ruling (user-voice), item 38): "An arm
