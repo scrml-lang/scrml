@@ -33,3 +33,4 @@ Round r1 (S239 review of #2012 BLOCKED, F1 fail-open):
   (analyze.scrml userDeclStub), gap g-boot-endpoint-typed-attr-code-s480 → carried, pinned by
   conformance endpoint/typed-attr-declaration-neg (xfail impl1-ts). DONE.
 - Battery (261 + 260 junk + 13 w): 0 head-accept where base or impl#1 refuses.
+- r1b: typed-attr conformance case was FAIL on the bootstrap (declaration-body cascade); case narrowed to x:string, and analyze openerWordDiags no longer reports an endpoint declaration's route words as unknown opener words — case PASS.

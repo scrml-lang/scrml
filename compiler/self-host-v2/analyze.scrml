@@ -8043,6 +8043,11 @@ ${
     fn openerWordDiags(te: TypeEnv, file: string, errs: ASpan[], d: ADecl, cell: boolean, st0: AS) -> AS {
         let st: AS = st0
         if (hasErrIn(errs, d.span)) return st
+        // ruling:user-voice-scrml.md-S480-endpoint-typed-attr: an `<endpoint>` opener made a
+        // declaration by a typed attribute is E-NAME-COLLIDES-RESERVED (userDeclStub), whose
+        // message names path/method/accepts/cors — its route words are not also each reported
+        // as an unknown declaration-opener word (one report per fault)
+        if (d.name == "endpoint" && d.attrs.length > 0) return st
         st = repeatedWordDiags(file, d, st)
         st = stampNoDefaultDiag(te, file, d, st)
         for (const a of d.mods) {

@@ -146,5 +146,7 @@ describe("§61.2 / §66.2.2 — a typed attribute on `<endpoint>`", () => {
     expect(es.length).toBe(1);
     expect(es[0].message).toContain("a typed attribute makes this a declaration");
     expect(es[0].message).toContain("an `<endpoint>` opener carries path/method/accepts/cors only");
+    // one report per fault: the route words are not each an unknown declaration-opener word too
+    expect(codes(prog(`path="/a" method="POST" accepts=Op x:string="*"`))).toEqual(["E-NAME-COLLIDES-RESERVED"]);
   });
 });

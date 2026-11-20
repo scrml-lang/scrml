@@ -1,6 +1,6 @@
 {
   "id": "endpoint-typed-attr-declaration-neg",
-  "description": "§61.2 / §66.2.2 — a typed attribute on `<endpoint>` (`x:cors=\"*\"`) makes the opener a declaration, and a declaration named `endpoint` is E-NAME-COLLIDES-RESERVED (§4.15). impl#1 reports E-ENDPOINT-ATTR-INVALID there (a recorded divergence, carried).",
+  "description": "§61.2 / §66.2.2 — a typed attribute on `<endpoint>` (`x:string=\"*\"`) makes the opener a declaration, and a declaration named `endpoint` is E-NAME-COLLIDES-RESERVED (§4.15). impl#1 reports E-ENDPOINT-ATTR-INVALID there (a recorded divergence, carried).",
   "language-version": "1.0",
   "spec": "§61.2, §66.2.2, §4.15",
   "provenance": "ruling:user-voice-scrml.md-S480-endpoint-typed-attr (gap g-boot-endpoint-typed-attr-code-s480)",
