@@ -21,6 +21,8 @@
 // Residual super-linear terms (per-call scans that remain — gap g-boot-compile-superquadratic-fn-count-s480)
 // keep "after" above 4×. The bounds fail every "before" and leave the "after" room for a loaded
 // runner; a fresh probe is tried up to ATTEMPTS times and the best ratio judged (as compile-scaling-s477).
+// s480-records-3 (review of #2020): indep / chain tightened 10× -> 8×. Five single-attempt probes
+// (local, N = 400): indep 5.67–6.35×, chain 5.55–6.73×.
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -54,12 +56,12 @@ function bestRatio(shape, bound) {
 }
 
 describe("s480-boot-fn-count-perf — compile time scales with the function count", () => {
-  test("N -> 4N independent one-line functions: under 10x (quadratic is 16x)", () => {
-    expect(bestRatio("indep", 10)).toBeLessThan(10);
+  test("N -> 4N independent one-line functions: under 8x (quadratic is 16x)", () => {
+    expect(bestRatio("indep", 8)).toBeLessThan(8);
   }, 1_500_000);
 
-  test("N -> 4N functions in a call chain: under 10x", () => {
-    expect(bestRatio("chain", 10)).toBeLessThan(10);
+  test("N -> 4N functions in a call chain: under 8x", () => {
+    expect(bestRatio("chain", 8)).toBeLessThan(8);
   }, 1_500_000);
 
   test("N -> 4N functions each calling up to 8 others: under 13x", () => {
