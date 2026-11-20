@@ -250,8 +250,10 @@ function seedExprFree(toks, from, to, bound, src) {
       const p3 = j - 3 >= from ? toks[j - 3] : null;
       if (t.text === "(" && pv && pv.kind === "IDENT" && p2 && p2.text === "."
         && (!p3 || ((p3.kind === "PUNCT" || p3.kind === "OPERATOR") && p3.text !== ")" && p3.text !== "]" && p3.text !== "}"))) continue;
+      // r3 (F3): `?.(` is an optional call (§42.3.6) — the region tokenizer gives it as `?` `.` `(`, so a
+      // `(` right after `.` (or a one-token `?.`) is a call
       if (t.text === "(" && pv && (pv.kind === "IDENT" || pv.kind === "AT_IDENT" || pv.kind === "KEYWORD" || pv.kind === "STRING"
-        || pv.kind === "NUMBER" || pv.kind === "MARKUP" || pv.text === ")" || pv.text === "]" || pv.text === "}")) return false; // a call
+        || pv.kind === "NUMBER" || pv.kind === "MARKUP" || pv.text === ")" || pv.text === "]" || pv.text === "}" || pv.text === "?." || pv.text === ".")) return false; // a call
       continue;
     }
     return false;
@@ -283,16 +285,15 @@ function seedTypedInitFree(toks, j, bound, src) {
  * Is one statement provably free of writes and calls? On true, the names it declares join `bound`.
  *   - a `function` / `fn` declaration (its body runs only when called — and a call is never free);
  *   - `type …`, `import …`, `use …` (compile-time / module initialization);
- *   - a component definition `const Name = <…>` (flagged by seedPrefixUnits);
  *   - `[export] let|const name [: T] [= init]` with a free initializer — binds `name`;
  *   - a cell declaration `[const] <name> [: T] = init` with a free initializer — binds `@name`.
  * Every other statement (an assignment, a call, `++`, a loop, `if`, `when`, a destructuring, a
- * KEYWORD-class name, a §66-form `let <x:T=v/>`, …) is not.
+ * KEYWORD-class name, a §66-form `let <x:T=v/>`, a component definition `const Name = <…>` — r3 F4:
+ * its body runs wherever it is instantiated —, …) is not.
  */
 function seedStmtFree(st, bound, src) {
   const toks = st.toks;
   if (!toks || toks.length === 0) return true;
-  if (st.component) return true;
   let h = 0;
   while (toks[h] && SEED_FN_MODIFIERS.has(toks[h].text) && toks[h + 1] && (toks[h + 1].kind === "KEYWORD" || toks[h + 1].kind === "IDENT")) h++;
   const head = toks[h];
@@ -323,6 +324,23 @@ function seedStmtFree(st, bound, src) {
     }
   }
   return false;
+}
+
+/**
+ * r3 (PR #2025 F1): might this statement declare a FILE-SCOPE BINDING (§7.6) — a `let` / `const` the
+ * bootstrap's client artifact evaluates at module initialization, before the program is constructed?
+ * Fails closed: any statement headed `[modifiers] let|const` that is not a legacy / §66 cell
+ * declaration (`const <x>` / `let <x:…/>`, seeded with the cells, in order) counts.
+ */
+function seedBindingStmt(st) {
+  const toks = st.toks;
+  if (!toks || toks.length === 0) return false;
+  let h = 0;
+  while (toks[h] && SEED_FN_MODIFIERS.has(toks[h].text) && toks[h + 1] && (toks[h + 1].kind === "KEYWORD" || toks[h + 1].kind === "IDENT")) h++;
+  const head = toks[h];
+  if (!head || head.kind !== "KEYWORD" || (head.text !== "let" && head.text !== "const")) return false;
+  const nx = toks[h + 1];
+  return !(nx && (nx.text === "<" || (nx.kind === "MARKUP" && /^<\s*[a-z]/.test(nx.text))));
 }
 
 /** ExprNode kinds the rewrite may parenthesize as an ordinary expression. */
@@ -1869,8 +1887,19 @@ export function fixS66(source, opts = {}) {
   // S480 r2 (F1, fail closed): a move of a declaration out of the `${ … }` block at s is allowed only
   // when every unit of code that could run before its seed is provably free of writes and calls —
   // every unit before the block in source order (impl#1's run order: every `${ … }` at any depth, the
-  // bare code of a body, interpolations, attribute values; an unread unit refuses), then the block's
-  // own statements before it. Null when the move is safe; else the reason.
+  // bare code of a body, interpolations, attribute values, component instances; an unread unit
+  // refuses), then the block's own statements before it.
+  // r3 (PR #2025 F1): what runs before the seed on the bootstrap is NOT a source-order prefix. The
+  // client artifact (print.scrml `printProgram`) runs, in order: its imports (the runtime, host
+  // modules); EVERY file-scope binding (§7.6, `constStmts` — linked files' first, then this file's,
+  // wherever each stands in the source); request slots, declarations, routes and function
+  // definitions (no user code runs); then the boot — `shared_program()` → `rt.construct`, which
+  // seeds the cells — and only then `render_program` (the body's statements, interpolations,
+  // attribute values, component instances) . So a file-scope `let` / `const` AFTER the declaration
+  // (a later block, or later in the same block) runs before its seed there and after it in impl#1:
+  // every such binding — and every unit after the block that cannot be read (it may hold one) —
+  // must be provably free too. (An imported module's code runs before both positions in both
+  // implementations, so the move cannot reorder it.) Null when the move is safe; else the reason.
   let seedUnits;
   const seedHazard = (s, stmts, moves) => {
     if (seedUnits === undefined) seedUnits = seedPrefixUnits(filePath, src);
@@ -1894,8 +1923,26 @@ export function fixS66(source, opts = {}) {
     for (let k = 0; k < last && !blocker; k++) {
       if (!seedStmtFree(stmts[k], bound, src)) blocker = why(stmts[k].start, "statement");
     }
-    if (!blocker || last < 0) return null;
-    return `the declaration on line ${lineOf(src, stmts[last].start)} would be seeded when the program is constructed, before the body's statements run (impl#1 runs them first, in order), and ${blocker} — moving it could change the value it reads`;
+    if (blocker && last >= 0) {
+      return `the declaration on line ${lineOf(src, stmts[last].start)} would be seeded when the program is constructed, before the body's statements run (impl#1 runs them first, in order), and ${blocker} — moving it could change the value it reads`;
+    }
+    if (last < 0) return null;
+    // r3 (F1): the file-scope bindings at or after the block (module initialization runs them all
+    // before the seed); the block's own statements up to its last moved declaration are checked above
+    const lastEnd = stmts[last].end;
+    for (const u of seedUnits) {
+      if (u.start < s || blocker) continue;
+      if (u.kind === "opaque") { if (u.binds !== false) blocker = why(u.start, u.what ?? "code"); continue; }
+      if (u.kind === "expr") {
+        if (!u.toks || u.toks.some((t) => t.kind === "KEYWORD" && (t.text === "let" || t.text === "const"))) blocker = why(u.start, "expression");
+        continue;
+      }
+      if (!u.stmts) { blocker = why(u.start, "code block (its statements cannot be placed)"); continue; }
+      const bad = u.stmts.find((st) => !(u.start === s && st.start < lastEnd) && seedBindingStmt(st) && !seedStmtFree(st, bound, src));
+      if (bad) blocker = why(bad.start, "file-scope binding");
+    }
+    if (!blocker) return null;
+    return `the declaration on line ${lineOf(src, stmts[last].start)} would be seeded when the program is constructed — after every file-scope \`let\` / \`const\` initializer, wherever it stands (the bootstrap evaluates them all at module initialization; impl#1 runs them in order, after the declaration) — and ${blocker} — moving it could change the value it reads`;
   };
 
   const splitAroundDecls = (n, s, e) => {

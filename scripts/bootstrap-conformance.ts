@@ -681,7 +681,7 @@ function between(html: string, open: string, close: string): string {
  * (compiler/self-host-v2/slice-m3/substitute.js `executeClient`) does — duplicated here rather than
  * imported because importing that module builds the M3 ingest bundle as a side effect.
  */
-async function runBootstrapArtifact(html: string, js: string, input: InputStep[], serverStub: Record<string, unknown> | undefined, routes: BootRoute[], server?: BootServer) {
+export async function runBootstrapArtifact(html: string, js: string, input: InputStep[], serverStub: Record<string, unknown> | undefined, routes: BootRoute[], server?: BootServer) {
   if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
   // s468 (U1c): a page served from an origin, so `document.cookie` holds the CSRF cookie;
   // s473: every case — the runtime makes no request from a document whose URL cannot be a base

@@ -40,3 +40,17 @@ items 3–4; S469 dpa-073 F1 / F2 / F3 / F5.
       slice-m4/fix-s66-seed-order-s480.test.js (red on 7d3877965); a free-prefix positive test; v5–v7 +
       PascalCase-void tests in fix-terminators.test.js.
 - [ ] cost (census lens r1 vs r2), runtime differential, conformance, gates.
+
+## r3 (PR #2025 r2 re-review: FIX) — scratch `~/.cache/scrml/review/s480-2025-r3/`
+
+- [x] F1 HIGH: the CLI artifact (print.scrml `printProgram`) evaluates EVERY file-scope binding (§7.6,
+      `constStmts`) at module initialization, before `shared_program()` → `rt.construct` seeds the
+      cells; body code runs in `render_program` after it. `seedHazard` now also requires every
+      file-scope `let` / `const` at or after the block (`seedBindingStmt`) to be provably free, and
+      refuses an unreadable unit after it.
+- [x] F2: fix-s66-seed-order-s480.test.js runs on the CLI artifact path (`compileSource` +
+      `runBootstrapArtifact`, now exported); r01 / r03 / r05 added (red on 1caa16f4c: 10 fail).
+- [x] F3: `(` after `.` / `?.` (the optional call `?.(`) is a call in `seedExprFree`.
+- [x] F4: component definitions are units like any other; a component instance before the
+      declaration is an opaque unit (refuses).
+- [ ] cost: census lens, runtime differential, conformance, gates.

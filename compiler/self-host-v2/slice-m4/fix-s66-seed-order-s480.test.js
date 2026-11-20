@@ -12,31 +12,43 @@
 // the block). The expected texts are impl#1's renders of the ORIGINAL sources (conformance/adapters/
 // impl1-ts.ts run, recorded in the r1 report).
 
-import { describe, test, expect, beforeAll, afterEach } from "bun:test";
-import { loadM2, frontEnd } from "./harness.js";
-import { loadProgram, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
+//
+// r3 (PR #2025 r2 re-review F2): every runtime case here runs on the SHIPPING path — the bootstrap CLI
+// artifact (scripts/scrml-boot.ts `compileSource` → print.scrml's client module, executed by the
+// conformance runner's `runBootstrapArtifact`). Up to r2 they ran on slice-m4/harness.js `frontEnd` +
+// slice-m1/load-program.js, which seeds a program's file-scope bindings differently from the artifact
+// (the artifact evaluates EVERY file-scope `let` / `const` at module initialization, before
+// `rt.construct`), so a miscompile on the CLI path (r01 / r03 / r05 below) rendered correctly there.
+
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fixS66, S66_RULES } from "../../src/commands/fix-s66.js";
+import { compileSource } from "../../../scripts/scrml-boot.ts";
+import { runBootstrapArtifact } from "../../../scripts/bootstrap-conformance.ts";
 
-let mods;
-beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 300000 });
-afterEach(() => expectNoPageErrors());
+let dir;
+beforeAll(() => { dir = mkdtempSync(join(tmpdir(), "s480-seed-")); });
+afterAll(() => { if (dir) rmSync(dir, { recursive: true, force: true }); });
 
-const ENTRY = "app.scrml";
 const F = "/virtual/app.scrml";
-const errs = (r) => r.diags.filter((d) => d.severity === "Error");
 // r2: the guard fails closed — the note names the first unit before the declaration that is not
 // provably free of writes and calls (r1's note named a read / write pair).
 const SEED_NOTE = /is not provably free of writes and calls/;
 let k = 0;
 
-/** fixS66 (every rule), then the bootstrap on the result: { blockers, clean, text }. */
+/** fixS66 (every rule), then the bootstrap CLI artifact on the result: { blockers, clean, text }. */
 async function migrateAndRun(src) {
   const fx = fixS66(src, { filePath: F, entry: true, rules: S66_RULES, allowNonCompiling: true });
   const blockers = fx.blockers.map((b) => `${b.rule}@${b.line}: ${b.reason}`);
-  const r = frontEnd(mods, [{ path: ENTRY, src: fx.output }], ENTRY);
-  if (errs(r).length > 0) return { blockers, clean: false, output: fx.output };
-  await loadProgram(r.core, "s480-seed-" + k++);
-  return { blockers, clean: true, output: fx.output, text: document.querySelector("#c").textContent.replace(/\s+/g, " ").trim() };
+  const file = join(dir, `app${k++}.scrml`);
+  writeFileSync(file, fx.output);
+  const res = await compileSource(file);
+  if (!res.ok) return { blockers, clean: false, output: fx.output };
+  const run = await runBootstrapArtifact(res.client.html, res.client.js, [], {}, [], undefined);
+  const el = run.body.querySelector("#c");
+  return { blockers, clean: true, output: fx.output, text: String(el?.textContent ?? "<no #c>").replace(/\s+/g, " ").trim() };
 }
 
 const CASES = [
@@ -181,4 +193,80 @@ describe("r2 — the seed-order guard fails closed (re-review N1 / N2 / N3 probe
     expect(r.clean).toBe(true);
     expect(r.text).toBe("0 1 1");
   }, 120000);
+});
+
+// ---------------------------------------------------------------------------------------------------
+// r3 (PR #2025 r2 re-review F1 / F3 / F4). Probes ~/.cache/scrml/review/s480-2025-r2rev/scratch/p/.
+// F1: the CLI artifact evaluates EVERY file-scope binding at module initialization — before
+// `rt.construct` seeds the cells — so a `let` / `const` written AFTER the moved declaration (a later
+// block, or later in the same block) runs before its seed there, and after it in impl#1. On 1caa16f4c
+// r01 / r03 / r05 compiled clean and rendered "20 10 0" (impl#1: "2 1 0").
+const R3_CASES = [
+  ["r01 — a later block's `const k = bump()` (bump writes the `let` the declaration reads)",
+    prog("${ let n: number = 1 }", "${ function bump() -> number { n = 10; return 0 } }", "${", "    <d>: number = n * 2", "}", "${ const k: number = bump() }", '<p id="c">${@d} ${n} ${k}</p>'), "2 1 0"],
+  ["r03 — a later block's `let k = bump()`",
+    prog("${ let n: number = 1 }", "${ function bump() -> number { n = 10; return 0 } }", "${", "    <d>: number = n * 2", "}", "${ let k: number = bump() }", '<p id="c">${@d} ${n} ${k}</p>'), "2 1 0"],
+  ["r05 — the same block's later `const k = bump()` (split)",
+    prog("${ let n: number = 1 }", "${ function bump() -> number { n = 10; return 0 } }", "${", "    <d>: number = n * 2", "    const k: number = bump()", "}", '<p id="c">${@d} ${n} ${k}</p>'), "2 1 0"],
+];
+
+describe("r3 — the seed comes after EVERY file-scope binding on the CLI artifact (re-review F1)", () => {
+  for (const [name, src, impl1] of R3_CASES) {
+    test(`${name}: renders impl#1's value or is refused with the note`, async () => {
+      const r = await migrateAndRun(src);
+      if (r.clean) expect(r.text).toBe(impl1);
+      else expect(r.blockers.join("\n")).toMatch(SEED_NOTE);
+    }, 120000);
+    test(`${name}: refused (left in \`\${}\` with the note)`, () => {
+      const fx = fixS66(src, { filePath: F, entry: true, rules: S66_RULES, allowNonCompiling: true });
+      expect(fx.blockers.map((b) => b.reason).join("\n")).toMatch(/file-scope binding on line \d+ is not provably free of writes and calls/);
+    });
+  }
+
+  test("a later binding that is provably free does not refuse the move (and renders impl#1's value)", async () => {
+    const src = prog("${ let n: number = 1 }", "${", "    <d>: number = n * 2", "}", "${ const k: number = n + 1 }", '<p id="c">${@d} ${k}</p>');
+    const r = await migrateAndRun(src);
+    expect(r.blockers.join("\n")).not.toMatch(SEED_NOTE);
+    expect(r.output).toContain("let <d:number=(n * 2)/>");
+    expect(r.clean).toBe(true);
+    expect(r.text).toBe("2 2");
+  }, 120000);
+
+  test("a later statement that is not a binding runs at render on both — it does not refuse the move", async () => {
+    // r04: `${ n = 10 }` after the declaration — the artifact runs it in render_program, after the seed
+    const src = prog("${ let n: number = 1 }", "${", "    <d>: number = n * 2", "}", "${ n = 10 }", '<p id="c">${@d} ${n}</p>');
+    const r = await migrateAndRun(src);
+    expect(r.blockers.join("\n")).not.toMatch(SEED_NOTE);
+    expect(r.clean).toBe(true);
+    expect(r.text).toBe("2 10");
+  }, 120000);
+});
+
+describe("r3 — F3 `?.(` is a call; F4 component code is not skipped", () => {
+  const seedNote = (src) => fixS66(src, { filePath: F, entry: true, rules: S66_RULES, allowNonCompiling: true })
+    .blockers.map((b) => b.reason).join("\n");
+
+  // F3: the bootstrap refuses `?.(` today, so this is pinned at the guard (fixS66's note), not at runtime
+  test("q01c — `arr?.push?.(5)` before the declaration is a call: refused", () => {
+    expect(seedNote(prog("${ let arr = [1] }", "${ let t = arr?.push?.(5) }", "${", "    <n>: number = arr.length", "}", '<p id="c">${@n}</p>')))
+      .toMatch(/statement on line 3 is not provably free of writes and calls/);
+    // the same without the call still moves
+    expect(seedNote(prog("${ let arr = [1] }", "${ let t = arr?.length }", "${", "    <n>: number = arr.length", "}", '<p id="c">${@n}</p>')))
+      .not.toMatch(SEED_NOTE);
+  });
+
+  // F4: impl#1 runs an instantiated component's body where the instance stands — before a later
+  // declaration — while the artifact renders it after the seed
+  test("o03 — a component definition's body calls a writer, instantiated before the declaration: refused", () => {
+    expect(seedNote(prog("${ <c>: number = 1 }", "${ function bump() -> number { @c = 5; return 7 } }", "${ const Comp = <span>${bump()}</span> }", "<Comp/>",
+      "${", "    <d>: number = @c * 2", "}", '<p id="c">${@c} ${@d}</p>'))).toMatch(SEED_NOTE);
+  });
+  test("o07 — a component body's logic writes the cell: refused", () => {
+    expect(seedNote(prog("${ <c>: number = 1 }", "${ const Comp = <span>${ @c = 5 }x</span> }", "<Comp/>",
+      "${", "    <d>: number = @c * 2", "}", '<p id="c">${@c} ${@d}</p>'))).toMatch(SEED_NOTE);
+  });
+  test("an imported component instantiated before the declaration: refused (its body is not in this file)", () => {
+    expect(seedNote(prog('${ import { Comp } from "./comp.scrml" }', "${ <c>: number = 1 }", "<Comp/>",
+      "${", "    <d>: number = @c * 2", "}", '<p id="c">${@c} ${@d}</p>'))).toMatch(/component instance `<Comp>`[^\n]* is not provably free of writes and calls/);
+  });
 });

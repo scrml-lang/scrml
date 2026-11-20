@@ -1000,9 +1000,12 @@ export function logicBlockStatements(filePath, source, blockStart) {
  *   - `opaque`: code this reader does not enter (`?{}`, `^{}`, `!{}`, `~{}`, `_{}` at markup level, an
  *     attribute value of an unknown kind) — never provably free.
  * `on…=` handler values are not units: a handler is a function value run on an event, after the
- * program is constructed and rendered. A component definition (`const Name = <…>`, in `${ … }` or a
- * program body) is a definition, not code that runs: its statement is flagged `component: true` and
- * the units inside its markup (its own interpolations / attributes) are dropped.
+ * program is constructed and rendered.
+ * r3 (PR #2025 F4): a component definition (`const Name = <…>`) is examined like any other unit (its
+ * statement holds markup, so it is never provably free, and the units inside its markup stay), and a
+ * component INSTANCE (`<Name …>`, a PascalCase / component element — its body runs where it stands in
+ * impl#1, wherever it is defined or imported from) is an `opaque` unit. An attribute value or a
+ * component instance is flagged `binds: false` (it declares no file-scope binding).
  * Null when the file cannot be read (fix-s66 then refuses every move).
  * @returns {Array<{start:number,end:number,kind:"stmts"|"expr"|"opaque",stmts?:object[]|null,toks?:object[]|null,what?:string}> | null}
  */
@@ -1036,13 +1039,12 @@ export function seedPrefixUnits(filePath, source) {
     if (r.mode === "stmts") units.push({ start, end, kind: "stmts", stmts: regionStatements(source, r, ls) });
     else units.push({ start, end, kind: "expr", toks: tokensOf(r.start, r.end, r.children) });
   }
-  const markupBlocks = [];
   const attrUnits = (b) => {
     let toks;
     try {
       toks = tokenizeAttributes(b.raw, b.span.start, b.span.line ?? 1, b.span.col ?? 1, b.type);
     } catch {
-      units.push({ start: b.span.start, end: b.span.start + 1, kind: "opaque", what: "an element's attributes" });
+      units.push({ start: b.span.start, end: b.span.start + 1, kind: "opaque", what: "an element's attributes", binds: false });
       return;
     }
     for (let i = 0; i < toks.length; i++) {
@@ -1064,7 +1066,7 @@ export function seedPrefixUnits(filePath, source) {
         continue;
       }
       // ATTR_CALL / ATTR_TYPED_DECL / an unquoted value refused / any other kind: not read here
-      units.push({ start: a.span.start, end: a.span.end, kind: "opaque", what: `an attribute value (${a.kind})` });
+      units.push({ start: a.span.start, end: a.span.end, kind: "opaque", what: `an attribute value (${a.kind})`, binds: false });
     }
   };
   const visit = (b) => {
@@ -1076,7 +1078,9 @@ export function seedPrefixUnits(filePath, source) {
       return;
     }
     if (b.type === "markup" || b.type === "state") {
-      markupBlocks.push(b);
+      if (b.type === "markup" && /^[A-Z]/.test(b.name ?? "")) {
+        units.push({ start: b.span.start, end: b.span.start + 1, kind: "opaque", what: `component instance \`<${b.name}>\` (its body runs where it stands)`, binds: false });
+      }
       attrUnits(b);
       for (const c of b.children ?? []) visit(c);
       return;
@@ -1084,26 +1088,7 @@ export function seedPrefixUnits(filePath, source) {
     units.push({ start: b.span.start, end: b.span.end, kind: "opaque", what: `a \`${b.type}\` block` });
   };
   for (const b of bs.blocks ?? []) visit(b);
-  // component definitions: `const Name = <…>` (one MARKUP token), or a body / root run ending in
-  // `const Name =` with the element right after it
-  const compSpans = [];
-  for (const u of units) {
-    if (u.kind !== "stmts" || !u.stmts) continue;
-    for (let k = 0; k < u.stmts.length; k++) {
-      const st = u.stmts[k];
-      const t = st.toks;
-      let h = 0;
-      if (t[0] && t[0].text === "export") h = 1;
-      if (!(t[h] && t[h].text === "const" && t[h + 1] && t[h + 1].kind === "IDENT" && /^[A-Z]/.test(t[h + 1].text) && t[h + 2] && t[h + 2].text === "=")) continue;
-      if (t.length === h + 4 && t[h + 3].kind === "MARKUP") { st.component = true; compSpans.push([t[h + 3].start, t[h + 3].end]); continue; }
-      if (t.length === h + 3 && k === u.stmts.length - 1) {
-        const at = u.end + (/^\s*/.exec(source.slice(u.end))?.[0].length ?? 0);
-        const mb = markupBlocks.find((m) => m.span.start === at && m.type === "markup");
-        if (mb) { st.component = true; compSpans.push([mb.span.start, mb.span.end]); }
-      }
-    }
-  }
-  return units.filter((u) => !compSpans.some(([a, b]) => u.start >= a && u.end <= b)).sort((x, y) => x.start - y.start);
+  return units.sort((x, y) => x.start - y.start);
 }
 
 function regionStatements(source, r, ls) {
