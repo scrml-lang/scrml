@@ -1,0 +1,16 @@
+{
+  "id": "each-at-dot-bare-item-rt",
+  "description": "§17.7.3 — inside `<each in=@items>` over a tape of strings, a bare `@.` is the current item: `${@.}` renders it and `up(@.)` passes it to a function. Two rows: \"ab-AB\" and \"c-C\".",
+  "language-version": "1.0",
+  "spec": "§17.7.3",
+  "rationale": "§17.7.3: \"Inside the body, `@.` refers to the current item. `@.field` accesses a field of the current item.\" — `@.` alone is the item itself, valid wherever a value is.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-"],
+    "domAnchored": [
+      { "selector": ".row", "count": 2 },
+      { "selector": ".row:nth-child(1)", "text": "ab-AB" },
+      { "selector": ".row:nth-child(2)", "text": "c-C" }
+    ]
+  }
+}

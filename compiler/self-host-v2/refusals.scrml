@@ -127,7 +127,7 @@ ${
             rowOn("multi-scrutinee match", "§18.19", U, ["match", "(", "*", ","], [], false, "match one value, and nest a second `match` in its arms"),
             rowOn("multi-scrutinee match", "§18.19", U, ["match", "(", "@", "$w", ","], [], false, "match one value, and nest a second `match` in its arms"),
             rowOn("named payload binding", "§18.7", U, ["$v", "(", "$w", ":", "$w"], ["E-PARSE-ARM"], false, "bind the payload positionally, `.V(a, b)`, in declared field order"),
-            row("is <variant>", "§18.17", U, ["is", "$v"], "test the variant with a `match` (an `else :>` arm for the rest)"),
+            // s480 (s480-boot-cheap-wins): the "is <variant>" row is gone — `x is .V` (§18.17) is built (parse.scrml variantTest)
             rowG("pure function", "§48.9", U, ["pure", "fn|function"], "lead", "`fn` is the pure form the bootstrap builds (§48); `pure function` is the deprecated spelling"),
             rowG("pinned", "§7.6.1", U, ["pinned", "fn|function|let|const|<"], "lead", ""),
             row("animationFrame()", "§6.7.9", U, ["animationFrame", "("], ""),

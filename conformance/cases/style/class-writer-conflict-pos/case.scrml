@@ -1,0 +1,6 @@
+// §5.5.4 — a computed `class=(…)` beside a `class:` directive on the SAME element is E-ATTR-WRITER-CONFLICT.
+<program>
+<mode>: string = "tab"
+<active>: bool = false
+<div id="box" class=(@mode) class:active=@active>box</div>
+</program>

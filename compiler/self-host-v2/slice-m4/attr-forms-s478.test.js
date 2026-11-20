@@ -157,7 +157,7 @@ describe("3 — the named codes", () => {
     expect(c).not.toContain("E-ATTR-MULTI-STATEMENT");
   });
   test("one expression the bootstrap cannot parse is that expression's own report, never a statement-list reading", () => {
-    const c = codes(`type S:enum = { Busy, Idle }\n<program>\nlet <s:S=.Idle/>\n<button disabled=\${@s is .Busy}>x</button>\n</program>\n`);
+    const c = codes(`type S:enum = { Busy, Idle }\n<program>\nlet <s:S=.Idle/>\n<button disabled=\${@s == S::Busy}>x</button>\n</program>\n`);
     expect(c).not.toContain("E-ATTR-MULTI-STATEMENT");
     expect(c.length).toBeGreaterThan(0);
   });

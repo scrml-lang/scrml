@@ -185,6 +185,26 @@ ${
         return s
     }
 
+    // s480 (s480-boot-cheap-wins): an operand of a binary — parenthesized by precedence, and
+    // ALWAYS where `??` meets `&&` / `||`: JavaScript refuses that mix unparenthesized
+    // (`a || b ?? c` is a SyntaxError), whatever the precedence would say.
+    fn wrapBin(op: JsOp, e: JsExpr, minPrec: int, ind: string) -> string {
+        if (nullishMixJs(op, e)) return "(" + expr(e, ind) + ")"
+        return wrap(e, minPrec, ind)
+    }
+
+    fn nullishMixJs(op: JsOp, e: JsExpr) -> boolean {
+        const child: JsOp | not = match e {
+            .JBin(op: o) :> o
+            // no-default-arm: only a binary operand can mix
+            _ :> not
+        }
+        if (child is not) return false
+        const logicP: boolean = op == JsOp.And || op == JsOp.Or
+        const logicC: boolean = child == JsOp.And || child == JsOp.Or
+        return (op == JsOp.Nullish && logicC) || (child == JsOp.Nullish && logicP)
+    }
+
     fn joinExprs(es: JsExpr[], minPrec: int, ind: string) -> string {
         let out = ""
         let first = true
@@ -242,7 +262,7 @@ ${
             .JCall(callee: f, args: args) :> wrap(f, 19, ind) + "(" + joinExprs(args, 2, ind) + ")"
             .JArrow(params: ps, body: body) :> arrowBlock(ps, body, ind)
             .JArrowE(params: ps, e: body) :> arrowExpr(ps, body, ind)
-            .JBin(op: op, l: l, r: r) :> wrap(l, opPrec(op), ind) + " " + opText(op) + " " + wrap(r, opPrec(op) + 1, ind)
+            .JBin(op: op, l: l, r: r) :> wrapBin(op, l, opPrec(op), ind) + " " + opText(op) + " " + wrapBin(op, r, opPrec(op) + 1, ind)
             .JUn(op: op, e: x) :> unJs(op, x, ind)
             .JCond(test: t, a: a, b: b) :> wrap(t, 4, ind) + " ? " + wrap(a, 3, ind) + " : " + wrap(b, 3, ind)
             .JArray(elems: es) :> "[" + joinExprs(es, 2, ind) + "]"

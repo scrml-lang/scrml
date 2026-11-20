@@ -1,0 +1,157 @@
+// is-variant-s480.test.js — s480-boot-cheap-wins item 3: `x is .V` (g-boot-is-variant-unbuilt-s480).
+//
+// SPEC §18.17: "`expr is .V` evaluates to `true` if and only if `expr`'s runtime value is the variant
+// `V` of its enum type. It evaluates to `false` for all other variants. No payload is bound or
+// accessible by the `is` expression itself." · "The `is` operator SHALL be valid only when the
+// left-hand operand is of an enum type. If the operand is not an enum type, this SHALL be a compile
+// error (E-TYPE-062 …)." · "An unknown variant name SHALL be a compile error (E-TYPE-063 …)." ·
+// "`expression is .VariantName` SHALL have result type `boolean`." · "`is` MAY be used in: `if`
+// conditions, `class=` dynamic binding expressions, ternary expressions, … and any position where a
+// boolean expression is valid."
+//
+// Before (red on base): every `x is .V` was refused by name — E-BOOTSTRAP-UNSUPPORTED "`is <variant>`
+// (§18.17) is not in the bootstrap yet" (refusals.scrml). Now the parser reads it as the `match` that
+// says it (`match x { .V :> true, else :> false }`, parse.scrml variantTest), its arms marked `test`
+// so analyze reports §18.17's codes.
+
+import { describe, test, expect, beforeAll, afterEach } from "bun:test";
+import { loadM2, frontEnd } from "./harness.js";
+import { loadProgram, click, expectNoPageErrors, warmLoadProgram } from "../slice-m1/load-program.js";
+
+let mods;
+beforeAll(() => { ({ mods } = loadM2()); warmLoadProgram(); }, { timeout: 300000 });
+afterEach(() => expectNoPageErrors());
+
+const fe = (src) => frontEnd(mods, [{ path: "app.scrml", src }], "app.scrml");
+const errs = (r) => r.diags.filter((d) => d.severity === "Error");
+const codes = (src) => errs(fe(src)).map((d) => d.code);
+const $ = (sel) => document.querySelector(sel);
+let k = 0;
+
+async function run(src) {
+  const r = fe(src);
+  expect(errs(r).map((d) => `${d.code}: ${d.message}`)).toEqual([]);
+  expect(mods.check.checkCore(r.core)).toEqual([]);
+  await loadProgram(r.core, "s480-isvar-" + k++);
+  return r;
+}
+
+const prog = (fns, markup = "") => `<program>
+type S:enum = { A, B(n: int) }
+let <s:S=.A/>
+let <o:S | not=(not)/>
+<name:string="x"/>
+${fns}
+<button id="b" onclick=flip()>flip</button>
+${markup}
+</program>
+`;
+
+describe("§18.17 — `x is .V` is a `bool`: true exactly for that variant (run)", () => {
+  test("in markup, a ternary, `if=`, a function — a unit variant and a payload variant", async () => {
+    await run(prog(`fn isA() -> bool { return @s is .A; }
+fn notB() -> bool { return !@s is .B; }
+function flip() { @s = .B(3); }`,
+    `<p id="t">\${@s is .A ? "a" : "b"}</p><p id="f">\${isA() ? "y" : "n"}\${notB() ? "y" : "n"}</p><p id="w" if=(@s is .B)>bee</p>`));
+    expect($("#t").textContent).toBe("a");
+    expect($("#f").textContent).toBe("yy");
+    expect($("#w")).toBeNull();
+    click($("#b"));
+    expect($("#t").textContent).toBe("b");
+    expect($("#f").textContent).toBe("nn");
+    expect($("#w").textContent).toBe("bee");
+  });
+
+  test("a narrowed `E | not` operand: `x is given && x is .V`", async () => {
+    await run(prog(`fn hasB() -> bool { return @o is given && @o is .B; }
+function flip() { @o = .B(1); }`, `<p id="h">\${hasB() ? "y" : "n"}</p>`));
+    expect($("#h").textContent).toBe("n");
+    click($("#b"));
+    expect($("#h").textContent).toBe("y");
+  });
+});
+
+describe("§18.17 — the codes", () => {
+  const rule = (fn) => prog(fn + "\nfunction flip() { }");
+  test("E-TYPE-062: a non-enum operand (an `E | not` operand is valid — see the S480 ruling below)", () => {
+    expect(codes(rule(`fn f() -> bool { return @name is .B; }`))).toEqual(["E-TYPE-062"]);
+    expect(codes(rule(`fn f() -> bool { return @o is .B; }`))).toEqual([]);
+  });
+  test("E-TYPE-063: an unknown variant name", () => {
+    expect(codes(rule(`fn f() -> bool { return @s is .Zed; }`))).toEqual(["E-TYPE-063"]);
+  });
+  test("the result is a `bool` (into a non-bool is E-TYPE-031); no payload is bound", () => {
+    expect(codes(rule(`fn f() -> int { return @s is .A; }`))).toEqual(["E-TYPE-031"]);
+    expect(codes(rule(`fn f() -> bool { return @s is .B; }`))).toEqual([]);
+  });
+});
+
+// s480 r1 (#2028 review F3 / F4). On ae5d75802: a subject whose type only the TYPER knows (a call,
+// an unannotated local) drew `match`'s E-TYPE-VARIANT ("the arms are variants of …" — arms the
+// author never wrote); `@one is .Only` over a one-variant enum drew W-MATCH-001 for the `else` arm
+// the parser adds; `@s is .B(x)` was read as a CALL of the test's result (E-LOGIC-EXECUTABLE-SINK).
+describe("§18.17 — r1: the typer's subject, one-variant enums, payload patterns", () => {
+  const p2 = (fn) => `<program>
+type S:enum = { A, B(n: int) }
+type Two:enum = { X, Y }
+type One:enum = { Only }
+let <s:S=.A/>
+let <one:One=.Only/>
+fn g() -> Two { return .X; }
+fn h() -> string { return "s"; }
+${fn}
+<button id="b" onclick=flip()>flip</button>
+</program>
+`;
+  const all = (src) => fe(src).diags.filter((d) => d.severity !== "Info").map((d) => d.code);
+  test("F3: a call / local the typer types — a non-enum is E-TYPE-062, another enum E-TYPE-063", () => {
+    const a = errs(fe(p2(`function flip() { if (h() is .A) { @s = .A; } }`)));
+    expect(a.map((d) => d.code)).toEqual(["E-TYPE-062"]);
+    expect(a[0].message).toContain("`is .A` requires an enum-typed left-hand operand, and this one is `string`");
+    expect(a[0].message).not.toContain("arms");
+    expect(codes(p2(`function flip() { const v = h(); if (v is .A) { @s = .A; } }`))).toEqual(["E-TYPE-062"]);
+    const c = errs(fe(p2(`function flip() { const v = g(); if (v is .A) { @s = .A; } }`)));
+    expect(c.map((d) => d.code)).toEqual(["E-TYPE-063"]);
+    expect(c[0].message).toContain("`.A` is not a variant of `Two`");
+  });
+  test("F4: `is` over a one-variant enum draws no W-MATCH-001 (an `is` gives no exhaustiveness)", () => {
+    expect(all(p2(`function flip() { if (@one is .Only) { @s = .A; } }`)).filter((c) => !c.startsWith("W-UNUSED") && c !== "E-DG-002")).toEqual([]);
+  });
+  test("F4: `x is .V(…)` is a parse error naming the `is` form — `is` binds no payload", () => {
+    for (const pat of [".B(x)", ".B(n: x)"]) {
+      const ds = errs(fe(p2(`function flip() { if (@s is ${pat}) { @s = .A; } }`)));
+      expect(ds.map((d) => d.code)).toEqual(["E-PARSE-EXPECTED"]);
+      expect(ds[0].message).toContain("`is` binds no payload");
+    }
+  });
+});
+
+// RULED S480 (ruling:user-voice-scrml.md-S480-is-not-nullish-type item 1): "`x is .V` and `x == .V`
+// are both allowed when `x : E | not`. An absent value is not `.V`, so the result is `false`." The
+// bootstrap's E-TYPE-062 for an un-narrowed `E | not` operand (ae5d75802 typer testMaybeCheck) is
+// withdrawn; E-TYPE-062 still applies to a non-enum operand (above). On ae5d75802 every `is` below
+// was E-TYPE-062.
+describe("§18.17 — `x is .V` over `E | not`: an absent value is `false` (S480 ruling)", () => {
+  test("in logic, a ternary, `if=`: false while absent (no throw), true once it is `.V`", async () => {
+    await run(prog(`fn hasB() -> bool { return @o is .B; }
+fn eqA() -> bool { return @o == .A; }
+function flip() { @o = .B(2); }`,
+    `<p id="h">\${hasB() ? "y" : "n"}\${eqA() ? "y" : "n"}\${@o is .A ? "a" : "-"}</p><b id="w" if=(@o is .B)>w</b>`));
+    expect($("#h").textContent).toBe("nn-");
+    expect($("#w")).toBeNull();
+    click($("#b"));
+    expect($("#h").textContent).toBe("yn-");
+    expect($("#w").textContent).toBe("w");
+  });
+  test("still checked: an unknown variant of `E | not` is E-TYPE-063; `string | not` is E-TYPE-062", () => {
+    const rule = (fn) => prog(fn + "\nfunction flip() { }");
+    expect(codes(rule(`fn f() -> bool { return @o is .Zed; }`))).toEqual(["E-TYPE-063"]);
+    expect(codes(`<program>
+type S:enum = { A }
+let <n:string | not=(not)/>
+fn f() -> bool { return @n is .A; }
+<p>\${f() ? "y" : "n"}</p>
+</program>
+`)).toEqual(["E-TYPE-062"]);
+  });
+});

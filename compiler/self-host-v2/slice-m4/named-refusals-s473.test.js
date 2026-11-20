@@ -59,7 +59,7 @@ const CASES = [
   ["partial match", P(`    type C:enum = { Red, Green }\n    function part(c: C) -> int { let r = 0; partial match c { .Red :> { r = 1; }, }; return r; }`), UNS],
   ["multi-scrutinee match", P(`    type C:enum = { Red, Green }\n    function ms(a: C, b: C) -> int { return match (a, b) { (.Red, .Red) :> 1, (_, _) :> 2, }; }`), UNS],
   ["named payload binding", P(`    type S:enum = { A(x: int, y: int), B }\n    function g(s: S) -> int { return match s { .A(x: q, y: w) :> q, .B :> 0, }; }`), UNS],
-  ["is <variant>", P(`    type C:enum = { Red, Green }\n    let <c:C=.Red/>\n    function f() -> bool { return @c is .Green; }`), UNS],
+  // s480 (s480-boot-cheap-wins): "is <variant>" is gone — `x is .V` (§18.17) is built (is-variant-s480.test.js)
   ["pure function", P(`    pure function f() -> int { return 1; }`), UNS],
   ["pinned", P(`    fn a() -> int { return b(); }\n    pinned fn b() -> int { return 1; }`), UNS],
   ["animationFrame()", P(`    function draw() { log("f"); }\n    function go() { animationFrame(draw); }`), UNS],

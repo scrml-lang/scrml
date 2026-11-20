@@ -1,0 +1,20 @@
+// §42 / §7 — `a ?? b`: the left operand where it is present, else the right (S440 Gotcha Q2: "defaults use `??`").
+<program>
+<n>: int | not = not
+<label> = "init"
+<total>: int = 0
+${
+    function pick(a: string | not) -> string {
+        return a ?? "none";
+    }
+    function go() {
+        @label = pick(not) + "|" + pick("x");
+        @n = 4;
+        @total = (@n ?? 0) + 1;
+    }
+}
+<button id="go" onclick=go()>go</button>
+<p id="out">${@label}</p>
+<p id="tot">${@total}</p>
+<p id="shown">${@n ?? 0}</p>
+</program>

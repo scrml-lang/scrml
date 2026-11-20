@@ -1,0 +1,20 @@
+// §18.17 — `x is .V` is a bool: true exactly for that variant (a unit and a payload variant), in a function, a ternary and `if=`.
+<program>
+type Phase:enum = { Idle, Busy(n: int) }
+<phase>: Phase = .Idle
+<label> = "init"
+${
+    function check() {
+        const busy: bool = @phase is .Busy;
+        @label = busy ? "busy" : "idle";
+    }
+    function start() {
+        @phase = .Busy(2);
+        check();
+    }
+}
+<button id="go" onclick=start()>go</button>
+<p id="out">${@label}</p>
+<p id="t">${@phase is .Idle ? "I" : "B"}</p>
+<p id="w" if=(@phase is .Busy)>working</p>
+</program>
