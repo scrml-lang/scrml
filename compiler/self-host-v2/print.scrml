@@ -3446,16 +3446,45 @@ ${
     // the element (§55.17.3: it runs before any author handler) — whatever the
     // attribute order.
     fn attrsJs(ctx: Ctx, attrs: Attr[], node: JsExpr) -> JsStmt[] {
+        const fixed: string[] = staticClasses(attrs)
         let gates: JsStmt[] = []
         let out: JsStmt[] = []
         for (const a of attrs) {
             if (isGate(a)) {
-                gates = gates.concat(attrJs(ctx, a, node))
+                gates = gates.concat(attrJs(ctx, a, node, fixed))
             } else {
-                out = out.concat(attrJs(ctx, a, node))
+                out = out.concat(attrJs(ctx, a, node, fixed))
             }
         }
         return gates.concat(out)
+    }
+
+    // s480 (s480-static-class) — the class names the element's static `class="…"` names (§5.5.2:
+    // "The static class is always present"). A `class:` directive naming one of them is printed
+    // `fixed` (rt.classOn's last argument): its condition is still read (its dependencies, and a
+    // trap holds the element out, §19.17), but the class is never removed — not on mount, not on a
+    // re-run, not on a held element's restore. A static `hidden` stripped would REVEAL content.
+    fn staticClasses(attrs: Attr[]) -> string[] {
+        let out: string[] = []
+        for (const a of attrs) {
+            const v: string = staticClassText(a)
+            for (const t of v.split("\t").join(" ").split("\n").join(" ").split("\r").join(" ").split(" ")) {
+                if (t != "") out = out.concat([t])
+            }
+        }
+        return out
+    }
+
+    fn staticClassText(a: Attr) -> string {
+        return match a {
+            .Static(name: n, value: v) :> (n.toLowerCase() == "class" ? v : "")
+            .Bound(name: x) :> ""
+            .Show(test: x) :> ""
+            .ClassOn(test: x) :> ""
+            .On(event: x) :> ""
+            .Bind(kind: x) :> ""
+            .Gate(values: x) :> ""
+        }
     }
 
     fn isGate(a: Attr) -> boolean {
@@ -3556,12 +3585,12 @@ ${
         }
     }
 
-    fn attrJs(ctx: Ctx, a: Attr, node: JsExpr) -> JsStmt[] {
+    fn attrJs(ctx: Ctx, a: Attr, node: JsExpr, fixed: string[]) -> JsStmt[] {
         return match a {
             .Static :> []
             .Bound(name: n, e: e) :> [sexpr(rtCall(ctx, "attr", [scopeVar(), node, jstr(n), jthunk(exprJs(ctx, e))]))]
             .Show(test: t) :> [sexpr(rtCall(ctx, "visibility", [scopeVar(), node, jthunk(exprJs(ctx, t))]))]
-            .ClassOn(name: cn, test: t) :> [sexpr(rtCall(ctx, "classOn", [scopeVar(), node, jstr(cn), jthunk(exprJs(ctx, t))]))]
+            .ClassOn(name: cn, test: t) :> [sexpr(rtCall(ctx, "classOn", [scopeVar(), node, jstr(cn), jthunk(exprJs(ctx, t))].concat(fixed.indexOf(cn) >= 0 ? [JsExpr.JAnnot(JsExpr.JBool(true), "also in the static class: never removed")] : [])))]
             .On(event: ev, body: body) :> [sexpr(rtCall(ctx, "on", [scopeVar(), node, jstr(ev), JsExpr.JArrow(handlerParams(body), blockJs(ctx, body))]))]
             .Bind(kind: k, read: r, sink: sk, write: w) :> [sexpr(rtCall(ctx, "bind", [scopeVar(), node, jstr(bindProp(k)), jthunk(exprJs(ctx, r)), JsExpr.JArrow([symName(ctx, sk)], blockJs(ctx, w))].concat(bindSurface(ctx, r))))]
             .Gate(values: vs, fields: fs) :> [sexpr(rtCall(ctx, "gate", [scopeVar(), node, JsExpr.JArrowE([], JsExpr.JArray(gateSurfacesJs(ctx, fs)))]))]

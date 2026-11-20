@@ -217,3 +217,86 @@ describe("§19.17 — a trapping `class:` condition holds its element out (r1 F2
     expect(cls("#p")).toBe("k");
   });
 });
+
+// s480 (s480-static-class, #2028 re-review LOW) — SPEC §5.5.2: "`class:` directives and a static
+// `class=` attribute MAY coexist on the same element. The static class is always present; each
+// `class:` directive independently adds or removes its named class." On c15225d88
+// `<p class="hidden" class:hidden=@f>` rendered `<p class="">` at mount while `@f` was false — a
+// static `hidden` stripped REVEALS what it hides. A class the static `class=` names is never removed
+// by a `class:` toggle: on mount, on a re-run, while held by a trap, on restore, inside `<each>`.
+describe("§5.5.2 — a `class:` toggle never removes a class the static `class=` names", () => {
+  test("at MOUNT, the condition false: the static class is present", async () => {
+    await run(prog(`<p id="p" class="hidden k" class:hidden=@lit>secret</p>`));
+    expect(cls("#p")).toBe("hidden k");                                // c15225d88: "k"
+  });
+
+  test("the static list's whitespace (several spaces, a tab) still names the class", async () => {
+    await run(prog(`<p id="p" class="a  hidden\tb" class:hidden=@lit>secret</p>`));
+    expect(cls("#p")).toBe("a b hidden");
+  });
+
+  test("toggled true → false at run time: the static class stays", async () => {
+    await run(prog(`<p id="p" class="hidden" class:hidden=(!@lit)>secret</p>`, `function go() { @lit = !@lit; }`));
+    expect(cls("#p")).toBe("hidden");
+    click($("#b"));
+    expect(cls("#p")).toBe("hidden");                                  // c15225d88: ""
+    click($("#b"));
+    expect(cls("#p")).toBe("hidden");
+  });
+
+  test("inside `<each>`: every row keeps it, on mount and on each re-run", async () => {
+    await run(prog(`<ul id="u"><each in=(["a", "b"]) key=@.><li class="hidden" class:hidden=@lit>\${@.}</li></each></ul>`, `function go() { @lit = !@lit; }`));
+    const rows = () => [...document.querySelectorAll("#u li")].map((li) => li.className);
+    expect(rows()).toEqual(["hidden", "hidden"]);                      // c15225d88: ["", ""]
+    click($("#b"));
+    expect(rows()).toEqual(["hidden", "hidden"]);
+    click($("#b"));
+    expect(rows()).toEqual(["hidden", "hidden"]);
+  });
+
+  test("held by a trap, then restored: it comes back WITH the static class; a trap still holds it out", async () => {
+    const reported = [];
+    const saved = globalThis.reportError;
+    globalThis.reportError = (e) => reported.push(e);
+    try {
+      // `@xs[@i]` traps while @i is out of range (@i starts at 5); `in` → 1 (reads 20: false),
+      // `zero` → 0 (reads 10: true), `out` → 7 (traps).
+      const r = fe(`<program>
+    <xs:int[]=([10, 20])/>
+    let <i:int=5/>
+    function into() { @i = 1; }
+    function zero() { @i = 0; }
+    function out() { @i = 7; }
+    <main>
+        <button onclick=into()>in</button>
+        <button onclick=zero()>zero</button>
+        <button onclick=out()>out</button>
+        <div id="box"><p id="p" class="hidden" class:hidden=(@xs[@i] == 10)>secret</p><span id="sib">sib</span></div>
+    </main>
+</program>
+`);
+      expect(errs(r).map((d) => `${d.code}: ${d.message}`)).toEqual([]);
+      await loadProgram(r.core, "s480-classdir-static-" + k++);
+      const btn = (label) => [...document.querySelectorAll("button")].find((b) => b.textContent === label);
+      expect($("#p")).toBeNull();                                      // held at mount (the trap rule is kept)
+      expect(reported.map((e) => e.code)).toEqual(["E-INDEX-OUT-OF-RANGE-RT"]);
+      click(btn("in"));                                                // restored with the condition false
+      expect(cls("#p")).toBe("hidden");                                // c15225d88: ""
+      click(btn("zero"));
+      expect(cls("#p")).toBe("hidden");
+      click(btn("out"));                                               // held again
+      expect($("#p")).toBeNull();
+      click(btn("in"));
+      expect(cls("#p")).toBe("hidden");
+    } finally { globalThis.reportError = saved; }
+  });
+
+  test("guard: a toggle naming a DIFFERENT class still removes its own class (the static one stays)", async () => {
+    await run(prog(`<p id="p" class="Hidden" class:on=(!@lit) class:hidden=(!@lit)>x</p>`, `function go() { @lit = !@lit; }`));
+    expect(cls("#p")).toBe("Hidden hidden on");
+    click($("#b"));
+    expect(cls("#p")).toBe("Hidden");                                  // `on` and `hidden` (class names are case-sensitive) go
+    click($("#b"));
+    expect(cls("#p")).toBe("Hidden hidden on");
+  });
+});
