@@ -19,7 +19,7 @@
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { mods, compile, check, realDb, serve, bridge } from "./server-artifact-harness.js";
-import { frontEnd } from "./harness.js";
+import { frontEndNoUnusedLint as frontEnd } from "../slice-m2/no-unused-lint.js";  // s480: fixtures hold incidental unread arm binders — W-UNUSED-BINDING is tested in slice-m4/unused-binding-s480.test.js
 import { loadProgram, click, expectNoPageErrors, warmLoadProgram, instancesOf } from "../slice-m1/load-program.js";
 import { dropUnnamedScaffold } from "../slice-m2/scaffold-cells.js";
 

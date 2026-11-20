@@ -1,0 +1,29 @@
+<program>
+    type Shape:enum = { Circle(r: int), Rect(w: int, h: int), Empty }
+    type Oops:enum = { Bad(why: string), Gone }
+    let <count:int=0/>
+    let <note:string=""/>
+    let <shape:Shape=.Empty/>
+    function area(s: Shape) -> int {
+        return match s {
+            .Circle(_) :> 3,
+            .Rect(w, _h) :> w,
+            .Empty :> 0
+        };
+    }
+    function fetch(k: int)! Oops {
+        if (k > 0) { fail Oops.Gone; }
+        return k;
+    }
+    function step() {
+        const got: int = fetch(1) !{ .Bad(why) :> { @note = why; lift 1; }, _ :> 2 };
+        @count = got + area(@shape);
+    }
+    <p id="s">${@count} ${@note}</p>
+    <match for=Shape on=@shape>
+        <Circle(r)><p>circle ${r}</p></>
+        <Rect(w, h)><p title=w>rect ${h}</p></>
+        <Empty><p>empty</p></>
+    </match>
+    <button id="b" onclick=step()>step</button>
+</program>

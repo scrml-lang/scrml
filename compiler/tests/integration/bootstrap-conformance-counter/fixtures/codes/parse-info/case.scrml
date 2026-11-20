@@ -7,7 +7,7 @@
     }
     function go() {
         load("x") !{
-            | .NotFound(m) :> @n = 1,
+            | .NotFound(_) :> @n = 1,
             | _ :> @n = 2
         };
     }

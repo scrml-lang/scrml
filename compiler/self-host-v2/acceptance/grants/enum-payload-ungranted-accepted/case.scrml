@@ -11,7 +11,7 @@
     function label() -> string {
         return match @e {
             .Dot :> "dot",
-            .A(xs) :> "a"
+            .A(_) :> "a"
         };
     }
     function grow() {

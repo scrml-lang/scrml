@@ -749,7 +749,7 @@ ${
     // resolved type, read by resolveLambda for the lambda's value type (a map's element type).
     type LamRet:struct = { lam: int, ty: Type | not }
     // s480 — a local binding (addLoc): its statement / binder node, Sym id, name and span.
-    type LocDecl:struct = { file: string, nid: int, sym: int, name: string, span: ASpan }
+    type LocDecl:struct = { file: string, nid: int, sym: int, name: string, span: ASpan, arm: int }
     type LiftSeen:struct = { into: int, ty: Type | not }
     type RSym:struct = { s: Sym, st: AS }
 
@@ -883,10 +883,20 @@ ${
     // s480 (W-UNUSED-BINDING, §7.3.5): record a LOCAL binding the binder minted — a `let` /
     // `const` / keywordless declaration (a destructured name included), an iterate-head binder,
     // a counted head's `let`, a loop bound as a value. unusedBindings judges them once the
-    // program is bound. File-scope bindings, parameters and pattern binders are never recorded.
+    // program is bound. File-scope bindings and parameters are never recorded; an arm's
+    // pattern binders are, by addArmLoc.
     fn addLoc(st: AS, file: string, nid: int, s: Sym, name: string, span: ASpan) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets,
-                 locs: st.locs.concat([{ file: file, nid: nid, sym: s.id, name: name, span: span }]) }
+                 locs: st.locs.concat([{ file: file, nid: nid, sym: s.id, name: name, span: span, arm: 0 }]) }
+    }
+
+    // s480 (S480 ruling item 2, `ruling:user-voice-scrml.md-S480-unused-binding-six`): an arm
+    // binder — of a `match` / `!{}` arm (`.V(x)`, `.Ok(v)`, `_ err`) or a `<match>` arm (§18.7).
+    // `_` binds nothing and is never recorded. `arm`: 1 a payload binder, 2 a whole binder (`_ err`).
+    fn addArmLoc(st: AS, file: string, b: ABind, s: Sym, arm: int) -> AS {
+        if (b.name == "_") return st
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend, lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets,
+                 locs: st.locs.concat([{ file: file, nid: b.nid, sym: s.id, name: b.name, span: b.span, arm: arm }]) }
     }
 
     fn localIsLin(s: AStmt) -> boolean {
@@ -20907,7 +20917,7 @@ ${
     // (§18.6.1 "The binder's type is the type of the failure being handled").
     fn bindWhole(env: Env, b: ABind, err: Sym, st0: AS) -> RBinds {
         const rb: RSym = mint(reservedName(st0, env.file, b.span, b.name), b.name)
-        const st: AS = addBind(rb.st, b.nid, BindFact.BBind(rb.s))
+        const st: AS = addArmLoc(addBind(rb.st, b.nid, BindFact.BBind(rb.s)), env.file, b, rb.s, 2)   // s480: W-UNUSED-BINDING (§7.3.5)
         if (b.name == "_") return { env: env, st: st }
         return { env: withLocal(env, { name: b.name, s: rb.s, ty: Type.Named(err), mutable: false, narrowed: not, nDecl: not, fresh: false, via: "", foreign: false }), st: st }
     }
@@ -20983,7 +20993,7 @@ ${
         let i = 0
         for (const b of bs) {
             const rb: RSym = mint(reservedName(st, env.file, b.span, b.name), b.name)
-            st = addBind(rb.st, b.nid, BindFact.BBind(rb.s))
+            st = addArmLoc(addBind(rb.st, b.nid, BindFact.BBind(rb.s)), env.file, b, rb.s, 1)   // s480: W-UNUSED-BINDING (§7.3.5)
             let ty: Type | not = not
             if (i < fs.length) ty = fs[i].ty
             if (b.name != "_") env = withLocal(env, { name: b.name, s: rb.s, ty: ty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "", foreign: false })
@@ -20999,7 +21009,7 @@ ${
         let i = 0
         for (const b of bs) {
             const rb: RSym = mint(reservedName(st, env.file, b.span, b.name), b.name)
-            st = addBind(rb.st, b.nid, BindFact.BBind(rb.s))
+            st = addArmLoc(addBind(rb.st, b.nid, BindFact.BBind(rb.s)), env.file, b, rb.s, 1)   // s480: W-UNUSED-BINDING (§7.3.5)
             let t: Type | not = not
             if (i == 0) t = ty
             if (b.name != "_") env = withLocal(env, { name: b.name, s: rb.s, ty: t, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "", foreign: false })
@@ -30834,7 +30844,9 @@ ${
     // governs it) not read before its scope ends gets the warning, and a `_` prefix
     // exempts it". The population is what the binder recorded with addLoc (a local
     // declaration — a destructured name included —, an iterate-head binder, a counted
-    // head's `let`, a loop bound as a value); parameters, pattern binders, `given`
+    // head's `let`, a loop bound as a value) and, by S480 ruling item 2
+    // (`ruling:user-voice-scrml.md-S480-unused-binding-six`), an arm's pattern binders
+    // (addArmLoc: a `match` / `!{}` arm, a `<match>` arm, §18.7); parameters, `given`
     // names and file-scope bindings are never recorded. A binding is READ when any
     // name the binder resolved denotes its Sym (NameFact NLocal) — a whole-assignment
     // target `x = v` records no name (placeName), so a write-only binding is unread;
@@ -30873,8 +30885,14 @@ ${
             const skip: boolean = l.name.substring(0, 1) == "_" || l.name.indexOf("#") >= 0 || l.sym >= read.length || l.nid < 0
             if (!skip && read[l.sym] != 1 && mark[l.nid] == -1) {
                 mark[l.nid] = 2
-                const what: string = wrote[l.sym] == 1 ? "is assigned, but nothing reads it before its scope ends — every value written to it is lost" : "is declared, but nothing reads it before its scope ends"
-                out = out.concat([mkDiag(l.file, l.span, "W-UNUSED-BINDING", "`" + l.name + "` " + what + " (§7.3.5). Read it, remove it, or name it `_" + l.name + "` if it is deliberately unread")])
+                if (l.arm == 2) {
+                    out = out.concat([mkDiag(l.file, l.span, "W-UNUSED-BINDING", "`" + l.name + "` is bound by this arm's pattern, but nothing in the arm reads it (§7.3.5). Read it, or write the arm as a bare `_` (in place of `_ " + l.name + "`) if the value is deliberately unread")])
+                } else if (l.arm == 1) {
+                    out = out.concat([mkDiag(l.file, l.span, "W-UNUSED-BINDING", "`" + l.name + "` is bound by this arm's pattern, but nothing in the arm reads it (§7.3.5). Read it, or write `_` in its place (`.V(_)`) if the value is deliberately unread")])
+                } else {
+                    const what: string = wrote[l.sym] == 1 ? "is assigned, but nothing reads it before its scope ends — every value written to it is lost" : "is declared, but nothing reads it before its scope ends"
+                    out = out.concat([mkDiag(l.file, l.span, "W-UNUSED-BINDING", "`" + l.name + "` " + what + " (§7.3.5). Read it, remove it, or name it `_" + l.name + "` if it is deliberately unread")])
+                }
             }
         }
         return out
