@@ -1,0 +1,6 @@
+<program>
+<u> = "/x"
+<base href="/app/">
+<a id="a" href=(@u)>x</a>
+<p id="ok">ok</p>
+</program>

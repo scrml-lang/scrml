@@ -7,22 +7,22 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1938 of 1938 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1943 of 1943 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 743 | 38.3% |
+| PASS | 748 | 38.5% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 0 | 0.0% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 638 | 32.9% |
+| NOT-TWINNED | 638 | 32.8% |
 | UNSUPPORTED | 557 | 28.7% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 743; of those, 743 hold (100.0%). Runtime half executed on the bootstrap for 240 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 748; of those, 748 hold (100.0%). Runtime half executed on the bootstrap for 240 case(s).
 
-- **Vacuous** passes: 16 of 743 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **727**.
+- **Vacuous** passes: 16 of 748 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **732**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 0 of 0; the other 0 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
@@ -116,7 +116,7 @@ NOT-TWINNED by reason (638 cases; a case counts once per distinct reason):
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
 | element-refusal | 39 | 26 | · | · | · | 11 | 2 | · | · |
-| endpoint | 26 | 25 | · | · | · | · | 1 | · | · |
+| endpoint | 31 | 30 | · | · | · | · | 1 | · | · |
 | engine | 101 | 31 | · | · | · | 50 | 20 | · | · |
 | enum | 1 | 1 | · | · | · | · | · | · | · |
 | equality | 10 | 6 | · | · | · | 4 | · | · | · |
@@ -179,7 +179,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (743)
+### PASS / CODES-ONLY (748)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -381,7 +381,9 @@ none
 - `endpoint/accepts-unknown-name` — PASS
 - `endpoint/arm-body-undefined-scope` — PASS (also emitted, unasserted: E-TYPE-STRUCT-CONTEXT)
 - `endpoint/arm-body-valid-scope-clean` — PASS (also emitted, unasserted: E-TYPE-043)
+- `endpoint/attr-comment-in-opener` — PASS
 - `endpoint/attr-invalid-misspelled-cors` — PASS
+- `endpoint/attr-single-quoted-value` — PASS
 - `endpoint/dead-arm` — PASS
 - `endpoint/duplicate-arm` — PASS
 - `endpoint/endpoint-clean` — PASS
@@ -392,13 +394,16 @@ none
 - `endpoint/not-exhaustive` — PASS
 - `endpoint/path-grammar-edges-clean` — PASS
 - `endpoint/path-invalid-dot-segment` — PASS
+- `endpoint/path-invalid-empty` — PASS
 - `endpoint/path-invalid-param` — PASS
 - `endpoint/path-invalid-query` — PASS
 - `endpoint/path-invalid-relative` — PASS
 - `endpoint/path-missing` — PASS
 - `endpoint/path-reserved-scrml-local` — PASS
 - `endpoint/path-reserved-scrml-local-bare` — PASS
+- `endpoint/path-warning-value-neg` — PASS (also emitted, unasserted: W-IS-SOME-DEPRECATED)
 - `endpoint/self-closing-arm-exhaustive` — PASS
+- `endpoint/typed-attr-declaration-neg` — PASS
 - `endpoint/wildcard-exhaustive` — PASS
 - `engine/e-engine-rule-quoted-pos` — PASS
 - `engine/engine-var-duplicate-neg` — PASS · TWIN (also emitted, unasserted: E-DG-002)
