@@ -504,7 +504,7 @@ jobs:
   # slices — the native bootstrap (impl#2, compiler/self-host-v2/) + the e2e-render-map tier, SHARDED.
   #
   # S480 (s480-ci-slices-timeout) — WHY SHARDED. As one job it ran 908–1180 s against a 20-min timeout
-  # and was CANCELLED at the timeout on 12 of 39 runs (merge-queue runs for PRs 2006/2007/2008/2010/2011
+  # and was CANCELLED at the timeout on 11 of 39 runs (merge-queue runs for PRs 2006/2007/2008/2010/2011
   # among them; `gate` then fails and the PR leaves the queue). slice-m4 alone is ~756 s of it.
   # WHAT EACH LEG RUNS lives in scripts/ci-slices.ts (its header): slice-m4 is split by bun's own
   # `--shard=i/N` (balanced by scripts/ci-test-timings.json, as unit/integration are), and every other

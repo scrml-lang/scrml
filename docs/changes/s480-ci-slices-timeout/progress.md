@@ -1,7 +1,7 @@
 # s480-ci-slices-timeout — progress
 
 Problem: CI `slices` (one serial job, 20-min timeout) ran 908–1180 s and was cancelled at the timeout on
-12 of the last 39 CI runs (merge_group runs for PRs 2006/2007/2008/2010/2011 among them).
+11 of the last 39 completed CI runs (merge_group runs for PRs 2006/2007/2008/2010/2011 among them).
 Step breakdown (run 44658840576, job 136031718699, 1109 s): slice-m4 756 s (241 files) · slice-m2 132 s ·
 slice-m1 lowered 72 s · slice-codec 57 s · e2e-render-map 48 s · slice-m1 14 s · slice-m3 13 s · lints ~1 s.
 

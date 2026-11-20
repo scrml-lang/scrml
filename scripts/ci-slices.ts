@@ -3,7 +3,7 @@
 //
 // WHY THIS EXISTS. `slices` was one job running every native-bootstrap slice suite + the e2e-render-map
 // tier in series. By S480 it took 908–1180 s on a GitHub runner against a 20-min (1200 s) timeout, and
-// 12 of the last 39 CI runs had it CANCELLED at the timeout (merge-queue runs for PRs 2006/2007/2008/
+// 11 of the last 39 completed CI runs had it CANCELLED at the timeout (merge-queue runs for PRs 2006/2007/2008/
 // 2010/2011 among them — `gate` then fails and the PR leaves the queue). One suite is ~70% of it:
 // slice-m4 (241 files, ~756 s on run 44658840576); everything else is ~340 s.
 //
