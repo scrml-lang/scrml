@@ -166,10 +166,24 @@ ${
                  start: t.span.start, end: t.span.end, line: t.span.line, bad: tokBad(t.kind) }
     }
 
+    // S480 (s480-boot-fn-count-perf): built by halves — one `concat` per token
+    // copied the whole prefix each time (O(tokens²) per region).
     export fn toPToks(ts: Token[]) -> PTok[] {
-        let out: PTok[] = []
-        for (const t of ts) { out = out.concat([toPTok(t)]) }
-        return out
+        return toPToksOf(ts, 0, ts.length)
+    }
+
+    fn toPToksOf(ts: Token[], lo: int, hi: int) -> PTok[] {
+        if (hi - lo <= 8) {
+            let out: PTok[] = []
+            let i: int = lo
+            while (i < hi) {
+                out = out.concat([toPTok(ts[i])])
+                i = i + 1
+            }
+            return out
+        }
+        const mid: int = lo + Math.floor((hi - lo) / 2)
+        return toPToksOf(ts, lo, mid).concat(toPToksOf(ts, mid, hi))
     }
 
     // =========================================================================

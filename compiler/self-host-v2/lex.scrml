@@ -1030,6 +1030,13 @@ ${
     type LexState:struct = {
         cur: Cursor,
         mode: LexMode,
+        // S480 (s480-boot-fn-count-perf): the tokens so far are `older` (full
+        // chunks of LEX_CHUNK, in order) then `tokens` (the most recent ones —
+        // never fewer than LEX_CHUNK once a chunk is flushed, so the readers of
+        // the last token or two read `tokens` alone). One `concat` per token over
+        // the WHOLE run copied every token lexed so far (O(tokens²) per region);
+        // `allTokens` joins them once, at the end of a run.
+        older: Token[][],
         tokens: Token[],
         bracketStack: BracketKind[],
         interps: InterpFrame[],
@@ -1047,8 +1054,28 @@ ${
     // this lexer (so the slot's extent is not known), "" while there is none.
     type InterpFrame:struct = { depth: int, start: int, why: string }
 
-    fn mkState(cur: Cursor, mode: LexMode, tokens: Token[], bracketStack: BracketKind[], interps: InterpFrame[], display: boolean) -> LexState {
-        return { cur: cur, mode: mode, tokens: tokens, bracketStack: bracketStack, interps: interps, display: display }
+    fn mkState(older: Token[][], cur: Cursor, mode: LexMode, tokens: Token[], bracketStack: BracketKind[], interps: InterpFrame[], display: boolean) -> LexState {
+        const k: int = lexChunk()
+        if (tokens.length >= k + k) {
+            return { cur: cur, mode: mode, older: older.concat([tokens.slice(0, k)]), tokens: tokens.slice(k), bracketStack: bracketStack, interps: interps, display: display }
+        }
+        return { cur: cur, mode: mode, older: older, tokens: tokens, bracketStack: bracketStack, interps: interps, display: display }
+    }
+
+    fn lexChunk() -> int { return 64 }
+
+    // Every token of the run, in order (`older`'s chunks, then `tokens`).
+    fn allTokens(st: LexState) -> Token[] {
+        if (st.older.length == 0) return st.tokens
+        return joinChunks(st.older, 0, st.older.length).concat(st.tokens)
+    }
+
+    // The chunks `cs[lo..hi)` joined — by halves, so each token is copied
+    // O(log chunks) times, not once per later chunk.
+    fn joinChunks(cs: Token[][], lo: int, hi: int) -> Token[] {
+        if (hi - lo == 1) return cs[lo]
+        const mid: int = lo + Math.floor((hi - lo) / 2)
+        return joinChunks(cs, lo, mid).concat(joinChunks(cs, mid, hi))
     }
 
     fn skipTrivia(cur: Cursor) -> Cursor {
@@ -1189,7 +1216,7 @@ ${
 
     fn scanForeignStep(st: LexState) -> LexState {
         const scan: Scan = scanForeign(st.cur)
-        return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), st.bracketStack, st.interps, st.display)
+        return mkState(st.older, scan.cur, st.mode, st.tokens.concat([scan.tok]), st.bracketStack, st.interps, st.display)
     }
 
     // The state-aware classifier used in InCode: an interp-closing `}` takes
@@ -1255,7 +1282,7 @@ ${
 
     fn codeStep(st: LexState) -> LexState {
         const cur: Cursor = skipTrivia(st.cur)
-        let st2: LexState = mkState(cur, st.mode, st.tokens, st.bracketStack, st.interps, st.display)
+        let st2: LexState = mkState(st.older, cur, st.mode, st.tokens, st.bracketStack, st.interps, st.display)
         let ev: LexEvent = classifyCode(st2, cur)
         if (st2.interps.length > 0 && isSlash(cur)) {
             const why: string = slashWhy(st2)
@@ -1279,7 +1306,7 @@ ${
         // refusal names this closer rather than an unclosed template)
         if (cw != "" && st.bracketStack.length <= st.interps[st.interps.length - 1].depth) nstack = st.bracketStack
         const marked: LexState = markSlot(st, cw)
-        return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), nstack, marked.interps, st.display)
+        return mkState(st.older, scan.cur, st.mode, st.tokens.concat([scan.tok]), nstack, marked.interps, st.display)
     }
 
     // -------------------------------------------------------------------------
@@ -1295,7 +1322,7 @@ ${
         const top: InterpFrame = st.interps[n - 1]
         if (top.why != "") return st
         const f: InterpFrame = { depth: top.depth, start: top.start, why: why }
-        return mkState(st.cur, st.mode, st.tokens, st.bracketStack, st.interps.slice(0, n - 1).concat([f]), st.display)
+        return mkState(st.older, st.cur, st.mode, st.tokens, st.bracketStack, st.interps.slice(0, n - 1).concat([f]), st.display)
     }
 
     // A `/` that is neither comment opener.
@@ -1409,28 +1436,28 @@ ${
         const scan: Scan = scanString(st.cur, q, st.display && !inSlot)
         let marked: LexState = st
         if (inSlot) marked = markSlot(st, slotStringWhy(scan.tok.text))
-        return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), st.bracketStack, marked.interps, st.display)
+        return mkState(st.older, scan.cur, st.mode, st.tokens.concat([scan.tok]), st.bracketStack, marked.interps, st.display)
     }
 
     fn scanLineCommentStep(st: LexState) -> LexState {
-        return mkState(skipLineComment(st.cur), st.mode, st.tokens, st.bracketStack, st.interps, st.display)
+        return mkState(st.older, skipLineComment(st.cur), st.mode, st.tokens, st.bracketStack, st.interps, st.display)
     }
 
     fn scanBlockCommentStep(st: LexState) -> LexState {
-        return mkState(skipBlockComment(st.cur), st.mode, st.tokens, st.bracketStack, st.interps, st.display)
+        return mkState(st.older, skipBlockComment(st.cur), st.mode, st.tokens, st.bracketStack, st.interps, st.display)
     }
 
     // A regex emits one RegexLit and stays InCode.
     fn scanRegexStep(st: LexState) -> LexState {
         const scan: Scan = scanRegex(st.cur)
-        return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), st.bracketStack, st.interps, st.display)
+        return mkState(st.older, scan.cur, st.mode, st.tokens.concat([scan.tok]), st.bracketStack, st.interps, st.display)
     }
 
     // A bare variant `.foo` emits one BareVariant and stays InCode. The `.` is
     // not a bracket, so the bracket stack is threaded through unchanged.
     fn scanBareVariantStep(st: LexState) -> LexState {
         const scan: Scan = scanBareVariant(st.cur)
-        return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), st.bracketStack, st.interps, st.display)
+        return mkState(st.older, scan.cur, st.mode, st.tokens.concat([scan.tok]), st.bracketStack, st.interps, st.display)
     }
 
     // Enter a template: consume the opening backtick (no token) and DRIVE the
@@ -1439,7 +1466,7 @@ ${
     // which the `while (!isEof)` driver would otherwise skip at EOF).
     fn enterTemplateStep(st: LexState) -> LexState {
         const to: Cursor = advance(st.cur, 1)
-        const started: LexState = mkState(to, LexMode.InTemplateBody, st.tokens, st.bracketStack, st.interps, st.display)
+        const started: LexState = mkState(st.older, to, LexMode.InTemplateBody, st.tokens, st.bracketStack, st.interps, st.display)
         return templateBodyStep(started)
     }
 
@@ -1452,9 +1479,9 @@ ${
         const chunk: Token = mkTok(kTemplateChunk(scan.cooked, scan.raw, escapeWhy(scan.raw)), scan.raw, st.cur, scan.cur)
         const toks: Token[] = st.tokens.concat([chunk])
         return match scan.term {
-            .TermInterp   :> emitInterpStart(scan.cur, toks, st.bracketStack, st.interps, st.display)
-            .TermBacktick :> mkState(scan.cur, LexMode.InCode, toks, st.bracketStack, st.interps, st.display)
-            .TermEof      :> mkState(scan.cur, LexMode.InCode, toks, st.bracketStack, st.interps, st.display)
+            .TermInterp   :> emitInterpStart(st.older, scan.cur, toks, st.bracketStack, st.interps, st.display)
+            .TermBacktick :> mkState(st.older, scan.cur, LexMode.InCode, toks, st.bracketStack, st.interps, st.display)
+            .TermEof      :> mkState(st.older, scan.cur, LexMode.InCode, toks, st.bracketStack, st.interps, st.display)
         }
     }
 
@@ -1462,11 +1489,11 @@ ${
     // bracket-stack DEPTH (length) at which the interp opened; lex the body as
     // InCode. The stack itself is threaded through unchanged (the `${` opens no
     // bracket — only the depth snapshot the closing `}` is matched against).
-    fn emitInterpStart(cur: Cursor, toks: Token[], stack: BracketKind[], ids: InterpFrame[], display: boolean) -> LexState {
+    fn emitInterpStart(older: Token[][], cur: Cursor, toks: Token[], stack: BracketKind[], ids: InterpFrame[], display: boolean) -> LexState {
         const to: Cursor = advance(cur, 2)   // consume ${
         const tok: Token = mkTok(TokenKind.TemplateInterpStart, sliceText(cur, to), cur, to)
         const f: InterpFrame = { depth: stack.length, start: to.pos, why: "" }
-        return mkState(to, LexMode.InCode, toks.concat([tok]), stack, ids.concat([f]), display)
+        return mkState(older, to, LexMode.InCode, toks.concat([tok]), stack, ids.concat([f]), display)
     }
 
     // Close the innermost interp: emit TemplateInterpEnd (`}`), pop its frame,
@@ -1481,14 +1508,14 @@ ${
         let why: string = top.why
         if (why == "") why = htmlCommentWhy(st.cur.source.substring(top.start, st.cur.pos))
         const tok: Token = mkTok(kInterpEnd(why), sliceText(st.cur, to), st.cur, to)
-        return mkState(to, LexMode.InTemplateBody, st.tokens.concat([tok]), st.bracketStack, popDepth(st.interps), st.display)
+        return mkState(st.older, to, LexMode.InTemplateBody, st.tokens.concat([tok]), st.bracketStack, popDepth(st.interps), st.display)
     }
 
     // DEFERRED-event safety net (unreachable in practice — every InCode event has
     // an explicit arm above, and InTemplateBody is routed through step). Advances
     // one code point so the driver always makes progress. TODO(slice-4).
     fn deferAdvance(st: LexState) -> LexState {
-        return mkState(advance(st.cur, 1), st.mode, st.tokens, st.bracketStack, st.interps, st.display)
+        return mkState(st.older, advance(st.cur, 1), st.mode, st.tokens, st.bracketStack, st.interps, st.display)
     }
 
     fn makeEof(cur: Cursor) -> Token {
@@ -1497,11 +1524,11 @@ ${
 
     // The driver: fold `step` until the cursor is exhausted, then append EOF.
     export fn lex(src: string) -> Token[] {
-        let st: LexState = mkState(makeCursor(src), LexMode.InCode, [], [], [], false)
+        let st: LexState = mkState([], makeCursor(src), LexMode.InCode, [], [], [], false)
         while (!isEof(st.cur)) {
             st = step(st)
         }
-        return st.tokens.concat([makeEof(st.cur)])
+        return allTokens(st).concat([makeEof(st.cur)])
     }
 
     // s475-boot-literal-carriers (W-REQUEST-ID-UNREFERENCEABLE, §6.7.7 / §15.11.2): is `s` an identifier
@@ -1655,7 +1682,7 @@ ${
     fn openTernary(st: LexState) -> boolean {
         let depth: int = 0
         let open: int = 0
-        for (const t of st.tokens) {
+        for (const t of allTokens(st)) {
             const k: TokenKind = t.kind
             if (k is .LParen || k is .LBracket || k is .LBrace || k is .TemplateInterpStart) {
                 depth = depth + 1
@@ -1865,7 +1892,7 @@ ${
             stack = stack.concat([BracketKind.Brace])
             i = i + 1
         }
-        let st: LexState = mkState(cursorAt(src, pos), LexMode.InCode, [], stack, [], false)
+        let st: LexState = mkState([], cursorAt(src, pos), LexMode.InCode, [], stack, [], false)
         let done = false
         let paused = false
         while (!done && !isEof(st.cur)) {
@@ -1881,8 +1908,8 @@ ${
             }
         }
         const at: Cursor = skipTriviaAhead(st.cur)
-        if (paused) return { tokens: st.tokens.concat([makeEof(st.cur)]), end: at.pos, line: at.line, paused: true, depth: st.bracketStack.length }
-        return { tokens: st.tokens.concat([makeEof(st.cur)]), end: st.cur.pos, line: st.cur.line, paused: false, depth: 0 }
+        if (paused) return { tokens: allTokens(st).concat([makeEof(st.cur)]), end: at.pos, line: at.line, paused: true, depth: st.bracketStack.length }
+        return { tokens: allTokens(st).concat([makeEof(st.cur)]), end: st.cur.pos, line: st.cur.line, paused: false, depth: 0 }
     }
 
     // The last token is the keyword `lift`, at statement level (only braces
@@ -1962,7 +1989,7 @@ ${
     // it stands alone as the body statement — the parser re-lexes any other
     // code-default region with display = false (ordinary strings, logic escapes).
     export fn lexFromMode(src: string, pos: int, stop: LexStop, display: boolean) -> LexRun {
-        let st: LexState = mkState(cursorAt(src, pos), LexMode.InCode, [], [], [], display)
+        let st: LexState = mkState([], cursorAt(src, pos), LexMode.InCode, [], [], [], display)
         let done = false
         while (!done && !isEof(st.cur)) {
             if (stopBefore(st, stop)) {
@@ -1975,7 +2002,7 @@ ${
                 if (stopAfter(st, stop)) done = true
             }
         }
-        return { tokens: st.tokens.concat([makeEof(st.cur)]), end: st.cur.pos }
+        return { tokens: allTokens(st).concat([makeEof(st.cur)]), end: st.cur.pos }
     }
 
     // =========================================================================
@@ -2029,7 +2056,7 @@ ${
         const end: int = markupValueExtentAt(c.source, c.pos)
         const to: Cursor = advanceTo(c, end)
         const tok: Token = mkTok(TokenKind.MarkupValue, sliceText(c, to), c, to)
-        return mkState(to, st.mode, st.tokens.concat([tok]), st.bracketStack, st.interps, st.display)
+        return mkState(st.older, to, st.mode, st.tokens.concat([tok]), st.bracketStack, st.interps, st.display)
     }
 
     // The end of the element whose `<` is at `pos`: past its matching closer

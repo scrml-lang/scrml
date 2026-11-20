@@ -141,25 +141,53 @@ ${
     // of (the S477 counted-loop `step` removal value). Program-wide, not
     // scope-aware: it catches a binding that is MISSING, not one out of scope.
     // =========================================================================
+    // S480 (s480-boot-fn-count-perf): the bound Sym ids are marked in a tape indexed by id
+    // (less the least), written in place — one concat per bound Sym and an indexOf per local
+    // use were O(locals²) and O(uses × locals).
     fn checkLocalsBound(p: CoreProgram) -> string[] {
-        let bound: int[] = []
-        for (const s of boundSyms(Node.NProgram(p))) { bound = bound.concat([s.id]) }
-        for (const k of p.consts) { bound = bound.concat([k.sym.id]) }
-        for (const f of p.fns) { bound = bound.concat([f.sym.id]) }
-        for (const sf of p.server) { bound = bound.concat([sf.sym.id]) }
-        for (const ld of p.loads) { bound = bound.concat([ld.val.id]) }
+        let ids: int[] = []
+        for (const k of p.consts) { ids = ids.concat([k.sym.id]) }
+        for (const sf of p.server) { ids = ids.concat([sf.sym.id]) }
+        for (const ld of p.loads) { ids = ids.concat([ld.val.id]) }
+        const bs: Sym[] = boundSyms(Node.NProgram(p))
+        let lo: int = 0
+        let hi: int = -1
+        for (const s of bs) {
+            if (hi < lo || s.id < lo) lo = s.id
+            if (s.id > hi) hi = s.id
+        }
+        for (const f of p.fns) {
+            if (hi < lo || f.sym.id < lo) lo = f.sym.id
+            if (f.sym.id > hi) hi = f.sym.id
+        }
+        for (const d of ids) {
+            if (hi < lo || d < lo) lo = d
+            if (d > hi) hi = d
+        }
+        let mark: int[] = minusOnesC(hi - lo + 1)     // 1: bound
+        for (const s of bs) { mark[s.id - lo] = 1 }
+        for (const f of p.fns) { mark[f.sym.id - lo] = 1 }
+        for (const d of ids) { mark[d - lo] = 1 }
         let out: string[] = []
         let seen: int[] = []
         for (const n of allNodes(Node.NProgram(p))) {
             const s: Sym | not = nodeLocalUse(n)
             if (s is given) {
-                if (bound.indexOf(s.id) < 0 && seen.indexOf(s.id) < 0) {
+                const isBound: boolean = s.id >= lo && s.id <= hi && mark[s.id - lo] == 1
+                if (!isBound && seen.indexOf(s.id) < 0) {
                     seen = seen.concat([s.id])
                     out = out.concat(["C21: the local " + s.hint + " (sym " + s.id + ") is read or rebound but nothing in the program binds it"])
                 }
             }
         }
         return out
+    }
+
+    fn minusOnesC(n: int) -> int[] {
+        if (n <= 0) return []
+        let out: int[] = [-1]
+        while (out.length + out.length <= n) { out = out.concat(out) }
+        return out.concat(minusOnesC(n - out.length))
     }
 
     fn nodeLocalUse(n: Node) -> Sym | not {
