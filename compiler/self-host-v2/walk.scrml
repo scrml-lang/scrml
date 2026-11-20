@@ -10,7 +10,7 @@
 // =============================================================================
 ${
     import { Sym, Type, Place, InstRef, Literal, Pattern, Expr, MatchArm, EditKind, Stmt, Block, PathStep, Failable, OkArm, ErrArm, LoopHead, Gather, Lifted, GatherRow,
-             Attr, View, CondArm, ConstructAttr, EffectDep, RequestState, Field, Decl, Fn, ServerFn, CoreProgram,
+             Attr, View, CondArm, ConstructAttr, EffectDep, RequestState, Field, Decl, Fn, ServerFn, CoreProgram, CoreConst,
              ValidityOf, validityInst } from "./core.scrml"
 
     // Every Core node kind, as one sum. Types, Syms and Literals are leaves of
@@ -152,13 +152,70 @@ ${
         }
     }
 
+    // S480 (s480-boot-fn-count-perf): each list by halves (as exprNodes) — one concat per
+    // declaration made every whole-program walk O(declarations²).
     fn programKids(p: CoreProgram) -> Node[] {
-        let out: Node[] = []
-        for (const d of p.decls) { out = out.concat([Node.NDecl(d)]) }
-        for (const f of p.fns) { out = out.concat([Node.NFn(f)]) }
-        for (const s of p.server) { out = out.concat([Node.NServerFn(s)]) }
-        for (const k of p.consts) { out = out.concat([Node.NExpr(k.init)]) }   // s472: file-scope constants
-        return out
+        const ds: Node[] = declNodesOf(p.decls, 0, p.decls.length)
+        const fs: Node[] = fnNodesOf(p.fns, 0, p.fns.length)
+        const ss: Node[] = serverNodesOf(p.server, 0, p.server.length)
+        const ks: Node[] = constNodesOf(p.consts, 0, p.consts.length)   // s472: file-scope constants
+        return ds.concat(fs).concat(ss).concat(ks)
+    }
+
+    fn declNodesOf(xs: Decl[], lo: int, hi: int) -> Node[] {
+        if (hi - lo <= 8) {
+            let out: Node[] = []
+            let i: int = lo
+            while (i < hi) {
+                out = out.concat([Node.NDecl(xs[i])])
+                i = i + 1
+            }
+            return out
+        }
+        const mid: int = lo + Math.floor((hi - lo) / 2)
+        return declNodesOf(xs, lo, mid).concat(declNodesOf(xs, mid, hi))
+    }
+
+    fn fnNodesOf(xs: Fn[], lo: int, hi: int) -> Node[] {
+        if (hi - lo <= 8) {
+            let out: Node[] = []
+            let i: int = lo
+            while (i < hi) {
+                out = out.concat([Node.NFn(xs[i])])
+                i = i + 1
+            }
+            return out
+        }
+        const mid: int = lo + Math.floor((hi - lo) / 2)
+        return fnNodesOf(xs, lo, mid).concat(fnNodesOf(xs, mid, hi))
+    }
+
+    fn serverNodesOf(xs: ServerFn[], lo: int, hi: int) -> Node[] {
+        if (hi - lo <= 8) {
+            let out: Node[] = []
+            let i: int = lo
+            while (i < hi) {
+                out = out.concat([Node.NServerFn(xs[i])])
+                i = i + 1
+            }
+            return out
+        }
+        const mid: int = lo + Math.floor((hi - lo) / 2)
+        return serverNodesOf(xs, lo, mid).concat(serverNodesOf(xs, mid, hi))
+    }
+
+    fn constNodesOf(xs: CoreConst[], lo: int, hi: int) -> Node[] {
+        if (hi - lo <= 8) {
+            let out: Node[] = []
+            let i: int = lo
+            while (i < hi) {
+                out = out.concat([Node.NExpr(xs[i].init)])
+                i = i + 1
+            }
+            return out
+        }
+        const mid: int = lo + Math.floor((hi - lo) / 2)
+        return constNodesOf(xs, lo, mid).concat(constNodesOf(xs, mid, hi))
     }
 
     fn declKids(d: Decl) -> Node[] {
@@ -503,10 +560,25 @@ ${
 
     // The locals a Stmt-bearing node BINDS (Let, <each> binds and row handles,
     // pattern binders) — the name requests the printer's NameSupply mints.
+    // S480 (s480-boot-fn-count-perf): by halves — one concat per node copied every Sym bound
+    // so far (O(nodes × locals)).
     export fn boundSyms(root: Node) -> Sym[] {
-        let out: Sym[] = []
-        for (const n of allNodes(root)) { out = out.concat(bindsOf(n)) }
-        return out
+        const ns: Node[] = allNodes(root)
+        return boundSymsOf(ns, 0, ns.length)
+    }
+
+    fn boundSymsOf(ns: Node[], lo: int, hi: int) -> Sym[] {
+        if (hi - lo <= 8) {
+            let out: Sym[] = []
+            let i: int = lo
+            while (i < hi) {
+                out = out.concat(bindsOf(ns[i]))
+                i = i + 1
+            }
+            return out
+        }
+        const mid: int = lo + Math.floor((hi - lo) / 2)
+        return boundSymsOf(ns, lo, mid).concat(boundSymsOf(ns, mid, hi))
     }
 
     fn bindsOf(n: Node) -> Sym[] {

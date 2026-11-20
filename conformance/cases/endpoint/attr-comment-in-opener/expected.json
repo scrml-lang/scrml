@@ -1,0 +1,14 @@
+{
+  "id": "endpoint-attr-comment-in-opener",
+  "description": "§61.2 — a comment inside an `<endpoint>` opener (`/* */`) is a run the markup attribute reader drops: E-ATTR-001 at the comment. The opener is refused rather than read without it.",
+  "language-version": "1.0",
+  "spec": "§61.2, §34",
+  "provenance": "S480 #2007 review (S239) item 1; §61.2 as amended by #1998 review r2 N1",
+  "source-test": "compiler/self-host-v2/slice-m4/endpoint-opener-s480.test.js",
+  "rationale": "§61.2: \"A character that reader drops (a `'`, a backtick, a `{…}` / `${…}` block or a comment with no attribute name, a value it cannot read) or a stray `=` / value is `E-ATTR-001` at that character, never skipped\".",
+  "expect": {
+    "codes": ["E-ATTR-001"],
+    "notCodes": ["E-BOOTSTRAP-UNSUPPORTED"],
+    "severity": { "E-ATTR-001": "error" }
+  }
+}
