@@ -84,4 +84,13 @@ decls / routes / fns (run nothing), then boot: `rt.construct` seeds, CSS bridges
       `SCRML_NON_ELEMENT_TAGS`) and not a §36 input-state tag (fail closed). (First cut exempted only
       `<program>`: conformance measured 6 `defer/*` cases with `<schema>` newly refused — fixed.)
 - [x] tests: r4 section of slice-m4/fix-s66-seed-order-s480.test.js — 11 red on d9eefb493, green on head.
-- [ ] cost (census lens vs d9eefb493, runtime differential, conformance), gates, PR body.
+- [x] cost: census lens 701, head vs d9eefb493 (both run fresh, same main): boot-clean 208 → 208, 0 lost,
+      0 newly refused; 1 newly MOVED (examples/32-external-api: two adjacent seeds with nothing between —
+      R empty; error → error either way); 2 refusal notes reworded. Runtime differential over the 208
+      boot-clean: 0 cell diffs (13 text diffs, 8 run errors — whitespace / impl#1 run errors, none seed-
+      related; the 4 not in r3's list are programs newly boot-clean from main). Conformance vs origin/main
+      c15225d88: CRASH 0, PASS 760 → 760, FAIL 0 → 10 (9 stmt-semi twins — TWIN_RULES excludes stmt-semi,
+      sources graded as written — + defer/outside-function-when-body-neg twin-extra-error); PASS→other =
+      reactive/hoist-forward-ref-neg (r2 by-design); NOT-TWINNED→PASS match-leave/top-level-match-arm-return-neg.
+- [x] gates: pretest, s34-census --check-new, types-gate, snippet-gate, claim-gate, corpus-compile-floor,
+      gen-md-shim — all pass.
