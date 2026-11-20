@@ -1,0 +1,14 @@
+{
+  "id": "endpoint-attr-invalid-misspelled-cors",
+  "description": "§61.2 — an `<endpoint>` opener attribute whose name is outside `endpoint-attrs ::= path-attr method-attr accepts-attr cors-attr?` (here a misspelled `cor=\"*\"`, with a well-formed value) is E-ENDPOINT-ATTR-INVALID. It is refused rather than ignored: read and ignored, the endpoint would compile with no CORS.",
+  "language-version": "1.0",
+  "spec": "§61.2, §61.9",
+  "provenance": "ruling:user-voice-scrml.md-S480-four-recs-2 item 1",
+  "source-test": "compiler/tests/integration/endpoint-opener-closed-grammar-served.test.js",
+  "rationale": "§61.2: \"An `<endpoint>` opener attribute whose name is not `path`, `method`, `accepts` or `cors` — whatever its value … — is `E-ENDPOINT-ATTR-INVALID` (§61.9), reported at that attribute.\"",
+  "expect": {
+    "codes": ["E-ENDPOINT-ATTR-INVALID"],
+    "notCodes": ["E-ENDPOINT-CORS-INVALID", "E-BOOTSTRAP-UNSUPPORTED", "E-ATTR-001"],
+    "severity": { "E-ENDPOINT-ATTR-INVALID": "error" }
+  }
+}

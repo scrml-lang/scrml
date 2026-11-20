@@ -2470,6 +2470,34 @@ ${
         return s
     }
 
+    // §20.7.2 / §14.13.1 item 2 — a type whose every value has ONE honest text: `string`,
+    // `int`, `number`, `bool`, or an enum whose variants all carry no payload. The one
+    // definition for every text sink (a template slot, markup text, `print`) and for
+    // `join(sep)`'s elements (s480, S479 item 13).
+    fn hasOneText(types: TypeInfo[], t: Type) -> boolean {
+        const k: int = kindOf(t)
+        if (k <= 3) return true
+        if (k != 4) return false
+        const es: Sym | not = isEnumType(types, t)
+        if (es is not) return false
+        const ti: TypeInfo | not = typeInfoOf(types, es)
+        if (ti is not) return false
+        for (const v of enumVariants(ti.def)) {
+            if (v.fields.length > 0) return false
+        }
+        return true
+    }
+
+    // s480 — what a tape's elements are when they have no one text (`join(sep)`'s refusal).
+    fn noTextWhat(types: TypeInfo[], el: Type) -> string {
+        const k: int = kindOf(el)
+        if (k == 6) return "`" + typeName(el) + "` values (an element may be `not`, which has no text)"
+        if (k == 5) return "tapes (`" + typeName(el) + "`)"
+        if (k == 7) return "functions (`" + typeName(el) + "`)"
+        if (isEnumType(types, el) is given) return "values of `" + typeName(el) + "`, an enum with payload variants"
+        return "`" + typeName(el) + "` values (a struct or an instance)"
+    }
+
     fn namedOf(t: Type) -> Sym | not {
         return match t {
             .Named(sym: s) :> s
@@ -12298,12 +12326,16 @@ ${
     // The built-in a method name is on a receiver of type `t`; `not` when the
     // type has no such method in the bootstrap (or, for `sort()`, when the
     // element type has no natural order — the caller says which).
-    fn methodOp(n: string, t: Type) -> PrimOp | not {
+    fn methodOp(types: TypeInfo[], n: string, t: Type) -> PrimOp | not {
         if (t == Type.Str) return strMethodOp(n)
         const el: Type | not = seqElem(t)
         if (el is not) return not
         if (n == "reverse") return PrimOp.Reverse
-        if (n == "join" && el == Type.Str) return PrimOp.Join
+        // s480 (S479 item 13) — `join(sep)` joins each element's ONE honest text (§20.7.2):
+        // a `string`, `int`, `number`, `bool` or unit enum element. The runtime's joinStr
+        // writes each element by textOf, which IS that text for every one of them (a unit
+        // variant is its declared name at runtime) and fails closed on anything else.
+        if (n == "join" && hasOneText(types, el)) return PrimOp.Join
         if (n == "includes") return PrimOp.TapeIncludes      // s475 (§66.12.1): an element's membership, a `bool`
         if (n == "concat") return PrimOp.TapeConcat          // s477 (§66.12.1): `a.concat(b)` — a NEW tape; ONE tape argument
         if (n == "sort") {
@@ -12468,14 +12500,14 @@ ${
         if (maybeInner(ot) is given) {
             return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", call + " on a `" + typeName(ot) + "` — the value may be `not`, and the bootstrap does not read a narrowing at a method's receiver; pass the narrowed value to a function that takes the plain type", args, st)
         }
-        const op: PrimOp | not = methodOp(m.method, ot)
+        const op: PrimOp | not = methodOp(env.g.types, m.method, ot)
         if (op is not) {
             const el: Type | not = seqElem(ot)
             if (m.method == "sort" && el is given) {
                 return plain(ot, refuseMethod(env, e, "E-TYPE-031", "`.sort()` with no comparator needs elements with a natural order — ints and numbers (numerically) or strings (by code point) — and these are `" + typeName(el) + "` (S469); pass a comparator, `.sort((a, b) => …)` returning a number", args, st).st)
             }
             if (m.method == "join" && el is given) {
-                return refuseMethod(env, e, "E-TYPE-031", "`.join(sep)` joins a tape of strings, and this one holds `" + typeName(el) + "` — there is no ruled conversion of a `" + typeName(el) + "` to a string yet, so nothing converts it implicitly", args, st)
+                return refuseMethod(env, e, "E-TYPE-031", "`.join(sep)` joins its elements' text, and these are " + noTextWhat(env.g.types, el) + " — only a `string`, `int`, `number`, `bool` or unit enum value has one honest text (§20.7.2, §66.12.6); give each element its text first: `xs.map(fmt).join(sep)`, with `fmt` returning a `string`", args, st)
             }
             if (ot == Type.Str) return refuseMethod(env, e, "E-STRING-METHOD-UNKNOWN", strUnknownMsg(m.method), args, st)
             return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", call + " on a `" + typeName(ot) + "` is not in the bootstrap — its built-in methods are, on a string: " + strMethodList() + "; on a tape: `.sort()`, `.reverse()`, `.join(sep)`, `.includes(x)`, `.filter(x => …)`, `.map(x => …)`, `.some(x => …)`, `.every(x => …)`", args, st)
@@ -23571,7 +23603,7 @@ ${
     fn resolveForStep(env: Env, x: AExpr, what: string, st0: AS) -> AS {
         const v: AExpr | not = assignValue(x)
         if (v is given) {
-            if (handledOf(v.k) is given) return addDiag(resolveExpr(env, v, not, st0), env.file, x.span, "E-BOOTSTRAP-UNSUPPORTED", "a handled failable in a counted head's `" + what + "` is not in the bootstrap yet — handle it in the loop body")
+            if (handledOf(v.k) is given) return addDiag(resolveExpr(env, v, not, st0).st, env.file, x.span, "E-BOOTSTRAP-UNSUPPORTED", "a handled failable in a counted head's `" + what + "` is not in the bootstrap yet — handle it in the loop body")
         }
         const st: AS = resolveStmtExpr(env, x, st0)
         if (st.diags.length > st0.diags.length) return st
@@ -24949,7 +24981,7 @@ ${
     fn typeCounted(env0: TEnv, init: AStmt[], cond: AExpr | not, step: AExpr[], body: ABlock, ts0: TypeState) -> TypeState {
         const ib: ABlock = { nid: -1, span: body.span, stmts: init }
         const ri: RTEnv = typeBlockEnv(env0, ib, ts0)
-        const env: TEnv = tDeferEnv(ri.env)
+        const env: TEnv = tCountedEnv(env0, ri.env)
         let ts: TypeState = ri.ts
         let benv: TEnv = env
         if (cond is given) {
@@ -24960,6 +24992,22 @@ ${
         ts = typeBlock(benv, body, ts)
         for (const x of step) { ts = typeEvalStmt(env, x, ts).ts }
         return ts
+    }
+
+    // s480 (S479 item 11) — the narrowings in force in a counted loop's condition, body and
+    // step: a local's by tDeferEnv's rule (never rebound — the `init` locals are rebound by the
+    // step), and a cell narrowing (with its `if=` gate mark) that tLoopEnv kept at loop entry
+    // (the loop writes it nowhere) and `init` did not end. Was: tDeferEnv alone, so a counted
+    // loop dropped every cell narrowing in its body even where it wrote none — an over-refusal
+    // the condition, iterate and infinite heads (tLoopEnv's rule, s478) did not have. A
+    // narrowing `init` creates is not kept unless the entry had it: tLoopEnv never judged it.
+    fn tCountedEnv(entry: TEnv, afterInit: TEnv) -> TEnv {
+        const d: TEnv = tDeferEnv(afterInit)
+        let keep: string[] = d.narrowed
+        for (const k of afterInit.narrowed) {
+            if (k.indexOf("#") != 0 && entry.narrowed.indexOf(k) >= 0 && keep.indexOf(k) < 0) keep = keep.concat([k])
+        }
+        return { t: d.t, file: d.file, errs: d.errs, locals: d.locals, settled: d.settled, narrowed: keep, fnw: d.fnw, rows: d.rows, fret: d.fret, blame: d.blame }
     }
 
     fn typeIter(env: TEnv, b: ABind, src: AIterSrc, key: AExpr | not, body: ABlock, ts0: TypeState) -> TypeState {
@@ -35789,6 +35837,13 @@ ${
             }
             return markPresence(ts, c.nid)
         }
+        // s480 (#2006 r1): a `T | not` place read where an enclosing test already
+        // narrowed it reads as `T` (§42.4 statement 4) — "compare explicitly" would
+        // mislead: the test is redundant, and `x is given` is what it meant.
+        const nk: string = nKey(env, c)
+        if (nk != "" && env.narrowed.indexOf(nk) >= 0) {
+            return report(ts, env, c.span, "E-COND-NOT-BOOLEAN", what + " needs a `bool`, and this value is `" + typeName(t) + "`: an enclosing test already narrowed it present, so it reads as `" + typeName(t) + "` here, not as a presence test (§42.4) — drop the redundant test, or write `x is given` (ruled S440 #4 = (c))")
+        }
         return report(ts, env, c.span, "E-COND-NOT-BOOLEAN", what + " needs a `bool` (or a `T | not` presence test), and this value is `" + typeName(t) + "` — a condition has no truthiness; compare explicitly (`n > 0`, `s != \"\"`, `xs.length > 0`) (ruled S440 #4 = (c))")
     }
     // `&&` / `||` take booleans only (RULED S440, Gotcha Q2 — superseding
@@ -36070,19 +36125,9 @@ ${
         return notText(env, s, textWhat(env, t), ts)
     }
 
-    // §14.13.1 item 2: "`string`, `int`, `number`, `bool`, or a unit enum value".
+    // §14.13.1 item 2: "`string`, `int`, `number`, `bool`, or a unit enum value" (hasOneText).
     fn isTextPrimitive(env: TEnv, t: Type) -> boolean {
-        const k: int = kindOf(t)
-        if (k <= 3) return true
-        if (k != 4) return false
-        const es: Sym | not = isEnumType(env.t.types, t)
-        if (es is not) return false
-        const ti: TypeInfo | not = typeInfoOf(env.t.types, es)
-        if (ti is not) return false
-        for (const v of enumVariants(ti.def)) {
-            if (v.fields.length > 0) return false
-        }
-        return true
+        return hasOneText(env.t.types, t)
     }
 
     fn textWhat(env: TEnv, t: Type) -> string {

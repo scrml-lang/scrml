@@ -14,8 +14,8 @@
 // 2. An array literal was not a typed receiver: `[10, 9, 2].sort()` was E-BOOTSTRAP-UNSUPPORTED "a built-in
 //    method needs a receiver of a known type". §66.3 rule 5 (a): "a non-empty sequence literal `[…]` whose
 //    elements are all such literals of one base type | the literal's (rule 3); `[1, 2, 3]` → `int[]`,
-//    `[1, 2.5]` → `number[]`". `.join` on an `int[]` keeps its E-TYPE-031 (no ruled int→string conversion,
-//    g-bootstrap-int-to-string-conversion-unruled-s469) — the same refusal a typed `int[]` local gets.
+//    `[1, 2.5]` → `number[]`". `.join` on an `int[]` literal joins as a typed `int[]` local does (s480, S479
+//    item 13: `join(sep)` joins each primitive element's one honest text, §20.7.2).
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
@@ -106,12 +106,13 @@ describe("2. a homogeneous array literal is a typed receiver", () => {
     await loadProgram(r.core, "s476-cst-incl-" + k++);
     expect($("#p").textContent).toBe("y");
   });
-  test("`[10, 9, 2].sort().join(\",\")` — `.join` on an `int[]` keeps the typed-local refusal E-TYPE-031 (int→string unruled)", () => {
-    const lit = errs(fe(`<main><p>\${[10, 9, 2].sort().join(",")}</p></main>`));
-    expect(lit.map((d) => d.code)).toEqual(["E-TYPE-031"]);
+  test("`[10, 9, 2].sort().join(\",\")` — `.join` on an `int[]` literal joins as a typed `int[]` local does (s480, S479 item 13)", async () => {
+    const lit = fe(`<main><p id="p">\${[10, 9, 2].sort().join(",")}</p></main>`);
+    expect(errs(lit)).toEqual([]);
     const typed = errs(fe("fn j() -> string { const xs: int[] = [10, 9, 2]; return xs.sort().join(\",\"); }\n<main><p>${j()}</p></main>"));
-    expect(typed.map((d) => d.code)).toEqual(["E-TYPE-031"]);
-    expect(lit[0].message).toBe(typed[0].message);
+    expect(typed).toEqual([]);
+    await loadProgram(lit.core, "s476-cst-joinint-" + k++);
+    expect($("#p").textContent).toBe("2,9,10");
   });
   test("a heterogeneous literal is refused by name: its elements are not of one type", () => {
     const e = errs(fe(`<main><p>\${["a", 1].sort().length}</p></main>`));

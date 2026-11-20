@@ -1,0 +1,25 @@
+{
+  "id": "linear-bare-arrow-binding-called-pos",
+  "description": "A keywordless binding holding an arrow function (`fmt = (n: string) => …`, §50.8.5 — a `const`) and called in markup is a legal binding, never E-MU-001: it is read, and an unread binding would be the S422 lint anyway.",
+  "language-version": "1.0",
+  "spec": "§50.8.5",
+  "provenance": "ruling:user-voice-scrml.md-S479-3B-rest-item-25 (\"⭐ RULED — the rest of S478 hand-off §3.B, PA recs adopted (S479, 2026-11-18)\", item 25: \"g-bare-arrow-binding-false-e-mu-001 — Rec (PERMANENT): option (a) — legal const per S422 Calls 1/3 (re-affirmed S479); unused = lint.\")",
+  "rationale": "The gap's own program (S347): impl#1 reported a false `E-MU-001: fmt declared but never used` though `fmt` is called in the `<each>` row. Under the ruling the binding is a `const` and the program has no error.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-MU-001"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-bare-arrow-binding-false-e-mu-001",
+      "fails": {
+        "codes": [
+          "emitted:E-MU-001=1",
+          "forbidden:E-MU-001"
+        ]
+      }
+    }
+  }
+}

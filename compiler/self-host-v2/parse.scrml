@@ -15043,6 +15043,12 @@ ${
     // with the arms' server functions once the whole file — and so the `accepts=`
     // enum, which may be declared after the endpoint — has been read.
     // =========================================================================
+    // §61.2 `endpoint-attrs ::= path-attr method-attr accepts-attr cors-attr?` — the
+    // E-ENDPOINT-ATTR-INVALID tail (impl#1 ast-builder.js says the same).
+    fn epAttrsOnly() -> string {
+        return "an `<endpoint>` opener carries `path=\"…\"`, `method=…`, `accepts=Enum` and an optional `cors=\"…\"` only (§61.2 `endpoint-attrs ::= path-attr method-attr accepts-attr cors-attr?`); any other attribute is refused rather than ignored. Remove it, or correct its name"
+    }
+
     fn endpointItem(o: Opener, mp: MP, exported: boolean, ctx: string) -> RMItems {
         let m: MP = mp
         const tagEnd: int = o.start + 9
@@ -15053,7 +15059,7 @@ ${
         // A non-entry file's `<program>` is judged in analyze (endpointPass).
         if (ctx != "program") m = mDiag(m, "E-STRUCTURAL-ELEMENT-MISPLACED", "`<endpoint>` " + endpointPlaceWhy(ctx) + " — an `<endpoint>` is grammatical only as a direct child of the top-level `<program>` (§61.2, §4.15): a route belongs to the served program, not to a page, a channel or a nested program; move it into the `<program>` body", o.start, tagEnd)
         for (const v of o.vals) {
-            m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "the validator `" + v.name + "(…)` on `<endpoint>` — an `<endpoint>` opener carries `path=`, `method=` and `accepts=` only (§61.2)", v.span.start, v.span.end)
+            m = mDiag(m, "E-ENDPOINT-ATTR-INVALID", "the validator `" + v.name + "(…)` is not an `<endpoint>` attribute — " + epAttrsOnly(), v.span.start, v.span.end)
         }
         for (const ta of o.typed) {
             m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "the typed attribute `" + ta.name + ":…` on `<endpoint>` — an `<endpoint>` opener carries `path=`, `method=` and `accepts=` only (§61.2)", ta.span.start, ta.span.end)
@@ -15093,8 +15099,9 @@ ${
                     m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`accepts=` on `<endpoint>` names an `:enum` type (§61.2 `accepts-attr ::= 'accepts=' enum-type-ref`) — write the bare type name, `accepts=MyEnum`", a.span.start, a.span.end)
                 }
             } else if (a.name == "csrf") {
-                // §61.7: "`<endpoint>` SHALL NOT carry a `csrf=` attribute" (no code named)
-                m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`csrf=` on `<endpoint>` — §61.7: \"`<endpoint>` SHALL NOT carry a `csrf=` attribute and SHALL NOT be routed through the §12 CSRF gate\" (a JSON + bearer endpoint is CSRF-exempt by construction); remove it", a.span.start, a.span.end)
+                // §61.7: "`<endpoint>` SHALL NOT carry a `csrf=` attribute" — outside §61.2
+                // `endpoint-attrs`, so E-ENDPOINT-ATTR-INVALID (ruling:user-voice-scrml.md-S480-four-recs-2 item 1)
+                m = mDiag(m, "E-ENDPOINT-ATTR-INVALID", "`csrf=` on `<endpoint>` — §61.7: \"`<endpoint>` SHALL NOT carry a `csrf=` attribute and SHALL NOT be routed through the §12 CSRF gate\" (a JSON + bearer endpoint is CSRF-exempt by construction); remove it", a.span.start, a.span.end)
             } else if (a.name == "cors") {
                 // S479 ruling (user-voice) "program `cors=` does not cover `<endpoint>` routes;
                 // per-endpoint `cors=`" — §61.7: "An `<endpoint>` MAY carry `cors=`". The
@@ -15103,7 +15110,11 @@ ${
                 // as an endpoint with no CORS would silently drop what the author asked for.
                 m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`cors=` on `<endpoint>` (§61.7 — cross-origin browser callers) is not in the bootstrap yet: it builds no CORS answer (nor the `<program cors=…>` one), so it is refused by name rather than ignored (INTERIM, gap g-boot-endpoint-cors-unbuilt-s479). Without `cors=`, the endpoint's preflight is answered 405 and same-origin or non-browser callers are served", a.span.start, a.span.end)
             } else {
-                m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=` on `<endpoint>` — an `<endpoint>` opener carries `path=`, `method=` and `accepts=` only (§61.2)", a.span.start, a.span.end)
+                // §61.2 — a name outside `endpoint-attrs`, whatever its value (a bare `note`,
+                // `note="x"`, a misspelled `cor="*"`, `CORS=`, `data-cors=`): refused under its
+                // own code, never ignored (ruling:user-voice-scrml.md-S480-four-recs-2 item 1 —
+                // a misspelled `cors=` otherwise compiles an endpoint that serves no CORS).
+                m = mDiag(m, "E-ENDPOINT-ATTR-INVALID", "`" + a.name + "` is not an `<endpoint>` attribute — " + epAttrsOnly(), a.span.start, a.span.end)
             }
         }
         if (!sawPath) m = mDiag(m, "E-ENDPOINT-PATH-MISSING", "`<endpoint>` has no `path=` — the author-stable URL a foreign client connects to is required (§61.7)", o.start, tagEnd)

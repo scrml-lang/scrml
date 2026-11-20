@@ -3144,10 +3144,16 @@ export function tapeInsert(xs, i, v, at) {
   return out;
 }
 
-/** `xs.join(sep)` on a tape of strings. */
+/**
+ * `xs.join(sep)` on a tape of one-text elements (s480, S479 item 13): `string`, `int`, `number`,
+ * `bool` or a unit enum (its variant name). Each element is written by `textOf` — the same text as
+ * before for every admitted type (`String(v)` equals `"" + v` on a primitive, NaN / ±Infinity / -0
+ * included) — so an element the typer should have refused (a struct, a tape, `not`) fails closed
+ * as a compiler defect instead of printing `[object Object]` or `null` (#2006 r1).
+ */
 export function joinStr(xs, sep) {
   let out = "";
-  for (let i = 0; i < xs.length; i++) out += (i > 0 ? sep : "") + xs[i];
+  for (let i = 0; i < xs.length; i++) out += (i > 0 ? sep : "") + textOf(xs[i]);
   return out;
 }
 
