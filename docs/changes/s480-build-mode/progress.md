@@ -12,4 +12,9 @@ Rulings: user-voice-scrml.md "⭐ RULED — the rest of S478 hand-off §3.B, PA 
   in production. Channels carry no server author code; the bootstrap has no SSR.
 - [x] SPEC §19.8.4 / §19.9.1 / §20.6.5; known-gaps markers; coverage rows.
 - [x] Tests: slice-m4/build-mode-s480.test.js (25; 12 red on base).
-- [ ] Final verification: pretest, conformance, CI gates, byte-compare, corpus.
+- [x] Conformance case `sql/driver-text-returned-withheld-rt` (pins the carried impl#1 gap; FAIL on base, PASS on head).
+- [x] Final verification: pretest; bootstrap conformance base 734 PASS / 1 FAIL (the new case) → head 735 PASS,
+  CRASH 0, no PASS→FAIL; s34-census, types-gate, snippet-gate, claim-gate, corpus-compile-floor, gen-md-shim all
+  exit 0; host-global-scan 1/2 + 2/2 clean (new case pinned in known-throws). Byte-compare over 1921 conformance
+  cases: html / client / codes identical; the 36 server artifacts differ ONLY in the createServer comment line.
+  Corpus: no new refusal (diagnostic codes identical on every case) — newly-rejecting 0.
