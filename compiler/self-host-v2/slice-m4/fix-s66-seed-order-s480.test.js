@@ -363,5 +363,9 @@ describe("r4 — LOW-1 `?.name(` is a call; LOW-2 an instance is any bound or no
       .toMatch(/component instance `<widget>`/);
     expect(seedNote(prog("${ <c>: number = 1 }", "<span>x</span>", "${", "    <d>: number = @c * 2", "}", '<p id="c">${@c} ${@d}</p>')))
       .not.toMatch(SEED_NOTE);
+    // a scrml structural tag (name-resolver SCRML_NON_ELEMENT_TAGS) is not an instance: its attributes and
+    // children are read as units like any element's
+    expect(seedNote(prog("<schema>\n    locks { id: integer primary key }\n</schema>", "${", "    <c>: number = 1", "    <d>: number = @c * 2", "}", '<p id="c">${@c} ${@d}</p>')))
+      .not.toMatch(SEED_NOTE);
   });
 });

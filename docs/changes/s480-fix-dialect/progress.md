@@ -80,6 +80,8 @@ decls / routes / fns (run nothing), then boot: `rt.construct` seeds, CSS bridges
 - [x] F-A: `seedHazard` rewritten to the invariant (initFree over the moved statements, R1 ∪ R2).
 - [x] LOW-1: `.Name(` enum-ctor exemption not after `?` (`o?.pop(`).
 - [x] LOW-2: seedPrefixUnits — an instance is any element bound by an import / `let` / `const` in the file,
-      or any name not standard HTML / SVG / MathML / custom / `<program>` (fail closed).
+      or any name not standard HTML / SVG / MathML / custom, not a scrml structural tag (name-resolver
+      `SCRML_NON_ELEMENT_TAGS`) and not a §36 input-state tag (fail closed). (First cut exempted only
+      `<program>`: conformance measured 6 `defer/*` cases with `<schema>` newly refused — fixed.)
 - [x] tests: r4 section of slice-m4/fix-s66-seed-order-s480.test.js — 11 red on d9eefb493, green on head.
 - [ ] cost (census lens vs d9eefb493, runtime differential, conformance), gates, PR body.

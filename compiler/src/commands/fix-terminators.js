@@ -73,6 +73,10 @@
 
 import { splitBlocks } from "../block-splitter.js";
 import { isStandardMarkupElementName } from "../html-elements.js";
+import { SCRML_NON_ELEMENT_TAGS } from "../name-resolver.ts";
+
+/** §36 input-state tags (name-resolver / emit-html INPUT_STATE_TAGS — not exported there). */
+const SEED_INPUT_STATE_TAGS = new Set(["keyboard", "mouse", "gamepad"]);
 import { tokenizeLogic, tokenizeAttributes } from "../tokenizer.ts";
 import { compileScrml } from "../api.js";
 import { captureTrailingContentWarnings } from "../expression-parser.ts";
@@ -1072,8 +1076,12 @@ export function seedPrefixUnits(filePath, source) {
   };
   // r4 (PR #2025 r3 re-review LOW-2): a component instance is any element whose name this file binds
   // (an import — `import { Card as card }` — or a `let` / `const`, a component definition among them),
-  // or any name that is not a standard HTML / SVG / MathML / custom element or `<program>`: resolution is
-  // lexical here, so an unknown name fails closed (opaque) rather than by its case.
+  // or any name that is neither a standard HTML / SVG / MathML / custom element nor a scrml structural
+  // tag (name-resolver's SCRML_NON_ELEMENT_TAGS — `<program>`, `<schema>`, `<each>`, `<match>`,
+  // `<engine>`, `<db>`, `<request>`, … — whose attributes and children are units here like any
+  // element's) nor a §36 input-state tag: resolution is lexical here, so an unknown name (a cell's
+  // render-by-tag `<name/>`, a §55 compound, an unresolved component) fails closed (opaque) rather than
+  // by its case.
   const boundNames = new Set();
   for (const u of units) {
     for (const st of u.stmts ?? []) {
@@ -1086,7 +1094,8 @@ export function seedPrefixUnits(filePath, source) {
     }
   }
   const isInstance = (name) => typeof name === "string" && name.length > 0
-    && (boundNames.has(name) || /^[A-Z]/.test(name) || !(name === "program" || isStandardMarkupElementName(name)));
+    && (boundNames.has(name) || /^[A-Z]/.test(name)
+      || !(isStandardMarkupElementName(name) || SCRML_NON_ELEMENT_TAGS.has(name.toLowerCase()) || SEED_INPUT_STATE_TAGS.has(name)));
   const visit = (b) => {
     if (!b || typeof b !== "object") return;
     if (b.type === "text" || b.type === "comment" || b.type === "css") return;
