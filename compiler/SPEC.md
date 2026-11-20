@@ -11676,6 +11676,17 @@ The compiler SHALL:
 
 > **Provenance:** ruling:user-voice-scrml.md S471 "go, and yes to all the recs" (hand-off-470 §3 item 3) — the
 > `safeCallAsync` exception above.
+- *(S479.)* **Placement does not make a function waiting.** "A server function" above is one a call reaches across
+  the client→server boundary. A function placed on the server only by its callers (§12.2 Trigger 5) and whose body
+  has no suspension point — no `?{}`, no call of an async-colored function — is not async-colored: it SHALL be
+  emitted synchronously, a server caller calls it in place without `await` (§13.4), it gets no route, and it is
+  legal in a parameter default (§7.3.2, §13.9.6 — E-PARAM-DEFAULT-AWAIT does not apply to it).
+  > **Provenance:** ruling:user-voice-scrml.md S479 "⭐ RULED — the rest of S478 hand-off §3.B" item 24 —
+  > *"placement does not make a function waiting; a helper with no suspension point is emitted synchronously and is
+  > legal in a parameter default (§13.9.6)."* · **Direction of change: newly-accepting** (impl#1 emitted such a
+  > helper as an async peer with a route and refused it in a parameter default; carried impl#1 divergence,
+  > `g-placement-only-helper-always-async-peer-s466`). The bootstrap already emits it synchronously (it has no
+  > parameter defaults yet, `g-boot-param-default-and-rest-s473`).
 
 > **Provenance:** ruling:user-voice-scrml.md S440 F4 ("async helpers may not escape as values"; rejected alternative: implicit await on every call of a function-typed value) · ruling:user-voice-scrml.md S440 JS-WAT #11 (`on mount` / inline handler bodies are subject to every rule) · s441-async-escape-f4-f5
 
@@ -25094,6 +25105,21 @@ S440, are earlier runtime errors at a value boundary. They keep their own sectio
 - Every trap SHALL be reported to scrml's logging surface (§19.6.8 B5) with its code, the source location and,
   for `E-INDEX-OUT-OF-RANGE-RT`, the index and the length (for `E-WRITE-INVARIANT-RT`, the length the write would
   leave and the bound, S477). It SHALL NOT be swallowed silently.
+- *(S479.)* In a client view the unit of a trap is the **effect, not the mount**: a trap raised while one
+  hole's reactive effect runs — a text hole, an `if=` / `show=` test, a loop's or `<each>`'s rows, a bound
+  value — ends that effect only. The failing hole renders nothing (no text; no arm, the `else` included; no
+  rows; a `show=` element is hidden), the trap is reported once as above, and the rest of the mount
+  proceeds. Inside an `<errorBoundary>` the boundary's backstop takes it instead (§19.6.8 B2).
+  *(Provenance: ruling:user-voice-scrml.md S479 "⭐ RULED — the rest of S478 hand-off §3.B" item 20 — "the trap
+  unit is the effect, not the mount — the failing hole renders nothing, the trap is reported once, the rest of
+  the mount proceeds"; direction of change: semantics-changed — before it, one trap left the whole view
+  unmounted.)* ⚑ **OPEN (not ruled):** a data-bound attribute's value that traps — with the attribute absent,
+  some attributes (an `<iframe>`'s `sandbox`) are in their less safe state, so the bootstrap does not make an
+  attribute a hole of its own: a trapping attribute at the top level of the view still ends the mount; one inside
+  a hole (an `if=` arm, an `<each>` row, a loop row) ends that hole, which renders nothing (the arm, or every row,
+  with the element carrying the attribute); and on a re-run an attribute whose value now traps keeps its previous
+  value (`g-boot-mount-trap-attr-hole-unruled-s480`). A body-top statement is a top-level logic block, its
+  own unit above, not a hole.
 - *(S473, DRAFT.)* In a `kind="service"` program (§68) the unit of execution is the **turn**: a trap ends its turn
   only, is reported to stderr with its code and location, and the program carries on with its next event, unless
   the program declares `on-trap="stop"` (then it stops with exit code 70). §68.6 is the full rule.
