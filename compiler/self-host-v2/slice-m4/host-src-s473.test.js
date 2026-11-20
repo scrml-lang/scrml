@@ -94,9 +94,14 @@ describe("rule 3 — a binding without a target calls the export of its own name
       "glue.js": "export function n() { return 'x'; }\n",
       "app.scrml": app("  n() -> int", '<p id="o">${n()}</p>'),
     });
-    let code = "";
-    try { await runPage(d); } catch (e) { code = e && e.code; }
-    expect(code).toBe("E-HOST-VALUE-MISMATCH-RT");
+    // s480 (§19.17, S479 §3.B item 20): the trap ends its hole's effect, not the mount — the hole
+    // renders nothing and the trap is reported once (to `reportError`, captured here)
+    const reported = [];
+    const saved = globalThis.reportError;
+    globalThis.reportError = (e) => reported.push(e);
+    try { await runPage(d); } finally { globalThis.reportError = saved; }
+    expect(reported.map((e) => e && e.code)).toEqual(["E-HOST-VALUE-MISMATCH-RT"]);
+    expect(document.getElementById("o").textContent).toBe("");
   }, 60000);
 
   // s473-host-allowlist-b (the lane merge; #1670 review M2): a `src=` export whose result is declared as an

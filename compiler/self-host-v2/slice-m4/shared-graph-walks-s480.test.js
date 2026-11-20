@@ -564,9 +564,16 @@ describe("F2 — a `<host src=>` result over a shared struct graph: the descript
 
   test("run: a mismatch deep in the value traps E-HOST-VALUE-MISMATCH-RT naming the same path as before", async () => {
     const d = project({ "glue.js": glue(3, 3, 22), [ENTRY]: app(3, 3, '<p id="o">${r1()}</p>', reader("r1", "f0.f0.f0")) });
-    let e = null;
-    try { await runPage(d); } catch (x) { e = x; }
+    // s480-runtime (§19.17, S479 §3.B item 20): the trap ends its hole's effect, not the mount — it is
+    // reported once (to `reportError`, captured here) and the hole renders nothing
+    const reported = [];
+    const saved = globalThis.reportError;
+    globalThis.reportError = (x) => reported.push(x);
+    try { await runPage(d); } finally { globalThis.reportError = saved; }
+    expect(reported.length).toBe(1);
+    const e = reported[0];
     expect(e && e.code).toBe("E-HOST-VALUE-MISMATCH-RT");
+    expect(document.getElementById("o").textContent).toBe("");
     // leaf 22 = f2.f1.f1 (2*9 + 1*3 + 1)
     expect(e.message).toContain("its result's field `f2`'s field `f1`'s field `f1`'s field `x` is \"s\" where its declared type is int");
   }, 120_000);
