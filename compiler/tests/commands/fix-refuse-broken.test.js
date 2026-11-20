@@ -361,7 +361,9 @@ describe("§7 a component module that compiles as part of its project", () => {
       expect(compileErrorsTogether(["app.scrml", "components.scrml", "types.scrml"].map((n) => join(dir, n)))).toEqual([]);
       const r = run([dir, "--check"]);
       expect(r.err).not.toContain("refused");
-      expect(r.code).toBe(0);
+      // S480: the example still owes the S469 `;` / arm `,` (stmt-semi / arm-comma, default rules),
+      // so --check reports "would change" (1) — never "refused" (3).
+      expect(r.code).toBe(1);
     });
   });
 

@@ -44,6 +44,12 @@
  *                   (fix-given-presence.js) locates the heads from impl#1's `given-guard` nodes and
  *                   verifies each site (same codes; artifacts identical but for the parentheses of
  *                   the presence check). A site impl#1 miscompiles today is listed, never rewritten.
+ *   stmt-semi       S469 dpa-073 F1 / F3 (S480 Track M step 1): the `;` statement terminator, inserted
+ *                   after every non-block statement at impl#1-legacy's newline boundary.
+ *   arm-comma       S469 dpa-073 F2: the `,` between arms of a `match` / `!{}` arm list. Both chained
+ *                   seventh, after given-presence and before the §66 declaration rules (their verify
+ *                   compiles the file with impl#1 — identical artifacts — which the declaration rules'
+ *                   output makes impossible); their own module (fix-terminators.js).
  *   rhs-decl        `<x> = v` / `<x>: T = v` / `<x attrs> = v` → `<x:T=v attrs/>` (locked) or
  *                   `let <x:T=v attrs/>`. §66.21 row 1 as amended S449 (dialect ruling 2): LOCKED
  *                   only when the cell is never written AND its initializer reads no cell;
@@ -64,6 +70,9 @@
  *   program-move    items above (or below) the entry's `<program>` → moved inside it.
  *   unwrap-logic    a `${ … }` block at markup depth 0 whose statements are all items → unwrapped
  *                   (§40.8 / S441: a bare run at a program body top means the same as inside `${}`).
+ *                   S480: a block that also holds a statement (a `when`, a call, a loop) and a
+ *                   rewritten legacy declaration is SPLIT around the declaration runs instead —
+ *                   a §66 cell declaration never stays inside `${}` (the bootstrap refuses it there).
  *
  * Types: an untyped legacy numeric literal is a JS `number` in impl#1 (impl#1 infers no `int`), so
  * the rewrite spells `:number` — `<count=0/>` would infer `int` under §66.3 rule 3 and change the
@@ -105,6 +114,7 @@ import { fixGivenPresence } from "./fix-given-presence.js";
 import { fixIsSome } from "./fix-is-some.js";
 import { fixClientServerCall } from "./fix-client-server-call.js";
 import { fixSqlFailable } from "./fix-sql-failable.js";
+import { fixTerminators, logicBlockStatements } from "./fix-terminators.js";
 import { writeScratchProject, errorSeverityCodes, scratchRefusalReason } from "./fix-verify-shared.js";
 import { compileScrml } from "../api.js";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync, existsSync } from "node:fs";
@@ -123,7 +133,7 @@ import { join, dirname, basename, resolve, relative, isAbsolute, sep } from "nod
  */
 export const WRAP_OPENER = '<program reset="none">';
 
-export const IMPL1_SAFE_RULES = Object.freeze(["pre-migrate", "arm-pipe", "client-server-call", "sql-failable", "is-some", "given-presence", "program-wrap", "program-move", "unwrap-logic"]);
+export const IMPL1_SAFE_RULES = Object.freeze(["pre-migrate", "arm-pipe", "client-server-call", "sql-failable", "is-some", "given-presence", "stmt-semi", "arm-comma", "program-wrap", "program-move", "unwrap-logic"]);
 /** The §66 declaration rules: their output is the §66 opener dialect, which impl#1 does NOT compile. */
 export const S66_DECL_RULES = Object.freeze(["rhs-decl", "const-cell", "engine-simple"]);
 
@@ -134,6 +144,8 @@ export const S66_RULES = Object.freeze([
   "sql-failable",
   "is-some",
   "given-presence",
+  "stmt-semi",
+  "arm-comma",
   "rhs-decl",
   "const-cell",
   "engine-simple",
@@ -1413,6 +1425,21 @@ export function fixS66(source, opts = {}) {
     blockers.push(...gp.blockers);
   }
 
+  if (enabled.has("stmt-semi") || enabled.has("arm-comma")) {
+    // S469 dpa-073 F1 / F2 / F3 / F5 (S480 Track M step 1) — the `;` statement terminator and the
+    // `,` arm separator, inserted at impl#1-legacy's statement / arm boundaries. Chained last of the
+    // text rules: its verify compiles the file with impl#1 (identical artifacts), which the §66
+    // declaration rules below make impossible (impl#1 does not compile their output).
+    // commands/fix-terminators.js.
+    const tr = fixTerminators(src, {
+      filePath, auxSources: opts.auxSources, verify: opts.verify, inPlaceClean: opts.inPlaceClean,
+      allowNonCompiling: opts.allowNonCompiling, rules: ["stmt-semi", "arm-comma"].filter((r) => enabled.has(r)),
+    });
+    if (tr.changed) src = tr.output;
+    applied.push(...tr.applied);
+    blockers.push(...tr.blockers);
+  }
+
   // The same memoized front-end reading moduleEdges / the CLI's project walk use (one parse per file).
   let ast = frontEndMemo(filePath, src)?.ast ?? null;
   if (!ast) try {
@@ -1691,6 +1718,62 @@ export function fixS66(source, opts = {}) {
   // Only where the result is a program body: inside the single <program>, the items moved into
   // it, or a file being wrapped. Elsewhere (a module file, an outside block that stays outside)
   // an unwrapped run would land in a free-text body and become prose.
+  /**
+   * The unwrap-logic edits that split the depth-0 `${ … }` block [s, e) around its rewritten §66
+   * declarations (S480): each maximal run of statements whose whole text a rhs-decl / const-cell edit
+   * replaces leaves the block, in place. Statement extents are the `;`-rule scanner's (impl#1's
+   * newline boundaries). Returns `{ edits }` or `{ reason }`.
+   */
+  const splitAroundDecls = (n, s, e) => {
+    const stmts = logicBlockStatements(filePath, src, s);
+    if (!stmts || stmts.length === 0) return { reason: "its statements cannot be placed" };
+    const declEdits = edits.filter((ed) => (ed.rule === "rhs-decl" || ed.rule === "const-cell") && ed.start >= s && ed.end <= e);
+    if (declEdits.length === 0) return { reason: "no declaration in it is rewritten" };
+    const moves = stmts.map((st) => declEdits.some((ed) => ed.start >= st.start && ed.start < st.end));
+    for (let k = 0; k < stmts.length; k++) {
+      if (!moves[k]) continue;
+      const ed = declEdits.find((x) => x.start >= stmts[k].start && x.start < stmts[k].end);
+      if (ed.start !== stmts[k].start || ed.end < stmts[k].end) return { reason: "a declaration's rewrite does not cover its whole statement" };
+    }
+    const lineStartOf = (off) => src.lastIndexOf("\n", off - 1) + 1;
+    const blockLineStart = lineStartOf(s);
+    const ind = /^[ \t]*$/.test(src.slice(blockLineStart, s)) ? src.slice(blockLineStart, s) : "";
+    const out = [];
+    let k = 0;
+    while (k < stmts.length) {
+      if (!moves[k]) { k++; continue; }
+      let b = k;
+      while (b + 1 < stmts.length && moves[b + 1]) b++;
+      const before = moves.slice(0, k).some((m) => !m);
+      const after = moves.slice(b + 1).some((m) => !m);
+      const ls0 = lineStartOf(stmts[k].start);
+      if (!/^[ \t]*$/.test(src.slice(ls0, stmts[k].start))) return { reason: "a declaration shares its line with a statement before it" };
+      const nl = src.indexOf("\n", stmts[b].end);
+      if (nl < 0 || nl >= e - 1 && after) return { reason: "a declaration shares its line with the block's end" };
+      if (!/^[ \t]*(\/\/[^\n]*)?$/.test(src.slice(stmts[b].end, nl))) return { reason: "a declaration shares its line with a statement after it" };
+      if (before) out.push({ start: ls0, end: ls0, text: `${ind}}\n`, rule: "unwrap-logic", detail: "split" });
+      else {
+        // nothing before the run: the block's opener goes (as a plain unwrap deletes it)
+        let os = s, oe = s + 2;
+        const afterOpen = src.slice(oe).match(/^[ \t]*\n/);
+        if (afterOpen) { oe += afterOpen[0].length; if (/^[ \t]*$/.test(src.slice(blockLineStart, s))) os = blockLineStart; }
+        if (oe > ls0) return { reason: "the block's opener shares a line with a declaration" };
+        out.push({ start: os, end: oe, text: "", rule: "unwrap-logic", detail: "${" });
+      }
+      if (after) out.push({ start: nl + 1, end: nl + 1, text: `${ind}\${\n`, rule: "unwrap-logic", detail: "split" });
+      else {
+        let cs = e - 1, ce = e;
+        const closeLineStart = lineStartOf(cs);
+        const afterClose = src.slice(ce).match(/^[ \t]*(\n|$)/);
+        if (afterClose && /^[ \t]*$/.test(src.slice(closeLineStart, cs)) && closeLineStart > nl) { cs = closeLineStart; ce += afterClose[0].length; }
+        if (cs <= nl) return { reason: "the block's closer shares a line with a declaration" };
+        out.push({ start: cs, end: ce, text: "", rule: "unwrap-logic", detail: "}" });
+      }
+      k = b + 1;
+    }
+    return { edits: out };
+  };
+
   const unwrapCandidates = structural?.kind === "wrap" ? topNodes
     : program ? [...(program.children ?? []), ...(structural?.kind === "move" ? topNodes.filter((n) => n !== program) : [])]
     : [];
@@ -1705,7 +1788,18 @@ export function fixS66(source, opts = {}) {
     if (bad) {
       // A block that holds no legacy construct can stay: `${}` at a body top is legal §66 (S441).
       const holdsLegacy = decls.some((d) => d.stack.includes(n)) || engines.some((d) => d.stack.includes(n));
-      if (holdsLegacy && declMode) block("unwrap-logic", s, `top-level \`\${}\` holding a legacy declaration also holds a \`${bad.kind}\` statement, which impl#1 reads differently outside \`\${}\` (S441) — not unwrapped`);
+      if (!(holdsLegacy && declMode)) continue;
+      // S480 (Track M step 1): a §66 cell declaration may not stand inside a `${}` logic block
+      // (§66: a cell is declared in the `<program>`). The block is SPLIT around its rewritten
+      // declarations instead of left whole: each run of them moves out to the program body top, in
+      // place, and the statements before / after it keep their own `${ … }`. Order is kept, so a
+      // file-scope name a declaration reads (§7.6) is still declared above it.
+      const split = splitAroundDecls(n, s, e);
+      if (split.reason) {
+        block("unwrap-logic", s, `top-level \`\${}\` holding a legacy declaration also holds a \`${bad.kind}\` statement, which impl#1 reads differently outside \`\${}\` (S441), and the block cannot be split around the declarations (${split.reason}) — not unwrapped`);
+        continue;
+      }
+      edits.push(...split.edits);
       continue;
     }
     // Delete the delimiters; a delimiter alone on its line takes the line with it (readability).

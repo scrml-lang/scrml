@@ -132,9 +132,13 @@ import { frontEndStdlib as sharedFrontEnd } from "../compiler/self-host-v2/slice
  * is a §63 spelling deprecation in the contract during the window (W-IS-SOME-DEPRECATED is
  * conformance-required), so a case written in it is graded AS WRITTEN. `given-presence` (§42.2.3,
  * S462) likewise: the in-place `given` guard is a §63 deprecation (W-GIVEN-PRESENCE-DEPRECATED is
- * conformance-required).
+ * conformance-required). `stmt-semi` / `arm-comma` (S469 dpa-073 F1/F2, S480 Track M step 1) are
+ * excluded too: the S469 terminator and arm separator are checks the bootstrap ENFORCES
+ * (E-STMT-MISSING-SEMICOLON, E-MATCH-ARM-SEPARATOR are graded by error cases), so a case is graded
+ * on its `;` / `,` as written; the corpus is migrated by committing the rewrite (Track M step 2),
+ * never silently at grading time.
  */
-const TWIN_RULES = S66_RULES.filter((r) => r !== "arm-pipe" && r !== "is-some" && r !== "given-presence" && r !== "client-server-call" && r !== "sql-failable");
+const TWIN_RULES = S66_RULES.filter((r) => r !== "arm-pipe" && r !== "is-some" && r !== "given-presence" && r !== "client-server-call" && r !== "sql-failable" && r !== "stmt-semi" && r !== "arm-comma");
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SELF_HOST_V2 = join(REPO_ROOT, "compiler", "self-host-v2");
