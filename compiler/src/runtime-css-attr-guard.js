@@ -159,15 +159,47 @@ function _scrml_link_href_refused(name, fate) {
   );
 }
 
+// Is `el` a `<base>` (tag compared case-insensitively)? (bootstrap runtime.js `isBaseElement`.)
+function _scrml_is_base_el(el) {
+  return !!el && typeof el.tagName === "string" && el.tagName.toLowerCase() === "base";
+}
+
+function _scrml_base_href_refused(name, fate) {
+  _scrml_css_guard_report(
+    "refused a data-supplied `" + String(name) + "` on a <base>: data never chooses the document's base " +
+    "URL (SPEC §5.2). The attribute was " + fate + ".",
+  );
+}
+
+// THE write of a URL attribute into an HTML STRING (S480, carve-out 2 widened —
+// ruling:user-voice-scrml.md-S480-census-recs item 5; gap g-impl1-renders-href-unguarded-s480): a
+// `renders` / `fallback=` template (codegen/emit-error-boundary.ts `emitBoundaryMarkupExpr`) writes a
+// URL attribute (`href`, `src`, `action`, … on its element — `_scrml_is_url_attr`), or an SVG animation
+// value that animates one (`target` as for `_scrml_safe_url`), from a payload field. The assembled
+// value (`parts`: static text and payload fields, `null` / `undefined` read as "") is judged by §5.2
+// rule 3's guard, `_scrml_safe_url` — the one reader: a refused scheme is written as `about:blank`
+// (reported, never the value). Returns ` name="…"`, attribute-escaped.
+export function _scrml_url_attr_html(tag, name, parts, target) {
+  let text = "";
+  for (let i = 0; i < parts.length; i++) text += parts[i] == null ? "" : String(parts[i]);
+  const u = _scrml_safe_url({ tagName: String(tag) }, name, text, target);
+  return " " + name + '="' + _scrml_css_attr_escape(u) + '"';
+}
+
 // THE write of a `<link>`'s `href` into an HTML STRING (S480 r2 N1) — the string-template twin of
 // `_scrml_link_href_set`, for a `renders` / `fallback=` template (codegen/emit-error-boundary.ts
 // `emitBoundaryMarkupExpr`). `relParts` are the pieces of the element's `rel` value (null: no `rel`),
 // `hrefParts` those of the `href` value (static text and payload fields, `null` / `undefined` read as
 // ""). When `rel` loads a stylesheet: `""` (the attribute is not written; reported, never the value).
-// Otherwise ` name="…"` (attribute-escaped) — NOT judged by §5.2 rule 3's URL guard, unlike
-// `_scrml_link_href_set`: a non-stylesheet URL attribute in these templates is outside the S479
-// carve-out 2 (gap g-impl1-renders-href-unguarded-s480), so it is written as it was before.
-export function _scrml_link_href_html(name, relParts, hrefParts) {
+// Otherwise ` name="…"` judged by §5.2 rule 3's URL guard, as `_scrml_link_href_set` judges it (S480,
+// carve-out 2 widened; gap g-impl1-renders-href-unguarded-s480). `tag` (S480) is passed only for a
+// `<base>`: its `href` is never written from data (§5.2 "Data never moves the document base") — `""`,
+// reported.
+export function _scrml_link_href_html(name, relParts, hrefParts, tag) {
+  if (typeof tag === "string" && tag.toLowerCase() === "base") {
+    _scrml_base_href_refused(name, "not written");
+    return "";
+  }
   let rel = null;
   if (relParts != null) {
     rel = "";
@@ -177,16 +209,24 @@ export function _scrml_link_href_html(name, relParts, hrefParts) {
     _scrml_link_href_refused(name, "not written");
     return "";
   }
-  let text = "";
-  for (let i = 0; i < hrefParts.length; i++) text += hrefParts[i] == null ? "" : String(hrefParts[i]);
-  return " " + name + '="' + _scrml_css_attr_escape(text) + '"';
+  return _scrml_url_attr_html("link", name, hrefParts);
 }
 
 // THE write of a `<link>`'s `href` (any case, any `prefix:href`) from data (SPEC §5.2 "Data-supplied
 // stylesheets (S472)": "Every runtime path that writes a `<link>`'s `href` from data SHALL refuse the
 // write when the element's `rel` contains `stylesheet` …"). Refused: the attribute is removed and the
 // refusal reported (never the value). Otherwise the value is judged by §5.2 rule 3's URL guard.
+//
+// S480 (carve-out 2 widened) — the same setter is the runtime wall for a `<base>`'s `href` (§5.2 "Data
+// never moves the document base (S473)": "Every runtime path that writes a `<base>`'s `href` from data
+// SHALL refuse the write (fail closed)"): removed, reported. The compiler refuses every such write
+// first (E-ATTR-BASE-HREF), so no compiled program asks for it.
 export function _scrml_link_href_set(el, name, value) {
+  if (_scrml_is_base_el(el)) {
+    el.removeAttribute(name);
+    _scrml_base_href_refused(name, "removed");
+    return;
+  }
   if (_scrml_link_loads_sheet(el)) {
     el.removeAttribute(name);
     _scrml_link_href_refused(name, "removed");

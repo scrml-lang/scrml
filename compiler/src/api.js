@@ -19,7 +19,7 @@ import { runCE } from "./component-expander.ts";
 import { assignMdHeadingIds } from "./md-lower.ts";
 import { runPostCEInvariant } from "./validators/post-ce-invariant.ts";
 import { runAttributeInterpolation, runExecutableSinkCheck } from "./validators/attribute-interpolation.ts";
-import { ATTR_INTERP_EXECUTABLE_CODE, ATTR_QUOTED_HANDLER_CODE, ATTR_STATIC_EXECUTABLE_CODE, ATTR_STYLESHEET_HREF_CODE } from "./attr-injection-sink.ts";
+import { ATTR_BASE_HREF_CODE, ATTR_INTERP_EXECUTABLE_CODE, ATTR_QUOTED_HANDLER_CODE, ATTR_STATIC_EXECUTABLE_CODE, ATTR_STYLESHEET_HREF_CODE } from "./attr-injection-sink.ts";
 import { runAttributeAllowlist } from "./validators/attribute-allowlist.ts";
 
 import { runPA } from "./protect-analyzer.ts";
@@ -1615,9 +1615,9 @@ function _compileScrmlImpl(options = {}) {
         // executable-value refusal (E-ATTR-STATIC-EXECUTABLE, S464 "(a) Refuse both") are decided by the
         // same walk (VP-3, post-ME, CE definitions) and deduped the same way; keys carry the code
         // so the two refusals never shadow each other.
-        if (enriched.code === ATTR_INTERP_EXECUTABLE_CODE || enriched.code === ATTR_QUOTED_HANDLER_CODE || enriched.code === ATTR_STATIC_EXECUTABLE_CODE || enriched.code === ATTR_STYLESHEET_HREF_CODE) {
+        if (enriched.code === ATTR_INTERP_EXECUTABLE_CODE || enriched.code === ATTR_QUOTED_HANDLER_CODE || enriched.code === ATTR_STATIC_EXECUTABLE_CODE || enriched.code === ATTR_STYLESHEET_HREF_CODE || enriched.code === ATTR_BASE_HREF_CODE) {
           const sp = enriched.span && typeof enriched.span === "object" ? enriched.span : {};
-          const codeTag = enriched.code === ATTR_QUOTED_HANDLER_CODE ? "QH|" : enriched.code === ATTR_STATIC_EXECUTABLE_CODE ? "SE|" : enriched.code === ATTR_STYLESHEET_HREF_CODE ? "SH|" : "";
+          const codeTag = enriched.code === ATTR_QUOTED_HANDLER_CODE ? "QH|" : enriched.code === ATTR_STATIC_EXECUTABLE_CODE ? "SE|" : enriched.code === ATTR_STYLESHEET_HREF_CODE ? "SH|" : enriched.code === ATTR_BASE_HREF_CODE ? "BH|" : "";
           const attrKey = codeTag + (e.attrSinkKey ?? `${sp.file ?? enriched.filePath ?? ""}:${sp.start}:${sp.end}`);
           const fullKey = `${attrKey}|${sp.file ?? enriched.filePath ?? ""}:${sp.start}:${sp.end}`;
           if (stageName === "CG" ? _attrInterpExecutableSeen.has(attrKey) : _attrInterpExecutableSeen.has(fullKey)) continue;

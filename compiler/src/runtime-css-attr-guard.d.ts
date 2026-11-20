@@ -8,4 +8,5 @@ export declare function _scrml_css_attr_value_admitted(text: string, perEntry: b
 export declare function _scrml_css_attr_set(el: unknown, name: string, value: unknown, target?: string): void;
 export declare function _scrml_link_href_set(el: unknown, name: string, value: unknown): void;
 export declare function _scrml_css_attr_html(tag: string, name: string, parts: unknown[], target?: string): string;
-export declare function _scrml_link_href_html(name: string, relParts: unknown[] | null, hrefParts: unknown[]): string;
+export declare function _scrml_link_href_html(name: string, relParts: unknown[] | null, hrefParts: unknown[], tag?: string): string;
+export declare function _scrml_url_attr_html(tag: string, name: string, parts: unknown[], target?: string): string;

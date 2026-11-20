@@ -10672,7 +10672,8 @@ ${
         const o: Opener = { start: start, star: star, isLet: isLet && marked, name: nm.w, ty: ty, own: own,
                             typed: typed, attrs: attrs, selfClosing: selfClosing, short: short, vals: vals }
         for (const k of kws) { m = keywordInOpener(m, k.name, nm.w, marked, k.span) }
-        if (!isDeclOpener(o)) m = repeatedAttrDiags(m, o)
+        // an `<endpoint>` opener's repeats are §61.2's, under their attributes' own codes (endpointItem)
+        if (!isDeclOpener(o) && !(nm.w == "endpoint" && !star)) m = repeatedAttrDiags(m, o)
         m = quotedInterpDiags(m, o)
         for (const sp of rend) {
             if (isDeclOpener(o)) {
@@ -15081,12 +15082,39 @@ ${
         // `<endpoint>` anywhere else … is `E-STRUCTURAL-ELEMENT-MISPLACED` (§4.15)".
         // A non-entry file's `<program>` is judged in analyze (endpointPass).
         if (ctx != "program") m = mDiag(m, "E-STRUCTURAL-ELEMENT-MISPLACED", "`<endpoint>` " + endpointPlaceWhy(ctx) + " — an `<endpoint>` is grammatical only as a direct child of the top-level `<program>` (§61.2, §4.15): a route belongs to the served program, not to a page, a channel or a nested program; move it into the `<program>` body", o.start, tagEnd)
+        // §61.2: "The opener is read whole … A character that reader drops (a `'`, a
+        // backtick, a `{…}` / `${…}` block or a comment with no attribute name, a value
+        // it cannot read) or a stray `=` / value is `E-ATTR-001` at that character, never
+        // skipped: text inside a `'…'` run is not read as the endpoint's `cors=` or
+        // `path=`." The bootstrap's opener reader takes `'…'` as a string and lets a bare
+        // value's lexer absorb a comment (`accepts=Op /* cors="*" */`), so the opener's
+        // text is scanned again here, as the markup attribute reader reads it (impl#1
+        // ast-builder.js readEndpointOpenerAttrs). A `:`-shorthand opener is refused below.
+        // the opener reader's own refusals (a value it refused whole, E-ATTR-UNQUOTED-OPERATOR):
+        // such an attribute is not then also reported as lacking a value (impl#1's "refused" kind)
+        const readerDiags: Diag[] = m.diags
+        let dropRuns: ASpan[] = []
+        if (!(o.short is given)) {
+            const to: int = m.pos
+            for (const at of epDroppedAt(m.src, tagEnd, to)) {
+                // one report per dropped run: the opener reader's "unexpected `/`" / "`*`" inside
+                // it (a comment's characters, a `'`) are that run, already refused here
+                const end: int = epDropEnd(m.src, at, to)
+                dropRuns = dropRuns.concat([mkSpan(at, end)])
+                m = withDiagsOf(m, m.diags.filter((d) => !(d.code == "E-PARSE-TAG" && d.span.start >= at && d.span.end <= end)))
+                m = mDiag(m, "E-ATTR-001", epDroppedMsg(m.src, at), at, at + 1)
+            }
+        }
+        // §61.2 / §34 E-ATTR-001: "a stray `=` / value" — a validator call (`req(x)`) is a
+        // value with no `name=` before it in the markup attribute reader (impl#1 reports it so)
         for (const v of o.vals) {
-            m = mDiag(m, "E-ENDPOINT-ATTR-INVALID", "the validator `" + v.name + "(…)` is not an `<endpoint>` attribute — " + epAttrsOnly(), v.span.start, v.span.end)
+            m = mDiag(m, "E-ATTR-001", "`" + v.name + "(…)` in the `<endpoint>` opener is not part of any attribute (a value with no `name=` before it — a validator call belongs on a declaration's field, §55.1). It is refused rather than dropped; " + epAttrsOnly(), v.span.start, v.span.end)
         }
-        for (const ta of o.typed) {
-            m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "the typed attribute `" + ta.name + ":…` on `<endpoint>` — an `<endpoint>` opener carries `path=`, `method=` and `accepts=` only (§61.2)", ta.span.start, ta.span.end)
-        }
+        // A typed attribute (`x:int=3`, `x:cors="*"`) never reaches here: it makes the opener
+        // a DECLARATION (§66.2.2 (ii) — "A tag is a DECLARATION iff its opener has … at least
+        // one typed attribute"), and a declaration named `endpoint` is E-NAME-COLLIDES-RESERVED
+        // (§4.15). (impl#1 reads it as an endpoint attribute, E-ENDPOINT-ATTR-INVALID — both
+        // refuse; g-boot-endpoint-typed-attr-code-s480.)
         let path: string = ""
         let method: string = ""
         let accepts: string = ""
@@ -15095,22 +15123,38 @@ ${
         let sawMethod = false
         let sawAccepts = false
         for (const a of o.attrs) {
-            if (a.name == "path") {
+            // §61.2: "each attribute is written at most once … A second `path=` is
+            // `E-ENDPOINT-PATH-INVALID`, a second `method=` `E-ENDPOINT-METHOD-INVALID`, a
+            // second `accepts=` `E-ENDPOINT-ACCEPTS-MISSING`" (parseOpenerB leaves an
+            // `<endpoint>` opener's repeats to this reader). A repeat is reported, not read.
+            if (epInRuns(dropRuns, a.span)) {
+                // s480 r1 (F2): a name inside a dropped run (`/* x */`, `'x path="/b"'`) is
+                // that run, refused once above (E-ATTR-001) — not read, and not reported again
+                // as an attribute of its own (impl#1 reads it on; both refuse)
+            } else if ((a.name == "path" && sawPath) || (a.name == "method" && sawMethod) || (a.name == "accepts" && sawAccepts)) {
+                m = mDiag(m, epRepeatCode(a.name), "`" + a.name + "=` is written twice on `<endpoint>` — an `<endpoint>` carries one `" + a.name + "=` (§61.2 `endpoint-attrs ::= path-attr method-attr accepts-attr cors-attr?`); it is refused rather than read first-wins. Keep one", a.span.start, a.span.end)
+            } else if (a.name == "path") {
                 sawPath = true
                 const pv: string | not = epQuotedOf(a.value)
                 if (pv is given) {
                     path = pv
-                } else {
-                    // §61.2: `path-attr ::= 'path=' string-literal`
-                    m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`path=` on `<endpoint>` is a string literal (§61.2 `path-attr ::= 'path=' string-literal` — the author-stable contract URL, §61.7); write it quoted, `path=\"/…\"`", a.span.start, a.span.end)
+                    // §61.7: "A `path=` SHALL be an absolute path: it begins with `/`" — an
+                    // empty `path=""` is outside the grammar (analyze's endpointPass judges a
+                    // non-empty one; an empty one used to compile, mounted at "")
+                    if (pv == "") m = mDiag(m, "E-ENDPOINT-PATH-INVALID", "`path=\"\"` on `<endpoint>` — it does not begin with `/` (§61.7: a `path=` is an absolute path of RFC 3986 unreserved characters and `/`, with no `.`, `..` or empty segment; a trailing `/` is allowed)", a.span.start, a.span.end)
+                } else if (!epReaderRefused(readerDiags, a.span)) {
+                    // §61.2: "a `path=` / `method=` / `accepts=` / `cors=` written with no
+                    // value, or with a value that is not its production's form, is that
+                    // attribute's code" — `path-attr ::= 'path=' string-literal`
+                    m = mDiag(m, "E-ENDPOINT-PATH-MISSING", "`path=` on `<endpoint>` has no string-literal value (§61.2 `path-attr ::= 'path=' string-literal` — the author-stable contract URL, §61.7); write it in double quotes, `path=\"/…\"`", a.span.start, a.span.end)
                 }
             } else if (a.name == "method") {
                 sawMethod = true
                 const mv: string = methodWordOf(a.value)
                 if (isEndpointMethod(mv)) {
                     method = mv
-                } else {
-                    m = mDiag(m, "E-ENDPOINT-METHOD-INVALID", "`method=` on `<endpoint>` is not a recognized HTTP method — it is one of GET, POST, PUT, PATCH, DELETE (§61.7, the §60.2 set)", a.span.start, a.span.end)
+                } else if (!epReaderRefused(readerDiags, a.span)) {
+                    m = mDiag(m, "E-ENDPOINT-METHOD-INVALID", "`method=` on `<endpoint>` is not a recognized HTTP method — it is one of GET, POST, PUT, PATCH, DELETE (§61.7, the §60.2 set), written `\"…\"` or as a bareword", a.span.start, a.span.end)
                 }
             } else if (a.name == "accepts") {
                 sawAccepts = true
@@ -15118,8 +15162,9 @@ ${
                 const nv: string = bareNameOf(a.value)
                 if (nv != "") {
                     accepts = nv
-                } else {
-                    m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`accepts=` on `<endpoint>` names an `:enum` type (§61.2 `accepts-attr ::= 'accepts=' enum-type-ref`) — write the bare type name, `accepts=MyEnum`", a.span.start, a.span.end)
+                } else if (!epReaderRefused(readerDiags, a.span)) {
+                    // §61.2 — `accepts-attr ::= 'accepts=' enum-type-ref`: that attribute's code
+                    m = mDiag(m, "E-ENDPOINT-ACCEPTS-MISSING", "`accepts=` on `<endpoint>` is not a bare type name (§61.2 `accepts-attr ::= 'accepts=' enum-type-ref`) — write the `:enum` type's name, `accepts=MyEnum`", a.span.start, a.span.end)
                 }
             } else if (a.name == "csrf") {
                 // §61.7: "`<endpoint>` SHALL NOT carry a `csrf=` attribute" — outside §61.2
@@ -15156,7 +15201,7 @@ ${
             m = ra.mp
         }
         const ep: AEndpoint = { nid: m.nid, span: mkSpan(o.start, m.pos), opener: opener, path: path, method: method, accepts: accepts, acceptsSpan: acceptsSpan,
-                                arms: arms, top: ctx == "program", lowered: false }
+                                arms: arms, top: ctx == "program", lowered: false, opErr: epOpenerErr(m.diags, opener) }
         // the placeholder item endpointDesugar replaces (an empty text run renders nothing)
         const n: ANode = { nid: m.nid, span: ep.span, k: ANodeK.Text("") }
         const withEp: MP = { src: m.src, pos: m.pos, nid: m.nid, diags: m.diags, file: m.file, hoist: m.hoist, dbFns: m.dbFns, hosts: m.hosts, pages: m.pages, eps: m.eps.concat([ep]), chans: m.chans, onchs: m.onchs, schemaN: m.schemaN, tables: m.tables, ns: m.ns }
@@ -15170,9 +15215,185 @@ ${
         return "outside a `<program>`"
     }
 
+    // s480 r1 (F1): the opener reader refused this attribute's value itself — an
+    // Error-severity reader diagnostic inside its span (E-ATTR-UNQUOTED-OPERATOR,
+    // E-ATTR-MULTI-STATEMENT — impl#1's "refused" kind — an E-PARSE-*, an
+    // E-BOOTSTRAP-UNSUPPORTED). A Warning / Info (W-IS-SOME-DEPRECATED,
+    // W-STRING-INTERP-LITERAL) is no refusal: with only those, the attribute's own §61.2
+    // code is reported, never nothing (the value is "" and analyze's endpointPass would
+    // mount no route). An error inside the value's expression (E-STMT-*, `path={"/a"}`)
+    // does not refuse the attribute either: its own code is reported too (impl#1's).
+    fn epReaderRefused(ds: Diag[], sp: ASpan) -> boolean {
+        for (const d of ds) {
+            if (d.severity == Severity.Error && d.code.indexOf("E-STMT-") != 0 && d.span.start >= sp.start && d.span.end <= sp.end) return true
+        }
+        return false
+    }
+
+    // s480 r1 (F2): `sp` lies inside one of the dropped runs
+    fn epInRuns(runs: ASpan[], sp: ASpan) -> boolean {
+        for (const r of runs) {
+            if (sp.start >= r.start && sp.end <= r.end) return true
+        }
+        return false
+    }
+
+    // s480 r1 (F1 b): an Error-severity diagnostic was reported in the `<endpoint>` opener
+    fn epOpenerErr(ds: Diag[], sp: ASpan) -> boolean {
+        for (const d of ds) {
+            if (d.severity == Severity.Error && d.span.start >= sp.start && d.span.end <= sp.end) return true
+        }
+        return false
+    }
+
+    // §61.2 — the code of a repeated `path=` / `method=` / `accepts=`
+    fn epRepeatCode(name: string) -> string {
+        if (name == "path") return "E-ENDPOINT-PATH-INVALID"
+        if (name == "method") return "E-ENDPOINT-METHOD-INVALID"
+        return "E-ENDPOINT-ACCEPTS-MISSING"
+    }
+
+    // §61.2 — the characters of an `<endpoint>` opener (`src[from, to)`, after the tag
+    // name) that the markup attribute reader (§5.2, impl#1 `tokenizeAttributes(…,
+    // "markup")`) does not read: the start of each run it drops. That reader reads a
+    // name, `=`, and a value — a `"…"` string, a `{…}` / `${…}` / `(…)` region, or a
+    // bare run. It drops a `'` or a backtick (an attribute string is `"…"` only,
+    // §4.18.3), a comment (`/* … */`, `// …`, `<!-- … -->`) and a `{…}` / `${…}` block
+    // with no attribute name. What else the bootstrap's opener reader refuses (a stray
+    // `=`, an unreadable value) it reports itself, under its own code.
+    fn epDroppedAt(src: string, from: int, to: int) -> int[] {
+        let out: int[] = []
+        let i: int = from
+        while (i < to) {
+            const c: string = src.substring(i, i + 1)
+            if (isSpaceCh(c)) {
+                i = i + 1
+            } else if (c == "\"") {
+                i = epQuoteEnd(src, i, to)
+            } else if (c == "=") {
+                i = epValueEnd(src, epSkipSpace(src, i + 1, to), to)
+            } else if (epDropStarts(src, i)) {
+                out = out.concat([i])
+                i = epDropEnd(src, i, to)
+            } else if (c == ">") {
+                i = i + 1
+            } else {
+                // a name (or a character the opener reader reports itself): read to the next delimiter
+                let j: int = i + 1
+                while (j < to && !epNameStops(src, j)) { j = j + 1 }
+                i = j
+            }
+        }
+        return out
+    }
+
+    // A run the markup attribute reader drops begins at `src[i]`.
+    fn epDropStarts(src: string, i: int) -> boolean {
+        const c: string = src.substring(i, i + 1)
+        if (c == "'" || c == "`" || c == "{") return true
+        const two: string = src.substring(i, i + 2)
+        if (two == "/*" || two == "//" || two == dollarOpen()) return true
+        return src.substring(i, i + 4) == "<!--"
+    }
+
+    // A name's run ends at `src[j]`.
+    fn epNameStops(src: string, j: int) -> boolean {
+        const c: string = src.substring(j, j + 1)
+        if (isSpaceCh(c) || c == "=" || c == "\"" || c == ">") return true
+        if (src.substring(j, j + 2) == "/>") return true
+        return epDropStarts(src, j)
+    }
+
+    // The end of the dropped run at `i` (reported once, at `i`).
+    fn epDropEnd(src: string, i: int, to: int) -> int {
+        const c: string = src.substring(i, i + 1)
+        if (c == "'" || c == "`") return epQuoteEnd(src, i, to)
+        if (c == "{") return epBalancedEnd(src, i, to)
+        const two: string = src.substring(i, i + 2)
+        if (two == dollarOpen()) return epBalancedEnd(src, i + 1, to)
+        if (two == "/*") return epUpTo(src, i + 2, to, "*/")
+        if (two == "//") return epUpTo(src, i + 2, to, "\n")
+        return epUpTo(src, i + 4, to, "-->")
+    }
+
+    // Just past the next `stop` at or after `i` (or `to`).
+    fn epUpTo(src: string, i: int, to: int, stop: string) -> int {
+        const k: int = src.indexOf(stop, i)
+        if (k < 0 || k + stop.length > to) return to
+        return k + stop.length
+    }
+
+    // Just past the quote that closes the one at `i` (a `\` escapes the next character).
+    fn epQuoteEnd(src: string, i: int, to: int) -> int {
+        const q: string = src.substring(i, i + 1)
+        let j: int = i + 1
+        while (j < to && src.substring(j, j + 1) != q) {
+            if (src.substring(j, j + 1) == "\\") j = j + 1
+            j = j + 1
+        }
+        if (j < to) return j + 1
+        return to
+    }
+
+    // Just past the bracket that closes the one at `i`; strings inside are skipped.
+    fn epBalancedEnd(src: string, i: int, to: int) -> int {
+        let depth = 0
+        let j: int = i
+        while (j < to) {
+            const c: string = src.substring(j, j + 1)
+            if (c == "\"" || c == "'" || c == "`") {
+                j = epQuoteEnd(src, j, to)
+            } else {
+                if (c == "(" || c == "{" || c == "[") depth = depth + 1
+                if (c == ")" || c == "}" || c == "]") depth = depth - 1
+                j = j + 1
+                if (depth <= 0) return j
+            }
+        }
+        return to
+    }
+
+    fn epSkipSpace(src: string, i: int, to: int) -> int {
+        let j: int = i
+        while (j < to && isSpaceCh(src.substring(j, j + 1))) { j = j + 1 }
+        return j
+    }
+
+    // The end of the value at `i` (after `=`): a string, a region, or a bare run. A
+    // character the reader drops is left for the caller to report.
+    fn epValueEnd(src: string, i: int, to: int) -> int {
+        if (i >= to) return to
+        const c: string = src.substring(i, i + 1)
+        if (c == "\"") return epQuoteEnd(src, i, to)
+        if (c == "{" || c == "(") return epBalancedEnd(src, i, to)
+        if (src.substring(i, i + 2) == dollarOpen()) return epBalancedEnd(src, i + 1, to)
+        if (c == "'" || c == "`" || epDropStarts(src, i)) return i
+        let j: int = i
+        while (j < to && !epNameStops(src, j)) {
+            if (src.substring(j, j + 1) == "(") {
+                j = epBalancedEnd(src, j, to)
+            } else {
+                j = j + 1
+            }
+        }
+        return j
+    }
+
+    fn epDroppedMsg(src: string, at: int) -> string {
+        const c: string = src.substring(at, at + 1)
+        const tail: string = " The opener is refused rather than read in part; " + epAttrsOnly()
+        if (c == "'" || c == "`") {
+            const q: string = c == "'" ? "`'`" : "a backtick"
+            return "in the `<endpoint>` opener, " + q + " is not an attribute quote — an attribute string is written in `\"…\"` only (§4.18.3) — so the attribute reader drops it and would read the text it encloses as attributes of their own (a `cors=` or `path=` there would configure the route). Write the value as `\"…\"`." + tail
+        }
+        return "in the `<endpoint>` opener, `" + src.substring(at, at + 4) + "…` is not part of any attribute — the attribute reader drops it (a `{…}` / `" + dollarOpen() + "…}` block or a comment with no attribute name) and would read the opener on without it (§61.2)." + tail
+    }
+
     fn epQuotedOf(v: AAttrValue) -> string | not {
         return match v {
-            .Quoted(v: s) :> s
+            // §61.2: "an attribute string is `\"…\"` only (§4.18.3)" — a `'…'` value is
+            // not one (E-ATTR-001 at its quote, endpointItem)
+            .Quoted(v: s, sq: sq) :> (sq ? not : s)
             .NoValue :> not
             .Dur(text: s) :> not
             .Bare(e: e) :> not
@@ -15439,7 +15660,7 @@ ${
                 arms = ep.arms
             }
             outEps = outEps.concat([{ nid: ep.nid, span: ep.span, opener: ep.opener, path: ep.path, method: ep.method, accepts: ep.accepts, acceptsSpan: ep.acceptsSpan,
-                                      arms: arms, top: ep.top, lowered: lowered }])
+                                      arms: arms, top: ep.top, lowered: lowered, opErr: ep.opErr }])
             repl = repl.concat([{ at: ep.nid, items: fns }])
             k = k + 1
         }

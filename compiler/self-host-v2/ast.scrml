@@ -654,10 +654,13 @@ ${
     //   AEndpoint: `path` / `method` / `accepts` as written ("" when absent or not a
     //   literal / name — the parser reported it); `top` — a direct child of the
     //   top-level `<program>` (the only place the bootstrap serves one); `lowered` —
-    //   `accepts=` named an enum declared in this file, so the arms were desugared.
+    //   `accepts=` named an enum declared in this file, so the arms were desugared;
+    //   `opErr` — the parser reported an Error in the opener (s480 r1: an endpoint whose
+    //   `path` / `method` / `accepts` is "" with no such Error is refused in analyze,
+    //   never silently left unmounted).
     export type AEpArm:struct = { nid: int, span: ASpan, variant: string, parens: boolean, binds: ABind[], body: AExpr | not, selfClosing: boolean, fn: string }
     export type AEndpoint:struct = { nid: int, span: ASpan, opener: ASpan, path: string, method: string, accepts: string, acceptsSpan: ASpan,
-                                     arms: AEpArm[], top: boolean, lowered: boolean }
+                                     arms: AEpArm[], top: boolean, lowered: boolean, opErr: boolean }
 
     // s478 (s478-boot-channel) — §38 `<channel>`. A `<channel>` written as a direct
     // child of the top-level `<program>` (§38.1: "the channel is a CHILD of

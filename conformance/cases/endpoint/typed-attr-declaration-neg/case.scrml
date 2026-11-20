@@ -1,0 +1,11 @@
+<program>
+
+type FspMethod:enum = {
+  FleetStatus
+}
+
+<endpoint path="/fsp" method="POST" accepts=FspMethod x:string="*">
+  <FleetStatus : { jsonrpc: "2.0", result: { active: 3 } }>
+</endpoint>
+
+</program>

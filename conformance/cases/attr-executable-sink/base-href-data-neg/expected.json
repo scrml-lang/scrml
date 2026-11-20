@@ -1,0 +1,13 @@
+{
+  "id": "attr-executable-sink-base-href-data-neg",
+  "description": "§5.2 \"Data never moves the document base (S473)\": a `<base>` whose `href` (any case) is not a static string — a cell read, a call — is refused: three `<base>` elements, three reports. impl#1 emits it under the S479 carve-out 2 as widened S480 (ruling:user-voice-scrml.md-S480-census-recs item 5, gap g-impl1-renders-href-unguarded-s480); before it, impl#1 compiled every one clean.",
+  "language-version": "1.0",
+  "spec": "§5.2",
+  "rationale": "§5.2: \"A `<base>` (tag compared case-insensitively) whose `href` (any case) is not a static string — `href=@u`, `href=(…)`, `href=name`, a call, an `<each>` row's field, a value a declaration's field supplies (reported once, at the definition) — SHALL be a compile error (E-ATTR-BASE-HREF).\"",
+  "expect": {
+    "codes": ["E-ATTR-BASE-HREF"],
+    "notCodes": [],
+    "severity": { "E-ATTR-BASE-HREF": "error" },
+    "codeCounts": { "E-ATTR-BASE-HREF": 3 }
+  }
+}

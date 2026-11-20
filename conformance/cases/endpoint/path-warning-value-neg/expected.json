@@ -1,0 +1,13 @@
+{
+  "id": "endpoint-path-warning-value-neg",
+  "description": "§61.2 — a `path=` whose value is not a string literal is E-ENDPOINT-PATH-MISSING even when the attribute reader only warns about the value (`path=(x is some)` — W-IS-SOME-DEPRECATED). The bootstrap compiled it with no error and mounted no route until the S480 #2012 review (F1): a Warning inside the attribute suppressed the attribute's own code.",
+  "language-version": "1.0",
+  "spec": "§61.2, §61.9",
+  "provenance": "review:#2012-S239 F1; the §61.2 rule ruling:user-voice-scrml.md-S480-four-recs-2 item 1 (PA ruling S480, #1998 review r2 N1)",
+  "source-test": "compiler/self-host-v2/slice-m4/endpoint-opener-s480.test.js",
+  "rationale": "§61.2: \"a `path=` / `method=` / `accepts=` / `cors=` written with no value, or with a value that is not its production's form, is that attribute's code\" — `path-attr ::= 'path=' string-literal`.",
+  "expect": {
+    "codes": ["E-ENDPOINT-PATH-MISSING"],
+    "severity": { "E-ENDPOINT-PATH-MISSING": "error" }
+  }
+}

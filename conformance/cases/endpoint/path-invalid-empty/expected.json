@@ -1,0 +1,14 @@
+{
+  "id": "endpoint-path-invalid-empty",
+  "description": "§61.7 — an empty `path=\"\"` does not begin with `/`: E-ENDPOINT-PATH-INVALID (the bootstrap compiled it, mounted at the empty string, until the S480 #2007 review).",
+  "language-version": "1.0",
+  "spec": "§61.7, §61.9",
+  "provenance": "ruling:user-voice-scrml.md-S478-open-Qs-item-37; the code ruling:user-voice-scrml.md-S479-3A-5",
+  "source-test": "compiler/self-host-v2/slice-m4/endpoint-opener-s480.test.js",
+  "rationale": "§61.7: \"A `path=` SHALL be an absolute path: it begins with `/` … A `path=` outside this grammar is `E-ENDPOINT-PATH-INVALID` (§61.9), reported at the `<endpoint>` opener.\"",
+  "expect": {
+    "codes": ["E-ENDPOINT-PATH-INVALID"],
+    "notCodes": ["E-ENDPOINT-PATH-MISSING", "E-BOOTSTRAP-UNSUPPORTED"],
+    "severity": { "E-ENDPOINT-PATH-INVALID": "error" }
+  }
+}

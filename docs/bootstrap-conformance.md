@@ -7,22 +7,22 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1938 of 1938 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1945 of 1945 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 743 | 38.3% |
+| PASS | 750 | 38.6% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 0 | 0.0% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 638 | 32.9% |
-| UNSUPPORTED | 557 | 28.7% |
+| NOT-TWINNED | 638 | 32.8% |
+| UNSUPPORTED | 557 | 28.6% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 743; of those, 743 hold (100.0%). Runtime half executed on the bootstrap for 240 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 750; of those, 750 hold (100.0%). Runtime half executed on the bootstrap for 240 case(s).
 
-- **Vacuous** passes: 16 of 743 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **727**.
+- **Vacuous** passes: 16 of 750 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **734**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 0 of 0; the other 0 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
@@ -30,7 +30,7 @@ UNSUPPORTED by reason: bootstrap-unsupported 557.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **893** — PASS 478 · UNSUPPORTED 415. Twin holds 478 (non-vacuous 465). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **895** — PASS 480 · UNSUPPORTED 415. Twin holds 480 (non-vacuous 467). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 5 replace a twin's expectations · 14 exclude a case.
 - Superseded-code mappings applied: 8 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -102,7 +102,7 @@ NOT-TWINNED by reason (638 cases; a case counts once per distinct reason):
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | api | 10 | · | · | · | · | · | 10 | · | · |
 | apply | 7 | · | · | · | · | · | 7 | · | · |
-| attr-executable-sink | 26 | 10 | · | · | · | 11 | 5 | · | · |
+| attr-executable-sink | 28 | 12 | · | · | · | 11 | 5 | · | · |
 | auth | 65 | 12 | · | · | · | 15 | 38 | · | · |
 | block-grammar | 14 | 11 | · | · | · | 1 | 2 | · | · |
 | body-top | 27 | 20 | · | · | · | 1 | 6 | · | · |
@@ -116,7 +116,7 @@ NOT-TWINNED by reason (638 cases; a case counts once per distinct reason):
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
 | element-refusal | 39 | 26 | · | · | · | 11 | 2 | · | · |
-| endpoint | 26 | 25 | · | · | · | · | 1 | · | · |
+| endpoint | 31 | 30 | · | · | · | · | 1 | · | · |
 | engine | 101 | 31 | · | · | · | 50 | 20 | · | · |
 | enum | 1 | 1 | · | · | · | · | · | · | · |
 | equality | 10 | 6 | · | · | · | 4 | · | · | · |
@@ -179,8 +179,10 @@ none
 
 none
 
-### PASS / CODES-ONLY (743)
+### PASS / CODES-ONLY (750)
 
+- `attr-executable-sink/base-href-data-neg` — PASS · TWIN
+- `attr-executable-sink/base-href-static-pos` — PASS · TWIN
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/css-url-attr-runtime-guard` — PASS · TWIN
@@ -381,7 +383,9 @@ none
 - `endpoint/accepts-unknown-name` — PASS
 - `endpoint/arm-body-undefined-scope` — PASS (also emitted, unasserted: E-TYPE-STRUCT-CONTEXT)
 - `endpoint/arm-body-valid-scope-clean` — PASS (also emitted, unasserted: E-TYPE-043)
+- `endpoint/attr-comment-in-opener` — PASS
 - `endpoint/attr-invalid-misspelled-cors` — PASS
+- `endpoint/attr-single-quoted-value` — PASS
 - `endpoint/dead-arm` — PASS
 - `endpoint/duplicate-arm` — PASS
 - `endpoint/endpoint-clean` — PASS
@@ -392,13 +396,16 @@ none
 - `endpoint/not-exhaustive` — PASS
 - `endpoint/path-grammar-edges-clean` — PASS
 - `endpoint/path-invalid-dot-segment` — PASS
+- `endpoint/path-invalid-empty` — PASS
 - `endpoint/path-invalid-param` — PASS
 - `endpoint/path-invalid-query` — PASS
 - `endpoint/path-invalid-relative` — PASS
 - `endpoint/path-missing` — PASS
 - `endpoint/path-reserved-scrml-local` — PASS
 - `endpoint/path-reserved-scrml-local-bare` — PASS
+- `endpoint/path-warning-value-neg` — PASS (also emitted, unasserted: W-IS-SOME-DEPRECATED)
 - `endpoint/self-closing-arm-exhaustive` — PASS
+- `endpoint/typed-attr-declaration-neg` — PASS
 - `endpoint/wildcard-exhaustive` — PASS
 - `engine/e-engine-rule-quoted-pos` — PASS
 - `engine/engine-var-duplicate-neg` — PASS · TWIN (also emitted, unasserted: E-DG-002)

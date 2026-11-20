@@ -54,9 +54,12 @@ import {
   attrSinkKey,
   ATTR_STYLESHEET_HREF_CODE,
   stylesheetHrefFromData,
+  ATTR_BASE_HREF_CODE,
+  baseHrefFromData,
+  baseHrefMessage,
   stylesheetHrefMessage,
 } from "../attr-injection-sink.ts";
-import { boundaryFallbackRaw, extractVariantRenders, rendersStylesheetHrefHits } from "../codegen/emit-error-boundary.ts";
+import { boundaryFallbackRaw, extractVariantRenders, rendersHrefRefusalHits } from "../codegen/emit-error-boundary.ts";
 
 // ---------------------------------------------------------------------------
 // Diagnostic shape
@@ -266,17 +269,19 @@ export function collectExecutableSinkErrors(
       // sees its elements: a `<link>` there whose `href` takes a payload field and whose `rel` loads a
       // stylesheet is E-ATTR-STYLESHEET-HREF, reported at the boundary's `fallback=`.
       if (attr.name === "fallback" && String(node.tag ?? "").toLowerCase() === "errorboundary") {
-        rendersStylesheetHrefHits(boundaryFallbackRaw(v)).forEach((hit, i) => {
+        rendersHrefRefusalHits(boundaryFallbackRaw(v)).forEach((hit, i) => {
           const own: Span = attr.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
           const inExpansion = spanFileIsSynthesized(own.file) && ctx.anchor !== null;
           const span = opts.spanOverride ?? (inExpansion ? (ctx.anchor as Span) : own);
           const key = `fallback|${span.file ?? filePath}:${span.start}:${span.end}|${own.file ?? filePath}:${own.start}:${own.end}|${i}`;
           if (reported.has(key)) return;
           reported.add(key);
+          const fbWhere = (opts.where ? opts.where + " " : "") + "in an `<errorBoundary>` `fallback=` template (a payload field)";
           const err: AttrInterpError = {
-            code: ATTR_STYLESHEET_HREF_CODE,
-            message: stylesheetHrefMessage(hit.name, hit.tag,
-              (opts.where ? opts.where + " " : "") + "in an `<errorBoundary>` `fallback=` template (a payload field)"),
+            code: hit.code,
+            message: hit.code === ATTR_BASE_HREF_CODE
+              ? baseHrefMessage(hit.name, hit.tag, fbWhere)
+              : stylesheetHrefMessage(hit.name, hit.tag, fbWhere),
             span,
             severity: "error",
           };
@@ -323,7 +328,12 @@ export function collectExecutableSinkErrors(
       const sheetHref = !sink && !quotedHandler && !staticSink &&
         dataValueReachesElementAttr(node, attr.name) &&
         stylesheetHrefFromData(node.tag, attr.name, v, node.attrs);
-      if (!sink && !quotedHandler && !staticSink && !sheetHref) continue;
+      // §5.2 "Data never moves the document base (S473)" — impl#1 under the S479 carve-out 2 as widened
+      // S480 (ruling:user-voice-scrml.md-S480-census-recs item 5): a `<base>` whose `href` is not static.
+      const baseHref = !sink && !quotedHandler && !staticSink && !sheetHref &&
+        dataValueReachesElementAttr(node, attr.name) &&
+        baseHrefFromData(node.tag, attr.name, v);
+      if (!sink && !quotedHandler && !staticSink && !sheetHref && !baseHref) continue;
       // A value written verbatim by the author (no caller substitution): anchored where it is written.
       const staticText = quotedHandler || staticSink !== null;
       if (opts.markReported) (attr as { _execSinkReportedAtDef?: boolean })._execSinkReportedAtDef = true;
@@ -360,11 +370,13 @@ export function collectExecutableSinkErrors(
       const err: AttrInterpError = {
         code: quotedHandler ? ATTR_QUOTED_HANDLER_CODE
           : staticSink ? ATTR_STATIC_EXECUTABLE_CODE
-          : sheetHref ? ATTR_STYLESHEET_HREF_CODE : ATTR_INTERP_EXECUTABLE_CODE,
+          : sheetHref ? ATTR_STYLESHEET_HREF_CODE
+          : baseHref ? ATTR_BASE_HREF_CODE : ATTR_INTERP_EXECUTABLE_CODE,
         message: quotedHandler
           ? quotedHandlerMessage(attr.name, node.tag ?? "", where)
           : staticSink ? staticExecutableMessage(staticSink, attr.name, node.tag ?? "", where)
           : sheetHref ? stylesheetHrefMessage(attr.name, node.tag ?? "", where)
+          : baseHref ? baseHrefMessage(attr.name, node.tag ?? "", where)
           : interpolatedAttrSinkMessage(sink!, attr.name, node.tag ?? "", where, form),
         span,
         severity: "error",
@@ -719,12 +731,14 @@ export function collectRendersStylesheetHrefErrors(root: unknown, filePath: stri
     if (n.kind === "type-decl" && n.typeKind === "enum" && typeof n.name === "string") {
       const info = extractVariantRenders(n);
       for (const [variant, raw] of info.renders) {
-        rendersStylesheetHrefHits(raw).forEach((hit, i) => {
+        rendersHrefRefusalHits(raw).forEach((hit, i) => {
           const span: Span = n.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+          const rWhere = "in the `renders` clause of `" + n.name + "." + variant + "` (a payload field)";
           const err: AttrInterpError = {
-            code: ATTR_STYLESHEET_HREF_CODE,
-            message: stylesheetHrefMessage(hit.name, hit.tag,
-              "in the `renders` clause of `" + n.name + "." + variant + "` (a payload field)"),
+            code: hit.code,
+            message: hit.code === ATTR_BASE_HREF_CODE
+              ? baseHrefMessage(hit.name, hit.tag, rWhere)
+              : stylesheetHrefMessage(hit.name, hit.tag, rWhere),
             span,
             severity: "error",
           };

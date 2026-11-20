@@ -218,8 +218,9 @@ describe("S478 ruling 19 — `schema` is a reserved structural-element name (§4
   test("compared lowercase (§24.4): `<Schema …>` is reserved too", () => {
     expect(errsOf(`<Schema label:string="x"/>\nrenders <p>\${label}</p>\n<program>\n<p>x</p>\n</program>\n`)).toEqual(["E-NAME-COLLIDES-RESERVED"]);
   });
-  test("a CELL named `schema` (`@schema`) is not a declaration a tag names — unchanged", () => {
-    expect(errsOf(`<program db="./app.db">\n let <schema:int=3/>\n<p id="z">\${@schema}</p>\n</program>\n`)).toEqual([]);
+  test("a CELL named `schema` (`@schema`) is reserved too since S480 (reserved-cells-s480.test.js)", () => {
+    // was "unchanged": compiled clean until ruling:user-voice-scrml.md-S480-census-recs item 9.
+    expect(errsOf(`<program db="./app.db">\n let <schema:int=3/>\n<p id="z">\${@schema}</p>\n</program>\n`)).toEqual(["E-NAME-COLLIDES-RESERVED"]);
   });
 });
 
