@@ -53,4 +53,10 @@ items 3–4; S469 dpa-073 F1 / F2 / F3 / F5.
 - [x] F3: `(` after `.` / `?.` (the optional call `?.(`) is a call in `seedExprFree`.
 - [x] F4: component definitions are units like any other; a component instance before the
       declaration is an opaque unit (refuses).
-- [ ] cost: census lens, runtime differential, conformance, gates.
+- [x] x02 test: a `const` in a later markup interpolation is hoisted to module init too (verified
+      emission); refused (expression unit after the block holding `let` / `const`).
+- [x] cost: census lens 701 vs 1caa16f4c — boot-clean 190 → 190 (0 lost); 16 newly refused moves,
+      none boot-clean before (8 `^{}` meta blocks after the declaration, 6 later interpolations
+      holding `let` / `const` or unreadable, 2 later non-free bindings). Runtime differential over the
+      190: 0 cell diffs (identical to r2). Conformance vs origin/main c15225d88: CRASH 0, PASS 760 →
+      759, PASS→other = the 2 r2 by-design refusals; 10 NOT-TWINNED→FAIL as r2. CI checks + pretest pass.
