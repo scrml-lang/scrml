@@ -29,3 +29,13 @@ data-written stylesheet `href` only). Gap: g-impl1-svg-css-url-attr-and-link-sty
 - [x] corpus newly-rejecting: 0 (only docs/changes/s473-spec-coverage probes p21/s09/s10, written to show the hole).
 - hook flake fixed: the integration test now unregisters happy-dom at file end (it broke the
   security-await-pack CSRF probes later in the same process).
+
+## r1 fix round (S239 review of #2015 BLOCKED)
+- merged origin/main.
+- F1: renders-template stylesheet href → E-ATTR-STYLESHEET-HREF at the enum decl
+  (attr-injection-sink RENDERS_FIELD_SENTINEL non-static; emit-error-boundary rendersStylesheetHrefHits;
+  attribute-interpolation collectRendersStylesheetHrefErrors).
+- F2: renders/boundary HTML-string CSS-url attrs → `_scrml_css_attr_html` (runtime guard, bootstrap's shape).
+- F3: meta.emit gate judges CSS-url attrs (metaemit → cssattrguard).
+- F2b filed: g-impl1-renders-href-unguarded-s480 (HIGH, owner question). F4: SPEC wording scoped.
+- tests: compiler/tests/integration/s480-r1-renders-css-url-guard.test.js (7 red on c1b892e1a, 9 green).

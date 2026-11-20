@@ -28,6 +28,8 @@
 
 import { runBlockSplitter } from "../block-splitter.js";
 import { buildAST } from "../ast-builder.js";
+import { RENDERS_FIELD_SENTINEL, stylesheetHrefFromData } from "../attr-injection-sink.ts";
+import { dataAttrWriteGuard } from "./url-attr-guard.ts";
 
 /**
  * A compiled markup template for a fallback / renders body.
@@ -46,7 +48,9 @@ export interface BoundaryMarkupTemplate {
 // Sentinel delimiting a runtime-substituted payload field inside the rendered
 // HTML template. Chosen to never collide with source markup: a private-use
 // Unicode codepoint that does not appear in scrml source or generated HTML.
-const FIELD_SENTINEL = "";
+// The one spelling is attr-injection-sink.ts `RENDERS_FIELD_SENTINEL` — the §5.2 checks read it as
+// data (S480 r1 F1: a captured field is not a static attribute value).
+const FIELD_SENTINEL = RENDERS_FIELD_SENTINEL;
 
 /**
  * Convert a raw scrml markup fragment (the `fallback=` attribute value or a
@@ -177,6 +181,51 @@ function convertTerseClosers(s: string): string {
   return out;
 }
 
+/** The payload-field interpolation `${field}` a fallback / renders template captures. */
+const FIELD_INTERP = /\$\{\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\}/g;
+
+/**
+ * §5.2 "Data-supplied stylesheets (S472)" over a `renders` / `fallback=` template (S480 r1 F1): the
+ * `<link>` attributes written from a payload field whose `rel` loads a stylesheet
+ * (attr-injection-sink.ts `stylesheetHrefFromData`). The template is re-parsed as
+ * `compileBoundaryMarkup` parses it, except that an UNQUOTED `name=${field}` is read as the quoted
+ * `name="${field}"` (codegen drops its value, but it is data all the same — fail closed, as the
+ * bootstrap refuses `href=sheet`). Returns one `{ tag, name }` per refused attribute.
+ */
+export function rendersStylesheetHrefHits(rawMarkup: string): Array<{ tag: string; name: string }> {
+  const trimmed = normalizeTokenizedMarkup((rawMarkup ?? "").trim());
+  if (trimmed === "") return [];
+  const quotedForm = trimmed.replace(/=\s*\$\{\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\}/g,
+    (_m, name: string) => `="${FIELD_SENTINEL}${name}${FIELD_SENTINEL}"`);
+  const prepared = convertTerseClosers(
+    quotedForm.replace(FIELD_INTERP, (_m, name: string) => `${FIELD_SENTINEL}${name}${FIELD_SENTINEL}`));
+  let nodes: any[];
+  try {
+    const bs = runBlockSplitter({ filePath: "<errorBoundary-markup>", source: prepared });
+    nodes = ((buildAST(bs) as { ast?: { nodes?: any[] } })?.ast?.nodes) ?? [];
+  } catch {
+    // compileBoundaryMarkup then writes the template as escaped TEXT (no element, no attribute).
+    return [];
+  }
+  const hits: Array<{ tag: string; name: string }> = [];
+  const seen = new Set<any>();
+  const visit = (n: any): void => {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { n.forEach(visit); return; }
+    if (typeof n.tag === "string" && Array.isArray(n.attrs)) {
+      for (const a of n.attrs) {
+        if (a && typeof a.name === "string" && stylesheetHrefFromData(n.tag, a.name, a.value, n.attrs)) {
+          hits.push({ tag: n.tag, name: a.name });
+        }
+      }
+    }
+    for (const k of ["children", "body", "nodes"]) if (n[k]) visit(n[k]);
+  };
+  visit(nodes);
+  return hits;
+}
+
 export function compileBoundaryMarkup(
   rawMarkup: string,
   generateHtmlFn: (nodes: any[], ctxOrErrors: any) => string,
@@ -189,8 +238,7 @@ export function compileBoundaryMarkup(
   // otherwise produce for an unbound identifier). Replace each with a sentinel-
   // delimited field marker embedded in a plain text node, then re-parse.
   const fields: string[] = [];
-  const fieldInterp = /\$\{\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\}/g;
-  const withFields = trimmed.replace(fieldInterp, (_m, name: string) => {
+  const withFields = trimmed.replace(FIELD_INTERP, (_m, name: string) => {
     if (!fields.includes(name)) fields.push(name);
     return `${FIELD_SENTINEL}${name}${FIELD_SENTINEL}`;
   });
@@ -248,23 +296,112 @@ export function emitBoundaryMarkupExpr(
   // is retained for caller-signature stability; the field name comes from the
   // sentinel segment, so no arity discrimination is needed.)
   void payloadFields;
+  const fieldValue = (field: string): string => `(${dataExpr}) != null ? (${dataExpr}).${field} : ""`;
+  const pieces: string[] = [];
   // Split on the sentinel. The split alternates literal-HTML and field-name
   // segments: even indices are HTML, odd indices are field names.
-  const segments = tpl.htmlTemplate.split(FIELD_SENTINEL);
-  const pieces: string[] = [];
-  for (let i = 0; i < segments.length; i++) {
-    if (i % 2 === 0) {
-      if (segments[i] !== "") pieces.push(JSON.stringify(segments[i]));
-    } else {
-      const field = segments[i];
-      // S468 fix round 1 (F3) — the template is written with innerHTML, so a payload
-      // value is HTML-escaped (text, never markup): §4.18.6 — an interpolated value
-      // "SHALL be escaped per the existing interpolation escaping rules".
-      pieces.push(`_scrml_error_boundary_text((${dataExpr}) != null ? (${dataExpr}).${field} : "")`);
+  const pushHtml = (html: string): void => {
+    const segments = html.split(FIELD_SENTINEL);
+    for (let i = 0; i < segments.length; i++) {
+      if (i % 2 === 0) {
+        if (segments[i] !== "") pieces.push(JSON.stringify(segments[i]));
+      } else {
+        // S468 fix round 1 (F3) — the template is written with innerHTML, so a payload
+        // value is HTML-escaped (text, never markup): §4.18.6 — an interpolated value
+        // "SHALL be escaped per the existing interpolation escaping rules".
+        pieces.push(`_scrml_error_boundary_text(${fieldValue(segments[i])})`);
+      }
     }
+  };
+  // §5.2 "Data-supplied CSS-url attributes" (S479 carve-out 2; S480 r1 F2) — a CSS-url attribute
+  // (`fill=`, `filter=`, … or an SVG animation value that may animate one) whose value carries a
+  // payload field is not written raw: the whole ` name="…"` is built at run time by
+  // `_scrml_css_attr_html` (runtime-css-attr-guard.js), which judges the assembled value with the
+  // same reader as `_scrml_css_attr_set` and writes nothing (reported) when it is refused.
+  let at = 0;
+  for (const g of guardedTemplateAttrs(tpl.htmlTemplate)) {
+    pushHtml(tpl.htmlTemplate.slice(at, g.start));
+    const segs = g.value.split(FIELD_SENTINEL);
+    const parts: string[] = [];
+    for (let i = 0; i < segs.length; i++) {
+      if (i % 2 === 0) { if (segs[i] !== "") parts.push(JSON.stringify(decodeHtmlAttr(segs[i]))); }
+      else parts.push(fieldValue(segs[i]));
+    }
+    const extra = typeof g.target === "string" ? `, ${JSON.stringify(g.target)}` : "";
+    pieces.push(`_scrml_css_attr_html(${JSON.stringify(g.tag)}, ${JSON.stringify(g.name)}, [${parts.join(", ")}]${extra})`);
+    at = g.end;
   }
+  pushHtml(tpl.htmlTemplate.slice(at));
   if (pieces.length === 0) return '""';
   return pieces.join(" + ");
+}
+
+/** Undo emit `escapeHtmlAttr` (`&` `"` `<` `>`) and the `'` escape, for a literal part of a value. */
+function decodeHtmlAttr(s: string): string {
+  return s.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+/**
+ * The attributes of a generated template (`generateHtml` output: ` name="value"`, values
+ * attribute-escaped) that the §5.2 CSS-url write guard covers: a payload field (`FIELD_SENTINEL`) in
+ * the value, and `url-attr-guard.ts` `dataAttrWriteGuard` answers `css` for the name on that element
+ * (a captured field in another attribute's value — `attributeName` — counts as computed). `start` is
+ * the whitespace before the name, `end` just past the closing quote.
+ */
+function guardedTemplateAttrs(html: string): Array<{
+  start: number; end: number; tag: string; name: string; value: string; target: string | null;
+}> {
+  const out: Array<{ start: number; end: number; tag: string; name: string; value: string; target: string | null }> = [];
+  if (html.indexOf(FIELD_SENTINEL) < 0) return out;
+  const n = html.length;
+  let i = 0;
+  while (i < n) {
+    if (html[i] !== "<" || !/[A-Za-z]/.test(html[i + 1] ?? "")) { i++; continue; }
+    let j = i + 1;
+    while (j < n && !/[\s/>]/.test(html[j])) j++;
+    const tag = html.slice(i + 1, j);
+    const attrs: Array<{ start: number; end: number; name: string; value: string | null }> = [];
+    while (j < n) {
+      const ws = j;
+      while (j < n && /\s/.test(html[j])) j++;
+      if (j >= n || html[j] === ">") { j++; break; }
+      if (html[j] === "/" ) { j++; continue; }
+      const nameStart = j;
+      while (j < n && !/[\s=/>]/.test(html[j])) j++;
+      const name = html.slice(nameStart, j);
+      let value: string | null = null;
+      if (html[j] === "=") {
+        j++;
+        const q = html[j];
+        if (q === '"' || q === "'") {
+          const close = html.indexOf(q, j + 1);
+          const end = close < 0 ? n : close;
+          value = html.slice(j + 1, end);
+          j = close < 0 ? n : close + 1;
+        } else {
+          const vs = j;
+          while (j < n && !/[\s>]/.test(html[j])) j++;
+          value = html.slice(vs, j);
+        }
+      }
+      if (name === "") { j++; continue; }
+      attrs.push({ start: ws, end: j, name, value });
+    }
+    const asAst = attrs.map((a) => ({
+      name: a.name,
+      value: a.value === null ? { kind: "absent" }
+        : { kind: "string-literal", value: a.value.replace(/\uE000([^\uE000]*)\uE000/g, "${$1}") },
+    }));
+    for (const a of attrs) {
+      if (a.value === null || a.value.indexOf(FIELD_SENTINEL) < 0) continue;
+      const guard = dataAttrWriteGuard(tag, a.name, asAst as any);
+      if (!guard || guard.kind !== "css") continue;
+      out.push({ start: a.start, end: a.end, tag: tag.toLowerCase(), name: a.name, value: a.value, target: guard.target });
+    }
+    i = j;
+  }
+  return out;
 }
 
 /** Minimal HTML-text escape for the re-parse fallback path. */

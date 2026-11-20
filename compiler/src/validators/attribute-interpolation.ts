@@ -56,6 +56,7 @@ import {
   stylesheetHrefFromData,
   stylesheetHrefMessage,
 } from "../attr-injection-sink.ts";
+import { extractVariantRenders, rendersStylesheetHrefHits } from "../codegen/emit-error-boundary.ts";
 
 // ---------------------------------------------------------------------------
 // Diagnostic shape
@@ -675,6 +676,48 @@ function collectEscapeHatchQuotedHandlerErrors(root: unknown, filePath: string, 
   return errors;
 }
 
+/**
+ * §5.2 "Data-supplied stylesheets (S472)" — impl#1 under the S479 carve-out 2 (S480 r1 F1): an enum
+ * variant's `renders` template is raw text until codegen re-parses it (emit-error-boundary.ts), so
+ * the markup walk never sees it. A `<link>` there whose `href` takes a payload field (`"${f}"` or
+ * `=${f}`) and whose `rel` loads a stylesheet is E-ATTR-STYLESHEET-HREF, reported ONCE, at the enum
+ * declaration (however many `<render of=…/>` / `<errorBoundary>` sites show it) — the bootstrap's
+ * "a declaration's field (reported once, at the definition)".
+ */
+export function collectRendersStylesheetHrefErrors(root: unknown, filePath: string): AttrInterpError[] {
+  const errors: AttrInterpError[] = [];
+  const seen = new Set<unknown>();
+  const visit = (n: any): void => {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { n.forEach(visit); return; }
+    if (n.kind === "type-decl" && n.typeKind === "enum" && typeof n.name === "string") {
+      const info = extractVariantRenders(n);
+      for (const [variant, raw] of info.renders) {
+        rendersStylesheetHrefHits(raw).forEach((hit, i) => {
+          const span: Span = n.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+          const err: AttrInterpError = {
+            code: ATTR_STYLESHEET_HREF_CODE,
+            message: stylesheetHrefMessage(hit.name, hit.tag,
+              "in the `renders` clause of `" + n.name + "." + variant + "` (a payload field)"),
+            span,
+            severity: "error",
+          };
+          // One report per refused attribute (api.js dedupes on this identity): the declaration's
+          // span is shared by all its variants.
+          (err as { attrSinkKey?: string }).attrSinkKey = `renders|${filePath}|${n.name}.${variant}|${i}`;
+          errors.push(err);
+        });
+      }
+    }
+    for (const k of ["nodes", "children", "body", "branches", "arms", "armBody", "typeDecls"]) {
+      if (n[k] && typeof n[k] === "object") visit(n[k]);
+    }
+  };
+  visit(root);
+  return errors;
+}
+
 function validateExecutableSinks(
   ast: FileAST,
   filePath: string,
@@ -682,6 +725,7 @@ function validateExecutableSinks(
   source?: string,
 ): void {
   errors.push(...collectExecutableSinkErrors(ast.nodes, filePath));
+  errors.push(...collectRendersStylesheetHrefErrors(ast, filePath));
   errors.push(...collectEscapeHatchQuotedHandlerErrors(ast.nodes, filePath, source));
 }
 

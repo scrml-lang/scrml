@@ -102,12 +102,42 @@ export function _scrml_css_attr_set(el, name, value, target) {
   const lower = String(name).toLowerCase();
   if (_scrml_css_attr_value_admitted(text, lower === "values")) { el.setAttribute(name, text); return; }
   el.removeAttribute(name);
+  _scrml_css_attr_refused(el, name, "removed");
+}
+
+// Report one refused CSS-url attribute value (never the value). `fate`: what happened to the attribute.
+function _scrml_css_attr_refused(el, name, fate) {
   const tag = el && typeof el.tagName === "string" ? "<" + el.tagName.toLowerCase() + "> " : "";
   _scrml_css_guard_report(
     "refused a data-supplied value for " + tag + String(name) + "=: the browser reads this attribute as " +
     "CSS, and only a finite number, a plain CSS value (no url(), image-set(), var(), quotes, escapes, ; { } " +
-    "< or !) or exactly a same-document url(#id) is written there from data (SPEC §5.2). The attribute was removed.",
+    "< or !) or exactly a same-document url(#id) is written there from data (SPEC §5.2). The attribute was " + fate + ".",
   );
+}
+
+function _scrml_css_attr_escape(text) {
+  return text.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// THE write of a CSS-url attribute into an HTML STRING (S480 r1 F2): an enum variant's `renders`
+// template / an `<errorBoundary>` `fallback=` is assembled as text and written with innerHTML
+// (codegen/emit-error-boundary.ts `emitBoundaryMarkupExpr`). `parts` are the value's pieces (static
+// text and payload fields, `null` / `undefined` read as ""). Returns ` name="…"` (attribute-escaped)
+// when `_scrml_css_attr_set` would write the value, `""` (reported) when it would remove it; `target`
+// as for `_scrml_css_attr_set`.
+export function _scrml_css_attr_html(tag, name, parts, target) {
+  let text = "";
+  for (let i = 0; i < parts.length; i++) text += parts[i] == null ? "" : String(parts[i]);
+  const el = { tagName: String(tag) };
+  if (typeof target === "string") {
+    const u = _scrml_safe_url(el, name, text, target);
+    if (u !== text) return " " + name + '="' + _scrml_css_attr_escape(u) + '"';
+  }
+  if (_scrml_css_attr_value_admitted(text, String(name).toLowerCase() === "values")) {
+    return " " + name + '="' + _scrml_css_attr_escape(text) + '"';
+  }
+  _scrml_css_attr_refused(el, name, "not written");
+  return "";
 }
 
 // Does this `<link>` load (or may it load) a stylesheet? Its `rel` text holds `stylesheet` anywhere

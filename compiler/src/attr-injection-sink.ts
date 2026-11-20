@@ -350,11 +350,24 @@ export const ATTR_INTERP_EXECUTABLE_CODE = "E-ATTR-INTERP-EXECUTABLE";
  */
 export const ATTR_STYLESHEET_HREF_CODE = "E-ATTR-STYLESHEET-HREF";
 
-/** A static attribute value: a quoted string with no `${…}`, or a bare (valueless) attribute. */
+/**
+ * The marker an enum variant's `renders` template (and an `<errorBoundary>` `fallback=`) carries in
+ * place of a payload-field interpolation `${field}` once codegen/emit-error-boundary.ts
+ * `compileBoundaryMarkup` has captured it: `<SENTINEL>field<SENTINEL>`. A private-use code point, so
+ * no source text spells it. An attribute value holding it is written from the variant's payload —
+ * data, not static text (S480 r1 F1).
+ */
+export const RENDERS_FIELD_SENTINEL = "\uE000";
+
+/**
+ * A static attribute value: a quoted string with no `${…}` and no captured `renders` payload field
+ * (`RENDERS_FIELD_SENTINEL`), or a bare (valueless) attribute.
+ */
 function attrValueIsStatic(v: unknown): boolean {
   const val = (typeof v === "string" ? { kind: "string-literal", value: v } : v) as { kind?: string; value?: unknown } | null | undefined;
   if (!val || val.kind === "absent") return true;
-  return val.kind === "string-literal" && typeof val.value === "string" && firstInterpolationIndex(val.value) < 0;
+  return val.kind === "string-literal" && typeof val.value === "string" && firstInterpolationIndex(val.value) < 0 &&
+    val.value.indexOf(RENDERS_FIELD_SENTINEL) < 0;
 }
 
 /**

@@ -593,7 +593,8 @@ export const CHUNK_DEPENDENCIES: Partial<Record<RuntimeChunkName, RuntimeChunkNa
   // judges URL attributes with `_scrml_is_url_attr` / `_scrml_url_value_admitted` (urlguard).
   // metaemit also reports a refused emit through `_scrml_error_boundary_log` (errors).
   meta: ['metaemit'],
-  metaemit: ['urlguard', 'errors'],
+  // S480 r1 F3 — the gate judges a CSS-url attribute with `_scrml_css_attr_value_admitted` (cssattrguard).
+  metaemit: ['urlguard', 'errors', 'cssattrguard'],
   // S461 — `errors` is no longer always-included, so every chunk whose OWN helpers report through
   // `_scrml_error_boundary_log` records the edge. Those calls are `typeof`-guarded, so a missing
   // edge would not throw — it would silently drop the report, which is a behaviour change, not a
