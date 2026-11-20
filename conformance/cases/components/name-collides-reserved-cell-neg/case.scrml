@@ -1,0 +1,6 @@
+<program>
+    let <db:int=1/>
+    let <Schema:int=2/>
+    let <md:int=3/>
+    <p>${@db} ${@Schema} ${@md}</p>
+</program>

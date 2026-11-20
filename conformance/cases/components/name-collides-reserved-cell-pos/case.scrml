@@ -1,0 +1,9 @@
+<program>
+    let <dbx:int=1/>
+    let <schemas:int=2/>
+    let <mdText:int=3/>
+    <card:struct>
+        <db:int=4/>
+    </card>
+    <p>${@dbx} ${@schemas} ${@mdText} ${@card.db}</p>
+</program>

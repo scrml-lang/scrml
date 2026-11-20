@@ -107,8 +107,9 @@ describe("S479 item 15 — `db` is a reserved name (§4.15, E-NAME-COLLIDES-RESE
     expect(es).toContain("E-NAME-COLLIDES-RESERVED");
     expect(es).not.toContain("E-BOOTSTRAP-UNSUPPORTED");
   });
-  test("a CELL named `db` (`@db`) is not a declaration a tag names (unchanged)", () => {
-    expect(errsOf(`<program>\n let <db:int=3/>\n<p id="z">\${@db}</p>\n</program>\n`)).toEqual([]);
+  test("a CELL named `db` (`@db`) is reserved too since S480 (reserved-cells-s480.test.js)", () => {
+    // was "(unchanged)": compiled clean until ruling:user-voice-scrml.md-S480-census-recs item 9.
+    expect(errsOf(`<program>\n let <db:int=3/>\n<p id="z">\${@db}</p>\n</program>\n`)).toEqual(["E-NAME-COLLIDES-RESERVED"]);
   });
   test("a `<db src=>` with no user declaration compiles as before (unchanged)", () => {
     expect(errsOf(`<program>\n    <db src="./app.db">\n    </db>\n    <main><p>x</p></main>\n</program>\n`)).toEqual([]);

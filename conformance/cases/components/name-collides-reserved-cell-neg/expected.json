@@ -1,0 +1,35 @@
+{
+  "id": "components-name-collides-reserved-cell-neg",
+  "description": "§4.15 / §24.4 (S480) — a program cell named `db`, `schema` or `md` (compared lowercase: `Schema` too) is E-NAME-COLLIDES-RESERVED, once per cell, at its declaration.",
+  "language-version": "1.0",
+  "spec": "§4.15, §24.4",
+  "provenance": "ruling:user-voice-scrml.md-S480-census-recs item 9 (\"Reserve the cell names `db`, `schema` and `md` in §4.15, with a test\"); gap g-boot-reserved-name-cell-db-s480",
+  "rationale": "§4.15: \"A cell named `db`, `schema` or `md` is `E-NAME-COLLIDES-RESERVED` too, compared lowercase (§24.4)\".",
+  "expect": {
+    "codes": [
+      "E-NAME-COLLIDES-RESERVED"
+    ],
+    "codeCounts": {
+      "E-NAME-COLLIDES-RESERVED": 3
+    },
+    "severity": {
+      "E-NAME-COLLIDES-RESERVED": "error"
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-reserved-cell-names-unemitted-s480",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'E-NAME-COLLIDES-RESERVED' fired 0 time(s), expected exactly 3",
+          "emitted:E-COMPONENT-035=1",
+          "emitted:E-PA-006=1",
+          "emitted:E-SCOPE-001=1",
+          "emitted:E-STATE-UNDECLARED=3",
+          "missing:E-NAME-COLLIDES-RESERVED",
+          "severity:code 'E-NAME-COLLIDES-RESERVED' did not fire (expected severity error)"
+        ]
+      }
+    }
+  }
+}
