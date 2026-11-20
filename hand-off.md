@@ -21,7 +21,8 @@
    - **Next:** read the r4 report (agent transcript, or the PR body r4 section + `~/.cache/scrml/review/s480-2025-r4/`); freeze head → fresh S239 re-review **on the CLI artifact path** (`compileSource` → `runBootstrapArtifact`, never `frontEnd`/`loadProgram`); reuse probes in `~/.cache/scrml/review/s480-2025-r{1,2,3}rev/scratch/`. Land only on CLEAN / LAND-W-F/U.
    - PR body must disclose conformance FAIL 0→10 (9 stmt-semi twins excluded by TWIN_RULES + `defer/outside-function-when-body-neg`).
    - PA decisions in force: step 2 commits only the impl#1-safe subset; terminator rules stay out of twins; validator heads `<x min(18)>`, object-literal keys and a `^{}` after a declaration stay **refused** (INTERIM precision, fail-closed — gaps to file when #2025 lands).
-2. **Static-class lane** — branch `s480-static-class`, worktree `.claude/worktrees/s480-static-class`. `class="hidden" class:hidden=@f` strips the static class (violates §5.5.2 "The static class is always present"). PA decision: conform to the SHALL (a toggle never removes a static class, incl. while held by a trap and on restore). If it opened a PR: S239 review (security-adjacent: a stripped `hidden` reveals content), then land.
+2. **#2032 static class never removed by `class:`** (12b1614e9) — PA-direct reviewed, auto-merge on at wrap; confirm it merged. Compile-time `fixed` flag on `rt.classOn`; impl#1 also strips → gap `g-impl1-class-directive-strips-static-class-s480` (LOW). Marker owed pr=2032 (clean, PA-direct).
+3. **Gaps to file when #2025 lands** (locus `compiler/src/commands/fix-s66.js`, prov `review:#2025`, INTERIM, fail-closed): the seed guard refuses validator heads `<x min(18)>` and object-literal keys; a `^{}` after a declaration refuses the move until the bootstrap has `^{}`.
 
 ## 2. Rulings this session (verbatim in user-voice §S480)
 All "your recs go" — PA recs adopted. Cite slugs `ruling:user-voice-scrml.md-S480-<slug>`:
@@ -48,7 +49,7 @@ All "your recs go" — PA recs adopted. Cite slugs `ruling:user-voice-scrml.md-S
 3. **Endpoint GET input** (item 9, S479 queue). **#1963 parser LOWs.** Bootstrap parse gaps on keyword member names (`.fn`, `.server`, `.renders`, `from`) and multi-line `|` heads (census).
 4. **`is .V` true-branch narrowing** `E | not` → `E` (capability follow-up; the ruling doesn't require it).
 5. **Maps refresh** — not run this session or S479 (last at f92d1a8fb).
-6. The gap follow-ups the wrap records lane listed but could not file (see its report section in the wrap PR body).
+6. review-debt was scanned at `--limit 200` only (GitHub 502 above that): re-run wider next session.
 
 ## 5. Lessons
 - **Hand-written allow-list readers fail open — repeatedly.** #2025's seed guard broke in three directions in three rounds; #1998's attribute reader leaked via quoting twice. Fix rounds now get the invariant stated in the brief, not the next direction to patch. Memory `feedback_constrain_to_proven_path`.
@@ -62,6 +63,5 @@ All "your recs go" — PA recs adopted. Cite slugs `ruling:user-voice-scrml.md-S
 ## 6. Wrap state
 - **Full test suite not run at wrap** (OOM risk with lanes running); CI `gate` on each PR is the authority. Every lane hook passed in the foreground (~57.4k pass, 0 fail).
 - **Maps not refreshed** (§4.5).
-- **Worktrees retained:** `agent-a709fde6a04559965` (#2025), `s480-static-class`, plus `agent-a036efcbcbcb1c8b0` (#1448) if present. All merged lanes' worktrees removed at wrap.
-- **Review trees:** `~/.cache/scrml/review/s480-*` removed at wrap except `s480-2025-*` and `s480-static-class*`.
+- **Worktree cleanup NOT done** (the bulk force-remove was blocked by the permission classifier; awaiting bryan). ~90 worktrees remain: merged lanes under `.claude/worktrees/agent-*` and review trees under `~/.cache/scrml/review/s480-*`. Keep `agent-a709fde6a04559965` (#2025) and `s480-2025-*`; everything else from S479/S480 has landed.
 - **PA ledger** `~/.claude/pa-ledger/scrml.md` rewritten for S480.
