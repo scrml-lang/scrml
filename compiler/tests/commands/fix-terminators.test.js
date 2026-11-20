@@ -345,3 +345,37 @@ describe("S480 r1 (PR #2025 review) — F2 / F3 / F4 and the verify's withdraw /
     expect(loose.blockers.map((b) => `${b.line}: ${b.reason}`).join("\n")).toContain("4: inserting `;` here changes impl#1's reading");
   });
 });
+
+describe("S480 r2 (PR #2025 re-review N4) — a PascalCase component is never a void element", () => {
+  // N4: scanMarkup treated `<Link>` (lowercased: `link`, a void HTML element) as void, so its body and
+  // closer were read as code and a `;` landed in the component's text. Void is a lowercase-HTML-only fact.
+  // Probes v5–v7 of the re-review (~/.cache/scrml/review/s480-2025-r1rev/scratch/p/f2/).
+  const comp = (def, lift) => `<program>\nconst Link = ${def}\n\${\n    for (const x of [1, 2]) {\n${lift}\n    }\n    let n = 1\n}\n<p>end</p>\n</program>\n`;
+  const cases = [
+    ["v5: `<Link t=\"hi\">` ⏎ `</Link>` (no body text)", comp('<a props={t:string} href="/x">${t}</a>', '        lift <Link t="hi">\n        </Link>')],
+    ["v6: `<Link t=\"a\">` with body text", comp('<a props={t:string} href="/x">${t}</a>', '        lift <Link t="a">\n            text here\n        </Link>')],
+    ["v7: `<Link>` with body text, no attributes", comp('<a href="/x">${children}</a>', "        lift <Link>\n            text here\n        </Link>")],
+  ];
+  for (const [name, src] of cases) {
+    test(`${name}: the \`;\` goes after \`</Link>\` and \`let n = 1\`, never in the component's opener or text`, () => {
+      const p = planTerminators(F, src);
+      const os = src.indexOf("lift <Link");
+      const ce = src.indexOf("</Link>");
+      expect(p.edits.filter((e) => e.at > os && e.at < ce + 7)).toEqual([]);
+      expect(p.edits.map((e) => src.slice(e.at - 9, e.at))).toEqual(["  </Link>", "let n = 1"]);
+    });
+  }
+  test("every PascalCase spelling of a void element name has a body (`Input`, `Source`, `Meta`, …)", () => {
+    for (const nm of ["Area", "Base", "Br", "Col", "Embed", "Hr", "Img", "Input", "Link", "Meta", "Source", "Track", "Wbr"]) {
+      const src = `<program>\n\${\n    for (const x of xs) {\n        lift <${nm}>\n            text here\n        </${nm}>\n    }\n}\n</program>\n`;
+      const p = planTerminators(F, src);
+      const os = src.indexOf(`lift <${nm}`);
+      const ce = src.indexOf(`</${nm}>`) + nm.length + 3;
+      expect([nm, p.edits.filter((e) => e.at > os && e.at < ce)]).toEqual([nm, []]);
+    }
+  });
+  test("a lowercase void element is still void (`lift <input>` ends at its `>`)", () => {
+    const src = "<program>\n${\n    for (const x of xs) {\n        lift <input>\n    }\n}\n</program>\n";
+    expect(fixed(src)).toBe("<program>\n${\n    for (const x of xs) {\n        lift <input>;\n    }\n}\n</program>\n");
+  });
+});

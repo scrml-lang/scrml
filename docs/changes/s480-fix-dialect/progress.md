@@ -25,3 +25,18 @@ items 3–4; S469 dpa-073 F1 / F2 / F3 / F5.
       template-literal / inline-markup / nested `${}` code.
 - [x] tests: verify withdraw (bisect) path, allowNonCompiling pin.
 - [ ] re-measure (census lens + dual compile + runtime differential).
+
+## r2 (PR #2025 r1 re-review: BLOCK — the F1 guard failed open) — scratch `~/.cache/scrml/review/s480-2025-r2/`
+
+- [x] F1 at the root: the read / write allow-list (`seedReads` / `addSeedWrites` / `seedConflict` /
+      `PURE_CALLEES`) is gone. fix-s66 `seedHazard` now FAILS CLOSED: a move is allowed only when every
+      unit of code before the declaration (`seedPrefixUnits`, fix-terminators.js — every `${}` at any
+      depth, body code, interpolations, non-handler attribute values; opaque blocks refuse) and every
+      earlier statement of its block is provably free of writes and calls (`seedStmtFree` /
+      `seedExprFree`: a closed token set). Covers N1 (template literal), N2 (KEYWORD names), N3 (shadowed
+      "pure" callees).
+- [x] N4: scanMarkup — void only for a lowercase element name (`<Link>` has a body).
+- [x] tests: every re-review probe (k01 c01 c02 g-* k02 h01 h02 i01 i02) in
+      slice-m4/fix-s66-seed-order-s480.test.js (red on 7d3877965); a free-prefix positive test; v5–v7 +
+      PascalCase-void tests in fix-terminators.test.js.
+- [ ] cost (census lens r1 vs r2), runtime differential, conformance, gates.

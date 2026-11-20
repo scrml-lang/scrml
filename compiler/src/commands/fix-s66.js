@@ -114,7 +114,7 @@ import { fixGivenPresence } from "./fix-given-presence.js";
 import { fixIsSome } from "./fix-is-some.js";
 import { fixClientServerCall } from "./fix-client-server-call.js";
 import { fixSqlFailable } from "./fix-sql-failable.js";
-import { fixTerminators, logicBlockStatements, programStatementRegions } from "./fix-terminators.js";
+import { fixTerminators, logicBlockStatements, seedPrefixUnits } from "./fix-terminators.js";
 import { writeScratchProject, errorSeverityCodes, scratchRefusalReason } from "./fix-verify-shared.js";
 import { compileScrml } from "../api.js";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync, existsSync } from "node:fs";
@@ -183,109 +183,140 @@ const UNWRAP_ITEM_KINDS = new Set([
   "state-decl", "function-decl", "type-decl", "import-decl", "export-decl", "engine-decl", "comment",
   "use-decl", "component-def",
 ]);
-// ---- seed order (S480 r1, PR #2025 review F1) ----------------------------------------------------
+// ---- seed order (S480 r1 F1; r2 — FAILS CLOSED) ------------------------------------------------
 // A §66 cell's initializer is evaluated when the program's record is CONSTRUCTED (the bootstrap
 // runtime's `rt.seeded` / `construct`, settled before any render) — before the program body's
 // statements run. impl#1 runs a `${ … }` block top to bottom. So a declaration the unwrap / split moves
-// out of `${ … }` past a statement that WRITES something its initializer READS would read the old value
+// out of `${ … }` past a statement that WRITES something its initializer reads would read the old value
 // (`<count> = 0`, a loop adding to `@count`, `<doubled> = @count * 2`: impl#1 "6 12", the migrated
-// program on the bootstrap "6 0"). Such a move is refused. A file-scope `let` / `const` binding is not
-// a write that matters: the bootstrap evaluates it at module initialization (§7.6), before any seed.
+// program on the bootstrap "6 0").
+//
+// r1 asked "does a statement before it write what it reads?" with an allow-list reader of reads and
+// writes — and that reader failed OPEN on every token it could not see (a template literal is one
+// STRING token; a KEYWORD-class name like `get` / `set` is neither a reader nor a writer; a user
+// `function Number(v)` passed as a pure library callee). r2 inverts the question: a move is allowed
+// only when EVERY unit of code that could run before the declaration's seed is PROVABLY FREE of
+// writes and calls — then nothing before the seed can change anything, and what the initializer reads
+// does not matter. Provably free is a closed set (`seedStmtFree`); anything else — an unknown token
+// kind, an unread region, a construct this reader does not name — refuses the move.
 
-/** Library callees that read and write no cell of the program. */
-const PURE_CALLEES = new Set([
-  "String", "Number", "Boolean", "BigInt", "Symbol", "parseInt", "parseFloat", "isNaN", "isFinite",
-  "encodeURIComponent", "decodeURIComponent", "encodeURI", "decodeURI", "Array", "Object", "JSON", "Math",
-  "Date", "RegExp", "Error", "Set", "Map",
+/** KEYWORD-class tokens that are literal values (the rest of the KEYWORD class is never free). */
+const SEED_LITERAL_KEYWORDS = new Set(["true", "false", "null", "not"]);
+/** Operator / punctuation tokens an initializer may hold: no assignment, no `++` / `--`, no `=>`, no `...`. */
+const SEED_OPERATORS = new Set([
+  "+", "-", "*", "/", "%", "**", "<", ">", "<=", ">=", "==", "!=", "===", "!==", "&&", "||", "??", "!", "~",
+  "&", "|", "^", "<<", ">>", ">>>", "?", ":", ",", ".", "?.", "(", ")", "[", "]", "{", "}",
 ]);
-const SEED_ASSIGN_OPS = new Set(["=", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??=", "&=", "|=", "^=", "<<=", ">>=", ">>>="]);
-/** Heads of statements that declare and run nothing at the program body (or run before any seed). */
-const SEED_INERT_HEADS = new Set(["function", "fn", "type", "import", "use"]);
-const SEED_HEAD_MODIFIERS = new Set(["export", "server", "async", "pure", "public", "default"]);
-const seedName = (t) => (t.kind === "AT_IDENT" ? t.text.replace(/^@/, "") : t.text);
+/** Tokens a type annotation `: T` may hold (it is not evaluated; no `(` — a refinement is not read). */
+const SEED_TYPE_PUNCT = new Set(["<", ">", "[", "]", "|", "?", ",", ".", "{", "}", ":"]);
+/** Heads of declarations that run nothing where they stand (a function body runs only when called). */
+const SEED_INERT_HEADS = new Set(["function", "fn"]);
+const SEED_FN_MODIFIERS = new Set(["export", "server", "async", "pure", "public", "default"]);
 
-/** End index (exclusive) of the member / index chain after the root token at j. */
-function seedChainEnd(toks, j) {
-  let k = j + 1;
-  for (;;) {
-    const t = toks[k];
-    if (!t) return k;
-    if ((t.text === "." || t.text === "?.") && toks[k + 1] && (toks[k + 1].kind === "IDENT" || toks[k + 1].kind === "KEYWORD")) { k += 2; continue; }
-    if (t.text === "[") {
-      let d = 0;
-      while (k < toks.length) { if (toks[k].text === "[") d++; else if (toks[k].text === "]" && --d === 0) break; k++; }
-      k++;
+/**
+ * Is toks[from, to) an expression provably free of writes and calls? Its tokens are drawn only from
+ * literals (NUMBER, a non-template STRING, `true` / `false` / `null` / `not`), SEED_OPERATORS, a
+ * property name after `.` / `?.`, and names `bound` by earlier provably-free declarations (`x` from a
+ * `let` / `const`, `@x` from a cell declaration). A `(` after a value is a call. Anything else — an
+ * unbound name, a template literal, any other KEYWORD, a nested block, markup, an unknown kind — is not.
+ */
+function seedExprFree(toks, from, to, bound, src) {
+  for (let j = from; j < to; j++) {
+    const t = toks[j];
+    const pv = j > from ? toks[j - 1] : null;
+    if (t.kind === "NUMBER") continue;
+    if (t.kind === "STRING") {
+      if (src.slice(t.start, t.end).includes("`")) return false; // a template literal runs its `${ }`
       continue;
     }
-    return k;
+    if (t.kind === "IDENT") {
+      if (pv && (pv.text === "." || pv.text === "?.")) continue; // a property name
+      if (bound.has(t.text)) continue;
+      return false;
+    }
+    if (t.kind === "AT_IDENT") {
+      if (bound.has(t.text)) continue;
+      return false;
+    }
+    if (t.kind === "KEYWORD") {
+      if (SEED_LITERAL_KEYWORDS.has(t.text) && !(pv && (pv.text === "." || pv.text === "?."))) continue;
+      return false;
+    }
+    if (t.kind === "PUNCT" || t.kind === "OPERATOR") {
+      if (!SEED_OPERATORS.has(t.text)) return false;
+      if (t.text === "(" && pv && (pv.kind === "IDENT" || pv.kind === "AT_IDENT" || pv.kind === "KEYWORD" || pv.kind === "STRING"
+        || pv.kind === "NUMBER" || pv.kind === "MARKUP" || pv.text === ")" || pv.text === "]" || pv.text === "}")) return false; // a call
+      continue;
+    }
+    return false;
   }
+  return true;
 }
 
-/** What a §66 declaration statement's initializer reads: `{ names, any }` (`any`: it calls code). */
-function seedReads(toks) {
-  const out = { names: new Set(), any: false };
-  // the head `<x attrs>` (the declared name, `pinned`, …) is not the initializer: reads start after it
-  const lt = toks.findIndex((t) => t.text === "<");
-  let from = 0;
-  if (lt >= 0) {
-    let d = 0;
-    for (let j = lt + 1; j < toks.length; j++) {
-      const x = toks[j].text;
-      if (x === "(" || x === "[" || x === "{") d++;
-      else if (x === ")" || x === "]" || x === "}") d--;
-      else if (x === ">" && d === 0) { from = j + 1; break; }
-    }
-    // `<x>: T = v`: the type annotation is not a read either — the initializer follows the `=`
-    const eq = toks.findIndex((t, j) => j >= from && t.text === "=");
-    if (eq >= 0) from = eq + 1;
-  }
-  for (let j = from; j < toks.length; j++) {
-    const t = toks[j];
-    const afterDot = j > 0 && (toks[j - 1].text === "." || toks[j - 1].text === "?.");
-    if (t.kind === "BLOCK_REF") { out.any = true; continue; }
-    if (t.kind === "AT_IDENT" || (t.kind === "IDENT" && !afterDot)) {
-      out.names.add(seedName(t));
-      if (t.kind === "IDENT" && toks[j + 1] && toks[j + 1].text === "(" && !PURE_CALLEES.has(t.text)) out.any = true;
+/**
+ * `name [: T] [= init]` from toks[j] (j at the `:` or `=` or the end): free when the type is a plain
+ * type and the initializer is a free expression. Returns true / false.
+ */
+function seedTypedInitFree(toks, j, bound, src) {
+  if (toks[j] && toks[j].text === ":") {
+    j++;
+    for (; j < toks.length && toks[j].text !== "="; j++) {
+      const t = toks[j];
+      if (t.kind === "IDENT" || (t.kind === "KEYWORD" && t.text === "not")) continue;
+      if ((t.kind === "PUNCT" || t.kind === "OPERATOR") && SEED_TYPE_PUNCT.has(t.text)) continue;
+      return false;
     }
   }
-  return out;
+  if (j >= toks.length) return true; // no initializer
+  if (toks[j].text !== "=") return false;
+  if (j + 1 >= toks.length) return false;
+  return seedExprFree(toks, j + 1, toks.length, bound, src);
 }
 
-/** Add what one program-body statement writes when it runs to `w` (`{ names, any }`). */
-function addSeedWrites(w, st) {
+/**
+ * Is one statement provably free of writes and calls? On true, the names it declares join `bound`.
+ *   - a `function` / `fn` declaration (its body runs only when called — and a call is never free);
+ *   - `type …`, `import …`, `use …` (compile-time / module initialization);
+ *   - a component definition `const Name = <…>` (flagged by seedPrefixUnits);
+ *   - `[export] let|const name [: T] [= init]` with a free initializer — binds `name`;
+ *   - a cell declaration `[const] <name> [: T] = init` with a free initializer — binds `@name`.
+ * Every other statement (an assignment, a call, `++`, a loop, `if`, `when`, a destructuring, a
+ * KEYWORD-class name, a §66-form `let <x:T=v/>`, …) is not.
+ */
+function seedStmtFree(st, bound, src) {
   const toks = st.toks;
-  if (!toks || toks.length === 0 || st.legacy) return; // a cell declaration: seeded, not run
+  if (!toks || toks.length === 0) return true;
+  if (st.component) return true;
   let h = 0;
-  while (toks[h] && SEED_HEAD_MODIFIERS.has(toks[h].text) && toks[h + 1] && (toks[h + 1].kind === "KEYWORD" || toks[h + 1].kind === "IDENT")) h++;
+  while (toks[h] && SEED_FN_MODIFIERS.has(toks[h].text) && toks[h + 1] && (toks[h + 1].kind === "KEYWORD" || toks[h + 1].kind === "IDENT")) h++;
   const head = toks[h];
-  if (!head) return;
-  if (SEED_INERT_HEADS.has(head.text)) return;
-  // a file-scope binding: evaluated at module initialization, before any seed (§7.6)
-  if ((head.text === "let" || head.text === "const" || head.text === "lin") && toks[h + 1] && toks[h + 1].text !== "<") return;
-  if ((toks[0].text === "[" || toks[0].text === "{" || toks[0].text === "(") && toks.some((t) => SEED_ASSIGN_OPS.has(t.text))) w.any = true; // a destructuring write
-  for (let j = 0; j < toks.length; j++) {
-    const t = toks[j];
-    const afterDot = j > 0 && (toks[j - 1].text === "." || toks[j - 1].text === "?.");
-    if (t.kind === "BLOCK_REF") { w.any = true; continue; }
-    if (!(t.kind === "AT_IDENT" || (t.kind === "IDENT" && !afterDot))) continue;
-    const k = seedChainEnd(toks, j);
-    const nx = toks[k];
-    const pv = j > 0 ? toks[j - 1] : null;
-    if (nx && (SEED_ASSIGN_OPS.has(nx.text) || nx.text === "++" || nx.text === "--")) w.names.add(seedName(t));
-    else if (pv && (pv.text === "++" || pv.text === "--")) w.names.add(seedName(t));
-    else if (nx && nx.text === "(") {
-      if (k > j + 1) w.names.add(seedName(t)); // a method call on it (`xs.push(…)`) may change it
-      else if (t.kind === "IDENT" && !PURE_CALLEES.has(t.text)) w.any = true; // a call runs code
+  if (!head) return false;
+  if (head.kind === "KEYWORD" && SEED_INERT_HEADS.has(head.text)) return !!st.blockLike;
+  if ((h === 0 || (h === 1 && toks[0].text === "export")) && head.kind === "KEYWORD" && (head.text === "type" || head.text === "import" || head.text === "use")) {
+    const nx = toks[h + 1];
+    return !!nx && (nx.kind === "IDENT" || nx.text === "{" || nx.text === "*" || nx.kind === "STRING");
+  }
+  if (head.kind === "KEYWORD" && (head.text === "let" || head.text === "const") && (h === 0 || toks[0].text === "export")) {
+    const nm = toks[h + 1];
+    if (!nm || nm.kind !== "IDENT") return false;
+    if (!seedTypedInitFree(toks, h + 2, bound, src)) return false;
+    bound.add(nm.text);
+    return true;
+  }
+  // a legacy cell declaration `<name> [: T] = init` / `const <name> [: T] = init`
+  if (h === 0) {
+    let j = 0;
+    if (toks[0].kind === "KEYWORD" && toks[0].text === "const") j = 1;
+    if (toks[j] && toks[j].text === "<" && toks[j + 1] && toks[j + 1].kind === "IDENT" && toks[j + 2] && toks[j + 2].text === ">") {
+      const nm = toks[j + 1].text;
+      if (!toks[j + 3] || (toks[j + 3].text !== "=" && toks[j + 3].text !== ":")) return false;
+      if (!seedTypedInitFree(toks, j + 3, bound, src)) return false;
+      if (j + 3 >= toks.length || !toks.some((t, k) => k > j + 2 && t.text === "=")) return false;
+      bound.add("@" + nm);
+      return true;
     }
   }
-}
-
-/** How a statement before the declaration may change what its initializer reads (`r`), or null. */
-function seedConflict(w, r) {
-  for (const n of r.names) if (w.names.has(n)) return `reads \`${n}\`, which a statement before it writes`;
-  if (r.any && w.names.size > 0) return `calls code that may read \`${[...w.names][0]}\`, which a statement before it writes`;
-  if (w.any && (r.any || r.names.size > 0)) return `reads \`${[...r.names][0] ?? "code"}\`, which a statement before it may write (that statement runs code: a call or a block)`;
-  return null;
+  return false;
 }
 
 /** ExprNode kinds the rewrite may parenthesize as an ordinary expression. */
@@ -1829,24 +1860,36 @@ export function fixS66(source, opts = {}) {
    * replaces leaves the block, in place. Statement extents are the `;`-rule scanner's (impl#1's
    * newline boundaries). Returns `{ edits }` or `{ reason }`.
    */
-  // S480 r1 (F1): the program-body statements that run before a moved declaration's seed would — every
-  // statement-list region before the block, in source order (the final program order: items above a
-  // `<program>` move to its top), then the block's own statements before the declaration.
-  let bodyRegions = null;
+  // S480 r2 (F1, fail closed): a move of a declaration out of the `${ … }` block at s is allowed only
+  // when every unit of code that could run before its seed is provably free of writes and calls —
+  // every unit before the block in source order (impl#1's run order: every `${ … }` at any depth, the
+  // bare code of a body, interpolations, attribute values; an unread unit refuses), then the block's
+  // own statements before it. Null when the move is safe; else the reason.
+  let seedUnits;
   const seedHazard = (s, stmts, moves) => {
-    if (bodyRegions === null) bodyRegions = programStatementRegions(filePath, src);
-    const w = { names: new Set(), any: false };
-    for (const r of bodyRegions) {
-      if (r.end > s) continue;
-      if (!r.stmts) { w.any = true; continue; }
-      for (const st of r.stmts) addSeedWrites(w, st);
+    if (seedUnits === undefined) seedUnits = seedPrefixUnits(filePath, src);
+    if (seedUnits === null) return "the file's code units cannot be read, so what runs before its declarations' seeds cannot be proved free of writes";
+    const bound = new Set();
+    let blocker = null;
+    const why = (at, what) => `the ${what} on line ${lineOf(src, at)} is not provably free of writes and calls`;
+    for (const u of seedUnits) {
+      if (u.start >= s) break;
+      if (u.end > s) { blocker = why(u.start, "code enclosing the block"); break; }
+      if (u.kind === "opaque") { blocker = why(u.start, u.what ?? "code"); break; }
+      if (u.kind === "expr") {
+        if (!u.toks || !seedExprFree(u.toks, 0, u.toks.length, bound, src)) { blocker = why(u.start, "expression"); break; }
+        continue;
+      }
+      if (!u.stmts) { blocker = why(u.start, "code block (its statements cannot be placed)"); break; }
+      const bad = u.stmts.find((st) => !seedStmtFree(st, bound, src));
+      if (bad) { blocker = why(bad.start, "statement"); break; }
     }
-    for (let k = 0; k < stmts.length; k++) {
-      if (!moves[k]) { addSeedWrites(w, stmts[k]); continue; }
-      const hit = seedConflict(w, seedReads(stmts[k].toks ?? []));
-      if (hit) return `the declaration on line ${lineOf(src, stmts[k].start)} ${hit} — a §66 cell's initializer runs when the program is constructed, before the body's statements (impl#1 runs them first), so moving it would change the value it reads`;
+    const last = moves.lastIndexOf(true);
+    for (let k = 0; k < last && !blocker; k++) {
+      if (!seedStmtFree(stmts[k], bound, src)) blocker = why(stmts[k].start, "statement");
     }
-    return null;
+    if (!blocker || last < 0) return null;
+    return `the declaration on line ${lineOf(src, stmts[last].start)} would be seeded when the program is constructed, before the body's statements run (impl#1 runs them first, in order), and ${blocker} — moving it could change the value it reads`;
   };
 
   const splitAroundDecls = (n, s, e) => {

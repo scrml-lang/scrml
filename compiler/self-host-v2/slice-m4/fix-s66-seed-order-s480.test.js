@@ -24,7 +24,9 @@ afterEach(() => expectNoPageErrors());
 const ENTRY = "app.scrml";
 const F = "/virtual/app.scrml";
 const errs = (r) => r.diags.filter((d) => d.severity === "Error");
-const SEED_NOTE = /which a statement before it (may )?write/;
+// r2: the guard fails closed — the note names the first unit before the declaration that is not
+// provably free of writes and calls (r1's note named a read / write pair).
+const SEED_NOTE = /is not provably free of writes and calls/;
 let k = 0;
 
 /** fixS66 (every rule), then the bootstrap on the result: { blockers, clean, text }. */
@@ -88,15 +90,86 @@ describe("fixS66 never moves a §66 declaration past a write it reads (review F1
     expect(r.text).toBe("9 3");
   }, 120000);
 
-  test("the declaration's head (`<count pinned>`) is not its initializer: a literal seed after a call is not refused", () => {
+  test("r2: a call before the declaration refuses it whatever its initializer reads (`<count pinned> = 0` after `@count = readEarly()`)", () => {
+    // r1 kept this move (the literal seed reads nothing); r2 refuses on the call alone — a fail-closed
+    // guard does not consult what the initializer reads, only whether anything before it can write.
     const src = ["${", "    function readEarly() {", "        return @count;", "    }", "    @count = readEarly()", "    <count pinned> = 0", "}", "<p>x</>", ""].join("\n");
     const fx = fixS66(src, { filePath: F, entry: true, rules: S66_RULES, allowNonCompiling: true, wrapPageRoot: true });
-    expect(fx.blockers.map((b) => b.reason).join("\n")).not.toMatch(SEED_NOTE);
+    expect(fx.blockers.map((b) => b.reason).join("\n")).toMatch(SEED_NOTE);
   });
 
   test("a call before the declaration refuses a seed that reads anything (the callee may write it)", () => {
     const src = ["<program>", "${", "    <a>: number = 1", "    bump()", "    <b>: number = @a + 1", "    function bump() { @a = 5 }", "}", '<p id="c">${@b}</p>', "</program>", ""].join("\n");
     const fx = fixS66(src, { filePath: F, entry: true, rules: S66_RULES, allowNonCompiling: true });
-    expect(fx.blockers.map((b) => b.reason).join("\n")).toMatch(/line 5 reads `a`, which a statement before it may write/);
+    expect(fx.blockers.map((b) => b.reason).join("\n")).toMatch(/declaration on line 5 [^\n]*the statement on line 4 is not provably free of writes and calls/);
   });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// r2 (PR #2025 re-review N1 / N2 / N3): r1's read / write reader failed OPEN on what it could not see —
+// a template literal (one STRING token), a KEYWORD-class name (`get`, `set`, `env`, `using`, `changes`,
+// `partial`, …), a user function that shadows a "pure" library callee (`function Number(v)`). Every
+// re-review probe (~/.cache/scrml/review/s480-2025-r1rev/scratch/p/) is pinned here: the migrated program
+// renders impl#1's value for the original, or it is refused with the note. On 7d3877965 each of them
+// compiled clean on the bootstrap and rendered another value. impl#1's renders are the recorded ones
+// (conformance/adapters/impl1-ts.ts on the original).
+const prog = (...lines) => ["<program>", ...lines, "</program>", ""].join("\n");
+const R2_CASES = [
+  // N1 — a template literal reads the cell inside its `${ }`
+  ["k01 — split: a loop writes @count, then `<s> = `n=${@count}``", prog("${", "    <count>: number = 0", "    for (const i of [1, 2, 3]) {", "        @count = @count + i", "    }",
+    "    <s>: string = `n=${@count}`", "}", '<p id="c">${@count} ${@s}</p>'), "6 n=6"],
+  ["c01 — split: `@c = 5`, then `<d> = `v${@c}``", prog("${", "    <c>: number = 1", "    @c = 5", "    <d>: string = `v${@c}`", "}", '<p id="c">${@c} ${@d}</p>'), "5 v5"],
+  ["c02 — full unwrap: `${ @c = 5 }` in an earlier block, then `<d> = `v${@c}``", prog("${ <c>: number = 1 }", "${ @c = 5 }", "${", "    <d>: string = `v${@c}`", "}", '<p id="c">${@c} ${@d}</p>'), "5 v5"],
+  // N2 — a KEYWORD-class name is a binding the initializer reads and an earlier block writes
+  ...["get", "set", "env", "using", "changes", "partial"].map((kw) => [`g-${kw} — \`let ${kw}\` reassigned in an earlier block`,
+    prog(`\${ let ${kw}: number = 2 }`, `\${ ${kw} = 10 }`, "${", `    <x>: number = ${kw} * 3`, "}", '<p id="c">${@x}</p>'), "30"]),
+  ["k02 — split: `let get` reassigned in the same block", prog("${", "    let get: number = 2", "    get = 10", "    <x>: number = get * 3", "}", '<p id="c">${@x}</p>'), "30"],
+  ["h01 — `function set()` writes @c; `set()` runs before `<d>`", prog("${ <c>: number = 1 }", "${ function set() { @c = 5 } }", "${ set() }", "${", "    <d>: number = @c * 2", "}", '<p id="c">${@c} ${@d}</p>'), "5 10"],
+  ["h02 — `function get()` reads @c, written before `<d> = get() * 2`", prog("${ <c>: number = 1 }", "${ @c = 5 }", "${ function get() -> number { return @c } }", "${", "    <d>: number = get() * 2", "}", '<p id="c">${@c} ${@d}</p>'), "5 10"],
+  // N3 — a user function shadowing a library callee is not pure
+  ["i01 — a user `function Number(v)` reads @c", prog("${ <c>: number = 1 }", "${ @c = 5 }", "${ function Number(v: number) -> number { return v + @c } }", "${", "    <d>: number = Number(1)", "}", '<p id="c">${@c} ${@d}</p>'), "5 6"],
+  ["i02 — a user `function String(v)` writes @c and is called before `<d>`", prog("${ <c>: number = 1 }", '${ function String(v: number) -> string { @c = 5; return "" } }', "${ String(1) }", "${", "    <d>: number = @c * 2", "}", '<p id="c">${@c} ${@d}</p>'), "5 10"],
+];
+// impl#1 itself does not render these two (a KEYWORD name it reads differently): the only safe outcome is a refusal
+const R2_REFUSE_ONLY = ["cleanup", "upload"].map((kw) => [`g-${kw} — \`let ${kw}\` reassigned in an earlier block`,
+  prog(`\${ let ${kw}: number = 2 }`, `\${ ${kw} = 10 }`, "${", `    <x>: number = ${kw} * 3`, "}", '<p id="c">${@x}</p>')]);
+
+describe("r2 — the seed-order guard fails closed (re-review N1 / N2 / N3 probes)", () => {
+  for (const [name, src, impl1] of R2_CASES) {
+    test(name, async () => {
+      const r = await migrateAndRun(src);
+      if (r.clean) expect(r.text).toBe(impl1);
+      else expect(r.blockers.join("\n")).toMatch(SEED_NOTE);
+    }, 120000);
+  }
+  for (const [name, src] of R2_REFUSE_ONLY) {
+    test(`${name}: refused with the note`, async () => {
+      const r = await migrateAndRun(src);
+      expect(r.clean).toBe(false);
+      expect(r.blockers.join("\n")).toMatch(SEED_NOTE);
+    }, 120000);
+  }
+
+  // the other side: the guard is not a blanket refusal — a declaration with only provably-free code
+  // before it (file-scope `let` / `const` from literals and earlier bindings, a function declaration,
+  // other cell declarations, a markup interpolation of a bound cell) still moves out of `${ }`, and the
+  // migrated program renders impl#1's value
+  test("a declaration with only provably-free code before it still moves (and renders impl#1's value)", async () => {
+    const src = prog("${ let base: number = 2 }", "${ const k: number = base + 1 }", "${ function twice(v: number) -> number { return v * 2 } }",
+      "${", "    <x>: number = twice(k)", "    @x = @x + 1", "}", '<p id="c">${@x}</p>');
+    const r = await migrateAndRun(src);
+    expect(r.blockers.join("\n")).not.toMatch(SEED_NOTE);
+    expect(r.output).toContain("let <x:number=(twice(k))/>");
+    expect(r.output).not.toMatch(/\$\{\s*let <x/);
+    expect(r.clean).toBe(true);
+    expect(r.text).toBe("7");
+  }, 120000);
+
+  test("cell declarations and function declarations before a declaration do not refuse it (the common program head)", async () => {
+    const src = prog("${", "    <count>: number = 0", "    <step>: number = 1", "    function inc() { @count = @count + @step }", "    <total>: number = @count + @step", "}", '<p id="c">${@count} ${@step} ${@total}</p>');
+    const r = await migrateAndRun(src);
+    expect(r.blockers.join("\n")).not.toMatch(SEED_NOTE);
+    expect(r.clean).toBe(true);
+    expect(r.text).toBe("0 1 1");
+  }, 120000);
 });

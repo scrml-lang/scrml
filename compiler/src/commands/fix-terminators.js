@@ -408,7 +408,9 @@ function scanMarkup(src, pos, limit, depth = 0) {
     if (c === ">") { i++; break; }
     i++;
   }
-  if (VOID_ELEMENTS.has(name.toLowerCase())) return i;
+  // Void only as a lowercase HTML element: a PascalCase name is a component (`<Link>…</Link>`,
+  // `<Input>`), which has a body and a closer even when its lowercased name is a void element (S480 r2 N4).
+  if (name === name.toLowerCase() && VOID_ELEMENTS.has(name)) return i;
   while (i < limit) {
     const c = src[i];
     if (c === "<") {
@@ -988,19 +990,120 @@ export function logicBlockStatements(filePath, source, blockStart) {
 }
 
 /**
- * Every statement-list region of the file that runs as program-body code — a `${ … }` that is the file
- * root's or a direct child of `<program>` / `<page>` / `<channel>` / `<effect>` / `<request>`, and the
- * bare code of a program / page body — in source order, each with its top-level statements (exact
- * extents and tokens; `stmts: null` when the region does not balance). Used by fix-s66 to see what
- * runs before a §66 declaration it moves (S480 r1).
- * @returns {Array<{start:number,end:number,stmts:Array<{start:number,end:number,legacy:boolean,terminated:boolean,toks:object[]}>|null}>}
+ * S480 r2 (PR #2025 F1 — the seed-order guard FAILS CLOSED). Every unit of the file that could run
+ * code, in source order, for fix-s66 to prove that nothing before a §66 declaration it moves out of
+ * `${ … }` can write what the declaration's seed reads:
+ *   - `stmts`: a statement list (a `${ … }` at any depth, the bare code of a program / page body, a
+ *     file-root run) with its statements (`stmts: null` when it does not balance);
+ *   - `expr`: an expression (a markup interpolation `${ … }`, a non-handler attribute value) with its
+ *     tokens (`toks: null` when they cannot be read);
+ *   - `opaque`: code this reader does not enter (`?{}`, `^{}`, `!{}`, `~{}`, `_{}` at markup level, an
+ *     attribute value of an unknown kind) — never provably free.
+ * `on…=` handler values are not units: a handler is a function value run on an event, after the
+ * program is constructed and rendered. A component definition (`const Name = <…>`, in `${ … }` or a
+ * program body) is a definition, not code that runs: its statement is flagged `component: true` and
+ * the units inside its markup (its own interpolations / attributes) are dropped.
+ * Null when the file cannot be read (fix-s66 then refuses every move).
+ * @returns {Array<{start:number,end:number,kind:"stmts"|"expr"|"opaque",stmts?:object[]|null,toks?:object[]|null,what?:string}> | null}
  */
-export function programStatementRegions(filePath, source) {
+export function seedPrefixUnits(filePath, source) {
   const ls = lineStarts(source);
-  const { regions } = codeRegions(filePath, source);
-  return regions.filter((r) => (r.kind === "logic" || r.kind === "body") && r.mode === "stmts")
-    .sort((x, y) => x.start - y.start)
-    .map((r) => ({ start: r.kind === "logic" ? r.start - 2 : r.start, end: r.kind === "logic" ? r.end + 1 : r.end, stmts: regionStatements(source, r, ls) }));
+  let bs;
+  try {
+    bs = captureTrailingContentWarnings(() => splitBlocks(filePath, source)).result;
+  } catch {
+    return null;
+  }
+  const { regions, errors } = codeRegions(filePath, source);
+  if (errors.length > 0) return null;
+  const tokensOf = (start, end, children) => {
+    try {
+      const notes = [];
+      const t = regionTokens(source, start, end, children, ls, notes);
+      if (notes.length > 0) return null;
+      return t.map((x) => ({ kind: x.kind, text: x.text, start: x.start, end: x.end }));
+    } catch {
+      return null;
+    }
+  };
+  const units = [];
+  const logicStarts = new Set();
+  for (const r of regions) {
+    if (r.kind === "handler") continue;
+    if (r.kind === "logic") logicStarts.add(r.start);
+    const start = r.kind === "logic" ? r.start - 2 : r.start;
+    const end = r.kind === "logic" ? r.end + 1 : r.end;
+    if (r.mode === "stmts") units.push({ start, end, kind: "stmts", stmts: regionStatements(source, r, ls) });
+    else units.push({ start, end, kind: "expr", toks: tokensOf(r.start, r.end, r.children) });
+  }
+  const markupBlocks = [];
+  const attrUnits = (b) => {
+    let toks;
+    try {
+      toks = tokenizeAttributes(b.raw, b.span.start, b.span.line ?? 1, b.span.col ?? 1, b.type);
+    } catch {
+      units.push({ start: b.span.start, end: b.span.start + 1, kind: "opaque", what: "an element's attributes" });
+      return;
+    }
+    for (let i = 0; i < toks.length; i++) {
+      const a = toks[i];
+      // the tag's own tokens, an attribute's name and `=`: not code
+      if (a.kind === "TAG_OPEN" || a.kind === "TAG_CLOSE_GT" || a.kind === "TAG_SELF_CLOSE" || a.kind === "ATTR_NAME" || a.kind === "ATTR_EQ") continue;
+      if (a.kind === "ATTR_STRING" && !a.attrInterp) continue;
+      // an `on…=` handler value of any kind: a function value, run on an event (see above)
+      const nm = toks[i - 2];
+      if (toks[i - 1] && toks[i - 1].kind === "ATTR_EQ" && nm && nm.kind === "ATTR_NAME" && /^on[a-z]/i.test(nm.text)) continue;
+      if (a.kind === "ATTR_EXPR" || a.kind === "ATTR_BLOCK" || a.kind === "ATTR_IDENT") {
+        const s = a.span.start;
+        const e = a.span.end;
+        let cs = s, ce = e;
+        if (source.startsWith("${", s) && source[e - 1] === "}") { cs = s + 2; ce = e - 1; }
+        else if (source[s] === "{" && source[e - 1] === "}") { cs = s + 1; ce = e - 1; }
+        else if ((source[s] === "\"" || source[s] === "'") && source[e - 1] === source[s]) { cs = s + 1; ce = e - 1; }
+        units.push({ start: s, end: e, kind: "expr", toks: tokensOf(cs, ce, []) });
+        continue;
+      }
+      // ATTR_CALL / ATTR_TYPED_DECL / an unquoted value refused / any other kind: not read here
+      units.push({ start: a.span.start, end: a.span.end, kind: "opaque", what: `an attribute value (${a.kind})` });
+    }
+  };
+  const visit = (b) => {
+    if (!b || typeof b !== "object") return;
+    if (b.type === "text" || b.type === "comment" || b.type === "css") return;
+    if (b.type === "logic") {
+      if (!logicStarts.has(b.span.start + 2)) units.push({ start: b.span.start, end: b.span.end, kind: "opaque", what: "a logic block" });
+      for (const c of b.children ?? []) if (c.type === "markup" || c.type === "state") visit(c);
+      return;
+    }
+    if (b.type === "markup" || b.type === "state") {
+      markupBlocks.push(b);
+      attrUnits(b);
+      for (const c of b.children ?? []) visit(c);
+      return;
+    }
+    units.push({ start: b.span.start, end: b.span.end, kind: "opaque", what: `a \`${b.type}\` block` });
+  };
+  for (const b of bs.blocks ?? []) visit(b);
+  // component definitions: `const Name = <…>` (one MARKUP token), or a body / root run ending in
+  // `const Name =` with the element right after it
+  const compSpans = [];
+  for (const u of units) {
+    if (u.kind !== "stmts" || !u.stmts) continue;
+    for (let k = 0; k < u.stmts.length; k++) {
+      const st = u.stmts[k];
+      const t = st.toks;
+      let h = 0;
+      if (t[0] && t[0].text === "export") h = 1;
+      if (!(t[h] && t[h].text === "const" && t[h + 1] && t[h + 1].kind === "IDENT" && /^[A-Z]/.test(t[h + 1].text) && t[h + 2] && t[h + 2].text === "=")) continue;
+      if (t.length === h + 4 && t[h + 3].kind === "MARKUP") { st.component = true; compSpans.push([t[h + 3].start, t[h + 3].end]); continue; }
+      if (t.length === h + 3 && k === u.stmts.length - 1) {
+        const at = u.end + (/^\s*/.exec(source.slice(u.end))?.[0].length ?? 0);
+        const mb = markupBlocks.find((m) => m.span.start === at && m.type === "markup");
+        if (mb) { st.component = true; compSpans.push([mb.span.start, mb.span.end]); }
+      }
+    }
+  }
+  return units.filter((u) => !compSpans.some(([a, b]) => u.start >= a && u.end <= b)).sort((x, y) => x.start - y.start);
 }
 
 function regionStatements(source, r, ls) {
@@ -1020,6 +1123,7 @@ function regionStatements(source, r, ls) {
     end: st.terminated ? toks[st.end].end : st.last.end,
     legacy: st.legacy,
     terminated: st.terminated,
+    blockLike: st.blockLike,
     toks: toks.slice(st.start, st.end).map((t) => ({ kind: t.kind, text: t.text, start: t.start, end: t.end })),
   }));
 }
