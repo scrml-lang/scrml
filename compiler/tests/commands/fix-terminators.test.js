@@ -255,3 +255,93 @@ describe("unwrap-logic split (S480) — no §66 cell declaration is left inside 
     expect(st.map((x) => x.legacy)).toEqual([true, false, false]);
   });
 });
+
+describe("S480 r1 (PR #2025 review) — F2 / F3 / F4 and the verify's withdraw / allowNonCompiling paths", () => {
+  // F2: a named closer that is not the open element's is not its end. Before: any `</…>` closed it, so a
+  // stray `</span>` (after a `</>` that already closed the span) ended the enclosing `<button>` early and
+  // a `;` landed in markup text (gauntlet-r10-odin-filebrowser.scrml l.436 / l.438, -ts-components l.162).
+  const STRAY = "<program>\n${\n    function rows(xs) {\n        for (const x of xs) {\n            lift <li>\n                <button onclick=pick(x)>\n                    <span>\n                        ${x}</>\n                    </span>\n                    <b>after</b>\n                </button>\n                <i>tail</>\n            </li>\n        }\n    }\n}\n</program>\n";
+  test("F2: a stray named closer in markup inside code — no edit inside the markup, the region is noted", () => {
+    const p = planTerminators(F, STRAY);
+    const ms = STRAY.indexOf("lift <li>") + 5;
+    const me = STRAY.indexOf("</li>") + 5;
+    expect(p.edits.filter((e) => e.at > ms && e.at < me)).toEqual([]);
+    expect(p.notes.map((n) => n.reason).join("\n")).toContain("markup inside code whose end this rule cannot find");
+  });
+
+  test("F2: the gauntlet shapes get no `;` in markup text", () => {
+    const { readFileSync } = require("node:fs");
+    const { join } = require("node:path");
+    const root = join(import.meta.dir, "../../../samples/compilation-tests");
+    for (const [file, lines] of [["gauntlet-r10-odin-filebrowser.scrml", [436, 438]], ["gauntlet-r10-ts-components.scrml", [162]]]) {
+      const src = readFileSync(join(root, file), "utf8");
+      const p = planTerminators(join(root, file), src);
+      expect(p.edits.filter((e) => lines.includes(e.line))).toEqual([]);
+    }
+  });
+
+  test("F2: a bare `</>` closes the innermost element; a matching named closer closes its own", () => {
+    const src = "<program>\n${\n    for (const x of xs) {\n        lift <li><b>${x}</> and <i>more</i></li>\n    }\n}\n</program>\n";
+    expect(fixed(src)).toBe("<program>\n${\n    for (const x of xs) {\n        lift <li><b>${x}</> and <i>more</i></li>;\n    }\n}\n</program>\n");
+  });
+
+  // F3: impl#1's newline boundary starts a statement at a prefix keyword (ast-builder.js tokStartsStmt).
+  test("F3: a line starting with `new` / `typeof` / `void` / `delete` / `await` is a new statement", () => {
+    expect(fixed(prog("  const b = a\n  new Date()"))).toBe(prog("  const b = a;\n  new Date();"));
+    expect(fixed(prog("  let t = x\n  typeof t"))).toBe(prog("  let t = x;\n  typeof t;"));
+    expect(fixed(prog("  let o = p\n  delete o.k"))).toBe(prog("  let o = p;\n  delete o.k;"));
+    // the infix words still continue (`a⏎in b`, `a⏎and b`)
+    expect(fixed(prog("  const c = a\n    and b"))).toBe(prog("  const c = a\n    and b;"));
+  });
+
+  test("F3: impl#1 reads `const b = a⏎new Date()` as two statements, so the verify keeps the `;`", () => {
+    const src = "<program>\n${\n    const a = 1\n    const b = a\n    new Date()\n}\n<p>${b}</p>\n</program>\n";
+    const r = fixTerminators(src, { filePath: F });
+    expect(r.blockers).toEqual([]);
+    expect(r.output).toContain("const b = a;\n    new Date();");
+  });
+
+  // F4: spots the rule used to leave without saying so.
+  test("F4: a regex literal ends a value — the statement after it is its own", () => {
+    expect(fixed(prog("  const re = /a+/g\n  f(re)"))).toBe(prog("  const re = /a+/g;\n  f(re);"));
+  });
+
+  test("F4: an `on…=${ (e) => { … } }` handler's function body is read (a lone value takes no `;`)", () => {
+    const src = "<program>\n<button onclick=${(e) => {\n    @a = 1\n    f(e)\n}}>x</button>\n<button onclick=${toggle}>y</button>\n</program>\n";
+    expect(fixed(src)).toBe("<program>\n<button onclick=${(e) => {\n    @a = 1;\n    f(e);\n}}>x</button>\n<button onclick=${toggle}>y</button>\n</program>\n");
+  });
+
+  test("F4: a multi-line alternation head that LEADS with `|` is one arm head", () => {
+    const src = prog("  const k = match t {\n    .Z :> 0\n    .A\n      | .B :> 1\n    _ :> 3\n  }");
+    expect(fixed(src)).toBe(prog("  const k = match t {\n    .Z :> 0,\n    .A\n      | .B :> 1,\n    _ :> 3\n  };"));
+  });
+
+  test("F4: code the rule does not enter is noted per site, never skipped silently", () => {
+    const tpl = planTerminators(F, prog("  const s = `${xs.map((x) => {\n    const y = x\n    return y\n  })}`"));
+    expect(tpl.notes.map((n) => n.reason).join("\n")).toContain("template literal");
+    const inl = planTerminators(F, prog("  for (const x of xs) {\n    lift <li>${ for (const y of x.ys) {\n      lift <b>${y}</b>\n    } }</li>\n  }"));
+    expect(inl.notes.map((n) => n.reason).join("\n")).toContain("inside markup written in code");
+  });
+
+  // The verify's withdraw path: an edit impl#1 reads differently is bisected out and reported, the rest kept.
+  test("verify: an edit that changes impl#1's reading is withdrawn and reported; the others are kept", () => {
+    const src = "${\n    let placeholder\n    placeholder = \"later\"\n}\n<p>${placeholder}</>\n";
+    const r = fixTerminators(src, { filePath: F });
+    expect(r.blockers.map((b) => `${b.line}: ${b.reason}`).join("\n")).toContain("2: inserting `;` here changes impl#1's reading");
+    expect(r.output).toBe("${\n    let placeholder\n    placeholder = \"later\";\n}\n<p>${placeholder}</>\n");
+  });
+
+  // allowNonCompiling (measurement / conformance-twin only; no shipped path runs the terminator rules with
+  // it): the verify still compares impl#1's codes and artifacts before / after on the failing file, so an
+  // edit that changes them is still withdrawn — it does NOT turn the verify off. Without it, a file impl#1
+  // does not compile gets no edit at all.
+  test("allowNonCompiling: edits on a non-compiling file are still compared (codes + artifacts); without it, none are made", () => {
+    const src = "<program>\n${\n    let a = 1\n    let placeholder\n    placeholder = \"later\"\n}\n<p>${a} ${placeholder} ${nope}</p>\n</program>\n";
+    const strict = fixTerminators(src, { filePath: F });
+    expect(strict.changed).toBe(false);
+    expect(strict.blockers.map((b) => b.reason).join("\n")).toContain("cannot verify");
+    const loose = fixTerminators(src, { filePath: F, allowNonCompiling: true });
+    expect(loose.output).toBe("<program>\n${\n    let a = 1;\n    let placeholder\n    placeholder = \"later\";\n}\n<p>${a} ${placeholder} ${nope}</p>\n</program>\n");
+    expect(loose.blockers.map((b) => `${b.line}: ${b.reason}`).join("\n")).toContain("4: inserting `;` here changes impl#1's reading");
+  });
+});

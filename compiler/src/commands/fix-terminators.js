@@ -101,6 +101,13 @@ const CONT_TEXT = new Set([
   ".", "?.", ":", ",", "=>", ":>", "->", "!", "...", "::",
 ]);
 const CONT_WORDS = new Set(["in", "instanceof", "is", "typeof", "new", "and", "or", "await", "void", "delete", "extends"]);
+/**
+ * The CONT_WORDS that, first on a line, still continue the statement above. impl#1's newline boundary
+ * (ast-builder.js collectExpr tokStartsStmt) starts a new statement at a KEYWORD that is not a statement
+ * keyword — so a line that begins with the PREFIX words `new` / `typeof` / `void` / `delete` / `await`
+ * is a new statement (`const b = a⏎new Date()` is two statements); only the infix words carry on.
+ */
+const NEXT_LINE_CONT_WORDS = new Set(["in", "instanceof", "is", "and", "or", "extends"]);
 const VALUE_KEYWORDS = new Set(["true", "false", "null", "undefined", "this", "not", "some", "given", "super"]);
 /** Words impl#1's tokenizer reserves that code also uses as plain names (`let i = from`). */
 const CONTEXTUAL_WORDS = new Set(["from", "as", "of", "get", "set", "static", "async", "default", "env", "public", "using", "with", "navigate", "cleanup", "upload", "reset", "changes", "animationFrame", "broadcast", "disconnect", "partial"]);
@@ -230,11 +237,16 @@ function handlerRegions(block) {
     const a = toks[i];
     const eq = toks[i + 1];
     const v = toks[i + 2];
-    if (a.kind !== "ATTR_NAME" || eq.kind !== "ATTR_EQ" || v.kind !== "ATTR_BLOCK") continue;
+    if (a.kind !== "ATTR_NAME" || eq.kind !== "ATTR_EQ" || (v.kind !== "ATTR_BLOCK" && v.kind !== "ATTR_EXPR")) continue;
     if (!/^on[a-z]/i.test(a.text)) continue;
     const s = v.span.start;
     const e = v.span.end;
-    out.push({ kind: "handler", start: s + 1, end: e - 1, children: [], mode: "stmts", raw: true });
+    if (v.kind === "ATTR_BLOCK") { out.push({ kind: "handler", start: s + 1, end: e - 1, children: [], mode: "stmts", raw: true }); continue; }
+    // `on…=${ (e) => { … } }`: an expression (a function value) — read as a markup interpolation is,
+    // so a lone value takes no `;` and a function body's statements take theirs.
+    if (block.raw && block.raw.startsWith("${", s - block.span.start) && block.raw[e - 1 - block.span.start] === "}") {
+      out.push({ kind: "handler", start: s + 2, end: e - 1, children: [], mode: "interp", raw: true });
+    }
   }
   return out;
 }
@@ -247,7 +259,7 @@ function handlerRegions(block) {
  * impl#1's logic tokens of `source[start, end)`, comments dropped, with markup children collapsed to
  * one MARKUP token each and `->` joined. Every token carries `start`, `end`, `line`, `endLine`.
  */
-function regionTokens(source, start, end, children, ls) {
+function regionTokens(source, start, end, children, ls, notes = []) {
   // Markup is masked to identifier characters before the code is tokenized: markup text is not code
   // (`don't` would open a string), and the whole element is one value token. The splitter names some
   // markup inside code as child blocks; markup it leaves inline (`lift <li>…</li>`, `return <p/>`,
@@ -282,6 +294,8 @@ function regionTokens(source, start, end, children, ls) {
         const me = scanMarkup(source, s, end);
         if (me > s) {
           markups.push({ start: s, end: me });
+          // the element's own `${ … }` code is not read here (the splitter did not name it): said so
+          if (holdsMultilineCode(source, s, me)) notes.push({ at: s, reason: "a `${ … }` with code over several lines inside markup written in code (`lift <li>…</li>`) — this rule does not enter it; its `;` / `,` are left for a human" });
           mask(s, me);
           out.push({ kind: "MARKUP", text: "<markup>", start: s, end: me, line: lineAt(ls, s), endLine: lineAt(ls, me - 1) });
           from = me;
@@ -299,6 +313,8 @@ function regionTokens(source, start, end, children, ls) {
     // impl#1's tokenizer reads a `!{ … }` the splitter left inline (in bare program-body code, a
     // handler attribute) as one BLOCK_REF: its body is an arm list all the same
     if (t.kind === "BLOCK_REF" && !child && source.startsWith("!{", s) && source[e - 1] === "}") child = { type: "error-effect", span: { start: s, end: e }, children: [] };
+      if (t.kind === "STRING" && source[s] === "`" && holdsMultilineCode(source, s, e)) notes.push({ at: s, reason: "code inside a template literal's `${ … }` (a function / match / arm body over several lines) — this rule does not enter it; its `;` / `,` are left for a human" });
+      if (t.kind === "BLOCK_REF" && source.startsWith("${", s) && /\n/.test(source.slice(s, e))) notes.push({ at: s, reason: "a nested `${ … }` inside code — this rule does not enter it; its `;` / `,` are left for a human" });
       // A literal's text never reads as punctuation or a keyword (`"}"`, `"match"` are values).
       const text = t.kind === "STRING" || t.kind === "BLOCK_REF" ? `\u0000${t.kind}` : t.text;
       out.push({ kind: t.kind, text, start: s, end: e, line: lineAt(ls, s), endLine: lineAt(ls, Math.max(s, e - 1)), child });
@@ -321,6 +337,23 @@ function inlineMarkupAt(source, s, prev, out, line) {
   if (declHead && /^<\s*[A-Za-z_][\w]*[^>\n]*>\s*(=(?!=)|:(?!>))/.test(source.slice(s, s + 300))) return false;
   if (prev && prev.endLine < line && /^<\s*[A-Za-z_][\w]*[^>\n]*>\s*(=(?!=)|:(?!>))/.test(source.slice(s, s + 300))) return false;
   return true;
+}
+
+/**
+ * Does source[s, e) hold a `${ … }` group whose body spans lines and can hold statements or arms (a
+ * function, an arrow body, a `match`)? Such code is not entered by this rule, so it is reported.
+ */
+function holdsMultilineCode(source, s, e) {
+  const text = source.slice(s, e);
+  let k = text.indexOf("${");
+  while (k >= 0) {
+    const close = skipBraced(text, k + 1, text.length);
+    if (close < 0) return false;
+    const body = text.slice(k + 2, close - 1);
+    if (/\n/.test(body) && /=>|\bfunction\b|\bfn\b|\bmatch\b|:>|\bfor\b|\bif\b/.test(body)) return true;
+    k = text.indexOf("${", close);
+  }
+  return false;
 }
 
 class UndelimitedMarkup extends Error {
@@ -382,6 +415,10 @@ function scanMarkup(src, pos, limit, depth = 0) {
       if (src[i + 1] === "/") {
         const cm = /^<\/\s*([A-Za-z_][\w:.-]*)?\s*>/.exec(src.slice(i, i + 200));
         if (!cm) return -1;
+        // A named closer must close THIS element (a stray `</button>` in `<span>…</button>` is not its
+        // end: the extent is unknown, so the caller reports the region rather than guess); a bare `</>`
+        // closes the innermost element.
+        if (cm[1] && cm[1].toLowerCase() !== name.toLowerCase()) return -1;
         return i + cm[0].length;
       }
       if (/[A-Za-z_]/.test(src[i + 1] ?? "")) { const e = scanMarkup(src, i, limit, depth + 1); if (e < 0) return -1; i = e; continue; }
@@ -407,7 +444,8 @@ function endsValue(last, prev) {
   const k = last.kind;
   const x = last.text;
   if (k === "IDENT") return !CONT_WORDS.has(x);
-  if (k === "NUMBER" || k === "STRING" || k === "AT_IDENT" || k === "BLOCK_REF" || k === "MARKUP") return true;
+  // (a regex literal is a value: `const re = /a+/g⏎f()` is two statements)
+  if (k === "NUMBER" || k === "STRING" || k === "AT_IDENT" || k === "BLOCK_REF" || k === "MARKUP" || k === "REGEX") return true;
   if (k === "KEYWORD") {
     if (prev && (prev.text === "." || prev.text === "?.")) return true;
     return VALUE_KEYWORDS.has(x) || CONTEXTUAL_WORDS.has(x) || x === "break" || x === "continue" || x === "return";
@@ -436,8 +474,8 @@ function continues(last, prev) {
 function startsStatement(t) {
   if (!t) return false;
   switch (t.kind) {
-    case "IDENT": return !CONT_WORDS.has(t.text);
-    case "KEYWORD": return !CONT_WORDS.has(t.text) && t.text !== "else" && t.text !== "catch" && t.text !== "finally";
+    case "IDENT": return !NEXT_LINE_CONT_WORDS.has(t.text);
+    case "KEYWORD": return !NEXT_LINE_CONT_WORDS.has(t.text) && t.text !== "else" && t.text !== "catch" && t.text !== "finally";
     case "AT_IDENT":
     case "MARKUP":
     case "BLOCK_REF":
@@ -681,7 +719,8 @@ function scanRegion(toks, mode, edits, notes, want, probe = null) {
     let d = 0;
     for (let j = i; j < n; j++) {
       if (toks[j].line !== line) {
-        if (!(j > i && toks[j - 1].text === "|" && d === 0)) return -1;
+        // the head runs on after a trailing `|`, or onto a next line that LEADS with `|`
+        if (!(j > i && d === 0 && (toks[j - 1].text === "|" || toks[j].text === "|"))) return -1;
         line = toks[j].line;
       }
       const x = toks[j].text;
@@ -744,7 +783,7 @@ export function planTerminators(filePath, source, want = { semi: true, comma: tr
     const r = queue.shift();
     let toks;
     try {
-      toks = regionTokens(source, r.start, r.end, r.children, ls);
+      toks = regionTokens(source, r.start, r.end, r.children, ls, notes);
     } catch (e) {
       if (e instanceof UndelimitedMarkup) notes.push({ at: e.at, reason: "markup inside code whose end this rule cannot find (a closer form it does not read) — the statements around it are left as written" });
       else notes.push({ at: r.start, reason: `impl#1's tokenizer threw on this region (${String(e?.message ?? e).split("\n")[0]}) — left as written` });
@@ -945,6 +984,26 @@ export function logicBlockStatements(filePath, source, blockStart) {
   const { regions } = codeRegions(filePath, source);
   const r = regions.find((x) => x.kind === "logic" && x.start === blockStart + 2);
   if (!r) return null;
+  return regionStatements(source, r, ls);
+}
+
+/**
+ * Every statement-list region of the file that runs as program-body code — a `${ … }` that is the file
+ * root's or a direct child of `<program>` / `<page>` / `<channel>` / `<effect>` / `<request>`, and the
+ * bare code of a program / page body — in source order, each with its top-level statements (exact
+ * extents and tokens; `stmts: null` when the region does not balance). Used by fix-s66 to see what
+ * runs before a §66 declaration it moves (S480 r1).
+ * @returns {Array<{start:number,end:number,stmts:Array<{start:number,end:number,legacy:boolean,terminated:boolean,toks:object[]}>|null}>}
+ */
+export function programStatementRegions(filePath, source) {
+  const ls = lineStarts(source);
+  const { regions } = codeRegions(filePath, source);
+  return regions.filter((r) => (r.kind === "logic" || r.kind === "body") && r.mode === "stmts")
+    .sort((x, y) => x.start - y.start)
+    .map((r) => ({ start: r.kind === "logic" ? r.start - 2 : r.start, end: r.kind === "logic" ? r.end + 1 : r.end, stmts: regionStatements(source, r, ls) }));
+}
+
+function regionStatements(source, r, ls) {
   let toks;
   try {
     toks = regionTokens(source, r.start, r.end, r.children, ls);
@@ -961,5 +1020,6 @@ export function logicBlockStatements(filePath, source, blockStart) {
     end: st.terminated ? toks[st.end].end : st.last.end,
     legacy: st.legacy,
     terminated: st.terminated,
+    toks: toks.slice(st.start, st.end).map((t) => ({ kind: t.kind, text: t.text, start: t.start, end: t.end })),
   }));
 }

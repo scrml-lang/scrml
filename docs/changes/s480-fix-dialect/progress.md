@@ -13,3 +13,15 @@ items 3–4; S469 dpa-073 F1 / F2 / F3 / F5.
 - [ ] item 4: const components (Form 2 → §66.15) — NOT cheap (structural, use sites, props →
       typed attributes, slots); left for step 2. Top-level markup: program-wrap already exists.
 - [ ] measurement (corpus 701 + core 52; self-host) — scratch `~/.cache/scrml/review/s480-fix-dialect/`.
+
+## r1 (PR #2025 S239 review: BLOCK on F1) — scratch `~/.cache/scrml/review/s480-2025-r1/`
+
+- [x] F1 HIGH — fix-s66 seed order: a split / unwrap that would move a §66 declaration past a statement
+      writing what its initializer reads is refused with a note (`seedHazard`, `seedReads`, `addSeedWrites`).
+      Runtime tests `compiler/self-host-v2/slice-m4/fix-s66-seed-order-s480.test.js` (red on 5592223b3).
+- [x] F2 — scanMarkup: a named closer must match its element (`</>` closes the innermost).
+- [x] F3 — next-line `new` / `typeof` / `void` / `delete` / `await` start a statement (impl#1 tokStartsStmt).
+- [x] F4 — REGEX ends a value; `on…=${…}` handlers scanned; leading-`|` alternation heads; notes for
+      template-literal / inline-markup / nested `${}` code.
+- [x] tests: verify withdraw (bisect) path, allowNonCompiling pin.
+- [ ] re-measure (census lens + dual compile + runtime differential).

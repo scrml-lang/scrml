@@ -114,7 +114,7 @@ import { fixGivenPresence } from "./fix-given-presence.js";
 import { fixIsSome } from "./fix-is-some.js";
 import { fixClientServerCall } from "./fix-client-server-call.js";
 import { fixSqlFailable } from "./fix-sql-failable.js";
-import { fixTerminators, logicBlockStatements } from "./fix-terminators.js";
+import { fixTerminators, logicBlockStatements, programStatementRegions } from "./fix-terminators.js";
 import { writeScratchProject, errorSeverityCodes, scratchRefusalReason } from "./fix-verify-shared.js";
 import { compileScrml } from "../api.js";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync, existsSync } from "node:fs";
@@ -183,6 +183,100 @@ const UNWRAP_ITEM_KINDS = new Set([
   "state-decl", "function-decl", "type-decl", "import-decl", "export-decl", "engine-decl", "comment",
   "use-decl", "component-def",
 ]);
+// ---- seed order (S480 r1, PR #2025 review F1) ----------------------------------------------------
+// A §66 cell's initializer is evaluated when the program's record is CONSTRUCTED (the bootstrap
+// runtime's `rt.seeded` / `construct`, settled before any render) — before the program body's
+// statements run. impl#1 runs a `${ … }` block top to bottom. So a declaration the unwrap / split moves
+// out of `${ … }` past a statement that WRITES something its initializer READS would read the old value
+// (`<count> = 0`, a loop adding to `@count`, `<doubled> = @count * 2`: impl#1 "6 12", the migrated
+// program on the bootstrap "6 0"). Such a move is refused. A file-scope `let` / `const` binding is not
+// a write that matters: the bootstrap evaluates it at module initialization (§7.6), before any seed.
+
+/** Library callees that read and write no cell of the program. */
+const PURE_CALLEES = new Set([
+  "String", "Number", "Boolean", "BigInt", "Symbol", "parseInt", "parseFloat", "isNaN", "isFinite",
+  "encodeURIComponent", "decodeURIComponent", "encodeURI", "decodeURI", "Array", "Object", "JSON", "Math",
+  "Date", "RegExp", "Error", "Set", "Map",
+]);
+const SEED_ASSIGN_OPS = new Set(["=", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??=", "&=", "|=", "^=", "<<=", ">>=", ">>>="]);
+/** Heads of statements that declare and run nothing at the program body (or run before any seed). */
+const SEED_INERT_HEADS = new Set(["function", "fn", "type", "import", "use"]);
+const SEED_HEAD_MODIFIERS = new Set(["export", "server", "async", "pure", "public", "default"]);
+const seedName = (t) => (t.kind === "AT_IDENT" ? t.text.replace(/^@/, "") : t.text);
+
+/** End index (exclusive) of the member / index chain after the root token at j. */
+function seedChainEnd(toks, j) {
+  let k = j + 1;
+  for (;;) {
+    const t = toks[k];
+    if (!t) return k;
+    if ((t.text === "." || t.text === "?.") && toks[k + 1] && (toks[k + 1].kind === "IDENT" || toks[k + 1].kind === "KEYWORD")) { k += 2; continue; }
+    if (t.text === "[") {
+      let d = 0;
+      while (k < toks.length) { if (toks[k].text === "[") d++; else if (toks[k].text === "]" && --d === 0) break; k++; }
+      k++;
+      continue;
+    }
+    return k;
+  }
+}
+
+/** What a §66 declaration statement's initializer reads: `{ names, any }` (`any`: it calls code). */
+function seedReads(toks) {
+  const out = { names: new Set(), any: false };
+  // the declared name (`<x>`, `const <x>`) is not a read
+  const lt = toks.findIndex((t) => t.text === "<");
+  const declared = lt >= 0 && toks[lt + 1] ? lt + 1 : -1;
+  for (let j = 0; j < toks.length; j++) {
+    if (j === declared) continue;
+    const t = toks[j];
+    const afterDot = j > 0 && (toks[j - 1].text === "." || toks[j - 1].text === "?.");
+    if (t.kind === "BLOCK_REF") { out.any = true; continue; }
+    if (t.kind === "AT_IDENT" || (t.kind === "IDENT" && !afterDot)) {
+      out.names.add(seedName(t));
+      if (t.kind === "IDENT" && toks[j + 1] && toks[j + 1].text === "(" && !PURE_CALLEES.has(t.text)) out.any = true;
+    }
+  }
+  return out;
+}
+
+/** Add what one program-body statement writes when it runs to `w` (`{ names, any }`). */
+function addSeedWrites(w, st) {
+  const toks = st.toks;
+  if (!toks || toks.length === 0 || st.legacy) return; // a cell declaration: seeded, not run
+  let h = 0;
+  while (toks[h] && SEED_HEAD_MODIFIERS.has(toks[h].text) && toks[h + 1] && (toks[h + 1].kind === "KEYWORD" || toks[h + 1].kind === "IDENT")) h++;
+  const head = toks[h];
+  if (!head) return;
+  if (SEED_INERT_HEADS.has(head.text)) return;
+  // a file-scope binding: evaluated at module initialization, before any seed (§7.6)
+  if ((head.text === "let" || head.text === "const" || head.text === "lin") && toks[h + 1] && toks[h + 1].text !== "<") return;
+  if ((toks[0].text === "[" || toks[0].text === "{" || toks[0].text === "(") && toks.some((t) => SEED_ASSIGN_OPS.has(t.text))) w.any = true; // a destructuring write
+  for (let j = 0; j < toks.length; j++) {
+    const t = toks[j];
+    const afterDot = j > 0 && (toks[j - 1].text === "." || toks[j - 1].text === "?.");
+    if (t.kind === "BLOCK_REF") { w.any = true; continue; }
+    if (!(t.kind === "AT_IDENT" || (t.kind === "IDENT" && !afterDot))) continue;
+    const k = seedChainEnd(toks, j);
+    const nx = toks[k];
+    const pv = j > 0 ? toks[j - 1] : null;
+    if (nx && (SEED_ASSIGN_OPS.has(nx.text) || nx.text === "++" || nx.text === "--")) w.names.add(seedName(t));
+    else if (pv && (pv.text === "++" || pv.text === "--")) w.names.add(seedName(t));
+    else if (nx && nx.text === "(") {
+      if (k > j + 1) w.names.add(seedName(t)); // a method call on it (`xs.push(…)`) may change it
+      else if (t.kind === "IDENT" && !PURE_CALLEES.has(t.text)) w.any = true; // a call runs code
+    }
+  }
+}
+
+/** The first name in `r` (reads) that `w` (writes) may have written, or null. */
+function seedConflict(w, r) {
+  if (w.any && (r.any || r.names.size > 0)) return "a call or block that runs code";
+  if (r.any && w.names.size > 0) return [...w.names][0];
+  for (const n of r.names) if (w.names.has(n)) return n;
+  return null;
+}
+
 /** ExprNode kinds the rewrite may parenthesize as an ordinary expression. */
 const PLAIN_EXPR_KINDS = new Set([
   "ident", "lit", "member", "index", "call", "binary", "unary", "ternary", "array", "object",
@@ -1724,12 +1818,34 @@ export function fixS66(source, opts = {}) {
    * replaces leaves the block, in place. Statement extents are the `;`-rule scanner's (impl#1's
    * newline boundaries). Returns `{ edits }` or `{ reason }`.
    */
+  // S480 r1 (F1): the program-body statements that run before a moved declaration's seed would — every
+  // statement-list region before the block, in source order (the final program order: items above a
+  // `<program>` move to its top), then the block's own statements before the declaration.
+  let bodyRegions = null;
+  const seedHazard = (s, stmts, moves) => {
+    if (bodyRegions === null) bodyRegions = programStatementRegions(filePath, src);
+    const w = { names: new Set(), any: false };
+    for (const r of bodyRegions) {
+      if (r.end > s) continue;
+      if (!r.stmts) { w.any = true; continue; }
+      for (const st of r.stmts) addSeedWrites(w, st);
+    }
+    for (let k = 0; k < stmts.length; k++) {
+      if (!moves[k]) { addSeedWrites(w, stmts[k]); continue; }
+      const hit = seedConflict(w, seedReads(stmts[k].toks ?? []));
+      if (hit) return `the declaration on line ${lineOf(src, stmts[k].start)} reads \`${hit}\`, which a statement before it writes — a §66 cell's initializer runs when the program is constructed, before the body's statements (impl#1 runs them first), so moving it would change the value it reads`;
+    }
+    return null;
+  };
+
   const splitAroundDecls = (n, s, e) => {
     const stmts = logicBlockStatements(filePath, src, s);
     if (!stmts || stmts.length === 0) return { reason: "its statements cannot be placed" };
     const declEdits = edits.filter((ed) => (ed.rule === "rhs-decl" || ed.rule === "const-cell") && ed.start >= s && ed.end <= e);
     if (declEdits.length === 0) return { reason: "no declaration in it is rewritten" };
     const moves = stmts.map((st) => declEdits.some((ed) => ed.start >= st.start && ed.start < st.end));
+    const hazard = seedHazard(s, stmts, moves);
+    if (hazard) return { reason: hazard };
     for (let k = 0; k < stmts.length; k++) {
       if (!moves[k]) continue;
       const ed = declEdits.find((x) => x.start >= stmts[k].start && x.start < stmts[k].end);
@@ -1801,6 +1917,19 @@ export function fixS66(source, opts = {}) {
       }
       edits.push(...split.edits);
       continue;
+    }
+    // S480 r1 (F1): unwrapping hands the block's rewritten declarations to the construction seed, ahead
+    // of the block's other items (a legacy `@a = @a + 1` is an item impl#1 runs in order) and of every
+    // statement before the block — refused when one of them writes what an initializer reads.
+    const ownDecls = edits.filter((ed) => (ed.rule === "rhs-decl" || ed.rule === "const-cell") && ed.start >= s && ed.end <= e);
+    if (ownDecls.length > 0) {
+      const stmts = logicBlockStatements(filePath, src, s);
+      const hazard = !stmts ? "its statements cannot be placed, so the order its declarations' initializers read in cannot be checked"
+        : seedHazard(s, stmts, stmts.map((st) => ownDecls.some((ed) => ed.start >= st.start && ed.start < st.end)));
+      if (hazard) {
+        block("unwrap-logic", s, `top-level \`\${}\` holding a legacy declaration not unwrapped: ${hazard}`);
+        continue;
+      }
     }
     // Delete the delimiters; a delimiter alone on its line takes the line with it (readability).
     let os = s, oe = s + 2;
