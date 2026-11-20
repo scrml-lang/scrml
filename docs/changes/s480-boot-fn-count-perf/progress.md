@@ -21,4 +21,6 @@ diagnostics compare, base worktree at base/).
       Tests: slice-m4/compile-scaling-fn-count-s480 (red on base: 12.0 / 16.0 / 18.7 vs bounds
       10 / 10 / 13), slice-m4/linecol-s480 (red on base). Gaps: g-boot-compile-superquadratic-fn-count-s480
       (resolved), g-boot-compile-per-call-scans-s480 (LOW, open residual).
-- [ ] final gates, PR.
+- [x] merged origin/main (764bebc77); final gates: pretest, conformance PASS 738 / FAIL 0 / CRASH 0, 1933 verdict
+      records identical to base; byte-compare 2884 inputs + 26 self-host files identical; CI checks green.
+- [ ] PR.
