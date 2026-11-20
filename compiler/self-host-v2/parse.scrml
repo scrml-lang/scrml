@@ -15053,12 +15053,14 @@ ${
         // the opener reader's own refusals (a value it refused whole, E-ATTR-UNQUOTED-OPERATOR):
         // such an attribute is not then also reported as lacking a value (impl#1's "refused" kind)
         const readerDiags: Diag[] = m.diags
+        let dropRuns: ASpan[] = []
         if (!(o.short is given)) {
             const to: int = m.pos
             for (const at of epDroppedAt(m.src, tagEnd, to)) {
                 // one report per dropped run: the opener reader's "unexpected `/`" / "`*`" inside
                 // it (a comment's characters, a `'`) are that run, already refused here
                 const end: int = epDropEnd(m.src, at, to)
+                dropRuns = dropRuns.concat([mkSpan(at, end)])
                 m = withDiagsOf(m, m.diags.filter((d) => !(d.code == "E-PARSE-TAG" && d.span.start >= at && d.span.end <= end)))
                 m = mDiag(m, "E-ATTR-001", epDroppedMsg(m.src, at), at, at + 1)
             }
@@ -15085,7 +15087,11 @@ ${
             // `E-ENDPOINT-PATH-INVALID`, a second `method=` `E-ENDPOINT-METHOD-INVALID`, a
             // second `accepts=` `E-ENDPOINT-ACCEPTS-MISSING`" (parseOpenerB leaves an
             // `<endpoint>` opener's repeats to this reader). A repeat is reported, not read.
-            if ((a.name == "path" && sawPath) || (a.name == "method" && sawMethod) || (a.name == "accepts" && sawAccepts)) {
+            if (epInRuns(dropRuns, a.span)) {
+                // s480 r1 (F2): a name inside a dropped run (`/* x */`, `'x path="/b"'`) is
+                // that run, refused once above (E-ATTR-001) — not read, and not reported again
+                // as an attribute of its own (impl#1 reads it on; both refuse)
+            } else if ((a.name == "path" && sawPath) || (a.name == "method" && sawMethod) || (a.name == "accepts" && sawAccepts)) {
                 m = mDiag(m, epRepeatCode(a.name), "`" + a.name + "=` is written twice on `<endpoint>` — an `<endpoint>` carries one `" + a.name + "=` (§61.2 `endpoint-attrs ::= path-attr method-attr accepts-attr cors-attr?`); it is refused rather than read first-wins. Keep one", a.span.start, a.span.end)
             } else if (a.name == "path") {
                 sawPath = true
@@ -15096,7 +15102,7 @@ ${
                     // empty `path=""` is outside the grammar (analyze's endpointPass judges a
                     // non-empty one; an empty one used to compile, mounted at "")
                     if (pv == "") m = mDiag(m, "E-ENDPOINT-PATH-INVALID", "`path=\"\"` on `<endpoint>` — it does not begin with `/` (§61.7: a `path=` is an absolute path of RFC 3986 unreserved characters and `/`, with no `.`, `..` or empty segment; a trailing `/` is allowed)", a.span.start, a.span.end)
-                } else if (!hasDiagIn(readerDiags, a.span)) {
+                } else if (!epReaderRefused(readerDiags, a.span)) {
                     // §61.2: "a `path=` / `method=` / `accepts=` / `cors=` written with no
                     // value, or with a value that is not its production's form, is that
                     // attribute's code" — `path-attr ::= 'path=' string-literal`
@@ -15107,7 +15113,7 @@ ${
                 const mv: string = methodWordOf(a.value)
                 if (isEndpointMethod(mv)) {
                     method = mv
-                } else if (!hasDiagIn(readerDiags, a.span)) {
+                } else if (!epReaderRefused(readerDiags, a.span)) {
                     m = mDiag(m, "E-ENDPOINT-METHOD-INVALID", "`method=` on `<endpoint>` is not a recognized HTTP method — it is one of GET, POST, PUT, PATCH, DELETE (§61.7, the §60.2 set), written `\"…\"` or as a bareword", a.span.start, a.span.end)
                 }
             } else if (a.name == "accepts") {
@@ -15116,7 +15122,7 @@ ${
                 const nv: string = bareNameOf(a.value)
                 if (nv != "") {
                     accepts = nv
-                } else if (!hasDiagIn(readerDiags, a.span)) {
+                } else if (!epReaderRefused(readerDiags, a.span)) {
                     // §61.2 — `accepts-attr ::= 'accepts=' enum-type-ref`: that attribute's code
                     m = mDiag(m, "E-ENDPOINT-ACCEPTS-MISSING", "`accepts=` on `<endpoint>` is not a bare type name (§61.2 `accepts-attr ::= 'accepts=' enum-type-ref`) — write the `:enum` type's name, `accepts=MyEnum`", a.span.start, a.span.end)
                 }
@@ -15155,7 +15161,7 @@ ${
             m = ra.mp
         }
         const ep: AEndpoint = { nid: m.nid, span: mkSpan(o.start, m.pos), opener: opener, path: path, method: method, accepts: accepts, acceptsSpan: acceptsSpan,
-                                arms: arms, top: ctx == "program", lowered: false }
+                                arms: arms, top: ctx == "program", lowered: false, opErr: epOpenerErr(m.diags, opener) }
         // the placeholder item endpointDesugar replaces (an empty text run renders nothing)
         const n: ANode = { nid: m.nid, span: ep.span, k: ANodeK.Text("") }
         const withEp: MP = { src: m.src, pos: m.pos, nid: m.nid, diags: m.diags, file: m.file, hoist: m.hoist, dbFns: m.dbFns, hosts: m.hosts, pages: m.pages, eps: m.eps.concat([ep]), chans: m.chans, onchs: m.onchs, schemaN: m.schemaN, tables: m.tables, ns: m.ns }
@@ -15167,6 +15173,37 @@ ${
         if (ctx == "nested") return "inside a nested `<program>`"
         if (ctx == "channel") return "inside a `<channel>`"
         return "outside a `<program>`"
+    }
+
+    // s480 r1 (F1): the opener reader refused this attribute's value itself — an
+    // Error-severity reader diagnostic inside its span (E-ATTR-UNQUOTED-OPERATOR,
+    // E-ATTR-MULTI-STATEMENT — impl#1's "refused" kind — an E-PARSE-*, an
+    // E-BOOTSTRAP-UNSUPPORTED). A Warning / Info (W-IS-SOME-DEPRECATED,
+    // W-STRING-INTERP-LITERAL) is no refusal: with only those, the attribute's own §61.2
+    // code is reported, never nothing (the value is "" and analyze's endpointPass would
+    // mount no route). An error inside the value's expression (E-STMT-*, `path={"/a"}`)
+    // does not refuse the attribute either: its own code is reported too (impl#1's).
+    fn epReaderRefused(ds: Diag[], sp: ASpan) -> boolean {
+        for (const d of ds) {
+            if (d.severity == Severity.Error && d.code.indexOf("E-STMT-") != 0 && d.span.start >= sp.start && d.span.end <= sp.end) return true
+        }
+        return false
+    }
+
+    // s480 r1 (F2): `sp` lies inside one of the dropped runs
+    fn epInRuns(runs: ASpan[], sp: ASpan) -> boolean {
+        for (const r of runs) {
+            if (sp.start >= r.start && sp.end <= r.end) return true
+        }
+        return false
+    }
+
+    // s480 r1 (F1 b): an Error-severity diagnostic was reported in the `<endpoint>` opener
+    fn epOpenerErr(ds: Diag[], sp: ASpan) -> boolean {
+        for (const d of ds) {
+            if (d.severity == Severity.Error && d.span.start >= sp.start && d.span.end <= sp.end) return true
+        }
+        return false
     }
 
     // §61.2 — the code of a repeated `path=` / `method=` / `accepts=`
@@ -15583,7 +15620,7 @@ ${
                 arms = ep.arms
             }
             outEps = outEps.concat([{ nid: ep.nid, span: ep.span, opener: ep.opener, path: ep.path, method: ep.method, accepts: ep.accepts, acceptsSpan: ep.acceptsSpan,
-                                      arms: arms, top: ep.top, lowered: lowered }])
+                                      arms: arms, top: ep.top, lowered: lowered, opErr: ep.opErr }])
             repl = repl.concat([{ at: ep.nid, items: fns }])
             k = k + 1
         }

@@ -20,3 +20,16 @@ Battery (158 cases, scratch ~/.cache/scrml/review/s480-boot-ep-opener/): accept/
 Round 2 (conformance): the opener reader's per-character E-PARSE-TAG inside a dropped run is
 folded into the one E-ATTR-001 (endpoint/attr-comment-in-opener was FAIL on head). Battery: same
 codes 58 → 70 of 158.
+
+Round r1 (S239 review of #2012 BLOCKED, F1 fail-open):
+- F1 (a) parse.scrml `epReaderRefused` — only an Error-severity reader diagnostic (not E-STMT-*) in
+  the attribute's span suppresses its own code; a Warning/Info (W-IS-SOME-DEPRECATED,
+  W-STRING-INTERP-LITERAL) did, and the endpoint compiled with no route. DONE.
+- F1 (b) AEndpoint.opErr + analyze.scrml `endpointUnreadDiags`: an endpoint with "" path/method/
+  accepts and no Error in its opener is refused under that attribute's code. DONE (unit test).
+- F2 (i) names inside a dropped run folded (`epInRuns`); (ii) `path={"/a"}` etc. now carry the
+  attribute's code too; (iii) residue gap updated (HTML comment mid-opener cascade noted). DONE.
+- Ruling S480 endpoint-typed-attr: §61.2 sentence, §34 row, bootstrap message
+  (analyze.scrml userDeclStub), gap g-boot-endpoint-typed-attr-code-s480 → carried, pinned by
+  conformance endpoint/typed-attr-declaration-neg (xfail impl1-ts). DONE.
+- Battery (261 + 260 junk + 13 w): 0 head-accept where base or impl#1 refuses.

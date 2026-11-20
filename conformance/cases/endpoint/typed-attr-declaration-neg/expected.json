@@ -1,0 +1,33 @@
+{
+  "id": "endpoint-typed-attr-declaration-neg",
+  "description": "§61.2 / §66.2.2 — a typed attribute on `<endpoint>` (`x:cors=\"*\"`) makes the opener a declaration, and a declaration named `endpoint` is E-NAME-COLLIDES-RESERVED (§4.15). impl#1 reports E-ENDPOINT-ATTR-INVALID there (a recorded divergence, carried).",
+  "language-version": "1.0",
+  "spec": "§61.2, §66.2.2, §4.15",
+  "provenance": "ruling:user-voice-scrml.md-S480-endpoint-typed-attr (gap g-boot-endpoint-typed-attr-code-s480)",
+  "source-test": "compiler/self-host-v2/slice-m4/endpoint-opener-s480.test.js",
+  "rationale": "§61.2: \"A typed attribute (`x:cors=\\\"*\\\"`, `x:int=3`) is not an endpoint attribute: it makes the opener a declaration (§66.2.2 \\\"at least one typed attribute\\\"), and a declaration named `endpoint` is `E-NAME-COLLIDES-RESERVED` (§4.15)\".",
+  "expect": {
+    "codes": [
+      "E-NAME-COLLIDES-RESERVED"
+    ],
+    "codeCounts": {
+      "E-NAME-COLLIDES-RESERVED": 1
+    },
+    "severity": {
+      "E-NAME-COLLIDES-RESERVED": "error"
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-boot-endpoint-typed-attr-code-s480",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'E-NAME-COLLIDES-RESERVED' fired 0 time(s), expected exactly 1",
+          "emitted:E-ENDPOINT-ATTR-INVALID=1",
+          "missing:E-NAME-COLLIDES-RESERVED",
+          "severity:code 'E-NAME-COLLIDES-RESERVED' did not fire (expected severity error)"
+        ]
+      }
+    }
+  }
+}
