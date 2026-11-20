@@ -278,7 +278,7 @@ none
 - `condition/known-int-markup-if-neg` — PASS
 - `condition/known-int-while-neg` — PASS
 - `condition/known-string-ternary-neg` — PASS
-- `condition/nullish-coalesce-default-rt` — PASS · TWIN (also emitted, unasserted: W-NULLISH-NEVER-ABSENT)
+- `condition/nullish-coalesce-default-rt` — PASS · TWIN
 - `condition/presence-bare-optional-if-ternary-pos` — PASS
 - `condition/presence-bare-optional-markup-pos` — PASS
 - `condition/presence-bare-optional-while-pos` — PASS
