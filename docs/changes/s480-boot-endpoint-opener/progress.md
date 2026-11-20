@@ -16,3 +16,7 @@ Source: the S239 review of #2007 (E-ENDPOINT-ATTR-INVALID). Bootstrap only; impl
 
 Battery (158 cases, scratch ~/.cache/scrml/review/s480-boot-ep-opener/): accept/refuse splits 14 → 7
 (6 × `cors=` INTERIM, 1 × spaced `=`).
+
+Round 2 (conformance): the opener reader's per-character E-PARSE-TAG inside a dropped run is
+folded into the one E-ATTR-001 (endpoint/attr-comment-in-opener was FAIL on head). Battery: same
+codes 58 → 70 of 158.

@@ -40,6 +40,8 @@ describe("§61.2 — a character the markup attribute reader drops is E-ATTR-001
     expect(attr001At(`path="/a" method="POST" accepts=Op /* cors="*" */`)).toEqual(["/*"]);
     expect(codes(prog(`path="/a" method="POST" accepts=Op/* x */`))).toEqual(["E-ATTR-001"]);
     expect(attr001At(`path="/a" /* x */ method="POST" accepts=Op`)).toEqual(["/*"]);
+    // one report for the run (impl#1's codes): not also the opener reader's "unexpected `/`" per character
+    expect(codes(prog(`path="/a" /* x */ method="POST" accepts=Op`))).toEqual(["E-ATTR-001", "E-ENDPOINT-ATTR-INVALID"]);
     expect(attr001At(`path="/a" method="POST" <!-- x --> accepts=Op`)).toEqual(["<!"]);
   });
 

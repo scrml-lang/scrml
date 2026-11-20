@@ -15054,7 +15054,12 @@ ${
         // such an attribute is not then also reported as lacking a value (impl#1's "refused" kind)
         const readerDiags: Diag[] = m.diags
         if (!(o.short is given)) {
-            for (const at of epDroppedAt(m.src, tagEnd, m.pos)) {
+            const to: int = m.pos
+            for (const at of epDroppedAt(m.src, tagEnd, to)) {
+                // one report per dropped run: the opener reader's "unexpected `/`" / "`*`" inside
+                // it (a comment's characters, a `'`) are that run, already refused here
+                const end: int = epDropEnd(m.src, at, to)
+                m = withDiagsOf(m, m.diags.filter((d) => !(d.code == "E-PARSE-TAG" && d.span.start >= at && d.span.end <= end)))
                 m = mDiag(m, "E-ATTR-001", epDroppedMsg(m.src, at), at, at + 1)
             }
         }
