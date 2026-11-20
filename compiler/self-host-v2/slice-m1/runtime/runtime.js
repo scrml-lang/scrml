@@ -3832,24 +3832,20 @@ export function attr(scope, el, name, fn) {
   const sheetHref = isLinkElement(el) && isHrefName(name);
   requireScope(scope, "a bound attribute");
   const h = elementHoleOf(el);
+  const slot = { name, guard, v: undefined, refused: false, dirty: false, effect: null };
   const tok = {};
-  const e = new Effect(scope, () => {
-    const refused = sheetHref && linkLoadsSheet(el);
-    const v = refused ? undefined : fn();
-    // This run read a value. While ANOTHER of the element's attributes traps, the element
-    // stays out of the page and nothing is written to it (a detached `<img>` still fetches
-    // a written `src`); every attribute is written when it comes back (`releaseElement`).
-    const mine = h.trapped.delete(tok);
-    if (h.trapped.size > 0 && !h.restoring) return;
-    if (refused) refuseLinkHref(el, name);
-    else writeAttr(el, name, v, guard);
-    if (mine && !h.restoring) releaseElement(el, h, tok);
-  }, () => {
-    el.removeAttribute(name);                         // never a stale value, in or out of the page
-    holdElement(el, h, tok);
-  });
-  h.writers.set(tok, e);
+  h.writers.set(tok, slot);                        // before the first run, which commits
   scope.own(() => { h.writers.delete(tok); h.trapped.delete(tok); });
+  // A run only EVALUATES its attribute (the value is kept in `slot`); `commitElement` writes. So
+  // every writer of the element is evaluated before any of them writes, and a throw stays with
+  // the writer that threw (its own `Effect` run — never another writer's blank).
+  slot.effect = new Effect(scope, () => {
+    slot.refused = sheetHref && linkLoadsSheet(el);
+    slot.v = slot.refused ? undefined : fn();
+    slot.dirty = true;
+    h.trapped.delete(tok);
+    commitElement(el, h);
+  }, () => holdElement(el, h, tok));               // the element leaves the page; nothing is written to it
 }
 
 function writeAttr(el, name, v, guard) {
@@ -3868,18 +3864,23 @@ function writeAttr(el, name, v, guard) {
 // recovery — on mount and on every re-run. Removing the element is the only
 // state that is safe for every attribute").
 //
-// When an `rt.attr` run throws, the attribute is removed and the element (with
-// its subtree) is replaced in place by a placeholder comment — at the mount
-// that is inside the template clone, BEFORE the view is inserted, so a
-// trapped `<iframe>` never starts loading without its `sandbox`; on a re-run it
-// leaves the live page. The run is an `Effect` hole (`blank` = hold), so a trap
+// When an `rt.attr` run throws, the element (with its subtree) is replaced in
+// place by a placeholder comment — at the mount that is inside the template
+// clone, BEFORE the view is inserted, so a trapped `<iframe>` never starts
+// loading without its `sandbox`; on a re-run it leaves the live page. Nothing
+// is removed from it (a removed `referrerpolicy` / `crossorigin` on a live
+// `<img>` is a refetch without the policy): the stale value leaves the page
+// with the element. The run is an `Effect` hole (`blank` = hold), so a trap
 // is reported once per trapped run and any other throw is rethrown after the
-// hold, exactly as `hole()`'s. While ANY of the element's attributes traps it
-// stays out and its other attributes are not written; when the last one reads
-// again, every attribute of the element is re-run (its fresh values written),
-// and only if none traps does the element go back in the placeholder's place.
-// So the element is never in the page with a stale or absent value of a
-// data-bound attribute (`sandbox`, `href`, `src`, `referrerpolicy`, `allow` …).
+// hold, exactly as `hole()`'s — from the run of the writer that threw.
+// A writer's run only EVALUATES its attribute; `commitElement` writes, once
+// every writer of the element queued in the flush has been evaluated and none
+// traps. So nothing is written to an element that is out, a live element is
+// never left with some attributes new and one stale, and when the last
+// trapped attribute reads again every changed attribute is written before the
+// element goes back in the placeholder's place. So the element is never in
+// the page with a stale or absent value of a data-bound attribute (`sandbox`,
+// `href`, `src`, `referrerpolicy`, `allow` …).
 //
 // The element that comes back is the SAME node: its listeners, its own holes
 // and child scopes, and a control's value are kept (nothing is registered
@@ -3893,7 +3894,7 @@ const holeMate = new WeakMap();
 function elementHoleOf(el) {
   let h = elementHoles.get(el);
   if (h === undefined) {
-    h = { writers: new Map(), trapped: new Set(), ph: null, out: false, restoring: false };
+    h = { writers: new Map(), trapped: new Set(), ph: null, out: false };
     elementHoles.set(el, h);
   }
   return h;
@@ -3911,18 +3912,25 @@ function holdElement(el, h, tok) {
   if (el.parentNode) el.parentNode.replaceChild(h.ph, el);
 }
 
-function releaseElement(el, h, tok) {
-  if (h.trapped.size > 0 || !h.out) return;
-  // every attribute of the element is evaluated (and written) before it returns
-  h.restoring = true;
-  try {
-    for (const [t, w] of h.writers) {
-      if (t === tok || w.disposed) continue;
-      queue.delete(w);
-      w.run();
-    }
-  } finally { h.restoring = false; }
+// Writes the element's evaluated attributes — only when EVERY writer of the element has been
+// evaluated for the current state and none of them traps:
+//  - a writer still queued in this flush (its input changed too) has not been evaluated yet, so
+//    nothing is written now; the last of the element's writers to run commits (so a live element
+//    is never left with some attributes new and one stale because a later writer trapped);
+//  - while any writer traps, the element is held out of the page and NOTHING is written to it (a
+//    detached `<img>` still fetches a written `src`; a removed `referrerpolicy` is a refetch).
+// Then every changed attribute is written, and a held element goes back in its placeholder's
+// place — after the writes, so it is never in the page with a stale or absent value.
+function commitElement(el, h) {
+  for (const s of h.writers.values()) if (s.effect !== null && queue.has(s.effect)) return;
   if (h.trapped.size > 0) return;
+  for (const s of h.writers.values()) {
+    if (!s.dirty) continue;
+    s.dirty = false;
+    if (s.refused) refuseLinkHref(el, s.name);
+    else writeAttr(el, s.name, s.v, s.guard);
+  }
+  if (!h.out) return;
   h.out = false;
   if (h.ph.parentNode) h.ph.parentNode.replaceChild(el, h.ph);
 }

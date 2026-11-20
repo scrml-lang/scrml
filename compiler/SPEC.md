@@ -25118,7 +25118,10 @@ S440, are earlier runtime errors at a value boundary. They keep their own sectio
   placeholder that renders nothing, the trap SHALL be reported once as above, and the rest of the mount — the
   element's siblings, and the rest of an enclosing `if=` arm or list row — proceeds. This holds on the mount
   (the element is never inserted, so a trapped frame never starts loading) and on every re-run (the element
-  leaves the page; it is never left showing the value it had before the trap). When every data-bound attribute
+  leaves the page; it is never left showing the value it had before the trap). When a re-run changes several
+  data-bound attributes of one element, every one of them is evaluated before any is written, and none is
+  written if one traps; while the element is out, no attribute of it is written (a detached element can still
+  start a fetch) and none is removed (it leaves with the values it had). When every data-bound attribute
   of the element reads again, the element SHALL be restored in the placeholder's place with each of those
   attributes written from its current value before it is back in the page. An element is never in the page
   with a stale or absent value of a data-bound attribute because of a trap. The restored element may lose

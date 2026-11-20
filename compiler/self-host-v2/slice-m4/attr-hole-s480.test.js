@@ -187,6 +187,45 @@ describe("S480 attr-hole: the element carrying a trapped attribute is the hole",
     await withReports(async () => { click(btn("in")); });
     expect($("#pic").getAttribute("src")).toBe("/a.png");
   });
+
+  // r1 (review of #2017) — the reviewer's compiled repros. `@i` 1 → 7 (F1) and 1 → 2 → 0 (F2).
+  test("r1 F1 compiled: `src` changes as `referrerpolicy` traps — nothing written, no policy removed from the live img", async () => {
+    await load(prog(`        <img id="p" src=(@i == 1 ? "/one" : "/other") referrerpolicy=(@xs[@i] == 20 ? "no-referrer" : "origin")/>`));
+    const writes = [];
+    let img = null;
+    const later = await withReports(async () => {
+      click(btn("in"));
+      img = $("#p");
+      expect(img.getAttribute("referrerpolicy")).toBe("no-referrer");
+      logWrites(img, writes);
+      click(btn("out"));
+    });
+    expect(writes).toEqual([]);
+    expect(img.isConnected).toBe(false);
+    expect(img.getAttribute("src")).toBe("/one");
+    expect(codesOf(later)).toEqual(["E-INDEX-OUT-OF-RANGE-RT"]);
+  });
+
+  test("r1 F2 compiled: a writer that re-traps during a recovery — nothing is written to the held img", async () => {
+    await load(prog(`        <img id="p" title=(@xs[@i]) referrerpolicy=(@xs[@i - 1] == 10 ? "no-referrer" : "origin") src=(@i == 1 ? "/one" : "/other")/>`));
+    const writes = [];
+    let img = null;
+    const later = await withReports(async () => {
+      click(btn("in"));
+      img = $("#p");
+      logWrites(img, writes);
+      click(btn("two"));                                              // title traps
+      click(btn("zero"));                                             // title reads, referrerpolicy traps, src changes
+      expect(writes).toEqual([]);                                     // base: set src=/other on a detached img, no policy
+      expect(img.isConnected).toBe(false);
+      click(btn("in"));
+    });
+    expect($("#p")).toBe(img);
+    expect(img.getAttribute("src")).toBe("/one");
+    expect(img.getAttribute("referrerpolicy")).toBe("no-referrer");
+    expect(writes.every((w) => w.endsWith("connected=false"))).toBe(true);
+    expect(codesOf(later)).toEqual(["E-INDEX-OUT-OF-RANGE-RT", "E-INDEX-OUT-OF-RANGE-RT"]);
+  });
 });
 
 describe("S480 attr-hole item 2: a masking element whose test traps disappears (pin)", () => {
@@ -206,6 +245,13 @@ describe("S480 attr-hole item 2: a masking element whose test traps disappears (
   });
 });
 
+// Every setAttribute / removeAttribute on `el`, with whether it was in the page at the time.
+function logWrites(el, log) {
+  const sa = el.setAttribute.bind(el), ra = el.removeAttribute.bind(el);
+  el.setAttribute = (n, v) => { log.push(`set ${n}=${v} connected=${el.isConnected}`); sa(n, v); };
+  el.removeAttribute = (n) => { log.push(`remove ${n} connected=${el.isConnected}`); ra(n); };
+}
+
 describe("S480 attr-hole: runtime, unit level", () => {
   const trap = (code = "E-INDEX-OUT-OF-RANGE-RT") => new rtm.ScrmlTrap(code, "trap (t.scrml:1)", {});
 
@@ -216,14 +262,19 @@ describe("S480 attr-hole: runtime, unit level", () => {
     const ok = new rtm.Cell(true);
     const src = new rtm.Cell("/a.png");
     const order = [];
+    const writes = [];
     const reported = await withReports(async () => {
       rtm.attr(s, img, "referrerpolicy", () => { if (!ok.get()) throw trap(); return "no-referrer"; });
       rtm.attr(s, img, "src", () => src.get());
       expect(img.getAttribute("src")).toBe("/a.png");
+      logWrites(img, writes);
       rtm.batch(() => ok.set(false));                                // referrerpolicy traps: the img leaves
       expect($("#p")).toBeNull();
-      expect(img.hasAttribute("referrerpolicy")).toBe(false);
+      expect(img.isConnected).toBe(false);
+      // r1 F1: the blank holds the element ONLY — removing `referrerpolicy` from a live img is a
+      // relevant mutation (a refetch without the policy); the stale value leaves with the element
       rtm.batch(() => src.set("/b.png"));                            // not written while out (a detached img fetches)
+      expect(writes).toEqual([]);
       expect(img.getAttribute("src")).toBe("/a.png");
       rtm.batch(() => ok.set(true));
       // back, with every attribute fresh
@@ -234,6 +285,82 @@ describe("S480 attr-hole: runtime, unit level", () => {
     });
     expect(codesOf(reported)).toEqual(["E-INDEX-OUT-OF-RANGE-RT"]);
     expect(order).toEqual(["done"]);
+    s.dispose();
+  });
+
+  // r1 (review of #2017) — F1: a live img whose `src` changes in the same flush in which its
+  // `referrerpolicy` traps: nothing is written (no new `src` fetched without the policy, no
+  // policy removed from a live img); the element leaves with its last consistent values.
+  test("r1 F1: a writer that traps in the same flush as a sibling's change — nothing is written; the element leaves", async () => {
+    document.body.innerHTML = '<div id="w"><img id="p"></div>';
+    const img = $("#p");
+    const s = new rtm.Scope(rtm.root);
+    const i = new rtm.Cell(1);
+    const writes = [];
+    const reported = await withReports(async () => {
+      rtm.attr(s, img, "src", () => "/p" + i.get());
+      rtm.attr(s, img, "referrerpolicy", () => { if (i.get() > 1) throw trap(); return "no-referrer"; });
+      logWrites(img, writes);
+      rtm.batch(() => i.set(2));
+    });
+    expect(writes).toEqual([]);
+    expect(img.isConnected).toBe(false);
+    expect(img.getAttribute("src")).toBe("/p1");
+    expect(img.getAttribute("referrerpolicy")).toBe("no-referrer");
+    expect(codesOf(reported)).toEqual(["E-INDEX-OUT-OF-RANGE-RT"]);
+    s.dispose();
+  });
+
+  // F2: A recovers while B starts trapping and C changes, all in one flush. Nothing may be written
+  // to the held img (base: C's `src=/p0` was written to a detached img with no referrerpolicy).
+  test("r1 F2: a writer re-trapping during a recovery — no write to the held element, ever", async () => {
+    document.body.innerHTML = '<div id="w"><img id="p"></div>';
+    const img = $("#p");
+    const s = new rtm.Scope(rtm.root);
+    const i = new rtm.Cell(1);
+    const xs = [10, 20];
+    const writes = [];
+    const reported = await withReports(async () => {
+      rtm.attr(s, img, "title", () => { const v = xs[i.get()]; if (v === undefined) throw trap(); return v; });   // A traps at 2
+      rtm.attr(s, img, "referrerpolicy", () => { if (i.get() < 1) throw trap(); return "no-referrer"; });          // B traps at 0
+      rtm.attr(s, img, "src", () => "/p" + i.get());                                                              // C
+      logWrites(img, writes);
+      rtm.batch(() => i.set(2));
+      expect(img.isConnected).toBe(false);
+      rtm.batch(() => i.set(0));
+      expect(img.isConnected).toBe(false);
+      expect(writes).toEqual([]);
+      rtm.batch(() => i.set(1));                                       // all read: written, then back
+    });
+    // every attribute is written from its current value while the img is still out, then it returns
+    expect(writes).toEqual(["set title=20 connected=false", "set referrerpolicy=no-referrer connected=false", "set src=/p1 connected=false"]);
+    expect($("#p")).toBe(img);
+    expect(img.getAttribute("referrerpolicy")).toBe("no-referrer");
+    expect(codesOf(reported)).toEqual(["E-INDEX-OUT-OF-RANGE-RT", "E-INDEX-OUT-OF-RANGE-RT"]);
+    s.dispose();
+  });
+
+  // F3: a non-trap throw from another writer in the flush that recovers a trapped writer is
+  // attributed to the writer that threw: once it reads again the element comes back (base: the
+  // recovering writer was marked trapped and the element stayed out until ITS input changed).
+  test("r1 F3: a non-trap throw during a recovery stays with the writer that threw; the element comes back when it reads", async () => {
+    document.body.innerHTML = '<div id="w"><a id="l"></a></div>';
+    const a = $("#l");
+    const s = new rtm.Scope(rtm.root);
+    const i = new rtm.Cell(1);
+    const j = new rtm.Cell(0);
+    const reported = await withReports(async () => {
+      rtm.attr(s, a, "title", () => { if (i.get() === 2) throw trap(); return "t" + i.get(); });
+      rtm.attr(s, a, "href", () => { if (j.get() === 1) throw new TypeError("defect"); return "/x" + j.get(); });
+      rtm.batch(() => i.set(2));
+      expect(() => rtm.batch(() => { i.set(1); j.set(1); })).toThrow(/defect/);
+      expect(a.isConnected).toBe(false);
+      rtm.batch(() => j.set(0));                                       // only href's input changes
+    });
+    expect($("#l")).toBe(a);
+    expect(a.getAttribute("title")).toBe("t1");
+    expect(a.getAttribute("href")).toBe("/x0");
+    expect(codesOf(reported)).toEqual(["E-INDEX-OUT-OF-RANGE-RT"]);
     s.dispose();
   });
 
