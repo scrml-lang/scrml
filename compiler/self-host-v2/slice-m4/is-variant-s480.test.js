@@ -85,3 +85,43 @@ describe("§18.17 — the codes", () => {
     expect(codes(rule(`fn f() -> bool { return @s is .B; }`))).toEqual([]);
   });
 });
+
+// s480 r1 (#2028 review F3 / F4). On ae5d75802: a subject whose type only the TYPER knows (a call,
+// an unannotated local) drew `match`'s E-TYPE-VARIANT ("the arms are variants of …" — arms the
+// author never wrote); `@one is .Only` over a one-variant enum drew W-MATCH-001 for the `else` arm
+// the parser adds; `@s is .B(x)` was read as a CALL of the test's result (E-LOGIC-EXECUTABLE-SINK).
+describe("§18.17 — r1: the typer's subject, one-variant enums, payload patterns", () => {
+  const p2 = (fn) => `<program>
+type S:enum = { A, B(n: int) }
+type Two:enum = { X, Y }
+type One:enum = { Only }
+let <s:S=.A/>
+let <one:One=.Only/>
+fn g() -> Two { return .X; }
+fn h() -> string { return "s"; }
+${fn}
+<button id="b" onclick=flip()>flip</button>
+</program>
+`;
+  const all = (src) => fe(src).diags.filter((d) => d.severity !== "Info").map((d) => d.code);
+  test("F3: a call / local the typer types — a non-enum is E-TYPE-062, another enum E-TYPE-063", () => {
+    const a = errs(fe(p2(`function flip() { if (h() is .A) { @s = .A; } }`)));
+    expect(a.map((d) => d.code)).toEqual(["E-TYPE-062"]);
+    expect(a[0].message).toContain("`is .A` requires an enum-typed left-hand operand, and this one is `string`");
+    expect(a[0].message).not.toContain("arms");
+    expect(codes(p2(`function flip() { const v = h(); if (v is .A) { @s = .A; } }`))).toEqual(["E-TYPE-062"]);
+    const c = errs(fe(p2(`function flip() { const v = g(); if (v is .A) { @s = .A; } }`)));
+    expect(c.map((d) => d.code)).toEqual(["E-TYPE-063"]);
+    expect(c[0].message).toContain("`.A` is not a variant of `Two`");
+  });
+  test("F4: `is` over a one-variant enum draws no W-MATCH-001 (an `is` gives no exhaustiveness)", () => {
+    expect(all(p2(`function flip() { if (@one is .Only) { @s = .A; } }`)).filter((c) => !c.startsWith("W-UNUSED") && c !== "E-DG-002")).toEqual([]);
+  });
+  test("F4: `x is .V(…)` is a parse error naming the `is` form — `is` binds no payload", () => {
+    for (const pat of [".B(x)", ".B(n: x)"]) {
+      const ds = errs(fe(p2(`function flip() { if (@s is ${pat}) { @s = .A; } }`)));
+      expect(ds.map((d) => d.code)).toEqual(["E-PARSE-EXPECTED"]);
+      expect(ds[0].message).toContain("`is` binds no payload");
+    }
+  });
+});

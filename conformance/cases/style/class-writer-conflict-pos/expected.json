@@ -1,0 +1,11 @@
+{
+  "id": "style-class-writer-conflict-pos",
+  "description": "§5.5.4 Axiom ① — `class=(@mode)` (a wholesale writer of the whole `class` attribute) and `class:active=@active` (a per-class writer) on one `<div>` fire E-ATTR-WRITER-CONFLICT: the next `class=` write would erase the toggled class.",
+  "language-version": "1.0",
+  "spec": "§5.5.4",
+  "rationale": "§5.5.4 \"Exclusive wholesale ownership (Axiom ①)\": \"`class=(expression)` is a WHOLESALE writer of the element's `class` surface … It SHALL be the SOLE writer of that surface on its element. If a `class:name=` directive (§5.5.2) or a transition directive … also targets `class` on the SAME element, the compiler SHALL emit `E-ATTR-WRITER-CONFLICT` (§34) naming both sites\". Presence only — the report's span and wording are impl freedom. Its clean twin is class-directive-toggle-rt (a STATIC `class=\"card\"` beside `class:` directives, which §5.5.2 says SHALL NOT be treated as a conflict).",
+  "expect": {
+    "codes": ["E-ATTR-WRITER-CONFLICT"],
+    "notCodes": []
+  }
+}

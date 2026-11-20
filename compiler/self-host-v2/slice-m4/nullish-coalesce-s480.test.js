@@ -109,3 +109,18 @@ describe("`??` — the rules (§34 E-EXPR-NULLISH-MIX; S440 typing)", () => {
     expect(codes(rule(`function f() -> string { return @ok ?? false ? "y" : "n"; }`))).toEqual([]);
   });
 });
+
+// s480 r1 (#2028 review F6): a condition over a KNOWN mix (`int | not ?? bool` is `int` or `bool`)
+// is still E-COND-NOT-BOOLEAN (§42.4 statement 5: it does not resolve to one type), but the message
+// names the mix — on ae5d75802 it said the type "cannot be resolved", as for an unknown type.
+describe("`??` as a condition — r1 F6", () => {
+  test("`if=(@n ?? @flag)`: E-COND-NOT-BOOLEAN naming `int` or `bool`", () => {
+    const ds = errs(fe(prog(`function go() { }`, `<p if=(@n ?? @flag)>x</p>`)));
+    expect(ds.map((d) => d.code)).toEqual(["E-COND-NOT-BOOLEAN"]);
+    expect(ds[0].message).toContain("either `int` or `bool`");
+    expect(ds[0].message).toContain("cannot resolve to one type");
+  });
+  test("a one-type `??` is a plain condition: `if=(@ok ?? @flag)` is a `bool`", () => {
+    expect(codes(prog(`function go() { }`, `<p if=(@ok ?? @flag)>x</p>`))).toEqual([]);
+  });
+});

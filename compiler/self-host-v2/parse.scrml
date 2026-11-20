@@ -1151,6 +1151,14 @@ ${
     fn variantTest(r: RExpr, start: int) -> RExpr {
         const vt: PTok = peekAt(r.tp, 1)
         let t: TP = adv(adv(r.tp))
+        // s480 r1 (#2028 F4): `x is .V(…)` — §18.17: "The `is` operator SHALL NOT bind or expose
+        // payload fields. For payload access, use `match`." The grammar is `expression 'is' '.'
+        // VariantName`; a `(…)` after the variant on its line is a payload pattern, refused here by
+        // name and read past (never read as a call of the test's result).
+        if (isP(t, "(") && cur(t).line == endLine(vt)) {
+            t = diagAt(t, "E-PARSE-EXPECTED", "`is ." + vt.v + "` tests the variant only — `is` binds no payload, so `." + vt.v + "(…)` is not its form (§18.17: \"The `is` operator SHALL NOT bind or expose payload fields. For payload access, use `match`\"). Write `x is ." + vt.v + "`, or `match x { ." + vt.v + "(…) :> …, else :> … }` to read the payload", cur(t))
+            t = skipParens(t)
+        }
         const vspan: ASpan = mkSpan(vt.start, vt.end)
         const yes: AExpr = { nid: t.nid, span: vspan, k: AExprK.Bool(true) }
         t = bumpId(t)

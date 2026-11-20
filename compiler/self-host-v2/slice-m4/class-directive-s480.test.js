@@ -95,3 +95,125 @@ describe("§5.5.2 — the codes", () => {
     expect(codes(prog(`<p class:x=(@cnt)>x</p>`))).toEqual(["E-COND-NOT-BOOLEAN"]);
   });
 });
+
+// s480 r1 (#2028 review F1) — SPEC §5.5.4 "Exclusive wholesale ownership (Axiom ①)": "If a
+// `class:name=` directive (§5.5.2) … also targets `class` on the SAME element, the compiler SHALL
+// emit `E-ATTR-WRITER-CONFLICT` (§34) naming both sites". On ae5d75802 both orders compiled clean
+// and the `class=` write erased the toggle at run time (in the `class:`-first order it was missing
+// at mount).
+describe("§5.5.4 — a computed `class=` beside `class:` is E-ATTR-WRITER-CONFLICT (r1 F1)", () => {
+  test("`class=(…)` then `class:`, and `class:` then `class=(…)`: one report naming both sites", () => {
+    for (const mk of [`<p class=(@lit ? "a" : "b") class:on=(!@lit)>x</p>`, `<p class:on=(!@lit) class=(@lit ? "a" : "b")>x</p>`]) {
+      const ds = errs(fe(prog(mk)));
+      expect(ds.map((d) => d.code)).toEqual(["E-ATTR-WRITER-CONFLICT"]);
+      expect(ds[0].message).toContain("`class=`");
+      expect(ds[0].message).toContain("`class:on=`");
+    }
+  });
+  test("both writers changing (a bare `class=@c`, two toggles): still one report, naming every toggle", () => {
+    const ds = errs(fe(`<program>
+let <c:string="x"/>
+let <lit:bool=false/>
+function go() { @c = "y"; @lit = true; }
+<button id="b" onclick=go()>go</button>
+<p class=@c class:on=@lit class:off=(!@lit)>x</p>
+</program>
+`));
+    expect(ds.map((d) => d.code)).toEqual(["E-ATTR-WRITER-CONFLICT"]);
+    expect(ds[0].message).toContain("`class:on=`, `class:off=`");
+  });
+  test("inside `<each>` too", () => {
+    expect(codes(prog(`<ul><each in=(["a"]) key=@.><li class=(@s is .A ? "a" : "b") class:on=@lit>x</li></each></ul>`))).toEqual(["E-ATTR-WRITER-CONFLICT"]);
+  });
+  test("a static `class=\"k\"` stays legal beside `class:` (§5.5.2)", () => {
+    expect(codes(prog(`<p class="k" class:on=@lit>x</p>`))).toEqual([]);
+  });
+});
+
+// s480 r1 (#2028 review F2) — ruling user-voice-scrml.md S480 "⭐ RULED — what a trap renders when
+// "nothing" is not safe" item 1: "A trapped data-bound attribute: the element carrying it is the
+// hole … the element is replaced by a placeholder, the trap is reported once, and the element is
+// restored on recovery — on mount and on every re-run. Removing the element is the only state that
+// is safe for every attribute". A `class:` toggle writes `class` (SPEC §19.17, §5.5.2). On
+// ae5d75802 a trapping condition REMOVED the class and left the element in the page — a
+// `class:hidden` / `class:blur` / `class:redacted` revealed what it hides.
+describe("§19.17 — a trapping `class:` condition holds its element out (r1 F2)", () => {
+  async function withReports(fn) {
+    const reported = [];
+    const saved = globalThis.reportError;
+    globalThis.reportError = (e) => reported.push(e);
+    try { await fn(reported); } finally { globalThis.reportError = saved; }
+    return reported;
+  }
+  const codesOf = (reported) => reported.map((e) => e.code);
+  // `@xs[@i]` traps (E-INDEX-OUT-OF-RANGE-RT) while @i is out of range: @i starts at 5;
+  // `in` sets it to 1 (reads 20), `zero` to 0 (reads 10), `out` to 7.
+  const trapProg = (view) => `<program>
+    <xs:int[]=([10, 20])/>
+    let <i:int=5/>
+    let <lit:bool=false/>
+    function into() { @i = 1; }
+    function zero() { @i = 0; }
+    function out() { @i = 7; }
+    function flip() { @lit = !@lit; }
+    <main>
+        <button onclick=into()>in</button>
+        <button onclick=zero()>zero</button>
+        <button onclick=out()>out</button>
+        <button onclick=flip()>flip</button>
+        <div id="box">${view}<span id="sib">sib</span></div>
+    </main>
+</program>
+`;
+  const btn = (label) => [...document.querySelectorAll("button")].find((b) => b.textContent === label);
+  const load = (src) => withReports(async () => { const r = fe(src); expect(errs(r).map((d) => `${d.code}: ${d.message}`)).toEqual([]); expect(mods.check.checkCore(r.core)).toEqual([]); await loadProgram(r.core, "s480-classdir-trap-" + k++); });
+
+  test("at MOUNT: the element is held out (never shown without its `hidden` class), one report", async () => {
+    const reported = await load(trapProg(`<p id="p" class="k" class:hidden=(@xs[@i] == 10)>secret</p>`));
+    expect(codesOf(reported)).toEqual(["E-INDEX-OUT-OF-RANGE-RT"]);   // ae5d75802: <p class="k"> shown
+    expect($("#p")).toBeNull();
+    expect($("#box").firstChild.nodeType).toBe(8);                    // the placeholder holds its place
+    expect($("#sib").textContent).toBe("sib");
+  });
+
+  test("on a RE-RUN it leaves; recovery writes the class state, THEN re-inserts the same node in place", async () => {
+    await load(trapProg(`<p id="p" class="k" class:hidden=(@xs[@i] == 10) class:on=@lit>secret</p>`));
+    const later = await withReports(async () => {
+      click(btn("zero"));
+      const node = $("#p");
+      expect(cls("#p")).toBe("hidden k");
+      click(btn("out"));                                               // ae5d75802: <p class="k"> — revealed
+      expect($("#p")).toBeNull();
+      expect($("#box").querySelector(".k")).toBeNull();
+      click(btn("flip"));                                              // a toggle while held: to its slot
+      expect($("#p")).toBeNull();
+      expect(node.classList.contains("on")).toBe(false);              // nothing written to a held element
+      // recovery: the class is written while the node is still out, THEN it goes back
+      const obs = new window.MutationObserver(() => {});
+      obs.observe(node, { attributes: true });
+      obs.observe($("#box"), { childList: true });
+      click(btn("in"));
+      const recs = obs.takeRecords().map((m) => m.type === "attributes" ? "class=" + (m.target.className) : (m.addedNodes.length && m.addedNodes[0] === node ? "inserted" : "other"));
+      obs.disconnect();
+      const at = recs.indexOf("inserted");
+      expect(at).toBeGreaterThan(0);                                   // re-inserted, after …
+      expect(recs.slice(0, at).every((r) => r.startsWith("class="))).toBe(true);   // … its class writes
+      expect(recs.slice(at).some((r) => r.startsWith("class="))).toBe(false);     // nothing written once back
+      expect($("#p")).toBe(node);                                      // the same node
+      expect($("#box").firstChild).toBe(node);
+      expect($("#box").childNodes.length).toBe(2);                     // the placeholder is gone
+      expect(cls("#p")).toBe("k on");
+    });
+    expect(codesOf(later)).toEqual(["E-INDEX-OUT-OF-RANGE-RT"]);      // reported once
+  });
+
+  test("with no trap the toggle is unchanged: written at once on a live element", async () => {
+    const reported = await load(trapProg(`<p id="p" class="k" class:on=@lit>x</p>`));
+    expect(reported).toEqual([]);
+    expect(cls("#p")).toBe("k");
+    click(btn("flip"));
+    expect(cls("#p")).toBe("k on");
+    click(btn("flip"));
+    expect(cls("#p")).toBe("k");
+  });
+});

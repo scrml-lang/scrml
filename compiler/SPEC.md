@@ -2501,18 +2501,35 @@ full re-render.
   expression (`obj.prop`), a parenthesized boolean expression (`(a == b)`), or a function call
   (`fn()`). A plain unqualified bare identifier (no `@`, no dot) SHALL be a compile error
   (E-ATTR-013). A string literal SHALL be a compile error (E-ATTR-013).
+- The right-hand side is a **condition** (§42.4): a `bool`, or a `T | not` presence test. Any other
+  type is compile error E-COND-NOT-BOOLEAN (§42.4); scrml has no truthiness.
 - When the right-hand side is an `@`-prefixed reactive variable, the compiler SHALL subscribe
-  to that variable and call `classList.toggle(name, !!value)` on every change.
+  to that variable and set or clear the class by the condition (`classList.toggle(name, condition)`)
+  on every change.
 - When the right-hand side is a property access (`obj.prop`), the compiler SHALL subscribe
   to the root reactive variable (`obj`) and project the path on each update.
 - When the right-hand side is a parenthesized expression, the compiler SHALL subscribe to
   each `@variable` referenced in the expression and re-evaluate on any change.
 - When the right-hand side is a function call, the compiler SHALL call the function at mount
   time and re-evaluate on any reactive variable change detected in the call arguments.
-- The compiler SHALL emit client-side wiring that calls `classList.toggle(name, !!condition)`
-  on the target element when any dependency changes.
-- The class named in the directive SHALL be applied on initial mount if the expression is
-  truthy at mount time. It SHALL be absent on initial mount if the expression is falsy.
+- The compiler SHALL emit client-side wiring that calls `classList.toggle(name, condition)`
+  on the target element when any dependency changes, where `condition` is the value of the
+  condition (§42.4): `true` for a `bool` that is `true` or a `T | not` value that is present.
+- The class named in the directive SHALL be applied on initial mount if the condition holds
+  at mount time. It SHALL be absent on initial mount if it does not.
+- A `class:` directive is a data-bound attribute for the trap rule of §19.17: when its condition
+  traps, the element that carries it is held out of the page until the condition reads again
+  without a trap.
+
+  > **Provenance (the value is a condition):** ruling:user-voice-scrml.md S440 "⭐⭐ RULED — #4 = (c):
+  > truthiness goes" — *"All conditions require a boolean, or a `T | not` presence test, and the truthiness
+  > of numbers and strings goes."* · supersedes (text): *"call `classList.toggle(name, !!value)` on every
+  > change"*, *"calls `classList.toggle(name, !!condition)`"* and *"applied on initial mount if the
+  > expression is truthy at mount time. It SHALL be absent on initial mount if the expression is falsy"*
+  > (JavaScript truthiness, which S440 removed from every condition). **Direction of change:
+  > newly-rejecting** (a number, string or other non-condition value, which toggled by truthiness).
+  > **Nominal on impl#1** (impl#1 emits `!!value`; carried gap `g-impl1-condition-rule-s460`); enforced
+  > by the bootstrap (`checkCond`, s480-boot-cheap-wins).
 - Multiple `class:` directives MAY appear on the same element. Each is independent.
 - `class:` directives and a static `class=` attribute MAY coexist on the same element.
   The static class is always present; each `class:` directive independently adds or removes
@@ -25164,7 +25181,13 @@ S440, are earlier runtime errors at a value boundary. They keep their own sectio
   a data-bound attribute because of a trap. A data-bound attribute whose evaluation throws something that is
   not a trap (a defect) also holds the element out (fail closed); the throw is then rethrown, as from any other
   effect, and the element stays out until that attribute reads again without a throw. The restored element may lose
-  focus, selection and scroll position, and a frame or media element reloads. *(Provenance:
+  focus, selection and scroll position, and a frame or media element reloads. A `class:name=` directive
+  (§5.5.2) writes the element's `class` attribute, so it is a data-bound attribute for this rule: when its
+  condition traps, the element is held out as above (never left in the page with the class removed — a
+  `class:hidden` or `class:redacted` would reveal what it hides); while the element is out the condition is
+  still re-evaluated and nothing is written to it, and on recovery its class is set or cleared before the
+  element is back. *(S480 r1 of #2028: `class:` added — a toggled class is part of the `class` attribute, which
+  item 1 names; item 2, a masking test, is a different rule.)* *(Provenance:
   ruling:user-voice-scrml.md S480 "⭐ RULED — what a trap renders when "nothing" is not safe (#2008, item 20
   follow-up)" item 1 — "the element is replaced by a placeholder, the trap is reported once, and the element is
   restored on recovery — on mount and on every re-run. Removing the element is the only state that is safe for
@@ -37087,7 +37110,9 @@ optional-access ::= expr '?.' identifier          // property:  recv?.field
 
 > **Provenance (`show=` as a condition position; `is some` narrowing as the `is given` alias, statement 8):** ruling:user-voice-scrml.md S460 "keep the code, accept both readings, go" (items 3 and 2).
 
-A **condition** is the test of an `if` / `else if` statement, a `while` / `do … while` loop (§49.2.3), a ternary `test ? a : b`, and the markup attributes `if=` (§17.1) and `else-if=` (§17.1.1). (`show=`, §17.2, is a condition too; it never narrows.) A condition asks one of two questions, and its TYPE says which: a `bool` asks *"is it true?"*; a `T | not` asks *"is it there?"*. There is no third reading — scrml has no truthiness.
+> **Provenance (the `class:name=` value as a condition position, S480):** ruling:user-voice-scrml.md S440 "⭐⭐ RULED — #4 = (c): truthiness goes" — *"All conditions require a boolean, or a `T | not` presence test, and the truthiness of numbers and strings goes."* A `class:` directive's value decides whether its class is present — a condition, so the ruling covers it (PA reading of "All conditions", s480-boot-cheap-wins r1). **Direction of change: newly-rejecting** (a non-`bool`, non-`T | not` `class:` value). **Nominal on impl#1** (`g-impl1-condition-rule-s460`); enforced by the bootstrap (`checkCond`).
+
+A **condition** is the test of an `if` / `else if` statement, a `while` / `do … while` loop (§49.2.3), a ternary `test ? a : b`, and the markup attributes `if=` (§17.1) and `else-if=` (§17.1.1). (`show=`, §17.2, and the value of a `class:name=` directive, §5.5.2, are conditions too; neither narrows.) A condition asks one of two questions, and its TYPE says which: a `bool` asks *"is it true?"*; a `T | not` asks *"is it there?"*. There is no third reading — scrml has no truthiness.
 
 **Normative statements:**
 

@@ -20412,21 +20412,47 @@ ${
         }
     }
 
-    fn testMaybeCheck(env: TEnv, subj: AExpr, h: AHandled, v: VType, ts: TypeState) -> TypeState {
+    fn testMaybeCheck(env: TEnv, subj: AExpr, h: AHandled, m: PlainMatch, v: VType, ts: TypeState) -> TypeState {
         if (!handledIsTest(h)) return ts
         const t: Type | not = knownOf(v)
         if (t is not) return ts
-        if (maybeInner(t) is not) return ts
-        let name: string = ""
+        const mi: Type | not = maybeInner(t)
+        if (mi is not) return ts
+        // s480 r1 (#2028 F3): a `T | not` over a type that is not the tested enum is
+        // plainSubjectCheck's E-TYPE-062 / E-TYPE-063 (narrowing would not help) — one report
+        const es: Sym | not = m.es
+        const ns: Sym | not = namedOf(mi)
+        if (es is given && (ns is not || ns.id != es.id)) return ts
+        const name: string = testVariantName(h)
+        return report(ts, env, subj.span, "E-TYPE-062", "`is " + name + "` requires an enum-typed left-hand operand, and this one is `" + typeName(t) + "`, which may be `not` — narrow it first: `x is given && x is " + name + "` (§18.17, §42.4)")
+    }
+
+    // `.V` of `x is .V` (its first arm's variant), or "" when it has none
+    fn testVariantName(h: AHandled) -> string {
         const how: AHow = h.how
         const arms: AArm[] = match how {
             .MatchOn(arms: a) :> a
             // no-default-arm: handledIsTest admitted a MatchOn only
             _ :> []
         }
+        if (arms.length == 0) return ""
         const pn: PatName | not = patName(arms[0].pat)
-        if (pn is given) name = "." + pn.name
-        return report(ts, env, subj.span, "E-TYPE-062", "`is " + name + "` requires an enum-typed left-hand operand, and this one is `" + typeName(t) + "`, which may be `not` — narrow it first: `x is given && x is " + name + "` (§18.17, §42.4)")
+        if (pn is given) return "." + pn.name
+        return ""
+    }
+
+    // s480 r1 (#2028 F3) — the typer's half of §18.17's subject rules, for a subject whose type
+    // only the typer knows (`h() is .A`, `const v = g(); v is .A`): the resolver found `.V` in
+    // the enum `es` by name; the subject is some other type. Not an enum: E-TYPE-062 ("`is`
+    // operator requires an enum-typed operand"). Another enum: `.V` is not one of its variants,
+    // E-TYPE-063 ("unknown variant name in `is` expression") — as testSubject maps the
+    // resolver's codes, never the `match` wording about arms the author did not write.
+    fn testSubjectMismatch(env: TEnv, subj: AExpr, h: AHandled, t: Type, inner: Type, ts: TypeState) -> TypeState {
+        const v: string = testVariantName(h)
+        const what: string = "`is` tests the variant of an enum value (§18.17)"
+        const oe: Sym | not = isEnumType(env.t.types, inner)
+        if (oe is given) return report(ts, env, subj.span, "E-TYPE-063", "`" + v + "` is not a variant of `" + oe.hint + "`, the type of `is`'s left-hand operand — " + what)
+        return report(ts, env, subj.span, "E-TYPE-062", "`is " + v + "` requires an enum-typed left-hand operand, and this one is `" + typeName(t) + "` — " + what)
     }
 
     // s472 r1 (F1) — §18.13: "`.VariantName` (shorthand) SHALL be valid when the
@@ -20790,7 +20816,10 @@ ${
                 if (!wild && missing.length > 0) covRefused = true
                 if (!wild && missing.length > 0) st = addDiag(st, env.file, e.span, "E-TYPE-020", "this `match` over " + en + " is not exhaustive: it does not cover " + missing.join(", ") + " — add those arms, or end with `else :>` (§18.8.1)")
                 if (missing.length == 0 && absentDone) exh = true
-                if (wild && missing.length == 0 && (!maybe || notSeen)) st = addDiag(st, env.file, e.span, "W-MATCH-001", "the wildcard arm is unreachable: every case of " + en + " already has an arm (§18.6)")
+                // s480 r1 (#2028 F4): `x is .V` is read as a `match` with an `else` arm the author never
+                // wrote — over a one-variant enum that arm is unreachable, and §18.17 says `is` "provides
+                // NO exhaustiveness guarantee": no W-MATCH-001 for a test
+                if (wild && missing.length == 0 && (!maybe || notSeen) && !isTestArms(arms)) st = addDiag(st, env.file, e.span, "W-MATCH-001", "the wildcard arm is unreachable: every case of " + en + " already has an arm (§18.6)")
             }
             if (sk.kind == 3) {
                 const both: boolean = lits.indexOf("b:true") >= 0 && lits.indexOf("b:false") >= 0
@@ -28810,7 +28839,32 @@ ${
                 st = addAttr(st, a.nid, AttrKind.AStatic)
             }
         }
+        st = classWriterConflict(env, e, st)
         return resolveNodes(penv, e.kids, st)
+    }
+
+    // s480 r1 (#2028 F1) — SPEC §5.5.4 "Exclusive wholesale ownership (Axiom ①)": "`class=(expression)`
+    // is a WHOLESALE writer of the element's `class` surface … It SHALL be the SOLE writer of that
+    // surface on its element. If a `class:name=` directive (§5.5.2) … also targets `class` on the
+    // SAME element, the compiler SHALL emit `E-ATTR-WRITER-CONFLICT` (§34) naming both sites". A
+    // computed `class=` (any value that is an expression: `(…)`, `@x`, a call, a member path) and
+    // a `class:` directive on one HTML element: one report, at the `class=`, naming every
+    // directive (as impl#1's, emit-html.ts analyzeWriterConflict). A static `class="k"` is in the
+    // template, never rewritten, and composes with `class:` (§5.5.1). The bootstrap reads every
+    // element here — inside `<each>` too (§5.5.4's loop-context note is impl#1's enforcement gap,
+    // not the rule).
+    fn classWriterConflict(env: Env, e: AElem, st0: AS) -> AS {
+        let whole: AAttr | not = not
+        let toggles: string[] = []
+        for (const a of e.attrs) {
+            if (a.name.toLowerCase() == "class" && valueExpr(a.value) is given) whole = a
+            if (a.name.substring(0, 6) == "class:" && isClassName(a.name.substring(6))) toggles = toggles.concat(["`" + a.name + "=`"])
+        }
+        if (toggles.length == 0) return st0
+        if (whole is not) return st0
+        let verb: string = "writes"
+        if (toggles.length > 1) verb = "write"
+        return addDiag(st0, env.file, whole.span, "E-ATTR-WRITER-CONFLICT", "`class=` on `<" + e.tag + ">` is computed — a WHOLESALE writer of the whole `class` attribute, rewritten on every update — and " + toggles.join(", ") + " on the same element also " + verb + " `class`: the next `class=` update would erase the toggled class. Each surface has one wholesale owner (Axiom ①); pick one: keep `class=(…)` and fold the toggle into it (`class=(@on ? \"tab active\" : \"tab\")`), or write the fixed classes as a static `class=\"…\"` and toggle the rest with `class:` (§5.5.4)")
     }
 
     // s451 — `show=cond` on an HTML element (§17.2): "The element EXISTS in the
@@ -36300,11 +36354,11 @@ ${
         return match v {
             .Known(t: t) :> condKnown(env, c, t, what, ts)
             .Absent :> markPresence(ts, c.nid)      // `not` as a condition: a presence test that is always false
-            .Unknown :> condUnresolvedWhole(env, c, what, ts)
+            .Unknown :> condUnresolvedWhole(env, c, what, ts, v)
             // s472: a choice is judged as an unresolved condition was (S460 N1's
             // arm-by-arm rule — strict-direction: it admits nothing more)
-            .OneOf(ts: xs) :> condUnresolvedWhole(env, c, what, ts)
-            .Partial(ts: xs) :> condUnresolvedWhole(env, c, what, ts)
+            .OneOf(ts: xs) :> condUnresolvedWhole(env, c, what, ts, v)
+            .Partial(ts: xs) :> condUnresolvedWhole(env, c, what, ts, v)
         }
     }
 
@@ -36319,9 +36373,9 @@ ${
     // arms' judgement is discarded and the WHOLE ternary is refused as
     // unresolved, exactly as before (statement 5, blame per statement 6).
     // A ternary whose arms joined to a known type is judged whole (condKnown).
-    fn condUnresolvedWhole(env: TEnv, c: AExpr, what: string, ts0: TypeState) -> TypeState {
+    fn condUnresolvedWhole(env: TEnv, c: AExpr, what: string, ts0: TypeState, v: VType) -> TypeState {
         const arms: AExpr[] = armsOf(c)
-        if (arms.length == 0) return condUnresolved(env, c, what, ts0)
+        if (arms.length == 0) return condMixed(env, c, what, v, ts0)
         let ts: TypeState = ts0
         for (const arm of arms) {
             ts = condWhole(env, arm, exprType0(ts, arm.nid), armWhat(what), ts)
@@ -36527,6 +36581,33 @@ ${
     // s460 — a condition whose type did not resolve is E-COND-NOT-BOOLEAN
     // (§42.4 statement 5), unless an error already reported explains it
     // (statement 6: no second report — see Blame).
+    // s480 r1 (#2028 F6): a condition whose type is a KNOWN mix (`@a ?? @t` over an `int | not`
+    // and a `bool` is `int` or `bool`) is not "a type the compiler cannot resolve" — the message
+    // names the mix, and still says the type does not resolve (to one type) and names the fixes,
+    // as §42.4 statement 5 requires of this report. Same code, same refusal; an unknown type keeps
+    // condUnresolved's wording.
+    fn condMixed(env: TEnv, c: AExpr, what: string, v: VType, ts: TypeState) -> TypeState {
+        const mix: string = vtMixName(v)
+        if (mix == "") return condUnresolved(env, c, what, ts)
+        if (condBlamed(env, c, ts)) return ts
+        return report(ts, env, c.span, "E-COND-NOT-BOOLEAN", what + " is " + mix + " — a value whose type the compiler cannot resolve to one type, and a condition must be a `bool` or a `T | not` presence test — annotate it (a parameter or return type), or say what you test: `x is given` (is it present?) or `x == true` (is it true?) (ruled S460, \"a′, go\")")
+    }
+
+    fn vtMixName(v: VType) -> string {
+        return match v {
+            .OneOf(ts: xs) :> "either " + typeNames(xs).join(" or ")
+            .Partial(ts: xs) :> "either " + typeNames(xs).join(" or ") + ", or a value whose type the compiler cannot resolve"
+            // no-default-arm: a known, absent or unknown type is not a mix
+            _ :> ""
+        }
+    }
+
+    fn typeNames(ts: Type[]) -> string[] {
+        let out: string[] = []
+        for (const t of ts) { out = out.concat(["`" + typeName(t) + "`"]) }
+        return out
+    }
+
     fn condUnresolved(env: TEnv, c: AExpr, what: string, ts: TypeState) -> TypeState {
         if (condBlamed(env, c, ts)) return ts
         return report(ts, env, c.span, "E-COND-NOT-BOOLEAN", what + " is a value whose type the compiler cannot resolve, and a condition must be a `bool` or a `T | not` presence test — annotate it (a parameter or return type), or say what you test: `x is given` (is it present?) or `x == true` (is it true?) (ruled S460, \"a′, go\")")
@@ -37545,7 +37626,7 @@ ${
     // not know the subject's type, the arms are checked against it here.
     fn typePlain(env: TEnv, e: AExpr, h: AHandled, m: PlainMatch, ts0: TypeState) -> RVT {
         const rs: RVT = typeExpr(env, h.subject, quietPlace(ts0, h.subject))     // s475: a `match` discriminates (§13.9.3)
-        let ts: TypeState = testMaybeCheck(env, h.subject, h, rs.vt, plainSubjectCheck(env, e, h.subject, m, rs.vt, rs.ts))
+        let ts: TypeState = testMaybeCheck(env, h.subject, h, m, rs.vt, plainSubjectCheck(env, e, h.subject, h, m, rs.vt, rs.ts))
         let present: string[] = []
         const st0: Type | not = knownOf(rs.vt)
         let subjMaybe: boolean = m.maybe
@@ -37732,7 +37813,7 @@ ${
     // the subject's (E-TYPE-VARIANT), a literal arm's type must be the
     // subject's (E-TYPE-001), and a `T | not` subject owes a `not` arm or a
     // wildcard (E-MATCH-012).
-    fn plainSubjectCheck(env: TEnv, e: AExpr, subj: AExpr, m: PlainMatch, v: VType, ts: TypeState) -> TypeState {
+    fn plainSubjectCheck(env: TEnv, e: AExpr, subj: AExpr, h: AHandled, m: PlainMatch, v: VType, ts: TypeState) -> TypeState {
         const t: Type | not = knownOf(v)
         if (t is not) return ts
         const inner: Type = unMaybe(t)
@@ -37747,6 +37828,7 @@ ${
             const ns: Sym | not = namedOf(inner)
             let same = false
             if (ns is given) same = ns.id == es.id
+            if (!same && handledIsTest(h)) return testSubjectMismatch(env, subj, h, t, inner, out)
             if (!same) out = report(out, env, subj.span, "E-TYPE-VARIANT", "the arms are variants of `" + es.hint + "`, but the subject is `" + typeName(t) + "` (§18.13)")
         }
         if (m.kind == 1 && k != 2) out = report(out, env, subj.span, "E-TYPE-001", "the arms are string literals, but the subject is `" + typeName(t) + "` (§18.16)")
