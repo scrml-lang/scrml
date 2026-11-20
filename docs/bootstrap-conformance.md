@@ -13,28 +13,28 @@ Scope: **1953 of 1953 cases attempted** — every attempted case reached the pur
 |---|---:|---:|
 | PASS | 760 | 38.9% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 0 | 0.0% |
+| FAIL | 10 | 0.5% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 638 | 32.7% |
+| NOT-TWINNED | 628 | 32.2% |
 | UNSUPPORTED | 555 | 28.4% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 760; of those, 760 hold (100.0%). Runtime half executed on the bootstrap for 244 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 770; of those, 760 hold (98.7%). Runtime half executed on the bootstrap for 244 case(s).
 
-- **Vacuous** passes: 16 of 760 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **744**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 0 of 0; the other 0 are implemented checks that answered wrong.
+- **Vacuous** passes: 15 of 760 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **745**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 1 of 10; the other 9 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
 UNSUPPORTED by reason: bootstrap-unsupported 555.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **900** — PASS 487 · UNSUPPORTED 413. Twin holds 487 (non-vacuous 474). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **910** — PASS 487 · FAIL 10 · UNSUPPORTED 413. Twin holds 487 (non-vacuous 475). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 7 replace a twin's expectations · 14 exclude a case.
 - Superseded-code mappings applied: 8 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (638 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (628 cases; a case counts once per distinct reason):
 
 - 107 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
 - 74 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -44,7 +44,6 @@ NOT-TWINNED by reason (638 cases; a case counts once per distinct reason):
 - 51 — rhs-decl: field of a compound cell (Tier 2 — `…` rewrite owed)
 - 49 — rhs-decl: `…` initializer needs a type (CTX — O35)
 - 41 — rhs-decl: declaration in a markup position (⚑ O38)
-- 39 — unwrap-logic: top-level `…` holding a legacy declaration also holds a `…` statement, which impl#1 reads differently outside `…` (S441) — not unwrapped
 - 33 — rhs-decl: empty `…` needs an element type (CTX — O35)
 - 32 — const-cell: non-literal initializer needs a type (CTX — O35)
 - 18 — engine-simple: `…` names the engine itself (§51.0.X — cross-file `…` mounting); §66.21 row 4 rewrites only `…` / `…` — left untouched
@@ -52,6 +51,7 @@ NOT-TWINNED by reason (638 cases; a case counts once per distinct reason):
 - 14 — excluded by dialect.s66
 - 13 — const-cell: initializer extent could not be verified against impl#1's AST
 - 13 — rhs-decl: declaration text not found at the AST site
+- 13 — unwrap-logic: top-level `…` holding a legacy declaration also holds a `…` statement, which impl#1 reads differently outside `…` (S441), and the block cannot be split around the declarations (no declaration in it is rewritten) — not unwrapped
 - 12 — engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - 11 — rhs-decl: non-literal initializer needs a type (CTX — O35)
 - 10 — engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
@@ -64,19 +64,25 @@ NOT-TWINNED by reason (638 cases; a case counts once per distinct reason):
 - 6 — engine-simple: nested engine (→ enum-valued child field, structural)
 - 6 — program-wrap: impl#1 reads the restructured file differently (+E-FOREIGN-LANG-IN-PROGRAM) — not restructured, no `…` unwrapped
 - 6 — program-wrap: top-level prose (a `…` body reads it as code — §4.18.1 / S441)
+- 6 — unwrap-logic: top-level `…` holding a legacy declaration also holds a `…` statement, which impl#1 reads differently outside `…` (S441), and the block cannot be split around the declarations (its statements cannot be placed) — not unwrapped
 - 5 — engine-simple: engine without a bare-variant `…`
 - 5 — program-wrap: a `…` the front end does not recognize as the root (malformed source)
 - 5 — rhs-decl: bare variant .X declared by N enums (needs a type)
 - 5 — rhs-decl: typed declaration with no initializer (Shape 4 — O31/O33)
+- 4 — unwrap-logic: top-level `…` holding a legacy declaration not unwrapped: the declaration on line 3 would be seeded when the program is constructed — after every file-scope `…` / `…` initializer (the bootstrap evaluates them all at module initialization) and before the body's statements, interpolations and component instances (impl#1 runs all of it in source order), and the statement on line 2 is not provably free of writes and calls — moving it could change the value it reads
 - 3 — engine-simple: declaration at the root of a file with no `…` (its §66 opener would be free-text there)
 - 3 — program-move: `…` outside `…` (where it renders is not mechanical)
 - 3 — rhs-decl: Shape 2 `…` (→ `…`, CTX — ⚑ O25)
 - 3 — rhs-decl: initializer extent could not be verified against impl#1's AST
 - 3 — rhs-decl: type `…` has a space at its top level that is not a union's `…` — how it stands in an opener is not ruled (§66.2.4 rules refinement / lifecycle / union types only)
+- 3 — unwrap-logic: top-level `…` holding a legacy declaration also holds a `…` statement, which impl#1 reads differently outside `…` (S441), and the block cannot be split around the declarations (the declaration on line 8 would be seeded when the program is constructed — after every file-scope `…` / `…` initializer (the bootstrap evaluates them all at module initialization) and before the body's statements, interpolations and component instances (impl#1 runs all of it in source order), and the statement on line 3 is not provably free of writes and calls — moving it could change the value it reads) — not unwrapped
+- 3 — unwrap-logic: top-level `…` holding a legacy declaration not unwrapped: the declaration on line 6 would be seeded when the program is constructed — after every file-scope `…` / `…` initializer (the bootstrap evaluates them all at module initialization) and before the body's statements, interpolations and component instances (impl#1 runs all of it in source order); a moved initializer is not provably free of writes and calls, so no code may change sides of its seed — and the statement on line 5 would (moving it could change the value either one reads)
 - 2 — const-cell: declaration in a markup position (⚑ O38)
 - 2 — engine-simple: engine surface beyond the simple rule: effect (⚑ O5 surface)
 - 2 — engine-simple: engine surface beyond the simple rule: if (⚑ O5 surface)
 - 2 — program-move: impl#1 reads the restructured file differently (+E-IMPORT-003) — not restructured, no `…` unwrapped
+- 2 — unwrap-logic: top-level `…` holding a legacy declaration also holds a `…` statement, which impl#1 reads differently outside `…` (S441), and the block cannot be split around the declarations (the declaration on line 2 would be seeded when the program is constructed — after every file-scope `…` / `…` initializer (the bootstrap evaluates them all at module initialization) and before the body's statements, interpolations and component instances (impl#1 runs all of it in source order), and the file-scope binding on line 3 is not provably free of writes and calls — moving it could change the value it reads) — not unwrapped
+- 2 — unwrap-logic: top-level `…` holding a legacy declaration not unwrapped: the declaration on line 13 would be seeded when the program is constructed — after every file-scope `…` / `…` initializer (the bootstrap evaluates them all at module initialization) and before the body's statements, interpolations and component instances (impl#1 runs all of it in source order), and the statement on line 11 is not provably free of writes and calls — moving it could change the value it reads
 - 1 — const-cell: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
 - 1 — engine-simple: `…` impl#1's front end did not surface as an engine declaration (left untouched)
 - 1 — engine-simple: engine surface beyond the simple rule: effect, derived (⚑ O5 surface)
@@ -95,6 +101,19 @@ NOT-TWINNED by reason (638 cases; a case counts once per distinct reason):
 - 1 — rhs-decl: opener attribute `…` has no mechanical §66 spelling
 - 1 — unwrap-logic: impl#1 reads the restructured file differently (+E-TYPE-046) — not restructured, no `…` unwrapped
 - 1 — unwrap-logic: impl#1 reads the restructured file differently (+W-INTERP-IN-RAW-CONTENT) — not restructured, no `…` unwrapped
+- 1 — unwrap-logic: top-level `…` holding a legacy declaration also holds a `…` statement, which impl#1 reads differently outside `…` (S441), and the block cannot be split around the declarations (the declaration on line 2 would be seeded when the program is constructed — after every file-scope `…` / `…` initializer (the bootstrap evaluates them all at module initialization) and before the body's statements, interpolations and component instances (impl#1 runs all of it in source order), and the file-scope binding on line 7 is not provably free of writes and calls — moving it could change the value it reads) — not unwrapped
+- 1 — unwrap-logic: top-level `…` holding a legacy declaration also holds a `…` statement, which impl#1 reads differently outside `…` (S441), and the block cannot be split around the declarations (the declaration on line 5 would be seeded when the program is constructed — after every file-scope `…` / `…` initializer (the bootstrap evaluates them all at module initialization) and before the body's statements, interpolations and component instances (impl#1 runs all of it in source order), and the file-scope binding on line 23 is not provably free of writes and calls — moving it could change the value it reads) — not unwrapped
+- 1 — unwrap-logic: top-level `…` holding a legacy declaration not unwrapped: the declaration on line 10 would be seeded when the program is constructed — after every file-scope `…` / `…` initializer (the bootstrap evaluates them all at module initialization) and before the body's statements, interpolations and component instances (impl#1 runs all of it in source order), and the statement on line 5 is not provably free of writes and calls — moving it could change the value it reads
+- 1 — unwrap-logic: top-level `…` holding a legacy declaration not unwrapped: the declaration on line 2 would be seeded when the program is constructed — after every file-scope `…` / `…` initializer (the bootstrap evaluates them all at module initialization) and before the body's statements, interpolations and component instances (impl#1 runs all of it in source order), and the a `…` block on line 4 is not provably free of writes and calls — moving it could change the value it reads
+- 1 — unwrap-logic: top-level `…` holding a legacy declaration not unwrapped: the declaration on line 2 would be seeded when the program is constructed — after every file-scope `…` / `…` initializer (the bootstrap evaluates them all at module initialization) and before the body's statements, interpolations and component instances (impl#1 runs all of it in source order), and the file-scope binding on line 4 is not provably free of writes and calls — moving it could change the value it reads
+- 1 — unwrap-logic: top-level `…` holding a legacy declaration not unwrapped: the declaration on line 3 would be seeded when the program is constructed — after every file-scope `…` / `…` initializer (the bootstrap evaluates them all at module initialization) and before the body's statements, interpolations and component instances (impl#1 runs all of it in source order), and the expression on line 11 is not provably free of writes and calls — moving it could change the value it reads
+- 1 — unwrap-logic: top-level `…` holding a legacy declaration not unwrapped: the declaration on line 4 would be seeded when the program is constructed — after every file-scope `…` / `…` initializer (the bootstrap evaluates them all at module initialization) and before the body's statements, interpolations and component instances (impl#1 runs all of it in source order); a moved initializer is not provably free of writes and calls, so no code may change sides of its seed — and the statement on line 3 would (moving it could change the value either one reads)
+- 1 — unwrap-logic: top-level `…` holding a legacy declaration not unwrapped: the declaration on line 6 would be seeded when the program is constructed — after every file-scope `…` / `…` initializer (the bootstrap evaluates them all at module initialization) and before the body's statements, interpolations and component instances (impl#1 runs all of it in source order), and the statement on line 4 is not provably free of writes and calls — moving it could change the value it reads
+- 1 — unwrap-logic: top-level `…` holding a legacy declaration not unwrapped: the declaration on line 6 would be seeded when the program is constructed — after every file-scope `…` / `…` initializer (the bootstrap evaluates them all at module initialization) and before the body's statements, interpolations and component instances (impl#1 runs all of it in source order), and the statement on line 5 is not provably free of writes and calls — moving it could change the value it reads
+- 1 — unwrap-logic: top-level `…` holding a legacy declaration not unwrapped: the declaration on line 6 would be seeded when the program is constructed — after every file-scope `…` / `…` initializer (the bootstrap evaluates them all at module initialization) and before the body's statements, interpolations and component instances (impl#1 runs all of it in source order); a moved initializer is not provably free of writes and calls, so no code may change sides of its seed — and the statement on line 4 would (moving it could change the value either one reads)
+- 1 — unwrap-logic: top-level `…` holding a legacy declaration not unwrapped: the declaration on line 7 would be seeded when the program is constructed — after every file-scope `…` / `…` initializer (the bootstrap evaluates them all at module initialization) and before the body's statements, interpolations and component instances (impl#1 runs all of it in source order); a moved initializer is not provably free of writes and calls, so no code may change sides of its seed — and the statement on line 6 would (moving it could change the value either one reads)
+- 1 — unwrap-logic: top-level `…` holding a legacy declaration not unwrapped: the declaration on line 8 would be seeded when the program is constructed — after every file-scope `…` / `…` initializer (the bootstrap evaluates them all at module initialization) and before the body's statements, interpolations and component instances (impl#1 runs all of it in source order); a moved initializer is not provably free of writes and calls, so no code may change sides of its seed — and the statement on line 5 would (moving it could change the value either one reads)
+- 1 — unwrap-logic: top-level `…` holding a legacy declaration not unwrapped: the declaration on line 9 would be seeded when the program is constructed — after every file-scope `…` / `…` initializer (the bootstrap evaluates them all at module initialization) and before the body's statements, interpolations and component instances (impl#1 runs all of it in source order); a moved initializer is not provably free of writes and calls, so no code may change sides of its seed — and the statement on line 6 would (moving it could change the value either one reads)
 
 ### Per area (case directory)
 
@@ -108,11 +127,11 @@ NOT-TWINNED by reason (638 cases; a case counts once per distinct reason):
 | body-top | 27 | 20 | · | · | · | 1 | 6 | · | · |
 | capability | 12 | 7 | · | · | · | · | 5 | · | · |
 | channel | 49 | 11 | · | · | · | 37 | 1 | · | · |
-| codegen | 4 | 1 | · | · | · | 3 | · | · | · |
+| codegen | 4 | 1 | · | 1 | · | 1 | 1 | · | · |
 | components | 72 | 5 | · | · | · | 65 | 2 | · | · |
 | condition | 37 | 26 | · | · | · | 2 | 9 | · | · |
-| control-flow | 76 | 43 | · | · | · | 24 | 9 | · | · |
-| defer | 51 | 26 | · | · | · | 4 | 21 | · | · |
+| control-flow | 76 | 43 | · | 2 | · | 22 | 9 | · | · |
+| defer | 51 | 26 | · | 2 | · | 1 | 22 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 26 | 1 | · | · | · | 25 | · | · | · |
 | element-refusal | 39 | 26 | · | · | · | 11 | 2 | · | · |
@@ -131,15 +150,15 @@ NOT-TWINNED by reason (638 cases; a case counts once per distinct reason):
 | input | 2 | · | · | · | · | · | 2 | · | · |
 | lifecycle | 69 | 35 | · | · | · | 22 | 12 | · | · |
 | linear | 16 | 6 | · | · | · | · | 10 | · | · |
-| loop | 8 | 3 | · | · | · | 3 | 2 | · | · |
+| loop | 8 | 3 | · | 1 | · | 2 | 2 | · | · |
 | maps | 13 | · | · | · | · | 13 | · | · | · |
 | markup-handler | 89 | 36 | · | · | · | 40 | 13 | · | · |
 | match-block | 23 | 12 | · | · | · | 6 | 5 | · | · |
 | match-codes | 31 | 22 | · | · | · | · | 9 | · | · |
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
-| match-leave | 46 | 19 | · | · | · | 12 | 15 | · | · |
+| match-leave | 46 | 20 | · | 2 | · | 9 | 15 | · | · |
 | md | 18 | 1 | · | · | · | 3 | 14 | · | · |
-| meta | 66 | 1 | · | · | · | 1 | 64 | · | · |
+| meta | 66 | 1 | · | · | · | 2 | 63 | · | · |
 | middleware | 6 | 3 | · | · | · | · | 3 | · | · |
 | module | 51 | 30 | · | · | · | 11 | 10 | · | · |
 | navigate | 3 | · | · | · | · | · | 3 | · | · |
@@ -152,7 +171,7 @@ NOT-TWINNED by reason (638 cases; a case counts once per distinct reason):
 | print | 1 | 1 | · | · | · | · | · | · | · |
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
 | raw-content | 9 | 8 | · | · | · | 1 | · | · | · |
-| reactive | 135 | 82 | · | · | · | 44 | 9 | · | · |
+| reactive | 135 | 81 | · | 2 | · | 44 | 8 | · | · |
 | refinement | 57 | 18 | · | · | · | 23 | 16 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 13 | 8 | · | · | · | · | 5 | · | · |
@@ -167,9 +186,35 @@ NOT-TWINNED by reason (638 cases; a case counts once per distinct reason):
 | tool | 12 | 12 | · | · | · | · | · | · | · |
 | type-state-codes | 32 | 13 | · | · | · | 6 | 13 | · | · |
 
-### FAIL (0)
+### FAIL (10)
 
-none
+- `codegen/reserved-prefix-double-underscore-pos` (twin · parse-reject)
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `1`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+- `control-flow/ctrl-011-for-in-neg` (twin · parse-reject)
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `x`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+- `control-flow/loop-007-separate-while-after-decl-neg` (twin · parse-reject)
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `5`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+  - E-LOOP-WHILE-RETIRED: `while` is not a scrml loop — write `for (cond) { … }`: a `for` with a condition head runs while the condition is true (§49.1, §49.4.1)
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `1`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+- `defer/outside-function-neg` (twin · parse-reject)
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `5`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+- `defer/outside-function-when-body-neg` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-EFFECT-WRITES-STATE, E-PARAM-TYPE-REQUIRED
+- `loop/w-assign-001-severity-pos` (twin · parse-reject; not in the bootstrap: W-ASSIGN-001)
+  - missing W-ASSIGN-001
+  - severity: W-ASSIGN-001 did not fire (expected warning)
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `0`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+  - E-LOOP-DO-WHILE-RETIRED: `do … while` is not a scrml loop — write a body-first `for { …; if (done) { break } }`, or, when the body uses `continue`, `for (let first = true; first || cond; first = false) { … }` (§49.3.6)
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `1`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+- `match-leave/top-level-given-guard-return-neg` (twin · parse-reject)
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `return`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+- `match-leave/top-level-if-return-neg` (twin · parse-reject)
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `return`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+- `reactive/is-literal-rhs-reject` (twin · parse-reject)
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+- `reactive/reset-init-after-assignment-in-if-rt` (twin · parse-reject)
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `1`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
+  - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `)`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
 
 ### CRASH (0)
 
@@ -687,6 +732,7 @@ none
 - `match-leave/stmt-arm-braced-break-continue-loop` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `match-leave/stmt-arm-braced-fail-propagates` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `match-leave/stmt-arm-braced-return-leaves-fn` — PASS · TWIN (also emitted, unasserted: E-DG-002)
+- `match-leave/top-level-match-arm-return-neg` — PASS · TWIN
 - `match-leave/value-arm-leave-word-in-string-not-a-leave` — PASS · TWIN
 - `md/in-logic-markup-refused` — PASS · TWIN
 - `meta/meta-reflect-outside-block-neg` — PASS · TWIN
@@ -775,7 +821,6 @@ none
 - `reactive/dg-002-no-readers-neg` — PASS · TWIN
 - `reactive/dg-002-no-readers-pos` — PASS · TWIN
 - `reactive/fn-mutual-recursion-hoist` — PASS · TWIN
-- `reactive/hoist-forward-ref-neg` — PASS · TWIN · VACUOUS
 - `reactive/if-top-level-absent` — PASS · TWIN
 - `reactive/if-wiring-bearing-subtree-absent` — PASS · TWIN
 - `reactive/if-wiring-bearing-subtree-mounts` — PASS · TWIN
@@ -1018,6 +1063,7 @@ none
 - `capability/inline-block-undeclared` — bootstrap-unsupported: a foreign code block in a web application's server function — read and checked (§23.2.4), but its emission there (a sealed, server-side slice of its `in:{}` crossings, awaited at the boundary, §23.2.3
 - `capability/undeclared-with-foreign` — bootstrap-unsupported: `use foreign:` (§23.4) is not in the bootstrap yet; it is refused here by name rather than misread
 - `channel/watches-broadcast-member-call-ok` — bootstrap-unsupported: `.broadcast(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.revers
+- `codegen/reserved-prefix-double-underscore-neg` — twin · bootstrap-unsupported: `.then(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.reverse()` 
 - `components/invalid-prop-decl-syntax-clean` — bootstrap-unsupported: `props={…}` on `<div>` — a `{…}` value on an attribute that is not an event handler is one expression (§5.2.4), which the bootstrap does not lower; it would be written as `props=""` and the value drop
 - `components/invalid-prop-decl-syntax-reject` — bootstrap-unsupported: `props={…}` on `<div>` — a `{…}` value on an attribute that is not an event handler is one expression (§5.2.4), which the bootstrap does not lower; it would be written as `props=""` and the value drop
 - `condition/given-cell-guard-multi-all-or-nothing-pos` — twin · bootstrap-unsupported: the markup presence guard `given @a, @b :> { … }` (§42.2.3, deprecated) is not in the bootstrap — write `${ if (@a is given) { … } }` (its canonical form), or `<p if=@a>…</p>`.
@@ -1049,6 +1095,7 @@ none
 - `defer/deferred-server-call-completes` — twin · bootstrap-unsupported: a client call of the server function `ping` (§19.9.10) stands in a `defer` body — a deferred body cannot wait (C16; §19.16.6 async `defer` arrives with its own slice)
 - `defer/hoist-structural` — twin · bootstrap-unsupported: a tape destructuring pattern `[x, y]` is not in the bootstrap yet — whether a pattern longer than the tape traps like an index read (§66.12.8) or binds `not` is unruled; read the elements by index: `c
 - `defer/hoist-structural-twin` — twin · bootstrap-unsupported: a tape destructuring pattern `[x, y]` is not in the bootstrap yet — whether a pattern longer than the tape traps like an index read (§66.12.8) or binds `not` is unruled; read the elements by index: `c
+- `defer/later-shadow-neg` — twin · bootstrap-unsupported: member access `.a` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `defer/nested-fn-handler-in-defer` — twin · bootstrap-unsupported: a nested `function inner` inside a block of the function body (an `if`, a loop, a `match` arm, a `given` or `defer` body) — the bootstrap builds a nested function only at the TOP LEVEL of a function b
 - `defer/nested-fn-handler-in-defer-twin` — twin · bootstrap-unsupported: a failable nested function `function inner(…)!` — the language allows it (§7.3.1, §19.4); the bootstrap does not build a nested `!` function yet (INTERIM — its failures, `?` propagation and transactio
 - `defer/return-value-contents-not-frozen` — twin · bootstrap-unsupported: `o.a = …` writes a part of `o`, whose type is not known here — annotate it (`let o: T = …`)
@@ -1225,7 +1272,6 @@ none
 - `meta/meta-allow-list-clean-pos` — twin · bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
 - `meta/meta-allow-list-computed-key-neg` — twin · bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
 - `meta/meta-allow-list-constructor-neg` — twin · bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-allow-list-runtime-host-neg` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
 - `meta/meta-compiler-namespace-neg` — twin · bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
 - `meta/meta-emit-bare-scope-attr-neg` — bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
 - `meta/meta-emit-clean-pos` — twin · bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
@@ -1346,7 +1392,6 @@ none
 - `reactive/narrowing-ends-destructured-callee-reject` — twin · bootstrap-unsupported: `clear` (a function named without a call) stands where the bootstrap does not build a function value — a function value may be bound (`const f = …` / `let f = …`, or `f = …` to such a local), passed a
 - `reactive/narrowing-survives-builtin-call-pos` — twin · bootstrap-unsupported: `.max(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.some(x => …)` / `.every(x => …)` / `.includes(x)` / `.sort(…)` / `.reverse()` /
 - `reactive/optional-member-access-block-arrow-reject` — twin · bootstrap-unsupported: a write to something the callback body did not declare (a cell, a captured local, or a part of a value) in the body of a block-bodied callback is not in the bootstrap (INTERIM — the language allows it
-- `reactive/pinned-forward-ref` — twin · bootstrap-unsupported: `pinned` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
 - `reactive/reset-to-default` — twin · bootstrap-unsupported: `default` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
 - `reactive/server-fn-ambient-identity-clean` — twin · bootstrap-unsupported: `@currentUser` (§52.15.1) is not in the bootstrap yet; it is refused here by name rather than misread — read the session in a server function and pass the value in
 - `reactive/server-fn-authority-wholly-server-error` — twin · bootstrap-unsupported: `server` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
@@ -1500,7 +1545,7 @@ none
 - `type-state-codes/e-value-function-stored-neg` — twin · bootstrap-unsupported: `map literal [k: v]` (§59) is not in the bootstrap yet; it is refused here by name rather than misread — maps (§59, O44) are not in the bootstrap
 - `type-state-codes/e-value-function-stored-pos` — twin · bootstrap-unsupported: `twice` (a function named without a call) stands where the bootstrap does not build a function value — a function value may be bound (`const f = …` / `let f = …`, or `f = …` to such a local), passed a
 
-### NOT-TWINNED (638)
+### NOT-TWINNED (628)
 
 - `attr-executable-sink/component-prop-substituted-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `attr-executable-sink/event-attr-interp-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -1564,12 +1609,10 @@ none
 - `channel/server-fn-uses-arg` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
 - `channel/shared-modifier-absent` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
 - `channel/sibling-of-page` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
-- `channel/watches-52-authority-shape` — not mechanical: rhs-decl: declaration text not found at the AST site · unwrap-logic: top-level `${}` holding a legacy declaration also holds a `state-constructor-def` statement, which impl#1 reads differently outside `${}` (S441) — not unwr
+- `channel/watches-52-authority-shape` — not mechanical: rhs-decl: declaration text not found at the AST site · unwrap-logic: top-level `${}` holding a legacy declaration also holds a `state-constructor-def` statement, which impl#1 reads differently outside `${}` (S441), and the b
 - `channel/watches-client-write` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
 - `channel/watches-derived-const-ok` — not mechanical: const-cell: declaration in a markup position (⚑ O38)
 - `codegen/cg-001-server-block-warn-pos` — not mechanical: program-move: `markup <p>` outside `<program>` (where it renders is not mechanical)
-- `codegen/reserved-prefix-double-underscore-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `const-decl` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
-- `codegen/reserved-prefix-double-underscore-pos` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `const-decl` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
 - `components/ambient-engine-cell` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/bind-non-bindable-prop-clean` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/bind-non-bindable-prop-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
@@ -1642,29 +1685,24 @@ none
 - `control-flow/ctrl-004-orphan-else-on-state-opener-pos` — not mechanical: spaced-state-opener: legacy state-object opener — no §66 fix rule rewrites it (§4.2/§4.3; INTERIM, g-boot-spaced-state-opener-s478)
 - `control-flow/ctrl-010-else-on-for-in-if-chain-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `control-flow/ctrl-010-else-on-for-without-lift-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
-- `control-flow/ctrl-011-for-in-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `for-stmt` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
 - `control-flow/ctrl-011-for-in-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants) · unwrap-logic: top-level `${}` holding a legacy declaration also holds a `for-stmt` statement, which impl#1 reads differently o
 - `control-flow/ctrl-012-bare-control-flow-in-markup-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `control-flow/ctrl-013-braceless-for-of-head-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `control-flow/ctrl-017-show-ssr-hide-variant-render-no-hide-pos` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
-- `control-flow/ctrl-018-show-ssr-hide-module-init-write-fail-open-pos` — not mechanical: rhs-decl: declaration text not found at the AST site · unwrap-logic: top-level `${}` holding a legacy declaration also holds a `state-constructor-def` statement, which impl#1 reads differently outside `${}` (S441) — not unwr
-- `control-flow/ctrl-019-show-ssr-hide-spelling-parity-pos` — not mechanical: rhs-decl: declaration text not found at the AST site · unwrap-logic: top-level `${}` holding a legacy declaration also holds a `state-constructor-def` statement, which impl#1 reads differently outside `${}` (S441) — not unwr
+- `control-flow/ctrl-018-show-ssr-hide-module-init-write-fail-open-pos` — not mechanical: rhs-decl: declaration text not found at the AST site · unwrap-logic: top-level `${}` holding a legacy declaration also holds a `state-constructor-def` statement, which impl#1 reads differently outside `${}` (S441), and the b
+- `control-flow/ctrl-019-show-ssr-hide-spelling-parity-pos` — not mechanical: rhs-decl: declaration text not found at the AST site · unwrap-logic: top-level `${}` holding a legacy declaration also holds a `state-constructor-def` statement, which impl#1 reads differently outside `${}` (S441), and the b
 - `control-flow/ctrl-020-show-ssr-hide-no-duplicate-style-pos` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · rhs-decl: declaration text not found at the AST site · unwrap-logic: top-level `${}` holding a legacy declaration also holds a `st
 - `control-flow/ctrl-switch-forbidden-match-neg-newline-list` — excluded (dialect.s66): impl#1-only guard (s469-impl1-arm-commas): the arm list is written NEWLINE-separated on purpose, to keep impl#1's carried newline-list reading covered after the conformance comma migration; the bootstrap enforces the
-- `control-flow/if-on-each-render-gate-absent-rt` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
-- `control-flow/if-on-each-render-gate-unmounts-rt` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `control-flow/if-on-each-render-gate-absent-rt` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35) · unwrap-logic: top-level `${}` holding a legacy declaration not unwrapped: the declaration on line 3 would be seeded when the program is constructed — 
+- `control-flow/if-on-each-render-gate-unmounts-rt` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35) · unwrap-logic: top-level `${}` holding a legacy declaration not unwrapped: the declaration on line 3 would be seeded when the program is constructed — 
 - `control-flow/if-on-engine-render-gate-absent-rt` — not mechanical: engine-simple: engine surface beyond the simple rule: if (⚑ O5 surface)
 - `control-flow/if-on-engine-render-gate-mounts-rt` — not mechanical: engine-simple: engine surface beyond the simple rule: if (⚑ O5 surface)
-- `control-flow/loop-007-separate-while-after-decl-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `let-decl` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
-- `control-flow/loop-007-while-as-expr-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `while-stmt` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
-- `control-flow/loop-007-while-as-expr-no-lift-pos` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `let-decl` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
-- `control-flow/loop-007-while-as-expr-pos` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `let-decl` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
+- `control-flow/loop-007-while-as-expr-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `while-stmt` statement, which impl#1 reads differently outside `${}` (S441), and the block cannot be split around the declarations (the declaration on l
+- `control-flow/loop-007-while-as-expr-no-lift-pos` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `let-decl` statement, which impl#1 reads differently outside `${}` (S441), and the block cannot be split around the declarations (the declaration on lin
+- `control-flow/loop-007-while-as-expr-pos` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `let-decl` statement, which impl#1 reads differently outside `${}` (S441), and the block cannot be split around the declarations (the declaration on lin
 - `control-flow/markup-if-presence-arm-reads-rerender-pos` — not mechanical: rhs-decl: anonymous record type annotation (no §66 spelling — a named `:struct` is owed)
 - `control-flow/markup-statement-not-rendered-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
-- `defer/later-shadow-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `const-decl` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
-- `defer/outside-function-component-handler-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
-- `defer/outside-function-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `defer-stmt` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
-- `defer/outside-function-when-body-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `when-effect` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
+- `defer/outside-function-component-handler-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · unwrap-logic: top-level `${}` holding a legacy declaration not unwrapped: the declaration on line 2 would be seeded when the progr
 - `derived/chain` — not mechanical: const-cell: non-literal initializer needs a type (CTX — O35)
 - `derived/diamond` — not mechanical: const-cell: non-literal initializer needs a type (CTX — O35)
 - `derived/e-derived-server-only-reach-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35) · const-cell: non-literal initializer needs a type (CTX — O35)
@@ -1675,7 +1713,7 @@ none
 - `each/each-body-decl-unsupported-pos` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `each/empty-fallback` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
 - `each/empty-teardown` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
-- `each/for-lift-list` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
+- `each/for-lift-list` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35) · unwrap-logic: top-level `${}` holding a legacy declaration not unwrapped: the declaration on line 3 would be seeded when the program is constructed — after every file-
 - `each/for-lift-per-item-if-reactive/create-time-absence` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `each/for-lift-per-item-if-reactive/flip-false-true` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `each/for-lift-per-item-if-reactive/flip-true-false` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -1692,7 +1730,7 @@ none
 - `each/shorthand-longhand-parity-rcdata` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `each/shorthand-option-label-preserved` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `each/shorthand-restricted-textarea` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
-- `each/ternary-markup-giti033` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `each/ternary-markup-giti033` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35) · unwrap-logic: top-level `${}` holding a legacy declaration not unwrapped: the declaration on line 3 would be seeded when the program is constructed — 
 - `each/when-changes-in-row-body` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `each/when-changes-in-row-body-no-write` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `element-refusal/component-body-script-pos` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
@@ -1846,7 +1884,6 @@ none
 - `lifecycle/when-dep-derived-error` — not mechanical: render-by-tag: markup tag `<p>` shares a cell's name — render-by-tag (→ `<*p/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · const-cell: non-literal initializer needs a type 
 - `loop/loop-006-pos` — not mechanical: program-wrap: impl#1 reads the restructured file differently (-E-LOOP-006) — not restructured, no `${}` unwrapped
 - `loop/loop-reactive-plain-fn` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
-- `loop/w-assign-001-severity-pos` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `let-decl` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
 - `maps/bracket-read-miss-rt` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `maps/bracket-write-inline-handler-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `maps/bracket-write-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
@@ -1914,14 +1951,12 @@ none
 - `match-leave/engine-msg-arm-inner-loop-and-default-param-pos` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - `match-leave/engine-msg-arm-return-neg` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - `match-leave/expr-arm-continuation-joins` — excluded (dialect.s66): impl#1-legacy newline shape (S469, dpa-073 F5): pins impl#1's continuation of a single-expression arm body past a line break that ends in `+` (`.Boom(m) :> "a:" +⏎ m,`). The arm-comma codemod (f0c9d4bb7) gave the arm
-- `match-leave/given-arm-in-derived-match` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
-- `match-leave/top-level-given-guard-return-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `given-guard` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
-- `match-leave/top-level-if-return-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `if-stmt` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
-- `match-leave/top-level-match-arm-return-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `match-stmt` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
-- `match-leave/top-level-raw-and-handler-arm-return-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `match-stmt` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
+- `match-leave/given-arm-in-derived-match` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST · unwrap-logic: top-level `${}` holding a legacy declaration not unwrapped: the declaration on line 10 would be seeded when the program is constructed
+- `match-leave/top-level-raw-and-handler-arm-return-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `match-stmt` statement, which impl#1 reads differently outside `${}` (S441), and the block cannot be split around the declarations (the declaration on l
 - `md/component-body-md` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `md/component-text-slot-in-each` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `md/each-row-md` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `meta/meta-allow-list-runtime-host-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration not unwrapped: the declaration on line 2 would be seeded when the program is constructed — after every file-scope `let` / `const` initializer (the bootstrap evaluate
 - `meta/meta-lift-in-block-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `module/e-export-003-attr-conflict-reject` — excluded (dialect.s66): S478 open-Qs ruling (user-voice) item 26 (2): in the §66 dialect `export <Card title:string> … </Card>` reads as a §66 declaration export (§66.2.5 — `title:string` a field), not a §21.2 Form 1 component export, and F
 - `module/e-export-003-attr-distinct-clean` — excluded (dialect.s66): S478 open-Qs ruling (user-voice) item 26 (2): in the §66 dialect `export <Card title:string> … </Card>` reads as a §66 declaration export (§66.2.5 — `title:string` a field), not a §21.2 Form 1 component export, and F
@@ -1994,7 +2029,7 @@ none
 - `reactive/decl-array-no-rhs-plain-neg` — not mechanical: rhs-decl: typed declaration with no initializer (Shape 4 — O31/O33)
 - `reactive/decl-needs-initializer-array-pos` — excluded (dialect.s66): the case's subject is a legacy form itself: a `const <x>: T[]` with no right-hand side (E-DECL-NEEDS-INITIALIZER, §6.2 Shape 4 / §6.6) has no §66 spelling to twin; a §66 case for the opener-form replacement is owed (
 - `reactive/decl-needs-initializer-pos` — excluded (dialect.s66): the case's subject is a legacy form itself: `const <doubled>: int` with no right-hand side (E-DECL-NEEDS-INITIALIZER, §6.2 Shape 4 / §6.6) has no §66 spelling to twin; a §66 case for the opener-form replacement is ow
-- `reactive/decl-rhs-interp-wrapped-neg` — not mechanical: rhs-decl: non-literal initializer needs a type (CTX — O35) · const-cell: non-literal initializer needs a type (CTX — O35)
+- `reactive/decl-rhs-interp-wrapped-neg` — not mechanical: rhs-decl: non-literal initializer needs a type (CTX — O35) · const-cell: non-literal initializer needs a type (CTX — O35) · unwrap-logic: top-level `${}` holding a legacy declaration not unwrapped: the declaration on line 6 
 - `reactive/decl-rhs-interp-wrapped-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants) · rhs-decl: initializer extent could not be verified against impl#1's AST · const-cell: initializer extent could not be verified
 - `reactive/derived-circular-dep-mutual` — not mechanical: const-cell: non-literal initializer needs a type (CTX — O35)
 - `reactive/derived-circular-dep-self` — not mechanical: const-cell: non-literal initializer needs a type (CTX — O35)
@@ -2004,7 +2039,7 @@ none
 - `reactive/derived-value-mutate-neg` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35) · const-cell: non-literal initializer needs a type (CTX — O35)
 - `reactive/derived-value-mutate-pos` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35) · const-cell: non-literal initializer needs a type (CTX — O35)
 - `reactive/derived-write-reassign` — not mechanical: const-cell: non-literal initializer needs a type (CTX — O35)
-- `reactive/is-literal-rhs-reject` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `if-stmt` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
+- `reactive/hoist-forward-ref-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration not unwrapped: the declaration on line 6 would be seeded when the program is constructed — after every file-scope `let` / `const` initializer (the bootstrap evaluate
 - `reactive/mutating-method-multi-arg-cell-read` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `reactive/mutating-method-string-arg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `reactive/narrowing-renarrows-on-present-write-pos` — not mechanical: unwrap-logic: impl#1 reads the restructured file differently (+E-TYPE-046) — not restructured, no `${}` unwrapped
@@ -2014,10 +2049,10 @@ none
 - `reactive/optional-member-access-not` — not mechanical: rhs-decl: anonymous record type annotation (no §66 spelling — a named `:struct` is owed)
 - `reactive/optional-member-access-render` — not mechanical: rhs-decl: anonymous record type annotation (no §66 spelling — a named `:struct` is owed)
 - `reactive/optional-member-access-show-reject` — not mechanical: rhs-decl: anonymous record type annotation (no §66 spelling — a named `:struct` is owed)
+- `reactive/pinned-forward-ref` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration not unwrapped: the declaration on line 6 would be seeded when the program is constructed — after every file-scope `let` / `const` initializer (the bootstrap evaluate
 - `reactive/reactive-map-insert-bare-variant` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants) · const-cell: non-literal initializer needs a type (CTX — O35)
 - `reactive/reset-compound-all` — not mechanical: rhs-decl: compound cell with child declarations (Tier 2 — `<x:struct>` rewrite owed) · rhs-decl: field of a compound cell (Tier 2 — `<x:struct>` rewrite owed)
 - `reactive/reset-compound-field` — not mechanical: rhs-decl: compound cell with child declarations (Tier 2 — `<x:struct>` rewrite owed) · rhs-decl: field of a compound cell (Tier 2 — `<x:struct>` rewrite owed)
-- `reactive/reset-init-after-assignment-in-if-rt` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `if-stmt` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
 - `reactive/s437-r5-template-cell-read-function-body` — not mechanical: rhs-decl: object literal needs a struct type (CTX)
 - `reactive/server-fn-cps-authority-marshal` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
 - `reactive/server-fn-cps-marshal-derived-warn` — not mechanical: const-cell: non-literal initializer needs a type (CTX — O35) · rhs-decl: empty `[]` needs an element type (CTX — O35)
@@ -2033,24 +2068,24 @@ none
 - `refinement/cell-write-origins-accept-neg` — not mechanical: render-by-tag: markup tag `<p>` shares a cell's name — render-by-tag (→ `<*p/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · rhs-decl: written sequence — its grants are the l
 - `refinement/cell-write-origins-reject-rt` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants) · rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `refinement/copy-in-define-property-reject-rt` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
-- `refinement/copy-in-draft-accept-neg` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `refinement/copy-in-draft-accept-neg` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants) · unwrap-logic: top-level `${}` holding a legacy declaration not unwrapped: the declaration on line 6 would be seeded when the p
 - `refinement/copy-in-raw-ref-accept-neg` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `refinement/copy-in-semantics-accept-neg` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `refinement/edit-buffer-commit-reject-rt` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `refinement/engine-payload-reject-rt` — not mechanical: render-by-tag: markup tag `<p>` shares a cell's name — render-by-tag (→ `<*p/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · program-move: `text` outside `<program>` (where i
-- `refinement/inplace-removal-length-accept-neg` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `refinement/inplace-removal-length-accept-neg` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants) · unwrap-logic: top-level `${}` holding a legacy declaration not unwrapped: the declaration on line 6 would be seeded when the p
 - `refinement/length-grow-holes-reject-rt` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `refinement/range-form-literal-pos` — not mechanical: program-move: impl#1 reads the restructured file differently (-E-CONTRACT-001, +E-CONTRACT-002, +E-CTX-001, +W-WHITESPACE-001) — not restructured, no `${}` unwrapped
 - `refinement/range-form-neg` — not mechanical: program-move: impl#1 reads the restructured file differently (+E-CONTRACT-002, +E-CTX-001, +W-WHITESPACE-001) — not restructured, no `${}` unwrapped
 - `refinement/shared-collection-delta-accept-neg` — not mechanical: render-by-tag: markup tag `<p>` shares a cell's name — render-by-tag (→ `<*p/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · rhs-decl: written sequence — its grants are the l
 - `refinement/shared-collection-delta-reject-rt` — not mechanical: render-by-tag: markup tag `<p>` shares a cell's name — render-by-tag (→ `<*p/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · rhs-decl: written sequence — its grants are the l
-- `refinement/ssr-seed-legit-accept-neg` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants) · rhs-decl: non-literal initializer needs a type (CTX — O35)
-- `refinement/ssr-seed-refused-keeps-initial-rt` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants) · rhs-decl: non-literal initializer needs a type (CTX — O35)
+- `refinement/ssr-seed-legit-accept-neg` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants) · rhs-decl: non-literal initializer needs a type (CTX — O35) · unwrap-logic: top-level `${}` holding a legacy declaration not un
+- `refinement/ssr-seed-refused-keeps-initial-rt` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants) · rhs-decl: non-literal initializer needs a type (CTX — O35) · unwrap-logic: top-level `${}` holding a legacy declaration not un
 - `refinement/subset-dead-arm-pos` — not mechanical: rhs-decl: type `Role oneOf([.Admin, .Editor])` has a space at its top level that is not a union's `|` — how it stands in an opener is not ruled (§66.2.4 rules refinement / lifecycle / union types only) · const-cell: initiali
 - `refinement/subset-narrowed-exhaustive-neg` — not mechanical: rhs-decl: type `Role oneOf([.Admin, .Editor])` has a space at its top level that is not a union's `|` — how it stands in an opener is not ruled (§66.2.4 rules refinement / lifecycle / union types only) · const-cell: initiali
 - `refinement/subset-notin-dead-arm-pos` — not mechanical: rhs-decl: type `Role notIn([.Guest])` has a space at its top level that is not a union's `|` — how it stands in an opener is not ruled (§66.2.4 rules refinement / lifecycle / union types only) · const-cell: initializer exten
 - `refinement/union-nonprimitive-member-accept-neg` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
-- `refinement/union-shaped-member-reject-rt` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `refinement/union-shaped-member-reject-rt` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants) · unwrap-logic: top-level `${}` holding a legacy declaration not unwrapped: the declaration on line 6 would be seeded when the p
 - `route-region/cn10-keepalive-reentry` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
 - `server-db/cps-batch-field-write-refused` — not mechanical: rhs-decl: object literal needs a struct type (CTX)
 - `server-db/sql-aggregate-group-rt` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
@@ -2087,18 +2122,18 @@ none
 - `sql/prepare-ws-onserver-e-sql-006-neg` — not mechanical: rhs-decl: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
 - `ssr/i-ssr-auth-scoped-prerender-omitted-pos` — not mechanical: rhs-decl: declaration text not found at the AST site · spaced-state-opener: legacy state-object opener — no §66 fix rule rewrites it (§4.2/§4.3; INTERIM, g-boot-spaced-state-opener-s478)
 - `ssr/i-ssr-auth-scoped-prerender-rowscoped-neg` — not mechanical: rhs-decl: initializer not parsed by impl#1
-- `ssr/i-ssr-each-client-rendered-author-template-pos` — not mechanical: rhs-decl: declaration text not found at the AST site · unwrap-logic: top-level `${}` holding a legacy declaration also holds a `state-constructor-def` statement, which impl#1 reads differently outside `${}` (S441) — not unwr
-- `ssr/i-ssr-each-client-rendered-if-enclosed-pos` — not mechanical: rhs-decl: declaration text not found at the AST site · unwrap-logic: top-level `${}` holding a legacy declaration also holds a `state-constructor-def` statement, which impl#1 reads differently outside `${}` (S441) — not unwr
-- `ssr/i-ssr-each-client-rendered-if-gate-bypass-neg` — not mechanical: rhs-decl: declaration text not found at the AST site · unwrap-logic: top-level `${}` holding a legacy declaration also holds a `state-constructor-def` statement, which impl#1 reads differently outside `${}` (S441) — not unwr
-- `ssr/i-ssr-each-client-rendered-show-enclosed-neg` — not mechanical: rhs-decl: declaration text not found at the AST site · unwrap-logic: top-level `${}` holding a legacy declaration also holds a `state-constructor-def` statement, which impl#1 reads differently outside `${}` (S441) — not unwr
-- `ssr/i-ssr-each-client-rendered-subset-pos` — not mechanical: rhs-decl: declaration text not found at the AST site · unwrap-logic: top-level `${}` holding a legacy declaration also holds a `state-constructor-def` statement, which impl#1 reads differently outside `${}` (S441) — not unwr
+- `ssr/i-ssr-each-client-rendered-author-template-pos` — not mechanical: rhs-decl: declaration text not found at the AST site · unwrap-logic: top-level `${}` holding a legacy declaration also holds a `state-constructor-def` statement, which impl#1 reads differently outside `${}` (S441), and the b
+- `ssr/i-ssr-each-client-rendered-if-enclosed-pos` — not mechanical: rhs-decl: declaration text not found at the AST site · unwrap-logic: top-level `${}` holding a legacy declaration also holds a `state-constructor-def` statement, which impl#1 reads differently outside `${}` (S441), and the b
+- `ssr/i-ssr-each-client-rendered-if-gate-bypass-neg` — not mechanical: rhs-decl: declaration text not found at the AST site · unwrap-logic: top-level `${}` holding a legacy declaration also holds a `state-constructor-def` statement, which impl#1 reads differently outside `${}` (S441), and the b
+- `ssr/i-ssr-each-client-rendered-show-enclosed-neg` — not mechanical: rhs-decl: declaration text not found at the AST site · unwrap-logic: top-level `${}` holding a legacy declaration also holds a `state-constructor-def` statement, which impl#1 reads differently outside `${}` (S441), and the b
+- `ssr/i-ssr-each-client-rendered-subset-pos` — not mechanical: rhs-decl: declaration text not found at the AST site · unwrap-logic: top-level `${}` holding a legacy declaration also holds a `state-constructor-def` statement, which impl#1 reads differently outside `${}` (S441), and the b
 - `ssr/ssr-auth-scoped-callable-not-seeded` — not mechanical: rhs-decl: non-literal initializer needs a type (CTX — O35) · rhs-decl: initializer not parsed by impl#1
 - `ssr/ssr-auth-scoped-cell-not-seeded` — not mechanical: rhs-decl: declaration text not found at the AST site · rhs-decl: initializer not parsed by impl#1 · unwrap-logic: top-level `${}` holding a legacy declaration also holds a `state-constructor-def` statement, which impl#1 read
 - `ssr/ssr-auth-scoped-commented-currentuser-not-seeded` — not mechanical: rhs-decl: initializer not parsed by impl#1
 - `ssr/ssr-auth-scoped-literal-currentuser-not-seeded` — not mechanical: rhs-decl: initializer not parsed by impl#1
 - `ssr/ssr-callable-public-seeded-gated-omitted` — not mechanical: rhs-decl: non-literal initializer needs a type (CTX — O35) · rhs-decl: opener attribute `auth="none"` has no mechanical §66 spelling
-- `ssr/ssr-first-paint-redacted-runtime` — not mechanical: rhs-decl: declaration text not found at the AST site · unwrap-logic: top-level `${}` holding a legacy declaration also holds a `state-constructor-def` statement, which impl#1 reads differently outside `${}` (S441) — not unwr
-- `ssr/ssr-first-paint-render` — not mechanical: rhs-decl: declaration text not found at the AST site · unwrap-logic: top-level `${}` holding a legacy declaration also holds a `state-constructor-def` statement, which impl#1 reads differently outside `${}` (S441) — not unwr
+- `ssr/ssr-first-paint-redacted-runtime` — not mechanical: rhs-decl: declaration text not found at the AST site · unwrap-logic: top-level `${}` holding a legacy declaration also holds a `state-constructor-def` statement, which impl#1 reads differently outside `${}` (S441), and the b
+- `ssr/ssr-first-paint-render` — not mechanical: rhs-decl: declaration text not found at the AST site · unwrap-logic: top-level `${}` holding a legacy declaration also holds a `state-constructor-def` statement, which impl#1 reads differently outside `${}` (S441), and the b
 - `style/bare-variant-no-theme-ambiguous` — not mechanical: rhs-decl: bare variant .Light declared by 0 enums (needs a type)
 - `style/clean-single-rule` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `style/conditional-hover-layer` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
@@ -2138,5 +2173,5 @@ none
 - `type-state-codes/e-state-terminal-mutation-pos` — not mechanical: spaced-state-opener: legacy state-object opener — no §66 fix rule rewrites it (§4.2/§4.3; INTERIM, g-boot-spaced-state-opener-s478)
 - `type-state-codes/e-state-transition-illegal-neg` — not mechanical: spaced-state-opener: legacy state-object opener — no §66 fix rule rewrites it (§4.2/§4.3; INTERIM, g-boot-spaced-state-opener-s478)
 - `type-state-codes/e-state-transition-illegal-pos` — not mechanical: spaced-state-opener: legacy state-object opener — no §66 fix rule rewrites it (§4.2/§4.3; INTERIM, g-boot-spaced-state-opener-s478)
-- `type-state-codes/e-state-undeclared-nested-each-in-match-arm-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `type-state-codes/e-state-undeclared-nested-each-in-match-arm-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants) · unwrap-logic: top-level `${}` holding a legacy declaration not unwrapped: the declaration on line 4 would be seeded when the p
 - `type-state-codes/e-state-undeclared-pos` — not mechanical: program-move: impl#1 reads the restructured file differently (-E-STATE-UNDECLARED) — not restructured, no `${}` unwrapped
