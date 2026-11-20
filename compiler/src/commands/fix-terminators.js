@@ -72,6 +72,7 @@
  */
 
 import { splitBlocks } from "../block-splitter.js";
+import { isStandardMarkupElementName } from "../html-elements.js";
 import { tokenizeLogic, tokenizeAttributes } from "../tokenizer.ts";
 import { compileScrml } from "../api.js";
 import { captureTrailingContentWarnings } from "../expression-parser.ts";
@@ -1069,6 +1070,23 @@ export function seedPrefixUnits(filePath, source) {
       units.push({ start: a.span.start, end: a.span.end, kind: "opaque", what: `an attribute value (${a.kind})`, binds: false });
     }
   };
+  // r4 (PR #2025 r3 re-review LOW-2): a component instance is any element whose name this file binds
+  // (an import — `import { Card as card }` — or a `let` / `const`, a component definition among them),
+  // or any name that is not a standard HTML / SVG / MathML / custom element or `<program>`: resolution is
+  // lexical here, so an unknown name fails closed (opaque) rather than by its case.
+  const boundNames = new Set();
+  for (const u of units) {
+    for (const st of u.stmts ?? []) {
+      const t = st.toks ?? [];
+      let h = 0;
+      while (t[h] && (t[h].text === "export" || t[h].text === "server" || t[h].text === "pure" || t[h].text === "default")) h++;
+      if (!t[h]) continue;
+      if (t[h].text === "import") { for (const x of t) if (x.kind === "IDENT") boundNames.add(x.text); }
+      else if ((t[h].text === "let" || t[h].text === "const") && t[h + 1] && t[h + 1].kind === "IDENT") boundNames.add(t[h + 1].text);
+    }
+  }
+  const isInstance = (name) => typeof name === "string" && name.length > 0
+    && (boundNames.has(name) || /^[A-Z]/.test(name) || !(name === "program" || isStandardMarkupElementName(name)));
   const visit = (b) => {
     if (!b || typeof b !== "object") return;
     if (b.type === "text" || b.type === "comment" || b.type === "css") return;
@@ -1078,7 +1096,7 @@ export function seedPrefixUnits(filePath, source) {
       return;
     }
     if (b.type === "markup" || b.type === "state") {
-      if (b.type === "markup" && /^[A-Z]/.test(b.name ?? "")) {
+      if (b.type === "markup" && isInstance(b.name ?? "")) {
         units.push({ start: b.span.start, end: b.span.start + 1, kind: "opaque", what: `component instance \`<${b.name}>\` (its body runs where it stands)`, binds: false });
       }
       attrUnits(b);

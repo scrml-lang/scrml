@@ -181,9 +181,11 @@ describe("r2 — the seed-order guard fails closed (re-review N1 / N2 / N3 probe
     const run = (pre) => fixS66(prog(pre, "${", "    <x>: number = 1", "    <y>: number = @x", "}", '<p id="c">${@x}</p>'),
       { filePath: F, entry: true, rules: S66_RULES, allowNonCompiling: true }).blockers.map((b) => b.reason).join("\n");
     expect(run('${ type R:enum = { Ok(n: int) Failed(reason: string) } }\n${ <r>: R = .Failed("unset") }')).not.toMatch(SEED_NOTE);
-    expect(run("${ let a = x.f(1) }")).toMatch(SEED_NOTE);
-    expect(run("${ let a = (1).f(1) }")).toMatch(SEED_NOTE);
-    expect(run("${ let a = [1].length }")).not.toMatch(SEED_NOTE);
+    // r4: a file-scope `let` before the block runs before the seed on both sides (it is not in R), so the
+    // expression reader is exercised on markup interpolations (render_program on the bootstrap — after the seed)
+    expect(run("<i>${x.f(1)}</i>")).toMatch(SEED_NOTE);
+    expect(run("<i>${(1).f(1)}</i>")).toMatch(SEED_NOTE);
+    expect(run("<i>${[1].length}</i>")).not.toMatch(SEED_NOTE);
   });
 
   test("cell declarations and function declarations before a declaration do not refuse it (the common program head)", async () => {
@@ -252,10 +254,11 @@ describe("r3 — F3 `?.(` is a call; F4 component code is not skipped", () => {
 
   // F3: the bootstrap refuses `?.(` today, so this is pinned at the guard (fixS66's note), not at runtime
   test("q01c — `arr?.push?.(5)` before the declaration is a call: refused", () => {
-    expect(seedNote(prog("${ let arr = [1] }", "${ let t = arr?.push?.(5) }", "${", "    <n>: number = arr.length", "}", '<p id="c">${@n}</p>')))
-      .toMatch(/statement on line 3 is not provably free of writes and calls/);
+    // (r4: as a markup interpolation — a file-scope `let t = …` before the block runs before the seed on both sides)
+    expect(seedNote(prog("${ let arr = [1] }", "<i>${arr?.push?.(5)}</i>", "${", "    <n>: number = arr.length", "}", '<p id="c">${@n}</p>')))
+      .toMatch(/expression on line 3 is not provably free of writes and calls/);
     // the same without the call still moves
-    expect(seedNote(prog("${ let arr = [1] }", "${ let t = arr?.length }", "${", "    <n>: number = arr.length", "}", '<p id="c">${@n}</p>')))
+    expect(seedNote(prog("${ let arr = [1] }", "<i>${arr?.length}</i>", "${", "    <n>: number = arr.length", "}", '<p id="c">${@n}</p>')))
       .not.toMatch(SEED_NOTE);
   });
 
@@ -272,5 +275,93 @@ describe("r3 — F3 `?.(` is a call; F4 component code is not skipped", () => {
   test("an imported component instantiated before the declaration: refused (its body is not in this file)", () => {
     expect(seedNote(prog('${ import { Comp } from "./comp.scrml" }', "${ <c>: number = 1 }", "<Comp/>",
       "${", "    <d>: number = @c * 2", "}", '<p id="c">${@c} ${@d}</p>'))).toMatch(/component instance `<Comp>`[^\n]* is not provably free of writes and calls/);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// r4 (PR #2025 r3 re-review F-A, LOW-1, LOW-2). Probes ~/.cache/scrml/review/s480-2025-r3rev/scratch/p/.
+// F-A: r2's premise "what the initializer reads does not matter" covered reads only. The mirror case is
+// an initializer that WRITES (through a call) what a later file-scope binding reads: the artifact runs
+// `const k = o[0]` at module initialization, BEFORE `rt.construct` seeds `<d> = bump()`; impl#1 runs it
+// after. On d9eefb493 a01l / a01m / a01n compiled clean and rendered "5 1" / "5 1" / "2 5 1".
+// The invariant (fix-s66.js, over `seedHazard`): the move is safe only if the moved seeds commute with
+// R — the code that changes sides of them — in the closed form: every moved initializer provably free
+// AND every unit of R provably free, OR R empty.
+const R4_CASES = [
+  ["a01l — `<d> = bump()` (bump writes o[0]); a later block's `const k = o[0]`",
+    prog("${", "    let o: int[free, write] = [1]", "    function bump() -> int { o[0] = 10; return 5 }", "}", "${", "    <d>: int = bump()", "}", "${ const k: int = o[0] }", '<p id="c">${@d} ${k}</p>'), "5 10"],
+  ["a01m — the same in one block (split)",
+    prog("${", "    let o: int[free, write] = [1]", "    function bump() -> int { o[0] = 10; return 5 }", "    <d>: int = bump()", "    const k: int = o[0]", "}", '<p id="c">${@d} ${k}</p>'), "5 10"],
+  ["a01n — two moved declarations, the second writes",
+    prog("${", "    let o: int[free, write] = [1]", "    function bump() -> int { o[0] = 10; return 5 }", "}", "${", "    <a>: int = 2", "    <d>: int = bump()", "}", "${ const k: int = o[0] }", '<p id="c">${@a} ${@d} ${k}</p>'), "2 5 10"],
+];
+
+describe("r4 — a moved initializer that writes: the seed must commute with the code that changes sides (F-A)", () => {
+  for (const [name, src, impl1] of R4_CASES) {
+    test(`${name}: renders impl#1's value or is refused with the note`, async () => {
+      const r = await migrateAndRun(src);
+      if (r.clean) expect(r.text).toBe(impl1);
+      else expect(r.blockers.join("\n")).toMatch(SEED_NOTE);
+    }, 120000);
+    test(`${name}: refused — the initializer is not provably free and a later binding changes sides`, () => {
+      const fx = fixS66(src, { filePath: F, entry: true, rules: S66_RULES, allowNonCompiling: true });
+      expect(fx.blockers.map((b) => b.reason).join("\n")).toMatch(/a moved initializer is not provably free of writes and calls[^\n]*file-scope binding on line \d+ would/);
+    });
+  }
+
+  test("R empty: a writing initializer with nothing changing sides still moves (and renders impl#1's value)", async () => {
+    // only a file-scope `let` (module init — before the seed on both sides) and a function definition
+    // precede it; after it, only render-time code (after the seed on both sides)
+    const src = prog("${", "    let o: int[free, write] = [1]", "    function bump() -> int { o[0] = 10; return 5 }", "}", "${", "    <d>: int = bump()", "}", '<p id="c">${@d} ${o[0]}</p>');
+    const r = await migrateAndRun(src);
+    expect(r.blockers.join("\n")).not.toMatch(SEED_NOTE);
+    expect(r.output).toContain("let <d:int=(bump())/>");
+    expect(r.clean).toBe(true);
+    expect(r.text).toBe("5 10");
+  }, 120000);
+
+  test("a pure-literal moved declaration with a later provably-free binding still moves (and renders impl#1's value)", async () => {
+    const src = prog("${ let o: int[free, write] = [1] }", "${", "    <d>: int = 5", "}", "${ const k: int = o[0] }", '<p id="c">${@d} ${k}</p>');
+    const r = await migrateAndRun(src);
+    expect(r.blockers.join("\n")).not.toMatch(SEED_NOTE);
+    expect(r.output).toContain("\n    <d:int=5/>\n");
+    expect(r.clean).toBe(true);
+    expect(r.text).toBe("5 1");
+  }, 120000);
+
+  test("a writing initializer after a body interpolation (R1: rendered after the seed on the bootstrap): refused", () => {
+    const fx = fixS66(prog("${", "    let o: int[free, write] = [1]", "    function bump() -> int { o[0] = 10; return 5 }", "}", '<p id="a">${o[0]}</p>',
+      "${", "    <d>: int = bump()", "}", '<p id="c">${@d}</p>'), { filePath: F, entry: true, rules: S66_RULES, allowNonCompiling: true });
+    expect(fx.blockers.map((b) => b.reason).join("\n")).toMatch(/a moved initializer is not provably free[^\n]*expression on line 6 would/);
+  });
+
+  test("a later binding that reads a moved cell is not free (module initialization runs before the cell exists)", () => {
+    const fx = fixS66(prog("${", "    <a>: int = 1", "    <b>: int = 2", "}", "${ const k: int = @a }", '<p id="c">${@b} ${k}</p>'),
+      { filePath: F, entry: true, rules: S66_RULES, allowNonCompiling: true });
+    expect(fx.blockers.map((b) => b.reason).join("\n")).toMatch(/file-scope binding on line 6 is not provably free of writes and calls/);
+  });
+});
+
+describe("r4 — LOW-1 `?.name(` is a call; LOW-2 an instance is any bound or non-standard element", () => {
+  const seedNote = (src) => fixS66(src, { filePath: F, entry: true, rules: S66_RULES, allowNonCompiling: true })
+    .blockers.map((b) => b.reason).join("\n");
+  // LOW-1: the region tokenizer gives `o?.pop(` as `o` `?` `.` `pop` `(` — the `.Name(` enum-constructor
+  // exemption read it as a constructor (no receiver before the `.`)
+  test("`o?.pop()` before the declaration is a call: refused", () => {
+    expect(seedNote(prog("${ let o = [1, 2] }", "<i>${o?.pop()}</i>", "${", "    <n>: number = o.length", "}", '<p id="c">${@n}</p>')))
+      .toMatch(/expression on line 3 is not provably free of writes and calls/);
+    expect(seedNote(prog("${ let o = [1, 2] }", "<i>${o?.length}</i>", "${", "    <n>: number = o.length", "}", '<p id="c">${@n}</p>')))
+      .not.toMatch(SEED_NOTE);
+  });
+  // LOW-2: `import { Card as card }` + `<card/>` — an instance whatever its case
+  test("a lowercase alias of an imported component instantiated before the declaration: refused", () => {
+    expect(seedNote(prog('${ import { Card as card } from "./comp.scrml" }', "${ <c>: number = 1 }", "<card/>",
+      "${", "    <d>: number = @c * 2", "}", '<p id="c">${@c} ${@d}</p>'))).toMatch(/component instance `<card>`[^\n]* is not provably free of writes and calls/);
+  });
+  test("an element name that is neither standard nor bound fails closed; a standard element does not", () => {
+    expect(seedNote(prog("${ <c>: number = 1 }", "<widget/>", "${", "    <d>: number = @c * 2", "}", '<p id="c">${@c} ${@d}</p>')))
+      .toMatch(/component instance `<widget>`/);
+    expect(seedNote(prog("${ <c>: number = 1 }", "<span>x</span>", "${", "    <d>: number = @c * 2", "}", '<p id="c">${@c} ${@d}</p>')))
+      .not.toMatch(SEED_NOTE);
   });
 });

@@ -60,3 +60,26 @@ items 3–4; S469 dpa-073 F1 / F2 / F3 / F5.
       holding `let` / `const` or unreadable, 2 later non-free bindings). Runtime differential over the
       190: 0 cell diffs (identical to r2). Conformance vs origin/main c15225d88: CRASH 0, PASS 760 →
       759, PASS→other = the 2 r2 by-design refusals; 10 NOT-TWINNED→FAIL as r2. CI checks + pretest pass.
+
+## r4 (PR #2025 r3 re-review: FIX — F-A HIGH, LOW-1, LOW-2) — scratch `~/.cache/scrml/review/s480-2025-r4/`
+
+THE INVARIANT (fix-s66.js, comment over `seedHazard`): moving a §66 declaration out of `${ … }` changes
+the relative order of the moved seed(s) S and a set R — every unit that runs on one side of S in impl#1
+and on the other on the bootstrap. Safe only if S and R commute; the guard requires the closed form:
+EITHER every moved initializer is provably free (no calls, no writes) AND every unit of R is provably
+free (and no R unit run at module init reads a moved cell), OR R is empty.
+R from print.scrml `printProgram` (5363–5418) / `constStmts` (267–279): imports, then EVERY file-scope
+`let` / `const` (module init; conservatively every binding counts as printed), request slots,
+decls / routes / fns (run nothing), then boot: `rt.construct` seeds, CSS bridges (pure cell reads),
+`render_program` (body statements, interpolations, attributes, instances).
+  R1 = render-time units before p_last (earlier blocks' non-binding, non-inert statements; the block's own
+       before p_last; interpolations; attribute values; instances; opaque / unread code). A depth-0
+       binding before p_first is module-init on both sides → not in R; a nested one stays in R.
+  R2 = file-scope bindings after p_first (the block's own after its first moved decl; every later
+       `let` / `const` at any depth; a later interpolation holding one; any later opaque / unread unit).
+- [x] F-A: `seedHazard` rewritten to the invariant (initFree over the moved statements, R1 ∪ R2).
+- [x] LOW-1: `.Name(` enum-ctor exemption not after `?` (`o?.pop(`).
+- [x] LOW-2: seedPrefixUnits — an instance is any element bound by an import / `let` / `const` in the file,
+      or any name not standard HTML / SVG / MathML / custom / `<program>` (fail closed).
+- [x] tests: r4 section of slice-m4/fix-s66-seed-order-s480.test.js — 11 red on d9eefb493, green on head.
+- [ ] cost (census lens vs d9eefb493, runtime differential, conformance), gates, PR body.
