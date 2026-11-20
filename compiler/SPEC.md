@@ -25145,12 +25145,17 @@ S440, are earlier runtime errors at a value boundary. They keep their own sectio
   while the element was in the page. While the element is out, none of its data-bound attributes is written (a
   detached element can still start a fetch) and none is removed (it leaves with the values it had); their
   values are still re-evaluated, and its other bindings (a `bind:` value, a `show=` display) and the holes
-  inside it stay current. The element SHALL be restored only once the change of state that re-evaluated it has
+  inside it stay current. The holes inside a held element — text, the data-bound attributes of the elements
+  it contains, list rows — are still written while it is out, with their current values and the same §5.2
+  guards as in the page, so a detached descendant such as an `<img>` can still start a fetch. The element
+  SHALL be restored only once the change of state that re-evaluated it has
   finished updating the view (every attribute, hole and list row it re-evaluates), and only if every data-bound
   attribute of the element then reads without a trap: each of those attributes whose value differs from the
   element's is written before the element is back in the placeholder's place. Otherwise it stays out. So once
   a change of state has finished updating the view, no element is in the page with a stale or absent value of
-  a data-bound attribute because of a trap. The restored element may lose
+  a data-bound attribute because of a trap. A data-bound attribute whose evaluation throws something that is
+  not a trap (a defect) also holds the element out (fail closed); the throw is then rethrown, as from any other
+  effect, and the element stays out until that attribute reads again without a throw. The restored element may lose
   focus, selection and scroll position, and a frame or media element reloads. *(Provenance:
   ruling:user-voice-scrml.md S480 "⭐ RULED — what a trap renders when "nothing" is not safe (#2008, item 20
   follow-up)" item 1 — "the element is replaced by a placeholder, the trap is reported once, and the element is

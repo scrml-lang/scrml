@@ -757,3 +757,170 @@ describe("S480 attr-hole r3: the non-trapping write path is the base's (every wr
     s.dispose();
   });
 });
+
+// s480 r4 (review of #2017, r3 S239) — N1: an element held out by a trapped attribute is still
+// inside its form. §55.17.2 rule 1 defines "contains" by the composed markup, so the §55.17.3
+// submit gate counts every instance inside a held element (and inside an element held within
+// it). Red on 836b4e6b1: the gate's walk stopped at the placeholder (`prevented=false calls=1`).
+describe("S480 attr-hole r4: a held element's instances still gate the form's submit (§55.17.3)", () => {
+  const submit = () => {
+    const e = new window.SubmitEvent("submit", { bubbles: true, cancelable: true, submitter: null });
+    $("main form").dispatchEvent(e);
+    return { prevented: e.defaultPrevented, calls: $("p.calls").textContent, wrap: $("#wrap") ? "in" : "out" };
+  };
+  const gateProg = (inner, i = 1, extra = "") => `<program>
+    let <calls:int=0/>
+    <xs:int[]=([10, 20])/>
+    let <i:int=${i}/>
+    let <j:int=1/>
+${extra}
+    <f note:string="n">
+        let <v:string="" req/>
+        renders <input class="v" bind:value=@v/>
+        let <w:string=""/>
+    </>
+    renders <span><*v/></span>
+    function save() { @calls = @calls + 1; }
+    function out() { @i = 7; }
+    function into() { @i = 1; }
+    function deep() { @j = 7; }
+    function up() { @j = 1; }
+    <main>
+        <button onclick=out()>out</button>
+        <button onclick=into()>in</button>
+        <button onclick=deep()>deep</button>
+        <button onclick=up()>up</button>
+        <form onsubmit=save()>${inner}<button type="submit">go</button></form>
+        <p class="calls">\${@calls}</p>
+    </main>
+</program>
+`;
+  const BLOCKED = (wrap) => ({ prevented: true, calls: "0", wrap });
+
+  test("G1: a declaration use inside a held wrapper — its empty `req` field still blocks", async () => {
+    await load(gateProg(`<div id="wrap" title=(@xs[@i])><f/></div>`));
+    expect(submit()).toEqual(BLOCKED("in"));
+    const reported = await withReports(async () => {
+      click(btn("out"));
+      expect(submit()).toEqual(BLOCKED("out"));                       // 836b4e6b1: prevented=false calls=1
+      click(btn("in"));
+      expect(submit()).toEqual(BLOCKED("in"));
+    });
+    expect(codesOf(reported)).toEqual(["E-INDEX-OUT-OF-RANGE-RT"]);
+  });
+
+  test("G2: the same, trapped at mount", async () => {
+    const reported = await load(gateProg(`<div id="wrap" title=(@xs[@i])><f/></div>`, 5));
+    expect(codesOf(reported)).toEqual(["E-INDEX-OUT-OF-RANGE-RT"]);
+    expect(submit()).toEqual(BLOCKED("out"));                         // 836b4e6b1: prevented=false calls=1
+    await withReports(async () => { click(btn("in")); });
+    expect(submit()).toEqual(BLOCKED("in"));
+  });
+
+  test("G3: `<each>` rows with a use inside a held wrapper", async () => {
+    await load(gateProg(`<ul id="wrap" title=(@xs[@i])><each in=@rows key=@.id as r><li><f/></li></each></ul>`, 1,
+      `    type R:struct = { id: int }\n    <rows:R[replace]=([{ id: 1 }])/>`));
+    expect(submit()).toEqual(BLOCKED("in"));
+    await withReports(async () => {
+      click(btn("out"));
+      expect(submit()).toEqual(BLOCKED("out"));                       // 836b4e6b1: prevented=false calls=1
+      click(btn("in"));
+      expect(submit()).toEqual(BLOCKED("in"));
+    });
+  });
+
+  test("G4 (pin): the form's own validated value, bound inside a held wrapper, still blocks", async () => {
+    await load(gateProg(`<div id="wrap" title=(@xs[@i])><input bind:value=@email/></div>`, 1, `    let <email:string="" req/>`));
+    expect(submit()).toEqual(BLOCKED("in"));
+    await withReports(async () => {
+      click(btn("out"));
+      expect(submit()).toEqual(BLOCKED("out"));
+      click(btn("in"));
+      expect(submit()).toEqual(BLOCKED("in"));
+    });
+  });
+
+  test("nested holds: a use inside an element held within a held wrapper still blocks", async () => {
+    await load(gateProg(`<div id="wrap" title=(@xs[@i])><div id="inner" title=(@xs[@j])><f/></div></div>`));
+    expect(submit()).toEqual(BLOCKED("in"));
+    await withReports(async () => {
+      click(btn("deep"));                                             // the inner element is held (wrapper live)
+      expect($("#inner")).toBeNull();
+      expect(submit()).toEqual(BLOCKED("in"));
+      click(btn("out"));                                              // now the wrapper too: a hold inside a hold
+      expect($("#wrap")).toBeNull();
+      expect(submit()).toEqual(BLOCKED("out"));                       // 836b4e6b1: prevented=false calls=1
+      click(btn("in"));
+      expect(submit()).toEqual(BLOCKED("in"));
+      click(btn("up"));
+      expect($("#inner")).not.toBeNull();
+      expect(submit()).toEqual(BLOCKED("in"));
+    });
+  });
+});
+
+// s480 r4 (review of #2017, r3 S239) — N2: host code re-entering a restore (a custom element's
+// `connectedCallback`) writes a cell; the rest of the restore waits for that change of state to
+// finish (§19.17 "restored only once the change of state … has finished"). Red on 836b4e6b1: the
+// sibling was written its STALE value and put back in the page, then held again.
+describe("S480 attr-hole r4: a restore is safe against re-entrant writes", () => {
+  const trap = () => new rtm.ScrmlTrap("E-INDEX-OUT-OF-RANGE-RT", "trap (t.scrml:1)", {});
+
+  test("T12: a connectedCallback that re-traps a sibling held in the same restore — the sibling is never written or inserted stale", async () => {
+    if (!customElements.get("x-r4-ping")) customElements.define("x-r4-ping", class extends HTMLElement { connectedCallback() { if (globalThis.__r4ping) globalThis.__r4ping(); } });
+    document.body.innerHTML = '<div id="w"></div>';
+    const w = $("#w");
+    const s = new rtm.Scope(rtm.root);
+    const c = new rtm.Cell(1), z = new rtm.Cell(0);
+    const e1 = document.createElement("x-r4-ping"); e1.id = "e1";
+    const e2 = document.createElement("img"); e2.id = "e2";
+    w.append(e1, e2);
+    const log = [];
+    const reported = await withReports(async () => {
+      rtm.attr(s, e1, "title", () => { if (c.get() === 1) throw trap(); return "t"; });
+      rtm.attr(s, e2, "src", () => { if (c.get() === 1 || z.get() === 1) throw trap(); return "/e2/z" + z.get(); });
+      expect(w.innerHTML).toBe("<!--trapped--><!--trapped-->");      // both held at mount
+      logWrites(e2, log);
+      const rc = w.replaceChild.bind(w);
+      w.replaceChild = (a, b) => { if (a === e2) log.push("e2 inserted"); return rc(a, b); };
+      globalThis.__r4ping = () => { log.push("e1 connected"); rtm.batch(() => z.set(1)); };
+      rtm.batch(() => c.set(2));
+    });
+    globalThis.__r4ping = null;
+    expect(log).toEqual(["e1 connected"]);                           // 836b4e6b1: set src=/e2/z0, e2 inserted
+    expect(w.innerHTML).toBe('<x-r4-ping id="e1" title="t"></x-r4-ping><!--trapped-->');
+    expect(e2.isConnected).toBe(false);
+    expect(codesOf(reported)).toEqual(["E-INDEX-OUT-OF-RANGE-RT", "E-INDEX-OUT-OF-RANGE-RT", "E-INDEX-OUT-OF-RANGE-RT"]);
+    await withReports(async () => { rtm.batch(() => z.set(0)); });
+    expect(w.innerHTML).toBe('<x-r4-ping id="e1" title="t"></x-r4-ping><img id="e2" src="/e2/z0">');
+    s.dispose();
+  });
+
+  test("bound: host callbacks that trap the element on insert and recover it on removal end — it stays out, warned", async () => {
+    if (!customElements.get("x-r4-pong")) customElements.define("x-r4-pong", class extends HTMLElement {
+      connectedCallback() { if (globalThis.__r4pong) globalThis.__r4pong(1); }
+      disconnectedCallback() { if (globalThis.__r4pong) globalThis.__r4pong(0); }
+    });
+    document.body.innerHTML = '<div id="w"></div>';
+    const w = $("#w");
+    const s = new rtm.Scope(rtm.root);
+    const bad = new rtm.Cell(1);
+    const e = document.createElement("x-r4-pong"); e.id = "e";
+    w.appendChild(e);
+    let n = 0;
+    const warns = [];
+    const warn = console.warn;
+    console.warn = (m) => warns.push(String(m));
+    try {
+      await withReports(async () => {
+        rtm.attr(s, e, "title", () => { if (bad.get() === 1) throw trap(); return "ok"; });
+        globalThis.__r4pong = (v) => { if (++n < 1000) rtm.batch(() => bad.set(v)); };
+        rtm.batch(() => bad.set(0));
+      });
+    } finally { console.warn = warn; globalThis.__r4pong = null; }
+    expect(n).toBeLessThan(1000);                                    // ended by the bound, not the test's own guard
+    expect(e.isConnected).toBe(false);                               // fail closed: out
+    expect(warns.filter((m) => m.includes("re-trapped each time it was restored")).length).toBe(1);
+    s.dispose();
+  });
+});

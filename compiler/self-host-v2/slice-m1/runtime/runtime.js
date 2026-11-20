@@ -148,7 +148,7 @@ let flushing = false;
 function flush() {
   if (flushing) return;
   flushing = true;
-  try { drainQueues(); } finally { flushing = false; }
+  try { drainQueues(); } finally { flushing = false; restoreTries.clear(); }
 }
 
 // s474 r1 (review of #1727, F1) — ONE EFFECT'S THROW NEVER STRANDS THE REST.
@@ -1681,11 +1681,20 @@ export function gate(scope, form, named) {
     const recs = new Set();
     const add = (rs) => { for (const r of rs) if (r !== null) recs.add(r); };
     add(named());
-    const marks = form.ownerDocument.createTreeWalker(form, 0x80 /* NodeFilter.SHOW_COMMENT */);
-    for (let c = marks.nextNode(); c !== null; c = marks.nextNode()) {
-      const reached = reachedFields.get(c);
-      if (reached) add(reached());
-    }
+    // s480 r4 (review of #2017, N1): an element held out by a trapped attribute (§19.17) is still
+    // inside the form — §55.17.2 rule 1's "contains" is the COMPOSED markup, not the live tree. Its
+    // placeholder stands in its place, so the walk goes on into the held element's own subtree
+    // (and into any element held inside that one): an invalid instance in it still blocks.
+    const walk = (root) => {
+      const marks = form.ownerDocument.createTreeWalker(root, 0x80 /* NodeFilter.SHOW_COMMENT */);
+      for (let c = marks.nextNode(); c !== null; c = marks.nextNode()) {
+        const reached = reachedFields.get(c);
+        if (reached) add(reached());
+        const held = holeMate.get(c);
+        if (held !== undefined && held.nodeType === 1) walk(held);
+      }
+    };
+    walk(form);
     // s472: the form's OWN controls, as HTML associates them (`form.elements`
     // — its form owner): a control outside it carrying `form="<its id>"` is
     // included, a control inside it that names another form is not (RULED
@@ -3945,21 +3954,54 @@ function holdElement(el, h, tok) {
 
 // The post-flush recovery step (above). An element whose placeholder is no longer in any tree
 // (its row or arm was disposed in the flush) is dropped, never written.
+//
+// s480 r4 (review of #2017, N2) — RE-ENTRANCY. Host code can run synchronously inside a restore: a
+// custom element's `attributeChangedCallback` on a write, its `connectedCallback` on the re-insert.
+// A cell it writes queues a writer, and every slot not yet restored may now be stale. So after
+// each write pass and after each re-insert, a non-empty queue ends this step: the elements not yet
+// restored (and, after a write pass, this one, still out) go back into `heldToRestore`, and
+// `drainQueues` runs the queued writers first — an element is restored only once the change of
+// state has finished (§19.17).
+//
+// BOUND: scrml code never runs inside a restore (an `<effect>` body writes no cell, §6.7.4), so an
+// element is restored at most once per flush unless host code re-enters. Host callbacks that trap
+// and recover an element on every insert / removal would loop forever; an element is therefore
+// tried at most RESTORE_TRIES times per flush. Past that it stays out (fail closed: held is the safe
+// state for every attribute, §19.17), a console warning names the cause, and it is tried again the
+// next time one of its writers runs without a trap.
+const RESTORE_TRIES = 8;
+const restoreTries = new Map();
+
 function restoreHeld() {
   const els = [...heldToRestore];
   heldToRestore.clear();
-  for (const el of els) {
+  for (let i = 0; i < els.length; i++) {
+    const el = els[i];
     const h = elementHoles.get(el);
     if (h === undefined || !h.out || h.trapped.size > 0) continue;
     if (h.ph.parentNode === null) continue;
+    const n = (restoreTries.get(el) ?? 0) + 1;
+    restoreTries.set(el, n);
+    if (n > RESTORE_TRIES) {
+      if (n === RESTORE_TRIES + 1) console.warn("[scrml trap] an element held out by a trapped attribute was re-trapped each time it was restored in one update (host code running on its insert or removal); it stays out until its attributes are next recomputed (SPEC §19.17).");
+      continue;
+    }
     for (const s of h.writers.values()) {
       if (!s.dirty) continue;
       s.dirty = false;
       if (s.refused) { refuseLinkHref(el, s.name); continue; }
       writeAttr(el, s.name, s.v, s.guard, true);
     }
+    if (queue.size > 0) {                            // a write re-entered: settle first, then try again
+      for (let j = i; j < els.length; j++) heldToRestore.add(els[j]);
+      return;
+    }
     h.out = false;
     h.ph.parentNode.replaceChild(el, h.ph);
+    if (queue.size > 0) {                            // the re-insert re-entered: settle the rest first
+      for (let j = i + 1; j < els.length; j++) heldToRestore.add(els[j]);
+      return;
+    }
   }
 }
 

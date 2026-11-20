@@ -32,3 +32,9 @@ Ruling: user-voice-scrml.md S480 "⭐ RULED — what a trap renders when "nothin
 - [x] Effect `after` hook removed (unused).
 - [x] Tests: glitch / glitch2 / glitch3 / order (select, range) / broad / multi pinned to base's measured trace; recovery-after-flush test; r1 F1/F2 expectations moved to base order (11 red on 2bc19f9f6).
 - [x] SPEC §19.17 + known-gaps resolution note rewritten for this design.
+
+## r4 fix round (r3 S239 review of #2017, head 836b4e6b1 — LAND-W-F/U)
+- [x] N1 (MEDIUM): `gate()` walks into a held element's subtree from its placeholder (`holeMate`), nested holds included — §55.17.2 rule 1 "contains" = composed markup.
+- [x] N2 (LOW): `restoreHeld` ends the step when a write pass or a re-insert queued a writer (host re-entrancy); the rest go back into `heldToRestore`, `drainQueues` settles first. Bound: RESTORE_TRIES=8 per element per flush; past it the element stays out (fail closed) + one console warning; retried when a writer next runs clean.
+- [x] N3 (LOW): SPEC §19.17 — holes inside a held element are still written (current, guarded; a detached `<img>` can fetch); a non-trap throw holds then rethrows.
+- [x] Tests: G1–G3 + nested hold + T12 + loop bound red on 836b4e6b1; G4 a pin (green on both).
