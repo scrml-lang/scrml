@@ -13586,7 +13586,12 @@ ${
     // slice-m3 CSS files are held by another session), so the element is
     // consumed whole and REPORTED — never parsed as markup (its token
     // declarations would otherwise vanish silently).
-    fn isThemeOpener(o: Opener) -> boolean { return !o.star && o.name == "theme" }
+    // A DECLARATION opener named `theme` (`let <theme:int=1/>` — an own value, a `:Type`, a
+    // typed attribute, §66.2.2) is a declaration, as a `page` one is (parseTagItem): it is judged
+    // by its own rules — E-NAME-COLLIDES-RESERVED, §4.15 (S480,
+    // ruling:user-voice-scrml.md-S480-driver-text-reserved-cells item 2: the full list applies to
+    // program cells) — not refused as the `<theme>` element.
+    fn isThemeOpener(o: Opener) -> boolean { return !o.star && o.name == "theme" && !isDeclOpener(o) }
 
     fn refuseTheme(o: Opener, mp: MP) -> MP {
         let m: MP = mp

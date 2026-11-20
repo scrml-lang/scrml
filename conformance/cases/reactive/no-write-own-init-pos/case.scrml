@@ -9,8 +9,8 @@
         @hits = @hits + 1;
         return "x";
     }
-    let <page:int=(bump())/>
+    let <pageNo:int=(bump())/>
     <main>
-        <p>${@page}</p>
+        <p>${@pageNo}</p>
     </main>
 </program>

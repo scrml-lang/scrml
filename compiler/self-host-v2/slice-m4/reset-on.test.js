@@ -56,16 +56,16 @@ function runsOn(label) {
 // The S447 search page (DD §2 row 12): one keystroke must be ONE search, already on page 1.
 export const SEARCH_PROGRAM = `<program>
     let <query:string=""/>
-    let <page:int=1 reset-on=[@query]/>
+    let <pageNo:int=1 reset-on=[@query]/>
     function search() {
         const t = Date.now();
     }
 
-    <effect deps=[@query, @page]>\${ search(); }</>
+    <effect deps=[@query, @pageNo]>\${ search(); }</>
 
     <main>
-        <p class="out">\${@query}|\${@page}</p>
-        <button onclick=(@page = @page + 1)>next</button>
+        <p class="out">\${@query}|\${@pageNo}</p>
+        <button onclick=(@pageNo = @pageNo + 1)>next</button>
         <button onclick=(@query = @query + "x")>type</button>
     </main>
 </program>
@@ -84,7 +84,7 @@ describe("§6.8.4 — the reset, end to end", () => {
 
   test("printed: `rt.resetOn(scope$, [<trigger>], () => { <the reset write> }, 0)`", async () => {
     const { out } = await loadProgram(coreOf(SEARCH_PROGRAM), "reset-print");
-    expect(out.js).toContain("rt.resetOn(scope$, [inst$.fields[0 /* query */]], () => {\n    inst$.fields[1 /* page */].set(1);\n  }, 0);");
+    expect(out.js).toContain("rt.resetOn(scope$, [inst$.fields[0 /* query */]], () => {\n    inst$.fields[1 /* pageNo */].set(1);\n  }, 0);");
   });
 
   test("rule 4: a change of the trigger resets the cell, and the trigger + its reset are ONE change — one search, already on page 1", async () => {
@@ -130,7 +130,7 @@ describe("§6.8.4 — the reset, end to end", () => {
 
 describe("§6.8.4 — codes", () => {
   const D = `    let <query:string=""/>\n    let <n:int=0/>\n    <step=1/>\n    <dbl:int=(@n * 2)/>`;
-  const page = (attr) => `    let <page:int=1 ${attr}/>`;
+  const page = (attr) => `    let <pageNo:int=1 ${attr}/>`;
 
   test("E-RESET-ON-INVALID-ENTRY — an empty list, a non-list, undeclared, non-`@`, derived and locked entries (rule 2)", () => {
     for (const attr of ["reset-on=[]", "reset-on=@query", "reset-on=[@nope]", "reset-on=[query]", "reset-on=[@dbl]", "reset-on=[@step]"]) {
@@ -138,14 +138,14 @@ describe("§6.8.4 — codes", () => {
     }
     expect(diagsOf(P(`${D}\n${page("reset-on=[@dbl]")}`, ""))[0].message).toMatch(/DERIVED/);
     // negative: mutable cells, one or several
-    expect(codes(P(`${D}\n${page("reset-on=[@query]")}`, "<p>${@page}</p>"))).toEqual([]);
-    expect(codes(P(`${D}\n${page("reset-on=[@query, @n]")}`, "<p>${@page}</p>"))).toEqual([]);
+    expect(codes(P(`${D}\n${page("reset-on=[@query]")}`, "<p>${@pageNo}</p>"))).toEqual([]);
+    expect(codes(P(`${D}\n${page("reset-on=[@query, @n]")}`, "<p>${@pageNo}</p>"))).toEqual([]);
   });
 
   test("E-RESET-ON-CYCLE — a cell listing itself, a pair, a triangle; the message names the cells (rule 3)", () => {
-    const self = diagsOf(P(`${D}\n${page("reset-on=[@page]")}`, ""));
+    const self = diagsOf(P(`${D}\n${page("reset-on=[@pageNo]")}`, ""));
     expect(self.map((d) => d.code)).toEqual(["E-RESET-ON-CYCLE"]);
-    expect(self[0].message).toContain("`@page` lists itself");
+    expect(self[0].message).toContain("`@pageNo` lists itself");
     const pair = diagsOf(P(`    let <a:int=0 reset-on=[@b]/>\n    let <b:int=0 reset-on=[@a]/>`, ""));
     expect(pair.map((d) => d.code)).toEqual(["E-RESET-ON-CYCLE"]);
     expect(pair[0].message).toMatch(/`@a` → `@b` → `@a`|`@b` → `@a` → `@b`/);
@@ -160,7 +160,7 @@ describe("§6.8.4 — codes", () => {
     expect(codes(P(`${D}\n    <twice:int=(@n * 2) reset-on=[@query]/>`, ""))).toEqual(["E-RESET-ON-NOT-WRITABLE"]);
     expect(diagsOf(P(`${D}\n    <frozen:int=1 reset-on=[@query]/>`, ""))[0].message).toMatch(/LOCKED.*make it writable/);
     // negative: a `let` cell, and a sequence whose type grants `replace`
-    expect(codes(P(`${D}\n${page("reset-on=[@query]")}`, "<p>${@page}</p>"))).toEqual([]);
+    expect(codes(P(`${D}\n${page("reset-on=[@query]")}`, "<p>${@pageNo}</p>"))).toEqual([]);
     expect(codes(P(`${D}\n    <xs:int[replace]=([1, 2]) reset-on=[@query]/>`, "<p>${@xs.length}</p>"))).toEqual([]);
   });
 
@@ -184,21 +184,21 @@ describe("§6.8.4 — codes", () => {
     // E-BOOTSTRAP-UNSUPPORTED; S449 item 3 (an initializer may not write) rejects it at its source, so that
     // refusal is removed — the DEAD-PROOF: the source-side error is the only one, for every shape it caught.
     const SRC = "E-VALUE-WRITES-STATE";
-    const loop = diagsOf(P(`    let <q:int=0/>\n    function bump() -> int {\n        @q = @q + 1;\n        return 1;\n    }\n    let <page:int=(bump()) reset-on=[@q]/>`, ""));
+    const loop = diagsOf(P(`    let <q:int=0/>\n    function bump() -> int {\n        @q = @q + 1;\n        return 1;\n    }\n    let <pageNo:int=(bump()) reset-on=[@q]/>`, ""));
     expect(loop.map((d) => d.code)).toEqual([SRC]);
-    expect(loop[0].message).toContain("the initializer of `@page` writes `@q` through a call: `bump() → @q`");
+    expect(loop[0].message).toContain("the initializer of `@pageNo` writes `@q` through a call: `bump() → @q`");
     // a writer of an UNRELATED cell
-    expect(codes(P(`    let <q:int=0/>\n    let <other:int=0/>\n    function note() -> int {\n        @other = 1;\n        return 1;\n    }\n    let <page:int=(note()) reset-on=[@q]/>`, ""))).toEqual([SRC]);
+    expect(codes(P(`    let <q:int=0/>\n    let <other:int=0/>\n    function note() -> int {\n        @other = 1;\n        return 1;\n    }\n    let <pageNo:int=(note()) reset-on=[@q]/>`, ""))).toEqual([SRC]);
     // the writer reached through a DERIVED cell the initializer reads — rejected at that cell's formula
-    const viaDerived = diagsOf(P(`    let <q:int=0/>\n    function g() -> int {\n        @q = @q + 1;\n        return 1;\n    }\n    <d:int=(@q + g())/>\n    let <page:int=(@d) reset-on=[@q]/>`, ""));
+    const viaDerived = diagsOf(P(`    let <q:int=0/>\n    function g() -> int {\n        @q = @q + 1;\n        return 1;\n    }\n    <d:int=(@q + g())/>\n    let <pageNo:int=(@d) reset-on=[@q]/>`, ""));
     expect(viaDerived.map((d) => d.code)).toEqual([SRC]);
     expect(viaDerived[0].message).toContain("the formula of derived `@d` writes `@q` through a call: `g() → @q`");
     // negative: an initializer that calls a write-free function
-    expect(codes(P(`    let <q:int=0/>\n    fn one() -> int { return 1; }\n    let <page:int=(one()) reset-on=[@q]/>`, "<p>${@page}</p>"))).toEqual([]);
+    expect(codes(P(`    let <q:int=0/>\n    fn one() -> int { return 1; }\n    let <pageNo:int=(one()) reset-on=[@q]/>`, "<p>${@pageNo}</p>"))).toEqual([]);
   });
 
   test("a `reset-on=` on a declaration's field is refused — per-instance resets are OPEN (§6.8.4)", () => {
-    const src = `<program>\n    let <query:string=""/>\n    <panel title:string>\n        let <page:int=1 reset-on=[@query]/>\n    </>\n    renders <div>\${page}</div>\n    <main><panel title="a"/></main>\n</program>\n`;
+    const src = `<program>\n    let <query:string=""/>\n    <panel title:string>\n        let <pageNo:int=1 reset-on=[@query]/>\n    </>\n    renders <div>\${pageNo}</div>\n    <main><panel title="a"/></main>\n</program>\n`;
     const ds = diagsOf(src);
     expect(ds.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(ds[0].message).toMatch(/per-instance reset/);
@@ -227,6 +227,6 @@ describe("Core check — C13 (ResetOn)", () => {
     const selfRef = clone(core);
     const r = resets(selfRef)[0];
     r.triggers = [{ ...r.triggers[0], idx: 1 }];     // `page` (field 1) listed as its own trigger
-    expect(mods.check.checkCore(selfRef).join("\n")).toMatch(/C13: a ResetOn on <program>\.page lists its own cell/);
+    expect(mods.check.checkCore(selfRef).join("\n")).toMatch(/C13: a ResetOn on <program>\.pageNo lists its own cell/);
   });
 });
