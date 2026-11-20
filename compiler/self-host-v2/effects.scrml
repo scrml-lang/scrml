@@ -101,8 +101,21 @@ ${
         return out
     }
 
-    fn setAtoms(xs: FxAtom[][], i: int, v: FxAtom[]) -> FxAtom[][] {
-        return xs.slice(0, i).concat([v]).concat(xs.slice(i + 1))
+    // S480 (s480-boot-fn-count-perf): closeDim's `fx` is a local tape written in place
+    // (`fx[i] = mine`) and built by halves; rebuilding it per improved callable (a slice
+    // and two concats) and one concat per callable were each O(callables) a step.
+    fn ownSortedAll(own: FxAtom[][], lo: int, hi: int) -> FxAtom[][] {
+        if (hi - lo <= 8) {
+            let out: FxAtom[][] = []
+            let i: int = lo
+            while (i < hi) {
+                out = out.concat([ownSorted(own[i])])
+                i = i + 1
+            }
+            return out
+        }
+        const mid: int = lo + Math.floor((hi - lo) / 2)
+        return ownSortedAll(own, lo, mid).concat(ownSortedAll(own, mid, hi))
     }
 
     // Close ONE dimension: `own[i]` — callable i's own atoms; `edges[i]` — the
@@ -114,8 +127,7 @@ ${
     // under-report. By construction it cannot.
     export fn closeDim(own: FxAtom[][], edges: int[][]) -> FxAtom[][] {
         const order: int[][] = sccOrder(edges)
-        let fx: FxAtom[][] = []
-        for (const o of own) { fx = fx.concat([ownSorted(o)]) }
+        let fx: FxAtom[][] = ownSortedAll(own, 0, own.length)
         for (const scc of order) {
             let changed = true
             while (changed) {
@@ -135,7 +147,7 @@ ${
                         e = e + 1
                     }
                     if (grew) {
-                        fx = setAtoms(fx, i, mine)
+                        fx[i] = mine
                         changed = true
                     }
                 }
@@ -175,63 +187,109 @@ ${
     // ---- the call graph's strongly connected components (Tarjan) ---------------
     // Returned callees first: every component after every component it reaches,
     // so a component is closed once the components below it are final.
-    type Tarjan:struct = { index: int[], low: int[], on: boolean[], stack: int[], next: int, out: int[][] }
-
+    // S480 (s480-boot-fn-count-perf): iterative, over local tapes written in place,
+    // with an explicit DFS frame stack (`cv` the vertex, `ce` its next edge). The
+    // recursive form rebuilt its index / low / on-stack tapes (a slice and two
+    // concats) at every step — O(callables²) — and recursed once per call-chain
+    // link. Same visit order, same components, same order of components and members.
     export fn sccOrder(edges: int[][]) -> int[][] {
-        let index: int[] = []
-        let low: int[] = []
-        let on: boolean[] = []
-        for (const e of edges) {
-            index = index.concat([-1])
-            low = low.concat([-1])
-            on = on.concat([false])
-        }
-        let ts: Tarjan = { index: index, low: low, on: on, stack: [], next: 0, out: [] }
-        let v = 0
-        while (v < edges.length) {
-            if (ts.index[v] < 0) ts = strongFrom(edges, v, ts)
-            v = v + 1
-        }
-        return ts.out
-    }
-
-    fn strongFrom(edges: int[][], v: int, ts0: Tarjan) -> Tarjan {
-        let ts: Tarjan = { index: setInt(ts0.index, v, ts0.next), low: setInt(ts0.low, v, ts0.next), on: setBool(ts0.on, v, true),
-                           stack: ts0.stack.concat([v]), next: ts0.next + 1, out: ts0.out }
-        for (const w of edges[v]) {
-            if (ts.index[w] < 0) {
-                ts = strongFrom(edges, w, ts)
-                ts = withLow(ts, v, minInt(ts.low[v], ts.low[w]))
-            } else if (ts.on[w]) {
-                ts = withLow(ts, v, minInt(ts.low[v], ts.index[w]))
+        const n: int = edges.length
+        let index: int[] = filledInt(n)
+        let low: int[] = filledInt(n)
+        let on: int[] = filledInt(n)            // 1: on the stack
+        let stk: int[] = filledInt(n)
+        let sp: int = 0
+        let cv: int[] = filledInt(n)
+        let ce: int[] = filledInt(n)
+        let dp: int = 0
+        let flat: int[] = filledInt(n)          // the components' members, component after component
+        let ends: int[] = filledInt(n)          // where each component ends in `flat`
+        let fp: int = 0
+        let nc: int = 0
+        let next: int = 0
+        let r: int = 0
+        while (r < n) {
+            if (index[r] < 0) {
+                index[r] = next
+                low[r] = next
+                next = next + 1
+                stk[sp] = r
+                sp = sp + 1
+                on[r] = 1
+                cv[0] = r
+                ce[0] = 0
+                dp = 1
+                while (dp > 0) {
+                    const v: int = cv[dp - 1]
+                    const ei: int = ce[dp - 1]
+                    if (ei < edges[v].length) {
+                        ce[dp - 1] = ei + 1
+                        const w: int = edges[v][ei]
+                        if (index[w] < 0) {
+                            index[w] = next
+                            low[w] = next
+                            next = next + 1
+                            stk[sp] = w
+                            sp = sp + 1
+                            on[w] = 1
+                            cv[dp] = w
+                            ce[dp] = 0
+                            dp = dp + 1
+                        } else if (on[w] == 1) {
+                            low[v] = minInt(low[v], index[w])
+                        }
+                    } else {
+                        if (low[v] == index[v]) {
+                            // `v` roots a component: everything above it on the stack
+                            let at: int = sp - 1
+                            while (stk[at] != v) { at = at - 1 }
+                            let j: int = at
+                            while (j < sp) {
+                                flat[fp] = stk[j]
+                                fp = fp + 1
+                                on[stk[j]] = -1
+                                j = j + 1
+                            }
+                            sp = at
+                            ends[nc] = fp
+                            nc = nc + 1
+                        }
+                        dp = dp - 1
+                        if (dp > 0) {
+                            const u: int = cv[dp - 1]
+                            low[u] = minInt(low[u], low[v])
+                        }
+                    }
+                }
             }
+            r = r + 1
         }
-        if (ts.low[v] != ts.index[v]) return ts
-        // `v` roots a component: everything above it on the stack
-        let comp: int[] = []
-        let stack: int[] = ts.stack
-        let on2: boolean[] = ts.on
-        let done = false
-        while (!done) {
-            const w: int = stack[stack.length - 1]
-            stack = stack.slice(0, stack.length - 1)
-            on2 = setBool(on2, w, false)
-            comp = [w].concat(comp)
-            if (w == v) done = true
+        return compsOf(flat, ends, 0, nc)
+    }
+
+    // Components `lo..hi` (component i ends at `ends[i]` in `flat`), by halves.
+    fn compsOf(flat: int[], ends: int[], lo: int, hi: int) -> int[][] {
+        if (hi - lo <= 8) {
+            let out: int[][] = []
+            let i: int = lo
+            while (i < hi) {
+                let from: int = 0
+                if (i > 0) from = ends[i - 1]
+                out = out.concat([flat.slice(from, ends[i])])
+                i = i + 1
+            }
+            return out
         }
-        return { index: ts.index, low: ts.low, on: on2, stack: stack, next: ts.next, out: ts.out.concat([comp]) }
+        const mid: int = lo + Math.floor((hi - lo) / 2)
+        return compsOf(flat, ends, lo, mid).concat(compsOf(flat, ends, mid, hi))
     }
 
-    fn withLow(ts: Tarjan, v: int, l: int) -> Tarjan {
-        return { index: ts.index, low: setInt(ts.low, v, l), on: ts.on, stack: ts.stack, next: ts.next, out: ts.out }
-    }
-
-    fn setInt(xs: int[], i: int, v: int) -> int[] {
-        return xs.slice(0, i).concat([v]).concat(xs.slice(i + 1))
-    }
-
-    fn setBool(xs: boolean[], i: int, v: boolean) -> boolean[] {
-        return xs.slice(0, i).concat([v]).concat(xs.slice(i + 1))
+    // A fresh tape of `n` -1s (by doubling, not one concat per element).
+    fn filledInt(n: int) -> int[] {
+        if (n <= 0) return []
+        let out: int[] = [-1]
+        while (out.length + out.length <= n) { out = out.concat(out) }
+        return out.concat(filledInt(n - out.length))
     }
 
     fn minInt(a: int, b: int) -> int {

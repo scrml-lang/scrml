@@ -314,11 +314,39 @@ const useColor = () => process.stdout.isTTY === true && !process.env.NO_COLOR;
 const paint = (code: string) => (s: string) => (useColor() ? `\x1b[${code}m${s}\x1b[0m` : s);
 const red = paint("31"), yellow = paint("33"), cyan = paint("36"), dim = paint("2"), bold = paint("1");
 
-function lineCol(src: string, offset: number): { line: number; col: number } {
-  let line = 1, last = -1;
+// S480 (s480-boot-fn-count-perf): the offsets where each line starts, computed once per source text
+// (a few texts are live at a time; the cache is dropped when it grows). lineCol rescanned the text
+// from offset 0 for every diagnostic, and sourceContext / byteColumn split the whole text per
+// diagnostic: O(diagnostics × file) — ~8 s of an error-heavy self-host compile.
+const lineStartsCache = new Map<string, number[]>();
+function lineStarts(src: string): number[] {
+  let ls = lineStartsCache.get(src);
+  if (ls === undefined) {
+    ls = [0];
+    for (let i = src.indexOf("\n"); i >= 0; i = src.indexOf("\n", i + 1)) ls.push(i + 1);
+    if (lineStartsCache.size >= 64) lineStartsCache.clear();
+    lineStartsCache.set(src, ls);
+  }
+  return ls;
+}
+
+/** Line `line` (1-based) of `src` as `src.split("\n")[line - 1]` reads it; undefined past the last. */
+function lineText(src: string, line: number): string | undefined {
+  const ls = lineStarts(src);
+  if (!(line >= 1 && line <= ls.length)) return undefined;
+  return src.substring(ls[line - 1], line < ls.length ? ls[line] - 1 : src.length);
+}
+
+export function lineCol(src: string, offset: number): { line: number; col: number } {
   const end = Math.max(0, Math.min(offset, src.length));
-  for (let i = 0; i < end; i++) if (src.charCodeAt(i) === 10) { line++; last = i; }
-  return { line, col: end - last };
+  // the last line start at or before `end` (a line feed at `end` itself starts the next line after it)
+  const ls = lineStarts(src);
+  let lo = 0, hi = ls.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (ls[mid] <= end) lo = mid; else hi = mid - 1;
+  }
+  return { line: lo + 1, col: end - (ls[lo] - 1) };
 }
 
 function severityOf(d: any): Diagnostic["severity"] {
@@ -336,12 +364,12 @@ function refusalDiag(s: string): Diagnostic {
 }
 
 function sourceContext(src: string, line: number): string {
-  const lines = src.split("\n");
+  const count = lineStarts(src).length;
   const out: string[] = [];
-  for (let i = Math.max(0, line - 3); i < Math.min(lines.length, line + 2); i++) {
+  for (let i = Math.max(0, line - 3); i < Math.min(count, line + 2); i++) {
     const n = String(i + 1).padStart(4);
     const here = i + 1 === line;
-    out.push(`${here ? red(" > ") : "   "}${here ? red(n) : dim(n)} ${dim("|")} ${lines[i]}`);
+    out.push(`${here ? red(" > ") : "   "}${here ? red(n) : dim(n)} ${dim("|")} ${lineText(src, i + 1)}`);
   }
   return out.join("\n");
 }
@@ -357,7 +385,7 @@ export type ColumnUnit = "utf16" | "bytes";
 export function byteColumn(d: Diagnostic, sources?: Map<string, string>): number | undefined {
   const src = d.file ? sources?.get(d.file) : undefined;
   if (d.col === undefined || d.line === undefined || src === undefined) return d.col;
-  const text = (src.split("\n")[d.line - 1] ?? "").replace(/\r$/, "");
+  const text = (lineText(src, d.line) ?? "").replace(/\r$/, "");
   return Buffer.byteLength(text.slice(0, d.col - 1), "utf8") + 1;
 }
 
