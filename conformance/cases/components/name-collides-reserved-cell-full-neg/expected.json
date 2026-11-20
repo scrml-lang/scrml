@@ -1,0 +1,35 @@
+{
+  "id": "components-name-collides-reserved-cell-full-neg",
+  "description": "§4.15 / §24.4 (S480 full list) — a program cell with any §4.15 reserved name, not only `db` / `schema` / `md`, is E-NAME-COLLIDES-RESERVED, once per cell, at its declaration: `onIdle`, `Theme` (compared lowercase), and the keywordless `<page=3/>`.",
+  "language-version": "1.0",
+  "spec": "§4.15, §24.4",
+  "provenance": "ruling:user-voice-scrml.md-S480-driver-text-reserved-cells item 2 (\"The full §4.15 reserved-name list applies to program cells, not only `db` / `schema` / `md`\")",
+  "rationale": "§4.15: \"A cell named with any name of the list above is `E-NAME-COLLIDES-RESERVED` too, compared lowercase (§24.4)\".",
+  "expect": {
+    "codes": [
+      "E-NAME-COLLIDES-RESERVED"
+    ],
+    "codeCounts": {
+      "E-NAME-COLLIDES-RESERVED": 3
+    },
+    "severity": {
+      "E-NAME-COLLIDES-RESERVED": "error"
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-reserved-cell-names-unemitted-s480",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'E-NAME-COLLIDES-RESERVED' fired 0 time(s), expected exactly 3",
+          "emitted:E-COMPONENT-035=1",
+          "emitted:E-SCOPE-001=1",
+          "emitted:E-STATE-UNDECLARED=3",
+          "emitted:E-STRUCTURAL-ELEMENT-MISPLACED=1",
+          "missing:E-NAME-COLLIDES-RESERVED",
+          "severity:code 'E-NAME-COLLIDES-RESERVED' did not fire (expected severity error)"
+        ]
+      }
+    }
+  }
+}

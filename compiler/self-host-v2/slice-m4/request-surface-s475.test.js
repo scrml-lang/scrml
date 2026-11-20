@@ -267,12 +267,12 @@ describe("runtime — the request machine on a real server (Bun.SQL) through the
     expect(cells(rt)["#r_error"]).toBe(null);
   });
 
-  test("the target is never a dependency: `@items = load(@page, @items)` runs once per @page change (no self-trigger)", async () => {
-    const src = `<program>\n    let <page:int=1/>\n    let <items:int=0/>\n    fn load(p: int, prev: int) -> int { return prev + p; }\n    <request id="items">${D} @items = load(@page, @items); }</request>\n    <main>\n        <button id="next" onclick={ @page = @page + 1; }>next</button>\n        <p id="items">${D}@items}</p>\n    </main>\n</program>\n`;
+  test("the target is never a dependency: `@items = load(@pageNo, @items)` runs once per @pageNo change (no self-trigger)", async () => {
+    const src = `<program>\n    let <pageNo:int=1/>\n    let <items:int=0/>\n    fn load(p: int, prev: int) -> int { return prev + p; }\n    <request id="items">${D} @items = load(@pageNo, @items); }</request>\n    <main>\n        <button id="next" onclick={ @pageNo = @pageNo + 1; }>next</button>\n        <p id="items">${D}@items}</p>\n    </main>\n</program>\n`;
     const r = compile(src);
     const prog = r.core.decls.find((d) => d.sym.id === r.core.program.id);
     const req = prog.renders.find((v) => v.variant === "Request").data;
-    expect(req.deps.map((d) => prog.fields[d.idx].sym.hint)).toEqual(["page"]);
+    expect(req.deps.map((d) => prog.fields[d.idx].sym.hint)).toEqual(["pageNo"]);
     const { rt } = await loadProgram(r.core, "req-self-" + k++);
     await settle();
     expect(document.querySelector("#items").textContent).toBe("1");

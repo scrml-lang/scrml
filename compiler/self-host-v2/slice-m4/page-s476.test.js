@@ -239,9 +239,12 @@ describe("`<page>` attributes (§40.8 per-route set)", () => {
     expect(codes(`<program>\nexport <page>\n<p>x</p>\n</page>\n</program>\n`)).toEqual(["E-PARSE-EXPORT"]);
     expect(codes(page(`length(>=5)`))).toEqual(["E-PAGE-INVALID-ATTR"]);
   });
-  // unchanged on base: a DECLARATION named `page` is a declaration, not the structural element
-  test("unchanged: a cell named `page` (`let <page:int=1/>`) is an ordinary cell", async () => {
-    const src = `<program>\n    let <page:int=1/>\n    <button id="b" onclick={ @page = @page + 1; }>next</button>\n    <p id="o">\${@page}</p>\n</program>\n`;
+  // a DECLARATION named `page` is a declaration, not the structural element. S480
+  // (ruling:user-voice-scrml.md-S480-driver-text-reserved-cells item 2, "The full §4.15 reserved-name
+  // list applies to program cells"): a cell so named is E-NAME-COLLIDES-RESERVED (it compiled before).
+  test("S480: a cell named `page` (`let <page:int=1/>`) is E-NAME-COLLIDES-RESERVED (§4.15); `pageNo` is an ordinary cell", async () => {
+    expect(codes(`<program>\n    let <page:int=1/>\n    <p id="o">\${@page}</p>\n</program>\n`)).toEqual(["E-NAME-COLLIDES-RESERVED"]);
+    const src = `<program>\n    let <pageNo:int=1/>\n    <button id="b" onclick={ @pageNo = @pageNo + 1; }>next</button>\n    <p id="o">\${@pageNo}</p>\n</program>\n`;
     await loadProgram(clean(src).core, "s476-page-cell", []);
     document.querySelector("#b").click();
     expect(document.querySelector("#o").textContent).toBe("2");

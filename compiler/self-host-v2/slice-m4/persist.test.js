@@ -139,8 +139,8 @@ describe("§6.14.2 — restore, codec, write on change, reset, cross-tab sync", 
   });
 
   test("rule 9 via `reset-on=`: the reset of a persisted cell removes its key too", async () => {
-    const src = P(`    let <query:string=""/>\n    let <page:int=1 persist="local" key="c8.page" reset-on=[@query]/>`,
-      `        <p class="out">\${@page}</p>\n        <button onclick=(@page = @page + 1)>next</button>\n        <button onclick=(@query = @query + "x")>type</button>`);
+    const src = P(`    let <query:string=""/>\n    let <pageNo:int=1 persist="local" key="c8.page" reset-on=[@query]/>`,
+      `        <p class="out">\${@pageNo}</p>\n        <button onclick=(@pageNo = @pageNo + 1)>next</button>\n        <button onclick=(@query = @query + "x")>type</button>`);
     const core = coreOf(src);
     const resetOn = walkCore(core, (n) => n.variant === "ResetOn")[0];
     expect(resetOn.data.reset.stmts.map((s) => s.variant)).toEqual(["Write", "Unpersist"]);
@@ -441,7 +441,7 @@ describe("§6.14 — refused, never accepted-and-ignored (E-BOOTSTRAP-UNSUPPORTE
   });
 
   test("a `persist=\"local\"` cell as a `reset-on=` trigger (§6.8.4 rule 7 → O-061-5); a \"session\" trigger is accepted", () => {
-    one(`    let <q:string="" persist="local" key="r7"/>\n    let <page:int=1 reset-on=[@q]/>`, "O-061-5");
+    one(`    let <q:string="" persist="local" key="r7"/>\n    let <pageNo:int=1 reset-on=[@q]/>`, "O-061-5");
     expect(codes(P(`    let <q:string="" persist="session" key="r7"/>\n    let <_page:int=1 reset-on=[@q]/>`, `        <p>x</p>`))).toEqual([]);
   });
 
