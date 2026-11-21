@@ -1,3 +1,4 @@
+<program reset="none">
 // test-001-basic.scrml
 // Simple test context. Tests: ~{ test "name" { assert true } } pattern.
 
@@ -8,3 +9,4 @@
 ~{ "basic tests"
     test "truth" { assert true }
 }
+</program>

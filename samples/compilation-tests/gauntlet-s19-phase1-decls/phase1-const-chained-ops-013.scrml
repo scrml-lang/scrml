@@ -1,6 +1,8 @@
+<program reset="none">
 // const initialized from a chained method call
 ${
-    const upper = "hello world".toUpperCase().trim()
-    const parts = "a,b,c".split(",").map(s => s.trim())
+    const upper = "hello world".toUpperCase().trim();
+    const parts = "a,b,c".split(",").map(s => s.trim());
 }
 <p>${upper}</>
+</program>

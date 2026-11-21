@@ -1,9 +1,7 @@
 // server function — escalates to server route
 <program db="./test.db">
-    ${
         server function deleteUser(id) {
-            ?{`DELETE FROM users WHERE id = ${id}`}.run()
+            ?{`DELETE FROM users WHERE id = ${id}`}.run();
         }
-    }
-    <button onclick={ deleteUser(1) !{ .Transport(_) :> return } }>delete</>
+    <button onclick={ deleteUser(1) !{ .Transport(_) :> return }; }>delete</>
 </>

@@ -1,13 +1,15 @@
+<program reset="none">
 // let with multi-line array literal init
 ${
     let names = [
         "alice",
         "bob",
         "carol"
-    ]
+    ];
 }
 <ul>
     <each in=names as name>
         <li>${name}</li>
     </each>
 </ul>
+</program>

@@ -1,9 +1,10 @@
+<program reset="none">
 // combined-013-blog.scrml
 // Blog post list with SQL. Tests: SQL + lift + markup + structure.
 
 <div class="blog">
     ${
-        let posts = ?{`SELECT id, title FROM articles`}
+        let posts = ?{`SELECT id, title FROM articles`};
     }
     <h1>Blog</>
     <div class="post-list">
@@ -12,8 +13,9 @@
                 lift <article class="post-preview">
                     <h2>${post.title}</>
                     <p>Read more...</>
-                </article>
+                </article>;
             }
         }
     </div>
 </div>
+</program>

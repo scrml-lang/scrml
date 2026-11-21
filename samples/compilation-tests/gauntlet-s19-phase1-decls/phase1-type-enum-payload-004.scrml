@@ -1,8 +1,8 @@
+<program reset="none">
 // type X:enum with variants carrying payload
-${
     type Result:enum = {
         Ok(value: number)
         Err(message: string)
     }
-}
 <p>x</>
+</program>

@@ -1,15 +1,17 @@
+<program reset="none">
 // lift-003-nested-markup.scrml
 // Lift producing nested markup. Tests: lift with complex tags.
 
 <div class="card-list">
     ${
-        let products = ["Widget", "Gadget", "Doohickey"]
+        let products = ["Widget", "Gadget", "Doohickey"];
         for (let p of products) {
             lift <div class="card">
                 <h3>${p}</>
                 <p>A great product</>
                 <button>Buy Now</>
-            </div>
+            </div>;
         }
     }
 </div>
+</program>

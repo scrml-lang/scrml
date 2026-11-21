@@ -1,9 +1,9 @@
+<program>
 // trap: `x ?? y` vs `x is some ? x : y` — equivalent semantics
 ${
-    let x: string | not = not
-    const a = x ?? "fallback"
-    const b = x is some ? x : "fallback"
+    let x: string | not = not;
+    const a = x ?? "fallback";
+    const b = x is some ? x : "fallback";
 }
-<program>
     <p>${a} / ${b}</>
 </>

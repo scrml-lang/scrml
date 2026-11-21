@@ -59,9 +59,9 @@
 // impl#1 workaround: `${` in a string literal is assembled from pieces.
 // =============================================================================
 ${
-    import { DdlTok, DdlScan, ddlScan } from "./sql.scrml"
+    import { DdlTok, DdlScan, ddlScan } from "./sql.scrml";
 
-    fn LB() -> string { return "{" }
+    fn LB() -> string { return "{"; }
 
     // A declared column / table (absolute source offsets of the name).
     // `nn`: the column carries `not null` (§38.5.2) — s478-boot-sql-row-types reads it for the
@@ -76,144 +76,145 @@ ${
     export type SchemaRead:struct = { tables: SchemaTable[], errs: SchemaErr[] }
 
     fn err(code: string, msg: string, start: int, end: int) -> SchemaErr {
-        return { code: code, text: msg, start: start, end: end }
+        return { code: code, text: msg, start: start, end: end };
     }
-    fn refuse(msg: string, start: int, end: int) -> SchemaErr { return err("E-BOOTSTRAP-UNSUPPORTED", msg, start, end) }
+    fn refuse(msg: string, start: int, end: int) -> SchemaErr { return err("E-BOOTSTRAP-UNSUPPORTED", msg, start, end); }
 
     // ---- characters -----------------------------------------------------------
-    fn ch(s: string, i: int) -> string { return s.substring(i, i + 1) }
-    fn isDigit(c: string) -> boolean { return c != "" && "0123456789".indexOf(c) >= 0 }
+    fn ch(s: string, i: int) -> string { return s.substring(i, i + 1); }
+    fn isDigit(c: string) -> boolean { return c != "" && "0123456789".indexOf(c) >= 0; }
     fn isWordStart(c: string) -> boolean {
-        return c != "" && "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_".indexOf(c) >= 0
+        return c != "" && "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_".indexOf(c) >= 0;
     }
-    fn isWordCh(c: string) -> boolean { return isWordStart(c) || isDigit(c) }
-    fn isSpace(c: string) -> boolean { return c == " " || c == "\n" || c == "\t" || c == "\r" }
+    fn isWordCh(c: string) -> boolean { return isWordStart(c) || isDigit(c); }
+    fn isSpace(c: string) -> boolean { return c == " " || c == "\n" || c == "\t" || c == "\r"; }
 
     // Past whitespace and `//` line comments, never past `to`.
     fn skip(s: string, from: int, to: int) -> int {
-        let i: int = from
-        let going = true
-        while (going && i < to) {
-            const c: string = ch(s, i)
+        let i: int = from;
+        let going = true;
+        for (; going && i < to; ) {
+            const c: string = ch(s, i);
             if (isSpace(c)) {
-                i = i + 1
+                i = i + 1;
             } else if (c == "/" && ch(s, i + 1) == "/") {
-                const nl: int = s.indexOf("\n", i)
-                if (nl < 0 || nl >= to) { i = to } else { i = nl + 1 }
+                const nl: int = s.indexOf("\n", i);
+                if (nl < 0 || nl >= to) { i = to; } else { i = nl + 1; }
             } else {
-                going = false
+                going = false;
             }
         }
-        return i
+        return i;
     }
 
     // The end of the identifier starting at `i` (`i` itself: none there).
     fn wordEnd(s: string, i: int, to: int) -> int {
-        if (i >= to || !isWordStart(ch(s, i))) return i
-        let j: int = i + 1
-        while (j < to && isWordCh(ch(s, j))) { j = j + 1 }
-        return j
+        if (i >= to || !isWordStart(ch(s, i))) return i;
+        let j: int = i + 1;
+        for (; j < to && isWordCh(ch(s, j)); ) { j = j + 1; }
+        return j;
     }
 
-    fn wordAt(s: string, i: int, to: int) -> string { return s.substring(i, wordEnd(s, i, to)) }
+    fn wordAt(s: string, i: int, to: int) -> string { return s.substring(i, wordEnd(s, i, to)); }
 
     // The end of a run of characters that are not whitespace, `{`, `}` and not
     // a `//` comment start — a top-level head as written.
     fn runEnd(s: string, i: int, to: int) -> int {
-        let j: int = i
-        while (j < to) {
-            const c: string = ch(s, j)
-            if (isSpace(c) || c == "{" || c == "}") return j
-            if (c == "/" && ch(s, j + 1) == "/") return j
-            j = j + 1
+        let j: int = i;
+        for (; j < to; ) {
+            const c: string = ch(s, j);
+            if (isSpace(c) || c == "{" || c == "}") return j;
+            if (c == "/" && ch(s, j + 1) == "/") return j;
+            j = j + 1;
         }
-        return j
+        return j;
     }
 
     // The table name a head run ends in: its longest suffix of letters, digits
     // and `_` that does not start with a digit ("" — the run ends in something
     // else, e.g. `users:`, and is no head at all).
     fn headTail(run: string) -> string {
-        let k: int = run.length
-        while (k > 0 && isWordCh(ch(run, k - 1))) { k = k - 1 }
-        while (k < run.length && isDigit(ch(run, k))) { k = k + 1 }
-        return run.substring(k, run.length)
+        let k: int = run.length;
+        for (; k > 0 && isWordCh(ch(run, k - 1)); ) { k = k - 1; }
+        for (; k < run.length && isDigit(ch(run, k)); ) { k = k + 1; }
+        return run.substring(k, run.length);
     }
 
     // The end (one past the closing quote) of a `'…'` / `"…"` run starting at
     // `i`, on one line; a doubled quote is an escaped one. -1: never closed.
     fn quoteEnd(s: string, i: int, to: int) -> int {
-        const q: string = ch(s, i)
-        let j: int = i + 1
-        while (j < to) {
-            const c: string = ch(s, j)
-            if (c == "\n") return -1
+        const q: string = ch(s, i);
+        let j: int = i + 1;
+        for (; j < to; ) {
+            const c: string = ch(s, j);
+            if (c == "\n") return -1;
             if (c == q) {
                 if (ch(s, j + 1) == q) {
-                    j = j + 2
+                    j = j + 2;
                 } else {
-                    return j + 1
+                    return j + 1;
                 }
             } else {
-                j = j + 1
+                j = j + 1;
             }
         }
-        return -1
+        return -1;
     }
 
     // The index of the `)` closing the `(` at `open` (nested parens, quotes
     // read whole), else -1.
     fn parenEnd(s: string, open: int, to: int) -> int {
-        let depth: int = 0
-        let j: int = open
-        while (j < to) {
-            const c: string = ch(s, j)
+        let depth: int = 0;
+        let j: int = open;
+        for (; j < to; ) {
+            const c: string = ch(s, j);
             if (c == "'" || c == "\"") {
-                const e: int = quoteEnd(s, j, to)
-                if (e < 0) return -1
-                j = e
+                const e: int = quoteEnd(s, j, to);
+                if (e < 0) return -1;
+                j = e;
             } else {
-                if (c == "(") depth = depth + 1
+                if (c == "(") depth = depth + 1;
                 if (c == ")") {
-                    depth = depth - 1
-                    if (depth == 0) return j
+                    depth = depth - 1;
+                    if (depth == 0) return j;
                 }
-                j = j + 1
+                j = j + 1;
             }
         }
-        return -1
+        return -1;
     }
 
     // The `}` that ends the table body the reader gave up on at `from` (quotes
     // read whole), else `to`.
     fn braceEnd(s: string, from: int, to: int) -> int {
-        let j: int = from
-        while (j < to) {
-            const c: string = ch(s, j)
+        let j: int = from;
+        for (; j < to; ) {
+            const c: string = ch(s, j);
             if (c == "'" || c == "\"") {
-                const e: int = quoteEnd(s, j, to)
-                if (e < 0) { j = j + 1 } else { j = e }
+                const e: int = quoteEnd(s, j, to);
+                if (e < 0) { j = j + 1; } else { j = e; }
             } else if (c == "/" && ch(s, j + 1) == "/") {
-                j = skip(s, j, to)
+                j = skip(s, j, to);
             } else if (c == "}") {
-                return j
+                return j;
             } else {
-                j = j + 1
+                j = j + 1;
             }
         }
-        return to
+        return to;
     }
 
     // Past whitespace, `//` line comments and closed `/* … */` comments (the
     // §39.2 "with any whitespace or closed comments around the `.`" of a head).
     fn skipHead(s: string, from: int, to: int) -> int {
-        let i: int = skip(s, from, to)
-        while (i < to && s.substring(i, i + 2) == "/*") {
-            const e: int = s.indexOf("*/", i + 2)
-            if (e < 0 || e + 2 > to) return i
-            i = skip(s, e + 2, to)
+        let i: int = skip(s, from, to);
+        for (;;) {
+            if (!(i < to && s.substring(i, i + 2) == "/*")) { break; }
+            const e: int = s.indexOf("*/", i + 2);
+            if (e < 0 || e + 2 > to) return i;
+            i = skip(s, e + 2, to);
         }
-        return i
+        return i;
     }
 
     // A `.`-qualified declarative head written with whitespace or comments
@@ -223,29 +224,29 @@ ${
     type QHead:struct = { name: string, end: int, open: int }
 
     fn qualHead(s: string, i: int, to: int) -> QHead {
-        const none: QHead = { name: "", end: i, open: -1 }
-        let j: int = wordEnd(s, i, to)
-        if (j == i) return none
-        let name: string = s.substring(i, j)
-        let dots: int = 0
-        let going = true
-        while (going) {
-            const k: int = skipHead(s, j, to)
+        const none: QHead = { name: "", end: i, open: -1 };
+        let j: int = wordEnd(s, i, to);
+        if (j == i) return none;
+        let name: string = s.substring(i, j);
+        let dots: int = 0;
+        let going = true;
+        for (; going; ) {
+            const k: int = skipHead(s, j, to);
             if (ch(s, k) == ".") {
-                const k2: int = skipHead(s, k + 1, to)
-                const we: int = wordEnd(s, k2, to)
-                if (we == k2) return none
-                name = s.substring(k2, we)
-                j = we
-                dots = dots + 1
+                const k2: int = skipHead(s, k + 1, to);
+                const we: int = wordEnd(s, k2, to);
+                if (we == k2) return none;
+                name = s.substring(k2, we);
+                j = we;
+                dots = dots + 1;
             } else {
-                going = false
+                going = false;
             }
         }
-        if (dots == 0) return none
-        const o: int = skipHead(s, j, to)
-        if (ch(s, o) != "{") return none
-        return { name: name, end: j, open: o }
+        if (dots == 0) return none;
+        const o: int = skipHead(s, j, to);
+        if (ch(s, o) != "{") return none;
+        return { name: name, end: j, open: o };
     }
 
     // The start of the `<schema>` closer (`</>`, or `</schema>` with optional
@@ -254,53 +255,53 @@ ${
     // `'…'` / `"…"` literal (`default('</>')`, `// see </>`) is text, not the
     // end of the block (§27.1: a comment is "valid in all scrml contexts").
     export fn schemaCloseAt(s: string, from: int) -> int {
-        const to: int = s.length
-        let j: int = from
-        while (j < to) {
-            const c: string = ch(s, j)
+        const to: int = s.length;
+        let j: int = from;
+        for (; j < to; ) {
+            const c: string = ch(s, j);
             if (c == "/" && ch(s, j + 1) == "/") {
-                const nl: int = s.indexOf("\n", j)
-                if (nl < 0) return -1
-                j = nl + 1
+                const nl: int = s.indexOf("\n", j);
+                if (nl < 0) return -1;
+                j = nl + 1;
             } else if (c == "'" || c == "\"") {
-                const e: int = quoteEnd(s, j, to)
-                j = e < 0 ? j + 1 : e
+                const e: int = quoteEnd(s, j, to);
+                j = e < 0 ? j + 1 : e;
             } else if (c == "<" && ch(s, j + 1) == "/") {
-                if (ch(s, j + 2) == ">") return j
+                if (ch(s, j + 2) == ">") return j;
                 if (s.substring(j + 2, j + 8) == "schema") {
-                    let k: int = j + 8
-                    while (k < to && isSpace(ch(s, k))) { k = k + 1 }
-                    if (ch(s, k) == ">") return j
+                    let k: int = j + 8;
+                    for (; k < to && isSpace(ch(s, k)); ) { k = k + 1; }
+                    if (ch(s, k) == ">") return j;
                 }
-                j = j + 1
+                j = j + 1;
             } else {
-                j = j + 1
+                j = j + 1;
             }
         }
-        return -1
+        return -1;
     }
 
-    fn sameName(a: string, b: string) -> boolean { return a.toLowerCase() == b.toLowerCase() }
+    fn sameName(a: string, b: string) -> boolean { return a.toLowerCase() == b.toLowerCase(); }
 
     // Does `low` (lower-cased) hold `w` as a whole word?
     fn hasWord(low: string, w: string) -> boolean {
-        let k: int = low.indexOf(w)
-        while (k >= 0) {
-            const before: string = k > 0 ? ch(low, k - 1) : ""
-            const after: string = ch(low, k + w.length)
-            if (!isWordCh(before) && !isWordCh(after)) return true
-            k = low.indexOf(w, k + 1)
+        let k: int = low.indexOf(w);
+        for (; k >= 0; ) {
+            const before: string = k > 0 ? ch(low, k - 1) : "";
+            const after: string = ch(low, k + w.length);
+            if (!isWordCh(before) && !isWordCh(after)) return true;
+            k = low.indexOf(w, k + 1);
         }
-        return false
+        return false;
     }
 
     fn isColumnType(t: string) -> boolean {
-        return ["text", "integer", "real", "blob", "boolean", "timestamp"].indexOf(t) >= 0
+        return ["text", "integer", "real", "blob", "boolean", "timestamp"].indexOf(t) >= 0;
     }
 
     // §39.5.7 — the shared-core validator vocabulary at the schema locus.
     fn isSharedCore(w: string) -> boolean {
-        return ["req", "length", "pattern", "min", "max", "gt", "lt", "gte", "lte", "eq", "neq", "oneOf", "notIn"].indexOf(w) >= 0
+        return ["req", "length", "pattern", "min", "max", "gt", "lt", "gte", "lte", "eq", "neq", "oneOf", "notIn"].indexOf(w) >= 0;
     }
 
     // ---- a column -------------------------------------------------------------
@@ -308,7 +309,7 @@ ${
     type RCol:struct = { col: SchemaCol | not, refs: SchemaRef[], errs: SchemaErr[], next: int, stop: boolean }
 
     fn colGiveUp(errs: SchemaErr[], e: SchemaErr, at: int) -> RCol {
-        return { col: not, refs: [], errs: errs.concat([e]), next: at, stop: true }
+        return { col: not, refs: [], errs: errs.concat([e]), next: at, stop: true };
     }
 
     // A give-up after the column's name and type were read keeps the column
@@ -316,7 +317,7 @@ ${
     // table-level checks do not cascade off the refusal (W-SCHEMA-001,
     // E-SCHEMA-006 against a column that is there).
     fn colGiveUpKeep(c: SchemaCol, refs: SchemaRef[], errs: SchemaErr[], e: SchemaErr, at: int) -> RCol {
-        return { col: c, refs: refs, errs: errs.concat([e]), next: at, stop: true }
+        return { col: c, refs: refs, errs: errs.concat([e]), next: at, stop: true };
     }
 
     // ---- a `default(…)` literal (§38.5.4) -------------------------------------
@@ -330,121 +331,122 @@ ${
     // with no identifier and no call). Everything else is refused by name
     // (INTERIM — what else "literal" admits is not written down).
     fn wsEnd(s: string, i: int, to: int) -> int {
-        let j: int = i
-        while (j < to && isSpace(ch(s, j))) { j = j + 1 }
-        return j
+        let j: int = i;
+        for (; j < to && isSpace(ch(s, j)); ) { j = j + 1; }
+        return j;
     }
 
     fn isDefaultKeyword(w: string) -> boolean {
-        return ["null", "true", "false", "current_timestamp", "current_date", "current_time"].indexOf(w.toLowerCase()) >= 0
+        return ["null", "true", "false", "current_timestamp", "current_date", "current_time"].indexOf(w.toLowerCase()) >= 0;
     }
 
     // The end of a numeric literal at `i` (`i`: none there).
     fn numEnd(s: string, i: int, to: int) -> int {
-        let j: int = i
-        while (j < to && isDigit(ch(s, j))) { j = j + 1 }
-        let had = j > i
+        let j: int = i;
+        for (; j < to && isDigit(ch(s, j)); ) { j = j + 1; }
+        let had = j > i;
         if (ch(s, j) == ".") {
-            let k: int = j + 1
-            while (k < to && isDigit(ch(s, k))) { k = k + 1 }
-            if (k > j + 1) had = true
-            if (had) j = k
+            let k: int = j + 1;
+            for (; k < to && isDigit(ch(s, k)); ) { k = k + 1; }
+            if (k > j + 1) had = true;
+            if (had) j = k;
         }
-        if (!had) return i
-        const e: string = ch(s, j)
+        if (!had) return i;
+        const e: string = ch(s, j);
         if (e == "e" || e == "E") {
-            let k: int = j + 1
-            if (ch(s, k) == "+" || ch(s, k) == "-") k = k + 1
-            const d0: int = k
-            while (k < to && isDigit(ch(s, k))) { k = k + 1 }
-            if (k > d0) j = k
+            let k: int = j + 1;
+            if (ch(s, k) == "+" || ch(s, k) == "-") k = k + 1;
+            const d0: int = k;
+            for (; k < to && isDigit(ch(s, k)); ) { k = k + 1; }
+            if (k > d0) j = k;
         }
-        if (j < to && isWordCh(ch(s, j))) return i
-        return j
+        if (j < to && isWordCh(ch(s, j))) return i;
+        return j;
     }
 
     fn isHexRun(t: string) -> boolean {
-        let k: int = 0
-        while (k < t.length) {
-            if ("0123456789abcdefABCDEF".indexOf(ch(t, k)) < 0) return false
-            k = k + 1
+        let k: int = 0;
+        for (; k < t.length; ) {
+            if ("0123456789abcdefABCDEF".indexOf(ch(t, k)) < 0) return false;
+            k = k + 1;
         }
-        return true
+        return true;
     }
 
     // One term at `i` (after whitespace); its end, or -1.
     fn defTerm(s: string, i0: int, to: int) -> int {
-        let i: int = wsEnd(s, i0, to)
-        let signed = false
-        while (i < to && (ch(s, i) == "-" || ch(s, i) == "+")) {
-            signed = true
-            i = wsEnd(s, i + 1, to)
+        let i: int = wsEnd(s, i0, to);
+        let signed = false;
+        for (;;) {
+            if (!(i < to && (ch(s, i) == "-" || ch(s, i) == "+"))) { break; }
+            signed = true;
+            i = wsEnd(s, i + 1, to);
         }
-        const c: string = ch(s, i)
+        const c: string = ch(s, i);
         if (c == "(") {
-            const e: int = defExpr(s, i + 1, to)
-            if (e < 0) return -1
-            const k: int = wsEnd(s, e, to)
-            if (ch(s, k) != ")") return -1
-            return k + 1
+            const e: int = defExpr(s, i + 1, to);
+            if (e < 0) return -1;
+            const k: int = wsEnd(s, e, to);
+            if (ch(s, k) != ")") return -1;
+            return k + 1;
         }
-        const n: int = numEnd(s, i, to)
-        if (n > i) return n
-        if (signed) return -1
+        const n: int = numEnd(s, i, to);
+        if (n > i) return n;
+        if (signed) return -1;
         if (c == "'") {
-            const e: int = quoteEnd(s, i, to)
-            return e > to ? -1 : e
+            const e: int = quoteEnd(s, i, to);
+            return e > to ? -1 : e;
         }
         if ((c == "x" || c == "X") && ch(s, i + 1) == "'") {
-            const e: int = quoteEnd(s, i + 1, to)
-            if (e < 0 || e > to) return -1
-            if (!isHexRun(s.substring(i + 2, e - 1))) return -1
-            return e
+            const e: int = quoteEnd(s, i + 1, to);
+            if (e < 0 || e > to) return -1;
+            if (!isHexRun(s.substring(i + 2, e - 1))) return -1;
+            return e;
         }
         if (isWordStart(c)) {
-            const we: int = wordEnd(s, i, to)
-            if (isDefaultKeyword(s.substring(i, we))) return we
+            const we: int = wordEnd(s, i, to);
+            if (isDefaultKeyword(s.substring(i, we))) return we;
         }
-        return -1
+        return -1;
     }
 
     // `term (op term)*` (inside parentheses only); its end, or -1.
     fn defExpr(s: string, i: int, to: int) -> int {
-        let e: int = defTerm(s, i, to)
-        if (e < 0) return -1
-        let going = true
-        while (going) {
-            const j: int = wsEnd(s, e, to)
-            const c: string = ch(s, j)
-            let op: int = 0
+        let e: int = defTerm(s, i, to);
+        if (e < 0) return -1;
+        let going = true;
+        for (; going; ) {
+            const j: int = wsEnd(s, e, to);
+            const c: string = ch(s, j);
+            let op: int = 0;
             if (s.substring(j, j + 2) == "||") {
-                op = 2
+                op = 2;
             } else if (j < to && "+-*/%".indexOf(c) >= 0) {
-                op = 1
+                op = 1;
             }
             if (op == 0) {
-                going = false
+                going = false;
             } else {
-                e = defTerm(s, j + op, to)
-                if (e < 0) return -1
+                e = defTerm(s, j + op, to);
+                if (e < 0) return -1;
             }
         }
-        return e
+        return e;
     }
 
     // "" when `s[a, b)` (the text inside `default(` … `)`) is an admitted
     // literal, else the refusal's reason.
     fn defaultRefusal(s: string, a: int, b: int) -> string {
-        const text: string = s.substring(a, b)
+        const text: string = s.substring(a, b);
         if (text.indexOf("$" + LB()) >= 0 || text.indexOf("?" + LB()) >= 0) {
-            return "holds scrml code (a `" + "$" + LB() + " … }` / `" + "?" + LB() + " … }`), not a literal — §38.5.4: \"The `literal` inside `default(...)` SHALL be passed verbatim to the generated SQL\", so code there would be pasted into the DDL"
+            return "holds scrml code (a `" + "$" + LB() + " … }` / `" + "?" + LB() + " … }`), not a literal — §38.5.4: \"The `literal` inside `default(...)` SHALL be passed verbatim to the generated SQL\", so code there would be pasted into the DDL";
         }
-        const e: int = defTerm(s, a, b)
-        if (e >= 0 && wsEnd(s, e, b) == b) return ""
-        const shown: string = text.trim().length > 60 ? text.trim().substring(0, 60) + "…" : text.trim()
-        let hint: string = ""
-        if (shown.indexOf("\"") >= 0) hint = " (a SQL string literal is single-quoted: `'…'`; `\"…\"` is an identifier in SQL)"
-        return "holds `" + shown + "`, which is not a literal the bootstrap admits" + hint + " — §38.5.4: \"The `literal` inside `default(...)` SHALL be passed verbatim to the generated SQL\" (its examples: `CURRENT_TIMESTAMP`, `0`, `''`). The bootstrap admits a number, a `'…'` string, an `X'…'` blob, NULL, TRUE, FALSE, CURRENT_TIMESTAMP, CURRENT_DATE, CURRENT_TIME, or a parenthesized constant expression of those (INTERIM — no identifier, function call or code)"
+        const e: int = defTerm(s, a, b);
+        if (e >= 0 && wsEnd(s, e, b) == b) return "";
+        const shown: string = text.trim().length > 60 ? text.trim().substring(0, 60) + "…" : text.trim();
+        let hint: string = "";
+        if (shown.indexOf("\"") >= 0) hint = " (a SQL string literal is single-quoted: `'…'`; `\"…\"` is an identifier in SQL)";
+        return "holds `" + shown + "`, which is not a literal the bootstrap admits" + hint + " — §38.5.4: \"The `literal` inside `default(...)` SHALL be passed verbatim to the generated SQL\" (its examples: `CURRENT_TIMESTAMP`, `0`, `''`). The bootstrap admits a number, a `'…'` string, an `X'…'` blob, NULL, TRUE, FALSE, CURRENT_TIMESTAMP, CURRENT_DATE, CURRENT_TIME, or a parenthesized constant expression of those (INTERIM — no identifier, function call or code)";
     }
 
     // ---- a default literal's kind against its column's type (S478 #1925 review F1) ----
@@ -461,168 +463,168 @@ ${
     // The kind of the admitted literal `s[a, b)` (defaultRefusal said ""): "null", "str",
     // "int", "real", "bool", "blob" or "expr".
     fn defKind(s: string, a: int, b: int) -> string {
-        let i: int = wsEnd(s, a, b)
-        while (i < b && (ch(s, i) == "-" || ch(s, i) == "+")) { i = wsEnd(s, i + 1, b) }
-        const c: string = ch(s, i)
-        if (c == "(") return "expr"
-        if (c == "'") return "str"
-        if ((c == "x" || c == "X") && ch(s, i + 1) == "'") return "blob"
-        const n: int = numEnd(s, i, b)
+        let i: int = wsEnd(s, a, b);
+        for (;;) { if (!(i < b && (ch(s, i) == "-" || ch(s, i) == "+"))) { break; } i = wsEnd(s, i + 1, b); }
+        const c: string = ch(s, i);
+        if (c == "(") return "expr";
+        if (c == "'") return "str";
+        if ((c == "x" || c == "X") && ch(s, i + 1) == "'") return "blob";
+        const n: int = numEnd(s, i, b);
         if (n > i) {
-            const t: string = s.substring(i, n)
-            if (t.indexOf(".") >= 0 || t.indexOf("e") >= 0 || t.indexOf("E") >= 0) return "real"
-            return "int"
+            const t: string = s.substring(i, n);
+            if (t.indexOf(".") >= 0 || t.indexOf("e") >= 0 || t.indexOf("E") >= 0) return "real";
+            return "int";
         }
-        const w: string = s.substring(i, wordEnd(s, i, b)).toLowerCase()
-        if (w == "null") return "null"
-        if (w == "true" || w == "false") return "bool"
-        return "str"
+        const w: string = s.substring(i, wordEnd(s, i, b)).toLowerCase();
+        if (w == "null") return "null";
+        if (w == "true" || w == "false") return "bool";
+        return "str";
     }
 
     // "" when a default of kind `kind` fits a column of §39.4 type `ty` (a raw column's type is
     // already mapped: INTEGER → integer, TEXT → text, …), else the refusal message.
     fn defaultKindRefusal(col: string, ty: string, kind: string, shown: string) -> string {
-        if (kind == "null") return ""
-        const isText: boolean = ty == "text" || ty == "timestamp"
-        const isInt: boolean = ty == "integer" || ty == "boolean"
-        if (isText && kind == "str") return ""
-        if (isInt && kind == "int") return ""
-        if (ty == "real" && (kind == "int" || kind == "real")) return ""
-        let what: string = "a string"
-        if (kind == "int") what = "an integer"
-        if (kind == "real") what = "a non-integer number"
-        if (kind == "bool") what = "a boolean"
-        if (kind == "blob") what = "a blob"
-        if (kind == "expr") what = "a parenthesized expression"
-        const fits: string = "the bootstrap admits a `'…'` string or CURRENT_TIMESTAMP / CURRENT_DATE / CURRENT_TIME on a text column, an integer on an integer column, a number on a real column, and NULL on any column (INTERIM — no boolean, blob or expression default)"
-        return "the default `" + shown + "` on column `" + col + "` (" + ty + ") is " + what + ", which the column's row type does not hold — SQLite stores a default it cannot convert as written, so a field §14.8.3 types by the column would hold another type at run time; " + fits
+        if (kind == "null") return "";
+        const isText: boolean = ty == "text" || ty == "timestamp";
+        const isInt: boolean = ty == "integer" || ty == "boolean";
+        if (isText && kind == "str") return "";
+        if (isInt && kind == "int") return "";
+        if (ty == "real" && (kind == "int" || kind == "real")) return "";
+        let what: string = "a string";
+        if (kind == "int") what = "an integer";
+        if (kind == "real") what = "a non-integer number";
+        if (kind == "bool") what = "a boolean";
+        if (kind == "blob") what = "a blob";
+        if (kind == "expr") what = "a parenthesized expression";
+        const fits: string = "the bootstrap admits a `'…'` string or CURRENT_TIMESTAMP / CURRENT_DATE / CURRENT_TIME on a text column, an integer on an integer column, a number on a real column, and NULL on any column (INTERIM — no boolean, blob or expression default)";
+        return "the default `" + shown + "` on column `" + col + "` (" + ty + ") is " + what + ", which the column's row type does not hold — SQLite stores a default it cannot convert as written, so a field §14.8.3 types by the column would hold another type at run time; " + fits;
     }
 
     // A column declaration at `i` (an identifier is there), inside table `table`.
     fn readColumn(s: string, i: int, to: int, table: string) -> RCol {
-        let errs: SchemaErr[] = []
-        const ne: int = wordEnd(s, i, to)
-        const name: string = s.substring(i, ne)
-        let j: int = skip(s, ne, to)
+        let errs: SchemaErr[] = [];
+        const ne: int = wordEnd(s, i, to);
+        const name: string = s.substring(i, ne);
+        let j: int = skip(s, ne, to);
         if (ch(s, j) != ":") {
-            return colGiveUp(errs, refuse("`" + name + "` here is not a §39.2 column declaration (`name: type constraint*`) — the bootstrap reads nothing else in a `<schema>` table body", i, ne), j)
+            return colGiveUp(errs, refuse("`" + name + "` here is not a §39.2 column declaration (`name: type constraint*`) — the bootstrap reads nothing else in a `<schema>` table body", i, ne), j);
         }
-        j = skip(s, j + 1, to)
-        const te: int = wordEnd(s, j, to)
+        j = skip(s, j + 1, to);
+        const te: int = wordEnd(s, j, to);
         if (te == j) {
-            return colGiveUp(errs, refuse("column `" + name + "` has no type — §39.2: `" + name + ": type` with type one of text, integer, real, blob, boolean, timestamp", i, ne), j)
+            return colGiveUp(errs, refuse("column `" + name + "` has no type — §39.2: `" + name + ": type` with type one of text, integer, real, blob, boolean, timestamp", i, ne), j);
         }
         // S479 ruling item 3 — §39.2: "The `column-type` names (§39.4) and the words of a
         // `column-constraint` … SHALL be matched case-insensitively; the lowercase spelling is
         // canonical." The column keeps the canonical (lowercase) type.
-        const tyWritten: string = s.substring(j, te)
-        const ty: string = tyWritten.toLowerCase()
+        const tyWritten: string = s.substring(j, te);
+        const ty: string = tyWritten.toLowerCase();
         if (!isColumnType(ty)) {
-            errs = errs.concat([err("E-SCHEMA-004", "column `" + table + "." + name + "` has the type `" + tyWritten + "`, which is not a `<schema>` column type — the types are text, integer, real, blob, boolean, timestamp (§39.4: \"No other column type names SHALL be valid in a `<schema>` block\")", j, te)])
+            errs = errs.concat([err("E-SCHEMA-004", "column `" + table + "." + name + "` has the type `" + tyWritten + "`, which is not a `<schema>` column type — the types are text, integer, real, blob, boolean, timestamp (§39.4: \"No other column type names SHALL be valid in a `<schema>` block\")", j, te)]);
         } else if (ty == "boolean") {
-            errs = errs.concat([refuse("column `" + table + "." + name + "` is `boolean` — §39.4: it is stored as INTEGER and \"The compiler SHALL emit read-path coercion (`!!value`) and write-path coercion (`value ? 1 : 0`)\" at every query, which the bootstrap does not build (INTERIM), so a read would hand the program `1` / `0`. Declare it `integer` and compare with 1 / 0", j, te)])
+            errs = errs.concat([refuse("column `" + table + "." + name + "` is `boolean` — §39.4: it is stored as INTEGER and \"The compiler SHALL emit read-path coercion (`!!value`) and write-path coercion (`value ? 1 : 0`)\" at every query, which the bootstrap does not build (INTERIM), so a read would hand the program `1` / `0`. Declare it `integer` and compare with 1 / 0", j, te)]);
         }
         if (sameName(name, "tenant_id")) {
-            errs = errs.concat([refuse("column `" + table + "." + name + "` makes `" + table + "` a tenant-scoped table (§14.8.10: the `tenant_id` column's presence is the declaration), and the tenant isolation floor is not in the bootstrap (INTERIM) — accepting it would serve every tenant's rows to every request", i, ne)])
+            errs = errs.concat([refuse("column `" + table + "." + name + "` makes `" + table + "` a tenant-scoped table (§14.8.10: the `tenant_id` column's presence is the declaration), and the tenant isolation floor is not in the bootstrap (INTERIM) — accepting it would serve every tenant's rows to every request", i, ne)]);
         }
-        let pk = false
-        let nn = false
-        let pks: int = 0
-        let refs: SchemaRef[] = []
-        let k: int = skip(s, te, to)
-        let going = true
-        while (going) {
+        let pk = false;
+        let nn = false;
+        let pks: int = 0;
+        let refs: SchemaRef[] = [];
+        let k: int = skip(s, te, to);
+        let going = true;
+        for (; going; ) {
             if (k >= to) {
-                going = false
+                going = false;
             } else {
-                const c: string = ch(s, k)
+                const c: string = ch(s, k);
                 if (c == "}") {
-                    going = false
+                    going = false;
                 } else if (c == ",") {
                     // S478 open-Qs ruling item 17 — §39.2: "table-declaration ::= table-name '{'
                     // ( column-declaration ( ','? column-declaration )* )? '}'". One `,` stands only
                     // BETWEEN two column declarations: what follows it must be the next one
                     // (`name :`); a `,` before `}` or a second `,` is outside the grammar.
-                    const nx: int = skip(s, k + 1, to)
-                    const nxe: int = wordEnd(s, nx, to)
+                    const nx: int = skip(s, k + 1, to);
+                    const nxe: int = wordEnd(s, nx, to);
                     if (nx < to && isWordStart(ch(s, nx)) && ch(s, skip(s, nxe, to)) == ":") {
-                        k = nx
-                        going = false
+                        k = nx;
+                        going = false;
                     } else {
-                        return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("a `,` after column `" + table + "." + name + "` that is not followed by another column declaration — §39.2 admits one `,` only BETWEEN two column declarations (`column-declaration (','? column-declaration)*`, S478), so a trailing `,` before `}` or a doubled `,` is not part of the grammar. Remove it", k, k + 1), k)
+                        return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("a `,` after column `" + table + "." + name + "` that is not followed by another column declaration — §39.2 admits one `,` only BETWEEN two column declarations (`column-declaration (','? column-declaration)*`, S478), so a trailing `,` before `}` or a doubled `,` is not part of the grammar. Remove it", k, k + 1), k);
                     }
                 } else if (!isWordStart(c)) {
-                    return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("`" + c + "` after column `" + table + "." + name + "` is not a §39.2 column constraint (primary key, not null, unique, default(literal), references table(column))", k, k + 1), k)
+                    return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("`" + c + "` after column `" + table + "." + name + "` is not a §39.2 column constraint (primary key, not null, unique, default(literal), references table(column))", k, k + 1), k);
                 } else {
-                    const we: int = wordEnd(s, k, to)
-                    const w: string = s.substring(k, we)
+                    const we: int = wordEnd(s, k, to);
+                    const w: string = s.substring(k, we);
                     // the §39.2 constraint words compare case-insensitively (S479 ruling item 3)
-                    const lw: string = w.toLowerCase()
-                    const after: int = skip(s, we, to)
-                    const lnext: string = wordAt(s, after, to).toLowerCase()
+                    const lw: string = w.toLowerCase();
+                    const after: int = skip(s, we, to);
+                    const lnext: string = wordAt(s, after, to).toLowerCase();
                     if (ch(s, after) == ":") {
                         // the next column declaration
-                        going = false
+                        going = false;
                     } else if (lw == "primary" && lnext == "key") {
-                        pk = true
-                        pks = pks + 1
-                        if (pks > 1) errs = errs.concat([err("E-SCHEMA-018", "column `" + table + "." + name + "` says `primary key` twice — a table has one primary key (§38.5.1: \"Exactly one column per table MAY be designated `primary key`\"; SQLite refuses it: \"has more than one primary key\"). Remove one", k, wordEnd(s, after, to))])
-                        k = skip(s, wordEnd(s, after, to), to)
+                        pk = true;
+                        pks = pks + 1;
+                        if (pks > 1) errs = errs.concat([err("E-SCHEMA-018", "column `" + table + "." + name + "` says `primary key` twice — a table has one primary key (§38.5.1: \"Exactly one column per table MAY be designated `primary key`\"; SQLite refuses it: \"has more than one primary key\"). Remove one", k, wordEnd(s, after, to))]);
+                        k = skip(s, wordEnd(s, after, to), to);
                     } else if (lw == "not" && lnext == "null") {
-                        nn = true
-                        k = skip(s, wordEnd(s, after, to), to)
+                        nn = true;
+                        k = skip(s, wordEnd(s, after, to), to);
                     } else if (lw == "unique") {
-                        k = after
+                        k = after;
                     } else if (lw == "default") {
                         if (ch(s, after) != "(") {
-                            return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("`default` on column `" + table + "." + name + "` without `(literal)` — §39.2: `default(literal)`", k, we), k)
+                            return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("`default` on column `" + table + "." + name + "` without `(literal)` — §39.2: `default(literal)`", k, we), k);
                         }
-                        const pe: int = parenEnd(s, after, to)
+                        const pe: int = parenEnd(s, after, to);
                         if (pe < 0) {
-                            return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("the `default(` on column `" + table + "." + name + "` is never closed", k, after + 1), k)
+                            return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("the `default(` on column `" + table + "." + name + "` is never closed", k, after + 1), k);
                         }
                         if (s.substring(after + 1, pe).trim() == "") {
-                            return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("`default()` on column `" + table + "." + name + "` holds no literal — §39.2: `default(literal)`", k, pe + 1), k)
+                            return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("`default()` on column `" + table + "." + name + "` holds no literal — §39.2: `default(literal)`", k, pe + 1), k);
                         }
-                        const why: string = defaultRefusal(s, after + 1, pe)
+                        const why: string = defaultRefusal(s, after + 1, pe);
                         if (why != "") {
-                            errs = errs.concat([refuse("the `default(…)` on column `" + table + "." + name + "` " + why, k, pe + 1)])
+                            errs = errs.concat([refuse("the `default(…)` on column `" + table + "." + name + "` " + why, k, pe + 1)]);
                         } else {
-                            const kw: string = defaultKindRefusal(table + "." + name, ty, defKind(s, after + 1, pe), s.substring(after + 1, pe).trim())
-                            if (kw != "") errs = errs.concat([refuse(kw, k, pe + 1)])
+                            const kw: string = defaultKindRefusal(table + "." + name, ty, defKind(s, after + 1, pe), s.substring(after + 1, pe).trim());
+                            if (kw != "") errs = errs.concat([refuse(kw, k, pe + 1)]);
                         }
-                        k = skip(s, pe + 1, to)
+                        k = skip(s, pe + 1, to);
                     } else if (lw == "references") {
                         // §39.5.5: "This is the ONLY foreign-key production" — `references <table>(<column>)`
-                        const tb: int = skip(s, we, to)
-                        const tbe: int = wordEnd(s, tb, to)
-                        let ok = tb > we && tbe > tb && ch(s, tbe) == "("
-                        let ce: int = tbe + 1
+                        const tb: int = skip(s, we, to);
+                        const tbe: int = wordEnd(s, tb, to);
+                        let ok = tb > we && tbe > tb && ch(s, tbe) == "(";
+                        let ce: int = tbe + 1;
                         if (ok) {
-                            ce = wordEnd(s, tbe + 1, to)
-                            ok = ce > tbe + 1 && ch(s, ce) == ")"
+                            ce = wordEnd(s, tbe + 1, to);
+                            ok = ce > tbe + 1 && ch(s, ce) == ")";
                         }
-                        const tail: int = ce + 1
-                        if (ok && tail < to && isWordCh(ch(s, tail))) ok = false
+                        const tail: int = ce + 1;
+                        if (ok && tail < to && isWordCh(ch(s, tail))) ok = false;
                         if (!ok) {
-                            const shown: string = s.substring(k, runEnd(s, tb, to)).trim()
-                            return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, err("E-SCHEMA-011", "column `" + table + "." + name + "` writes `" + shown + "`, which is not a foreign key — §39.5.5: the only form is `references <table>(<column>)`, the table name outside the parentheses and the column inside, nothing between them", k, runEnd(s, tb, to)), k)
+                            const shown: string = s.substring(k, runEnd(s, tb, to)).trim();
+                            return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, err("E-SCHEMA-011", "column `" + table + "." + name + "` writes `" + shown + "`, which is not a foreign key — §39.5.5: the only form is `references <table>(<column>)`, the table name outside the parentheses and the column inside, nothing between them", k, runEnd(s, tb, to)), k);
                         }
-                        refs = refs.concat([{ col: name, table: table, target: s.substring(tb, tbe), targetCol: s.substring(tbe + 1, ce), start: k, end: tail }])
-                        k = skip(s, tail, to)
+                        refs = refs.concat([{ col: name, table: table, target: s.substring(tb, tbe), targetCol: s.substring(tbe + 1, ce), start: k, end: tail }]);
+                        k = skip(s, tail, to);
                     } else if (lw == "rename") {
-                        return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("`rename from` on column `" + table + "." + name + "` is decided against the live database (§38.5.6, E-SCHEMA-007), which the bootstrap does not read (INTERIM)", k, we), k)
+                        return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("`rename from` on column `" + table + "." + name + "` is decided against the live database (§38.5.6, E-SCHEMA-007), which the bootstrap does not read (INTERIM)", k, we), k);
                     } else if (isSharedCore(w)) {
-                        return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("`" + w + "` on column `" + table + "." + name + "` is §39.5.7 shared-core validator vocabulary, which the bootstrap does not read at the schema locus (INTERIM) — write the SQL-mirror constraints (not null, unique, …)", k, we), k)
+                        return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("`" + w + "` on column `" + table + "." + name + "` is §39.5.7 shared-core validator vocabulary, which the bootstrap does not read at the schema locus (INTERIM) — write the SQL-mirror constraints (not null, unique, …)", k, we), k);
                     } else if (w == "immutable") {
-                        return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("`immutable` on column `" + table + "." + name + "` belongs to a §14.8.11 db-authoritative table, which is not in the bootstrap", k, we), k)
+                        return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("`immutable` on column `" + table + "." + name + "` belongs to a §14.8.11 db-authoritative table, which is not in the bootstrap", k, we), k);
                     } else {
-                        return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("`" + w + "` after column `" + table + "." + name + "` is not a §39.2 column constraint (primary key, not null, unique, default(literal), references table(column))", k, we), k)
+                        return colGiveUpKeep({ name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs, errs, refuse("`" + w + "` after column `" + table + "." + name + "` is not a §39.2 column constraint (primary key, not null, unique, default(literal), references table(column))", k, we), k);
                     }
                 }
             }
         }
-        return { col: { name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs: refs, errs: errs, next: k, stop: false }
+        return { col: { name: name, ty: ty, pk: pk, nn: nn, start: i, end: ne }, refs: refs, errs: errs, next: k, stop: false };
     }
 
     // ---- a table --------------------------------------------------------------
@@ -630,60 +632,60 @@ ${
 
     // The table body after its `{` (at `open`).
     fn readTable(s: string, name: string, start: int, end: int, open: int, to: int) -> RTable {
-        let errs: SchemaErr[] = []
-        let cols: SchemaCol[] = []
-        let refs: SchemaRef[] = []
-        let gaveUp = false             // a refusal stopped the reader inside this table
-        let i: int = skip(s, open + 1, to)
-        let going = true
-        while (going) {
+        let errs: SchemaErr[] = [];
+        let cols: SchemaCol[] = [];
+        let refs: SchemaRef[] = [];
+        let gaveUp = false;             // a refusal stopped the reader inside this table
+        let i: int = skip(s, open + 1, to);
+        let going = true;
+        for (; going; ) {
             if (i >= to) {
-                errs = errs.concat([err("E-PARSE-UNCLOSED", "the `{` of `<schema>` table `" + name + "` is never closed", open, open + 1)])
-                going = false
+                errs = errs.concat([err("E-PARSE-UNCLOSED", "the `{` of `<schema>` table `" + name + "` is never closed", open, open + 1)]);
+                going = false;
             } else if (ch(s, i) == "}") {
-                i = i + 1
-                going = false
+                i = i + 1;
+                going = false;
             } else if (isWordStart(ch(s, i))) {
-                const rc: RCol = readColumn(s, i, to, name)
-                errs = errs.concat(rc.errs)
-                const c: SchemaCol | not = rc.col
+                const rc: RCol = readColumn(s, i, to, name);
+                errs = errs.concat(rc.errs);
+                const c: SchemaCol | not = rc.col;
                 if (c is given) {
                     for (const prior of cols) {
-                        if (sameName(prior.name, c.name)) errs = errs.concat([err("E-SCHEMA-017", "table `" + name + "` declares column `" + c.name + "` twice (column names compare case-insensitively) — §39.7: \"no duplicate column names within a table\". Remove or rename one", c.start, c.end)])
+                        if (sameName(prior.name, c.name)) errs = errs.concat([err("E-SCHEMA-017", "table `" + name + "` declares column `" + c.name + "` twice (column names compare case-insensitively) — §39.7: \"no duplicate column names within a table\". Remove or rename one", c.start, c.end)]);
                     }
-                    cols = cols.concat([c])
-                    refs = refs.concat(rc.refs)
+                    cols = cols.concat([c]);
+                    refs = refs.concat(rc.refs);
                 }
                 if (rc.stop) {
-                    gaveUp = true
-                    const b: int = braceEnd(s, rc.next, to)
+                    gaveUp = true;
+                    const b: int = braceEnd(s, rc.next, to);
                     if (b >= to) {
-                        i = to
+                        i = to;
                     } else {
-                        i = b + 1
+                        i = b + 1;
                     }
-                    going = false
+                    going = false;
                 } else {
-                    i = skip(s, rc.next, to)
+                    i = skip(s, rc.next, to);
                 }
             } else {
-                errs = errs.concat([refuse("`" + ch(s, i) + "` in `<schema>` table `" + name + "` is not a §39.2 column declaration (`name: type constraint*`)", i, i + 1)])
-                gaveUp = true
-                const b2: int = braceEnd(s, i, to)
-                i = b2 >= to ? to : b2 + 1
-                going = false
+                errs = errs.concat([refuse("`" + ch(s, i) + "` in `<schema>` table `" + name + "` is not a §39.2 column declaration (`name: type constraint*`)", i, i + 1)]);
+                gaveUp = true;
+                const b2: int = braceEnd(s, i, to);
+                i = b2 >= to ? to : b2 + 1;
+                going = false;
             }
         }
-        let pks: int = 0
-        for (const c of cols) { if (c.pk) pks = pks + 1 }
+        let pks: int = 0;
+        for (const c of cols) { if (c.pk) pks = pks + 1; }
         // W-SCHEMA-001 only for a table read to its end: after a refusal the
         // reader did not see every column, and a `primary key` it skipped would
         // make the warning a false cascade
-        if (pks == 0 && !gaveUp) errs = errs.concat([err("W-SCHEMA-001", "`<schema>` table `" + name + "` has no `primary key` column (§38.5.1)", start, end)])
+        if (pks == 0 && !gaveUp) errs = errs.concat([err("W-SCHEMA-001", "`<schema>` table `" + name + "` has no `primary key` column (§38.5.1)", start, end)]);
         // S479 ruling item 4 — §38.5.1: "A table with more than one `primary key` SHALL be a compile
         // error (E-SCHEMA-018)"; a key over several columns is a table-level `PRIMARY KEY (a, b)` in raw DDL
-        if (pks > 1) errs = errs.concat([err("E-SCHEMA-018", "`<schema>` table `" + name + "` has " + pks + " `primary key` columns — §38.5.1: \"Exactly one column per table MAY be designated `primary key`\" (SQLite refuses the table: \"has more than one primary key\"). A key over several columns is one key: declare the table with raw `CREATE TABLE " + name + " (…, PRIMARY KEY (a, b))` in this `<schema>`", start, end)])
-        return { t: { name: name, cols: cols, start: start, end: end, strict: false }, refs: refs, errs: errs, next: i }
+        if (pks > 1) errs = errs.concat([err("E-SCHEMA-018", "`<schema>` table `" + name + "` has " + pks + " `primary key` columns — §38.5.1: \"Exactly one column per table MAY be designated `primary key`\" (SQLite refuses the table: \"has more than one primary key\"). A key over several columns is one key: declare the table with raw `CREATE TABLE " + name + " (…, PRIMARY KEY (a, b))` in this `<schema>`", start, end)]);
+        return { t: { name: name, cols: cols, start: start, end: end, strict: false }, refs: refs, errs: errs, next: i };
     }
 
     // ---- raw SQL DDL (s478-boot-schema-ddl) ------------------------------------
@@ -733,74 +735,74 @@ ${
     type RDdl:struct = { t: SchemaTable | not, refs: SchemaRef[], errs: SchemaErr[], stop: boolean }
 
     fn tk(ts: DdlTok[], i: int) -> DdlTok {
-        if (i >= 0 && i < ts.length) return ts[i]
-        return { kind: "end", w: "", text: "" }
+        if (i >= 0 && i < ts.length) return ts[i];
+        return { kind: "end", w: "", text: "" };
     }
-    fn isPu(t: DdlTok, c: string) -> boolean { return t.kind == "punct" && t.text == c }
-    fn isW(t: DdlTok, w: string) -> boolean { return t.kind == "word" && t.w == w }
+    fn isPu(t: DdlTok, c: string) -> boolean { return t.kind == "punct" && t.text == c; }
+    fn isW(t: DdlTok, w: string) -> boolean { return t.kind == "word" && t.w == w; }
     fn sub(ts: DdlTok[], a: int, b: int) -> DdlTok[] {
-        let out: DdlTok[] = []
-        let k: int = a
-        while (k < b) {
-            out = out.concat([ts[k]])
-            k = k + 1
+        let out: DdlTok[] = [];
+        let k: int = a;
+        for (; k < b; ) {
+            out = out.concat([ts[k]]);
+            k = k + 1;
         }
-        return out
+        return out;
     }
 
     // §39.2's table-kind modifiers and the words that may follow a table name.
     fn isTableModifier(w: string) -> boolean {
-        return ["TEMP", "TEMPORARY", "GLOBAL", "LOCAL", "UNLOGGED", "VIRTUAL", "FOREIGN", "OR", "REPLACE"].indexOf(w) >= 0
+        return ["TEMP", "TEMPORARY", "GLOBAL", "LOCAL", "UNLOGGED", "VIRTUAL", "FOREIGN", "OR", "REPLACE"].indexOf(w) >= 0;
     }
     fn isNameFollower(w: string) -> boolean {
-        return ["AS", "USING", "WITH", "ON", "TABLESPACE", "PARTITION", "OF", "INHERITS"].indexOf(w) >= 0
+        return ["AS", "USING", "WITH", "ON", "TABLESPACE", "PARTITION", "OF", "INHERITS"].indexOf(w) >= 0;
     }
 
     // §14.8.3 primary mapping (case-insensitive) → the SchemaCol type; "" — not admitted.
     fn ddlType(w: string) -> string {
-        if (w == "INTEGER" || w == "INT") return "integer"
-        if (w == "TEXT" || w == "CHAR" || w == "VARCHAR" || w == "CLOB") return "text"
-        if (w == "REAL" || w == "FLOAT" || w == "DOUBLE") return "real"
-        if (w == "BLOB") return "blob"
-        return ""
+        if (w == "INTEGER" || w == "INT") return "integer";
+        if (w == "TEXT" || w == "CHAR" || w == "VARCHAR" || w == "CLOB") return "text";
+        if (w == "REAL" || w == "FLOAT" || w == "DOUBLE") return "real";
+        if (w == "BLOB") return "blob";
+        return "";
     }
 
-    fn isPlainIdent(s: string) -> boolean { return s != "" && wordEnd(s, 0, s.length) == s.length }
+    fn isPlainIdent(s: string) -> boolean { return s != "" && wordEnd(s, 0, s.length) == s.length; }
 
     // The name a token spells: a bare word or a `"…"` plain identifier. `why`:
     // "empty" (`""`), "quoted" (a quoted name that is not a plain identifier),
     // "" with name "" — no name there.
     fn nameOf(t: DdlTok) -> DName {
-        if (t.kind == "word") return { name: t.text, why: "" }
+        if (t.kind == "word") return { name: t.text, why: "" };
         if (t.kind == "qname") {
-            if (t.text.substring(0, 1) != "\"") return { name: "", why: "quoted" }
-            const inner: string = t.text.substring(1, t.text.length - 1)
-            if (inner == "") return { name: "", why: "empty" }
-            if (isPlainIdent(inner)) return { name: inner, why: "" }
-            return { name: "", why: "quoted" }
+            if (t.text.substring(0, 1) != "\"") return { name: "", why: "quoted" };
+            const inner: string = t.text.substring(1, t.text.length - 1);
+            if (inner == "") return { name: "", why: "empty" };
+            if (isPlainIdent(inner)) return { name: inner, why: "" };
+            return { name: "", why: "quoted" };
         }
-        return { name: "", why: "" }
+        return { name: "", why: "" };
     }
 
     // The index of the `)` closing the `(` at `i`, else -1.
     fn tokClose(ts: DdlTok[], i: int) -> int {
-        let depth: int = 0
-        let k: int = i
-        while (k < ts.length) {
-            if (isPu(ts[k], "(")) depth = depth + 1
+        let depth: int = 0;
+        let k: int = i;
+        for (; k < ts.length; ) {
+            if (isPu(ts[k], "(")) depth = depth + 1;
             if (isPu(ts[k], ")")) {
-                depth = depth - 1
-                if (depth == 0) return k
+                depth = depth - 1;
+                if (depth == 0) return k;
             }
-            k = k + 1
+            k = k + 1;
         }
-        return -1
+        return -1;
     }
 
     fn isNumText(t: string) -> boolean {
-        const d: int = t.indexOf(".")
-        if (d < 0) return true
-        return t.indexOf(".", d + 1) < 0 && d < t.length - 1
+        const d: int = t.indexOf(".");
+        if (d < 0) return true;
+        return t.indexOf(".", d + 1) < 0 && d < t.length - 1;
     }
 
     // A DEFAULT term at `i` (§38.5.4's admitted literals, as tokens): a number
@@ -808,482 +810,486 @@ ${
     // CURRENT_DATE / CURRENT_TIME, or a parenthesized constant expression of
     // those. Its end, or -1.
     fn ddlDefTerm(ts: DdlTok[], i0: int) -> int {
-        let i: int = i0
-        let signed = false
-        while (isPu(tk(ts, i), "-") || isPu(tk(ts, i), "+")) {
-            signed = true
-            i = i + 1
+        let i: int = i0;
+        let signed = false;
+        for (;;) {
+            if (!(isPu(tk(ts, i), "-") || isPu(tk(ts, i), "+"))) { break; }
+            signed = true;
+            i = i + 1;
         }
-        const t: DdlTok = tk(ts, i)
+        const t: DdlTok = tk(ts, i);
         if (isPu(t, "(")) {
-            const e: int = ddlDefExpr(ts, i + 1)
-            if (e < 0 || !isPu(tk(ts, e), ")")) return -1
-            return e + 1
+            const e: int = ddlDefExpr(ts, i + 1);
+            if (e < 0 || !isPu(tk(ts, e), ")")) return -1;
+            return e + 1;
         }
-        if (t.kind == "num") return isNumText(t.text) ? i + 1 : -1
-        if (signed) return -1
-        if (t.kind == "str") return i + 1
-        if (t.kind == "word" && isDefaultKeyword(t.text)) return i + 1
-        return -1
+        if (t.kind == "num") return isNumText(t.text) ? i + 1 : -1;
+        if (signed) return -1;
+        if (t.kind == "str") return i + 1;
+        if (t.kind == "word" && isDefaultKeyword(t.text)) return i + 1;
+        return -1;
     }
 
     // The kind of the DEFAULT term at `i0` (ddlDefTerm read it) — as defKind.
     fn ddlDefKind(ts: DdlTok[], i0: int) -> string {
-        let i: int = i0
-        while (isPu(tk(ts, i), "-") || isPu(tk(ts, i), "+")) { i = i + 1 }
-        const t: DdlTok = tk(ts, i)
-        if (isPu(t, "(")) return "expr"
-        if (t.kind == "num") return t.text.indexOf(".") >= 0 ? "real" : "int"
-        if (t.kind == "str") return "str"
-        if (isW(t, "NULL")) return "null"
-        if (isW(t, "TRUE") || isW(t, "FALSE")) return "bool"
-        return "str"
+        let i: int = i0;
+        for (;;) { if (!(isPu(tk(ts, i), "-") || isPu(tk(ts, i), "+"))) { break; } i = i + 1; }
+        const t: DdlTok = tk(ts, i);
+        if (isPu(t, "(")) return "expr";
+        if (t.kind == "num") return t.text.indexOf(".") >= 0 ? "real" : "int";
+        if (t.kind == "str") return "str";
+        if (isW(t, "NULL")) return "null";
+        if (isW(t, "TRUE") || isW(t, "FALSE")) return "bool";
+        return "str";
     }
 
     fn ddlDefExpr(ts: DdlTok[], i: int) -> int {
-        let e: int = ddlDefTerm(ts, i)
-        if (e < 0) return -1
-        let going = true
-        while (going) {
-            const t: DdlTok = tk(ts, e)
+        let e: int = ddlDefTerm(ts, i);
+        if (e < 0) return -1;
+        let going = true;
+        for (; going; ) {
+            const t: DdlTok = tk(ts, e);
             if (t.kind == "punct" && ["+", "-", "*", "/", "%", "||"].indexOf(t.text) >= 0) {
-                e = ddlDefTerm(ts, e + 1)
-                if (e < 0) return -1
+                e = ddlDefTerm(ts, e + 1);
+                if (e < 0) return -1;
             } else {
-                going = false
+                going = false;
             }
         }
-        return e
+        return e;
     }
 
     // `( name, … )` at `i` — the names, or not.
     type DNames:struct = { names: string[], next: int }
 
     fn nameList(ts: DdlTok[], i: int) -> DNames | not {
-        if (!isPu(tk(ts, i), "(")) return not
-        let names: string[] = []
-        let k: int = i + 1
-        let going = true
-        while (going) {
-            const n: DName = nameOf(tk(ts, k))
-            if (n.name == "") return not
-            names = names.concat([n.name])
-            const sep: DdlTok = tk(ts, k + 1)
+        if (!isPu(tk(ts, i), "(")) return not;
+        let names: string[] = [];
+        let k: int = i + 1;
+        let going = true;
+        for (; going; ) {
+            const n: DName = nameOf(tk(ts, k));
+            if (n.name == "") return not;
+            names = names.concat([n.name]);
+            const sep: DdlTok = tk(ts, k + 1);
             if (isPu(sep, ",")) {
-                k = k + 2
+                k = k + 2;
             } else if (isPu(sep, ")")) {
-                k = k + 2
-                going = false
+                k = k + 2;
+                going = false;
             } else {
-                return not
+                return not;
             }
         }
-        const r: DNames = { names: names, next: k }
-        return r
+        const r: DNames = { names: names, next: k };
+        return r;
     }
 
     // `ON DELETE|UPDATE <action>`* at `i`: its end, or -1.
     fn fkActions(ts: DdlTok[], i0: int) -> int {
-        let i: int = i0
-        while (isW(tk(ts, i), "ON")) {
-            const e: DdlTok = tk(ts, i + 1)
-            if (!isW(e, "DELETE") && !isW(e, "UPDATE")) return -1
-            const a: DdlTok = tk(ts, i + 2)
+        let i: int = i0;
+        for (;;) {
+            if (!(isW(tk(ts, i), "ON"))) { break; }
+            const e: DdlTok = tk(ts, i + 1);
+            if (!isW(e, "DELETE") && !isW(e, "UPDATE")) return -1;
+            const a: DdlTok = tk(ts, i + 2);
             if (isW(a, "CASCADE") || isW(a, "RESTRICT")) {
-                i = i + 3
+                i = i + 3;
             } else if (isW(a, "SET") && (isW(tk(ts, i + 3), "NULL") || isW(tk(ts, i + 3), "DEFAULT"))) {
-                i = i + 4
+                i = i + 4;
             } else if (isW(a, "NO") && isW(tk(ts, i + 3), "ACTION")) {
-                i = i + 4
+                i = i + 4;
             } else {
-                return -1
+                return -1;
             }
         }
-        return i
+        return i;
     }
 
     fn shownToks(ts: DdlTok[], i: int) -> string {
-        let out: string = ""
-        let k: int = i
-        while (k < ts.length && k < i + 4) {
-            out = out + (out == "" ? "" : " ") + ts[k].text
-            k = k + 1
+        let out: string = "";
+        let k: int = i;
+        for (; k < ts.length && k < i + 4; ) {
+            out = out + (out == "" ? "" : " ") + ts[k].text;
+            k = k + 1;
         }
-        return out
+        return out;
     }
 
     // One column item (`it` — its tokens) of table `table`; `pkN`: the
     // column-level PRIMARY KEYs it carries (returned in `next`).
     fn readDdlCol(it: DdlTok[], table: string, start: int, end: int) -> RCol {
-        const n: DName = nameOf(tk(it, 0))
+        const n: DName = nameOf(tk(it, 0));
         if (n.name == "") {
-            const why: string = n.why == "quoted" ? " (a quoted name the bootstrap reads is a plain identifier, `\"name\"`)" : ""
-            return colGiveUp([], refuse("`" + shownToks(it, 0) + "` in `CREATE TABLE " + table + "` is not a column the bootstrap reads" + why, start, end), 0)
+            const why: string = n.why == "quoted" ? " (a quoted name the bootstrap reads is a plain identifier, `\"name\"`)" : "";
+            return colGiveUp([], refuse("`" + shownToks(it, 0) + "` in `CREATE TABLE " + table + "` is not a column the bootstrap reads" + why, start, end), 0);
         }
-        const name: string = n.name
-        let errs: SchemaErr[] = []
-        const t: DdlTok = tk(it, 1)
-        const ty: string = t.kind == "word" ? ddlType(t.w) : ""
+        const name: string = n.name;
+        let errs: SchemaErr[] = [];
+        const t: DdlTok = tk(it, 1);
+        const ty: string = t.kind == "word" ? ddlType(t.w) : "";
         // S478 ruling (user-voice): "a raw-DDL column type outside §14.8.3's primary list is
         // E-SCHEMA-004 in `<schema>` (BOOLEAN, DATETIME, NUMERIC, BIGINT, an absent type, …), the
         // same as §39.4's declarative form" — §39.4: "No other column type names SHALL be valid
         // in a `<schema>` block. An unrecognized column type name SHALL be a compile error
         // (E-SCHEMA-004)." A multi-word type name (`DOUBLE PRECISION`, `UNSIGNED BIG INT`) is
         // one SQLite type name, outside the list too.
-        const constraintWords: string[] = ["PRIMARY", "NOT", "NULL", "UNIQUE", "DEFAULT", "REFERENCES", "CHECK", "COLLATE", "CONSTRAINT", "GENERATED", "AS"]
-        const noType: boolean = t.kind == "end" || (t.kind == "word" && constraintWords.indexOf(t.w) >= 0)
-        const t2: DdlTok = tk(it, 2)
-        const multi: boolean = ty != "" && t2.kind == "word" && constraintWords.indexOf(t2.w) < 0
+        const constraintWords: string[] = ["PRIMARY", "NOT", "NULL", "UNIQUE", "DEFAULT", "REFERENCES", "CHECK", "COLLATE", "CONSTRAINT", "GENERATED", "AS"];
+        const noType: boolean = t.kind == "end" || (t.kind == "word" && constraintWords.indexOf(t.w) >= 0);
+        const t2: DdlTok = tk(it, 2);
+        const multi: boolean = ty != "" && t2.kind == "word" && constraintWords.indexOf(t2.w) < 0;
         if ((ty == "" && (noType || t.kind == "word")) || multi) {
-            const shownT: string = noType ? "no type" : "the type `" + t.text + (multi ? " " + t2.text : "") + "`"
-            return colGiveUp(errs, err("E-SCHEMA-004", "column `" + table + "." + name + "` has " + shownT + ", which is not a `<schema>` column type — a raw `CREATE TABLE` column in `<schema>` takes one of §14.8.3's primary SQLite types INTEGER, INT, TEXT, CHAR, VARCHAR, CLOB, REAL, FLOAT, DOUBLE, BLOB (§39.4: \"No other column type names SHALL be valid in a `<schema>` block\"; S478 ruling: §14.8.3's affinity fallback does not apply inside `<schema>`, because SQLite does not guarantee those values)", start, end), 0)
+            const shownT: string = noType ? "no type" : "the type `" + t.text + (multi ? " " + t2.text : "") + "`";
+            return colGiveUp(errs, err("E-SCHEMA-004", "column `" + table + "." + name + "` has " + shownT + ", which is not a `<schema>` column type — a raw `CREATE TABLE` column in `<schema>` takes one of §14.8.3's primary SQLite types INTEGER, INT, TEXT, CHAR, VARCHAR, CLOB, REAL, FLOAT, DOUBLE, BLOB (§39.4: \"No other column type names SHALL be valid in a `<schema>` block\"; S478 ruling: §14.8.3's affinity fallback does not apply inside `<schema>`, because SQLite does not guarantee those values)", start, end), 0);
         }
         if (ty == "") {
-            return colGiveUp(errs, refuse("column `" + table + "." + name + "` has `" + t.text + "` where its type is, which the bootstrap does not read (INTERIM) — write one of the §14.8.3 primary SQLite types INTEGER, INT, TEXT, CHAR, VARCHAR, CLOB, REAL, FLOAT, DOUBLE, BLOB, unquoted", start, end), 0)
+            return colGiveUp(errs, refuse("column `" + table + "." + name + "` has `" + t.text + "` where its type is, which the bootstrap does not read (INTERIM) — write one of the §14.8.3 primary SQLite types INTEGER, INT, TEXT, CHAR, VARCHAR, CLOB, REAL, FLOAT, DOUBLE, BLOB, unquoted", start, end), 0);
         }
         if (sameName(name, "tenant_id")) {
-            errs = errs.concat([refuse("column `" + table + "." + name + "` makes `" + table + "` a tenant-scoped table (§14.8.10: the `tenant_id` column's presence is the declaration), and the tenant isolation floor is not in the bootstrap (INTERIM) — accepting it would serve every tenant's rows to every request", start, end)])
+            errs = errs.concat([refuse("column `" + table + "." + name + "` makes `" + table + "` a tenant-scoped table (§14.8.10: the `tenant_id` column's presence is the declaration), and the tenant isolation floor is not in the bootstrap (INTERIM) — accepting it would serve every tenant's rows to every request", start, end)]);
         }
-        let p: int = 2
+        let p: int = 2;
         // CHAR(n) / VARCHAR(n): SQLite ignores the length (§14.8.3 "a declared type of `VARCHAR(255)` has TEXT affinity")
-        if ((t.w == "CHAR" || t.w == "VARCHAR") && isPu(tk(it, 2), "(") && tk(it, 3).kind == "num" && isPu(tk(it, 4), ")")) p = 5
-        let pkN: int = 0
-        let alias = false
-        let nn = false
-        let refs: SchemaRef[] = []
-        let going = true
-        while (going) {
-            const c: DdlTok = tk(it, p)
-            const c1: DdlTok = tk(it, p + 1)
+        if ((t.w == "CHAR" || t.w == "VARCHAR") && isPu(tk(it, 2), "(") && tk(it, 3).kind == "num" && isPu(tk(it, 4), ")")) p = 5;
+        let pkN: int = 0;
+        let alias = false;
+        let nn = false;
+        let refs: SchemaRef[] = [];
+        let going = true;
+        for (; going; ) {
+            const c: DdlTok = tk(it, p);
+            const c1: DdlTok = tk(it, p + 1);
             if (c.kind == "end") {
-                going = false
+                going = false;
             } else if (isW(c, "CONSTRAINT") && nameOf(c1).name != "") {
-                p = p + 2
+                p = p + 2;
             } else if (isW(c, "PRIMARY") && isW(c1, "KEY")) {
-                pkN = pkN + 1
-                p = p + 2
-                if (isW(tk(it, p), "AUTOINCREMENT")) p = p + 1
+                pkN = pkN + 1;
+                p = p + 2;
+                if (isW(tk(it, p), "AUTOINCREMENT")) p = p + 1;
                 // §14.8.3 nullability: only `INTEGER PRIMARY KEY` (exactly) is the rowid alias
-                if (t.w == "INTEGER") alias = true
+                if (t.w == "INTEGER") alias = true;
             } else if (isW(c, "NOT") && isW(c1, "NULL")) {
-                nn = true
-                p = p + 2
+                nn = true;
+                p = p + 2;
             } else if (isW(c, "NULL") || isW(c, "UNIQUE")) {
-                p = p + 1
+                p = p + 1;
             } else if (isW(c, "DEFAULT")) {
-                const e: int = ddlDefTerm(it, p + 1)
+                const e: int = ddlDefTerm(it, p + 1);
                 if (e < 0) {
-                    return colGiveUpKeep({ name: name, ty: ty, pk: alias, nn: nn, start: start, end: end }, refs, errs, refuse("the `DEFAULT` on column `" + table + "." + name + "` is not a literal the bootstrap admits — §38.5.4: a `default` literal is \"passed verbatim to the generated SQL\"; the bootstrap admits a number, a `'…'` string, NULL, CURRENT_TIMESTAMP, CURRENT_DATE or CURRENT_TIME (INTERIM)", start, end), 0)
+                    return colGiveUpKeep({ name: name, ty: ty, pk: alias, nn: nn, start: start, end: end }, refs, errs, refuse("the `DEFAULT` on column `" + table + "." + name + "` is not a literal the bootstrap admits — §38.5.4: a `default` literal is \"passed verbatim to the generated SQL\"; the bootstrap admits a number, a `'…'` string, NULL, CURRENT_TIMESTAMP, CURRENT_DATE or CURRENT_TIME (INTERIM)", start, end), 0);
                 }
-                const kw: string = defaultKindRefusal(table + "." + name, ty, ddlDefKind(it, p + 1), shownToks(sub(it, p + 1, e), 0))
+                const kw: string = defaultKindRefusal(table + "." + name, ty, ddlDefKind(it, p + 1), shownToks(sub(it, p + 1, e), 0));
                 if (kw != "") {
-                    return colGiveUpKeep({ name: name, ty: ty, pk: alias, nn: nn, start: start, end: end }, refs, errs, refuse(kw, start, end), 0)
+                    return colGiveUpKeep({ name: name, ty: ty, pk: alias, nn: nn, start: start, end: end }, refs, errs, refuse(kw, start, end), 0);
                 }
-                p = e
+                p = e;
             } else if (isW(c, "REFERENCES")) {
-                const tn: DName = nameOf(c1)
-                const cl: DNames | not = nameList(it, p + 2)
-                let ok = tn.name != "" && cl is given
-                let after: int = -1
+                const tn: DName = nameOf(c1);
+                const cl: DNames | not = nameList(it, p + 2);
+                let ok = tn.name != "" && cl is given;
+                let after: int = -1;
                 if (cl is given) {
-                    if (cl.names.length != 1) ok = false
+                    if (cl.names.length != 1) ok = false;
                     if (ok) {
-                        refs = refs.concat([{ col: name, table: table, target: tn.name, targetCol: cl.names[0], start: start, end: end }])
-                        after = fkActions(it, cl.next)
+                        refs = refs.concat([{ col: name, table: table, target: tn.name, targetCol: cl.names[0], start: start, end: end }]);
+                        after = fkActions(it, cl.next);
                     }
                 }
                 if (!ok || after < 0) {
-                    return colGiveUpKeep({ name: name, ty: ty, pk: alias, nn: nn, start: start, end: end }, refs, errs, refuse("`REFERENCES …` on column `" + table + "." + name + "` is not a foreign key the bootstrap reads — it reads `REFERENCES <table>(<column>)`, then `ON DELETE` / `ON UPDATE` CASCADE, RESTRICT, SET NULL, SET DEFAULT or NO ACTION (INTERIM)", start, end), 0)
+                    return colGiveUpKeep({ name: name, ty: ty, pk: alias, nn: nn, start: start, end: end }, refs, errs, refuse("`REFERENCES …` on column `" + table + "." + name + "` is not a foreign key the bootstrap reads — it reads `REFERENCES <table>(<column>)`, then `ON DELETE` / `ON UPDATE` CASCADE, RESTRICT, SET NULL, SET DEFAULT or NO ACTION (INTERIM)", start, end), 0);
                 }
-                p = after
+                p = after;
             } else if (isW(c, "CHECK") && isPu(c1, "(") && tokClose(it, p + 1) > 0) {
-                p = tokClose(it, p + 1) + 1
+                p = tokClose(it, p + 1) + 1;
             } else if (isW(c, "COLLATE") && c1.kind == "word") {
-                p = p + 2
+                p = p + 2;
             } else {
-                return colGiveUpKeep({ name: name, ty: ty, pk: alias, nn: nn, start: start, end: end }, refs, errs, refuse("`" + shownToks(it, p) + "` after column `" + table + "." + name + " " + t.text + "` is not a column constraint the bootstrap reads (INTERIM) — it reads PRIMARY KEY [AUTOINCREMENT], NOT NULL, NULL, UNIQUE, DEFAULT <literal>, REFERENCES <table>(<column>), CHECK (…), COLLATE <name> and CONSTRAINT <name>", start, end), 0)
+                return colGiveUpKeep({ name: name, ty: ty, pk: alias, nn: nn, start: start, end: end }, refs, errs, refuse("`" + shownToks(it, p) + "` after column `" + table + "." + name + " " + t.text + "` is not a column constraint the bootstrap reads (INTERIM) — it reads PRIMARY KEY [AUTOINCREMENT], NOT NULL, NULL, UNIQUE, DEFAULT <literal>, REFERENCES <table>(<column>), CHECK (…), COLLATE <name> and CONSTRAINT <name>", start, end), 0);
             }
         }
-        if (pkN > 1) errs = errs.concat([err("E-SCHEMA-018", "column `" + table + "." + name + "` says `PRIMARY KEY` twice — a table has one primary key (§38.5.1: \"Exactly one column per table MAY be designated `primary key`\"; SQLite refuses it: \"has more than one primary key\"). Remove one", start, end)])
+        if (pkN > 1) errs = errs.concat([err("E-SCHEMA-018", "column `" + table + "." + name + "` says `PRIMARY KEY` twice — a table has one primary key (§38.5.1: \"Exactly one column per table MAY be designated `primary key`\"; SQLite refuses it: \"has more than one primary key\"). Remove one", start, end)]);
         // `next` carries the column-level PRIMARY KEY count (readDdl counts them per table)
-        return { col: { name: name, ty: ty, pk: alias, nn: nn, start: start, end: end }, refs: refs, errs: errs, next: pkN, stop: false }
+        return { col: { name: name, ty: ty, pk: alias, nn: nn, start: start, end: end }, refs: refs, errs: errs, next: pkN, stop: false };
     }
 
     // A table constraint item. `pk`: 1 when it is a PRIMARY KEY, else 0; `pkCols`: its columns.
     type RCons:struct = { refs: SchemaRef[], errs: SchemaErr[], pk: int, pkCols: string[] }
 
     fn readDdlCons(it: DdlTok[], table: string, start: int, end: int) -> RCons {
-        let p: int = 0
-        if (isW(tk(it, 0), "CONSTRAINT") && nameOf(tk(it, 1)).name != "") p = 2
-        const c: DdlTok = tk(it, p)
-        const c1: DdlTok = tk(it, p + 1)
-        let after: int = -1
-        let pk: int = 0
-        let pkCols: string[] = []
-        let refs: SchemaRef[] = []
+        let p: int = 0;
+        if (isW(tk(it, 0), "CONSTRAINT") && nameOf(tk(it, 1)).name != "") p = 2;
+        const c: DdlTok = tk(it, p);
+        const c1: DdlTok = tk(it, p + 1);
+        let after: int = -1;
+        let pk: int = 0;
+        let pkCols: string[] = [];
+        let refs: SchemaRef[] = [];
         if ((isW(c, "PRIMARY") && isW(c1, "KEY")) || (isW(c, "FOREIGN") && isW(c1, "KEY"))) {
-            const nl: DNames | not = nameList(it, p + 2)
+            const nl: DNames | not = nameList(it, p + 2);
             if (nl is given) {
                 if (isW(c, "PRIMARY")) {
-                    pk = 1
-                    pkCols = nl.names
-                    after = nl.next
+                    pk = 1;
+                    pkCols = nl.names;
+                    after = nl.next;
                 } else if (isW(tk(it, nl.next), "REFERENCES")) {
-                    const tn: DName = nameOf(tk(it, nl.next + 1))
-                    const tl: DNames | not = nameList(it, nl.next + 2)
+                    const tn: DName = nameOf(tk(it, nl.next + 1));
+                    const tl: DNames | not = nameList(it, nl.next + 2);
                     if (tn.name != "" && tl is given) {
                         if (tl.names.length == nl.names.length) {
-                            let k: int = 0
+                            let k: int = 0;
                             for (const col of nl.names) {
-                                refs = refs.concat([{ col: col, table: table, target: tn.name, targetCol: tl.names[k], start: start, end: end }])
-                                k = k + 1
+                                refs = refs.concat([{ col: col, table: table, target: tn.name, targetCol: tl.names[k], start: start, end: end }]);
+                                k = k + 1;
                             }
-                            after = fkActions(it, tl.next)
+                            after = fkActions(it, tl.next);
                         }
                     }
                 }
             }
         } else if (isW(c, "UNIQUE")) {
-            const ul: DNames | not = nameList(it, p + 1)
-            if (ul is given) after = ul.next
+            const ul: DNames | not = nameList(it, p + 1);
+            if (ul is given) after = ul.next;
         } else if (isW(c, "CHECK") && isPu(c1, "(") && tokClose(it, p + 1) > 0) {
-            after = tokClose(it, p + 1) + 1
+            after = tokClose(it, p + 1) + 1;
         }
         if (after < 0 || after != it.length) {
-            return { refs: [], errs: [refuse("the table constraint `" + shownToks(it, 0) + " …` in `CREATE TABLE " + table + "` is not one the bootstrap reads (INTERIM) — it reads PRIMARY KEY (…), UNIQUE (…), CHECK (…) and FOREIGN KEY (…) REFERENCES <table>(…) [ON DELETE / ON UPDATE action], each optionally named by CONSTRAINT <name>", start, end)], pk: 0, pkCols: [] }
+            return { refs: [], errs: [refuse("the table constraint `" + shownToks(it, 0) + " …` in `CREATE TABLE " + table + "` is not one the bootstrap reads (INTERIM) — it reads PRIMARY KEY (…), UNIQUE (…), CHECK (…) and FOREIGN KEY (…) REFERENCES <table>(…) [ON DELETE / ON UPDATE action], each optionally named by CONSTRAINT <name>", start, end)], pk: 0, pkCols: [] };
         }
-        return { refs: refs, errs: [], pk: pk, pkCols: pkCols }
+        return { refs: refs, errs: [], pk: pk, pkCols: pkCols };
     }
 
     fn ddlRefuse(msg: string, start: int, end: int) -> RDdl {
-        return { t: not, refs: [], errs: [refuse(msg, start, end)], stop: true }
+        return { t: not, refs: [], errs: [refuse(msg, start, end)], stop: true };
     }
     fn ddlErr(code: string, msg: string, start: int, end: int) -> RDdl {
-        return { t: not, refs: [], errs: [err(code, msg, start, end)], stop: false }
+        return { t: not, refs: [], errs: [err(code, msg, start, end)], stop: false };
     }
 
     // The index of the first `(` of `text` outside a `'…'` / `"…"` literal, else -1.
     fn firstParen(text: string) -> int {
-        let j: int = 0
-        while (j < text.length) {
-            const c: string = ch(text, j)
+        let j: int = 0;
+        for (; j < text.length; ) {
+            const c: string = ch(text, j);
             if (c == "'" || c == "\"") {
-                const e: int = quoteEnd(text, j, text.length)
-                if (e < 0) return -1
-                j = e
+                const e: int = quoteEnd(text, j, text.length);
+                if (e < 0) return -1;
+                j = e;
             } else if (c == "(") {
-                return j
+                return j;
             } else {
-                j = j + 1
+                j = j + 1;
             }
         }
-        return -1
+        return -1;
     }
 
     // One raw DDL statement `text` (absolute span `start`..`end`).
     fn readDdl(text: string, start: int, end: int) -> RDdl {
-        const shown: string = text.trim().length > 50 ? text.trim().substring(0, 50).split("\n").join(" ") + "…" : text.trim().split("\n").join(" ")
-        const open: int = firstParen(text)
-        const headText: string = open < 0 ? text : text.substring(0, open)
-        const hs: DdlScan = ddlScan(headText)
-        const h: DdlTok[] = hs.toks
+        const shown: string = text.trim().length > 50 ? text.trim().substring(0, 50).split("\n").join(" ") + "…" : text.trim().split("\n").join(" ");
+        const open: int = firstParen(text);
+        const headText: string = open < 0 ? text : text.substring(0, open);
+        const hs: DdlScan = ddlScan(headText);
+        const h: DdlTok[] = hs.toks;
         if (!isW(tk(h, 0), "CREATE")) {
-            return ddlRefuse("the SQL statement `" + shown + "` in `<schema>` is not a `CREATE TABLE` — the bootstrap reads only `CREATE TABLE` statements in a `<schema>` body (INTERIM: the §14.8.10 schema-hazard reader of other statements is not built)", start, end)
+            return ddlRefuse("the SQL statement `" + shown + "` in `<schema>` is not a `CREATE TABLE` — the bootstrap reads only `CREATE TABLE` statements in a `<schema>` body (INTERIM: the §14.8.10 schema-hazard reader of other statements is not built)", start, end);
         }
         // CREATE, at most three words, TABLE (§39.2 "What is a head")
-        let p: int = 1
-        let other = false
-        while (p <= 3 && tk(h, p).kind == "word" && tk(h, p).w != "TABLE") {
-            if (!isTableModifier(tk(h, p).w)) other = true
-            p = p + 1
+        let p: int = 1;
+        let other = false;
+        for (;;) {
+            if (!(p <= 3 && tk(h, p).kind == "word" && tk(h, p).w != "TABLE")) { break; }
+            if (!isTableModifier(tk(h, p).w)) other = true;
+            p = p + 1;
         }
         if (!isW(tk(h, p), "TABLE") || other) {
-            const what: string = tk(h, 1).kind == "word" ? "`CREATE " + tk(h, 1).text + "`" : "`" + shown + "`"
-            return ddlRefuse("the statement " + what + " in `<schema>` is not a `CREATE TABLE` — the bootstrap reads only `CREATE TABLE` statements in a `<schema>` body (INTERIM: a view, index, trigger or policy is read by the §14.8.10 schema-hazard check, which is not built)", start, end)
+            const what: string = tk(h, 1).kind == "word" ? "`CREATE " + tk(h, 1).text + "`" : "`" + shown + "`";
+            return ddlRefuse("the statement " + what + " in `<schema>` is not a `CREATE TABLE` — the bootstrap reads only `CREATE TABLE` statements in a `<schema>` body (INTERIM: a view, index, trigger or policy is read by the §14.8.10 schema-hazard check, which is not built)", start, end);
         }
-        const modified = p > 1
+        const modified = p > 1;
         if (hs.broken) {
             if (headText.indexOf("--") >= 0 || headText.indexOf("/*") >= 0) {
-                return ddlRefuse("a SQL comment inside the head of `" + shown + "` is not read by the bootstrap (INTERIM) — write the comment on its own line, between statements", start, end)
+                return ddlRefuse("a SQL comment inside the head of `" + shown + "` is not read by the bootstrap (INTERIM) — write the comment on its own line, between statements", start, end);
             }
-            return ddlErr("E-SCHEMA-013", "the `<schema>` table head `" + headText.trim().split("\n").join(" ") + "` is not one the compiler can read — §39.2: a known-kind head whose table name cannot be read through to what may follow a name (the column list `(`, …) is a compile error", start, end)
+            return ddlErr("E-SCHEMA-013", "the `<schema>` table head `" + headText.trim().split("\n").join(" ") + "` is not one the compiler can read — §39.2: a known-kind head whose table name cannot be read through to what may follow a name (the column list `(`, …) is a compile error", start, end);
         }
-        p = p + 1
-        if (isW(tk(h, p), "IF") && isW(tk(h, p + 1), "NOT") && isW(tk(h, p + 2), "EXISTS")) p = p + 3
-        const n0: DName = nameOf(tk(h, p))
+        p = p + 1;
+        if (isW(tk(h, p), "IF") && isW(tk(h, p + 1), "NOT") && isW(tk(h, p + 2), "EXISTS")) p = p + 3;
+        const n0: DName = nameOf(tk(h, p));
         if (n0.why == "quoted") {
-            return ddlRefuse("the table name `" + tk(h, p).text + "` in `<schema>` is a quoted name that is not a plain identifier, which the bootstrap does not key (INTERIM) — name the table with letters, digits and `_`", start, end)
+            return ddlRefuse("the table name `" + tk(h, p).text + "` in `<schema>` is a quoted name that is not a plain identifier, which the bootstrap does not key (INTERIM) — name the table with letters, digits and `_`", start, end);
         }
-        const unreadable: string = "the `<schema>` table head `" + headText.trim().split("\n").join(" ") + "` is not one the compiler can read — §39.2: a known-kind head whose table name cannot be read through to what may follow a name (the column list `(`, or AS, USING, WITH, ON, TABLESPACE, PARTITION OF, OF, INHERITS) is a compile error"
-        if (n0.name == "") return ddlErr("E-SCHEMA-013", unreadable, start, end)
-        p = p + 1
-        let qualified = false
-        while (isPu(tk(h, p), ".")) {
-            const nx: DName = nameOf(tk(h, p + 1))
-            if (nx.name == "" && nx.why != "quoted") return ddlErr("E-SCHEMA-013", unreadable, start, end)
-            qualified = true
-            p = p + 2
+        const unreadable: string = "the `<schema>` table head `" + headText.trim().split("\n").join(" ") + "` is not one the compiler can read — §39.2: a known-kind head whose table name cannot be read through to what may follow a name (the column list `(`, or AS, USING, WITH, ON, TABLESPACE, PARTITION OF, OF, INHERITS) is a compile error";
+        if (n0.name == "") return ddlErr("E-SCHEMA-013", unreadable, start, end);
+        p = p + 1;
+        let qualified = false;
+        for (;;) {
+            if (!(isPu(tk(h, p), "."))) { break; }
+            const nx: DName = nameOf(tk(h, p + 1));
+            if (nx.name == "" && nx.why != "quoted") return ddlErr("E-SCHEMA-013", unreadable, start, end);
+            qualified = true;
+            p = p + 2;
         }
         if (qualified) {
-            return ddlErr("E-SCHEMA-012", "the `<schema>` table head `" + headText.trim().split("\n").join(" ") + "` carries a schema / database qualifier — §39.2: \"The table head of a raw `CREATE TABLE` in a `<schema>` body SHALL name an **unqualified** table\" (select the schema through the connection, e.g. the Postgres `search_path`)", start, end)
+            return ddlErr("E-SCHEMA-012", "the `<schema>` table head `" + headText.trim().split("\n").join(" ") + "` carries a schema / database qualifier — §39.2: \"The table head of a raw `CREATE TABLE` in a `<schema>` body SHALL name an **unqualified** table\" (select the schema through the connection, e.g. the Postgres `search_path`)", start, end);
         }
-        const name: string = n0.name
-        const fol: DdlTok = tk(h, p)
-        const notPlain: string = "`<schema>` table `" + name + "` is not a plain declaration — §39.2: a readable head \"SHALL have the shape `CREATE TABLE [IF NOT EXISTS] <name> ( <column list> ) [<trailing clauses>]`\"; "
-        if (modified) return ddlErr("E-SCHEMA-014", notPlain + "a table-kind modifier between `CREATE` and `TABLE` (a session-scoped or non-durable table has no schema-as-code meaning)", start, end)
-        if (fol.kind == "word" && isNameFollower(fol.w)) return ddlErr("E-SCHEMA-014", notPlain + "the name is followed by `" + fol.text + "`, a clause instead of a column list", start, end)
-        if (fol.kind != "end" || open < 0) return ddlErr("E-SCHEMA-013", unreadable, start, end)
+        const name: string = n0.name;
+        const fol: DdlTok = tk(h, p);
+        const notPlain: string = "`<schema>` table `" + name + "` is not a plain declaration — §39.2: a readable head \"SHALL have the shape `CREATE TABLE [IF NOT EXISTS] <name> ( <column list> ) [<trailing clauses>]`\"; ";
+        if (modified) return ddlErr("E-SCHEMA-014", notPlain + "a table-kind modifier between `CREATE` and `TABLE` (a session-scoped or non-durable table has no schema-as-code meaning)", start, end);
+        if (fol.kind == "word" && isNameFollower(fol.w)) return ddlErr("E-SCHEMA-014", notPlain + "the name is followed by `" + fol.text + "`, a clause instead of a column list", start, end);
+        if (fol.kind != "end" || open < 0) return ddlErr("E-SCHEMA-013", unreadable, start, end);
         // the column list and what follows it
-        const sc: DdlScan = ddlScan(text.substring(open))
+        const sc: DdlScan = ddlScan(text.substring(open));
         if (sc.broken) {
             if (parenEnd(text, open, text.length) < 0 && text.indexOf("--", open) < 0 && text.indexOf("/*", open) < 0) {
-                return ddlErr("E-SCHEMA-014", notPlain + "its column list `(` is never closed", start, end)
+                return ddlErr("E-SCHEMA-014", notPlain + "its column list `(` is never closed", start, end);
             }
-            return ddlRefuse("`CREATE TABLE " + name + "` holds text the bootstrap's SQL scanner does not read with certainty on every driver (INTERIM) — a SQL comment inside the statement, a string holding a backslash or a prefixed string (`E'…'`, `X'…'`), `$`, `[`, a backtick, or a character or operator outside its whitelist", start, end)
+            return ddlRefuse("`CREATE TABLE " + name + "` holds text the bootstrap's SQL scanner does not read with certainty on every driver (INTERIM) — a SQL comment inside the statement, a string holding a backslash or a prefixed string (`E'…'`, `X'…'`), `$`, `[`, a backtick, or a character or operator outside its whitelist", start, end);
         }
-        const ts: DdlTok[] = sc.toks
-        const lc: int = tokClose(ts, 0)
-        if (lc < 0) return ddlErr("E-SCHEMA-014", notPlain + "its column list `(` is never closed", start, end)
-        let q: int = lc + 1
-        if (isW(tk(ts, q), "INHERITS")) return ddlErr("E-SCHEMA-014", notPlain + "its column list is followed by `INHERITS (parent)`, whose columns the floors never read", start, end)
+        const ts: DdlTok[] = sc.toks;
+        const lc: int = tokClose(ts, 0);
+        if (lc < 0) return ddlErr("E-SCHEMA-014", notPlain + "its column list `(` is never closed", start, end);
+        let q: int = lc + 1;
+        if (isW(tk(ts, q), "INHERITS")) return ddlErr("E-SCHEMA-014", notPlain + "its column list is followed by `INHERITS (parent)`, whose columns the floors never read", start, end);
         // the items, split at depth-1 commas
-        let cols: SchemaCol[] = []
-        let refs: SchemaRef[] = []
-        let errs: SchemaErr[] = []
-        let pks: int = 0
-        let pkCols: string[] = []      // the PRIMARY KEY columns (column- and table-level)
-        let autoinc = false
-        let notStrictTy: string[] = []  // columns whose type word a STRICT table refuses
-        let a: int = 1
-        let depth: int = 0
-        let k: int = 1
-        let stopped = false
-        while (k <= lc && !stopped) {
-            const t: DdlTok = ts[k]
-            if (isPu(t, "(")) depth = depth + 1
-            if (isPu(t, ")")) depth = depth - 1
+        let cols: SchemaCol[] = [];
+        let refs: SchemaRef[] = [];
+        let errs: SchemaErr[] = [];
+        let pks: int = 0;
+        let pkCols: string[] = [];      // the PRIMARY KEY columns (column- and table-level)
+        let autoinc = false;
+        let notStrictTy: string[] = [];  // columns whose type word a STRICT table refuses
+        let a: int = 1;
+        let depth: int = 0;
+        let k: int = 1;
+        let stopped = false;
+        for (; k <= lc && !stopped; ) {
+            const t: DdlTok = ts[k];
+            if (isPu(t, "(")) depth = depth + 1;
+            if (isPu(t, ")")) depth = depth - 1;
             if ((isPu(t, ",") && depth == 0) || k == lc) {
-                const it: DdlTok[] = sub(ts, a, k)
+                const it: DdlTok[] = sub(ts, a, k);
                 if (it.length == 0) {
-                    return ddlRefuse("`CREATE TABLE " + name + "` has an empty column-list item (or an empty column list) — the bootstrap reads a column list of columns and table constraints (§39.2 reading R2: a raw declaration from which no column is read is not a declaration)", start, end)
+                    return ddlRefuse("`CREATE TABLE " + name + "` has an empty column-list item (or an empty column list) — the bootstrap reads a column list of columns and table constraints (§39.2 reading R2: a raw declaration from which no column is read is not a declaration)", start, end);
                 }
-                const f: DdlTok = tk(it, 0)
+                const f: DdlTok = tk(it, 0);
                 // §39.2 (e) — an unquoted `LIKE <name chain>` followed by INCLUDING / EXCLUDING / `,` / `)`
-                let isTemplate = false
+                let isTemplate = false;
                 if (isW(f, "LIKE")) {
-                    let m: int = 1
-                    let chain = nameOf(tk(it, 1)).name != ""
+                    let m: int = 1;
+                    let chain = nameOf(tk(it, 1)).name != "";
                     if (chain) {
-                        m = 2
-                        while (isPu(tk(it, m), ".") && nameOf(tk(it, m + 1)).name != "") { m = m + 2 }
-                        const nx: DdlTok = tk(it, m)
-                        if (nx.kind == "end" || isW(nx, "INCLUDING") || isW(nx, "EXCLUDING")) isTemplate = true
+                        m = 2;
+                        for (;;) { if (!(isPu(tk(it, m), ".") && nameOf(tk(it, m + 1)).name != "")) { break; } m = m + 2; }
+                        const nx: DdlTok = tk(it, m);
+                        if (nx.kind == "end" || isW(nx, "INCLUDING") || isW(nx, "EXCLUDING")) isTemplate = true;
                     }
                 }
                 if (isTemplate) {
-                    return ddlErr("E-SCHEMA-014", notPlain + "the column-list item `" + shownToks(it, 0) + "` is a template reference (`LIKE <table>`), whose columns the floors never read — a column NAMED `like` is quoted (`\"like\" TEXT`)", start, end)
+                    return ddlErr("E-SCHEMA-014", notPlain + "the column-list item `" + shownToks(it, 0) + "` is a template reference (`LIKE <table>`), whose columns the floors never read — a column NAMED `like` is quoted (`\"like\" TEXT`)", start, end);
                 }
                 if (isW(f, "CONSTRAINT") || isW(f, "PRIMARY") || isW(f, "UNIQUE") || isW(f, "CHECK") || isW(f, "FOREIGN")) {
-                    const rc: RCons = readDdlCons(it, name, start, end)
-                    errs = errs.concat(rc.errs)
-                    refs = refs.concat(rc.refs)
-                    pks = pks + rc.pk
-                    pkCols = pkCols.concat(rc.pkCols)
-                    if (rc.errs.length > 0) stopped = true
+                    const rc: RCons = readDdlCons(it, name, start, end);
+                    errs = errs.concat(rc.errs);
+                    refs = refs.concat(rc.refs);
+                    pks = pks + rc.pk;
+                    pkCols = pkCols.concat(rc.pkCols);
+                    if (rc.errs.length > 0) stopped = true;
                 } else {
-                    const rcol: RCol = readDdlCol(it, name, start, end)
-                    errs = errs.concat(rcol.errs)
-                    const c: SchemaCol | not = rcol.col
+                    const rcol: RCol = readDdlCol(it, name, start, end);
+                    errs = errs.concat(rcol.errs);
+                    const c: SchemaCol | not = rcol.col;
                     if (c is given) {
                         for (const prior of cols) {
-                            if (sameName(prior.name, c.name)) errs = errs.concat([err("E-SCHEMA-017", "`CREATE TABLE " + name + "` declares column `" + c.name + "` twice (column names compare case-insensitively) — §39.7: \"no duplicate column names within a table\". Remove or rename one", start, end)])
+                            if (sameName(prior.name, c.name)) errs = errs.concat([err("E-SCHEMA-017", "`CREATE TABLE " + name + "` declares column `" + c.name + "` twice (column names compare case-insensitively) — §39.7: \"no duplicate column names within a table\". Remove or rename one", start, end)]);
                         }
-                        cols = cols.concat([c])
-                        refs = refs.concat(rcol.refs)
+                        cols = cols.concat([c]);
+                        refs = refs.concat(rcol.refs);
                     }
                     if (rcol.stop) {
-                        stopped = true
+                        stopped = true;
                     } else {
                         // one column is one key, however often it says `PRIMARY KEY` (readDdlCol reports that)
-                        if (rcol.next > 0) pks = pks + 1
+                        if (rcol.next > 0) pks = pks + 1;
                         if (c is given) {
-                            if (rcol.next > 0) pkCols = pkCols.concat([c.name])
-                            const tw: string = tk(it, 1).w
-                            if (tw != "INTEGER" && tw != "INT" && tw != "TEXT" && tw != "REAL" && tw != "BLOB") notStrictTy = notStrictTy.concat([c.name + " " + tk(it, 1).text])
+                            if (rcol.next > 0) pkCols = pkCols.concat([c.name]);
+                            const tw: string = tk(it, 1).w;
+                            if (tw != "INTEGER" && tw != "INT" && tw != "TEXT" && tw != "REAL" && tw != "BLOB") notStrictTy = notStrictTy.concat([c.name + " " + tk(it, 1).text]);
                         }
-                        for (const at of it) { if (isW(at, "AUTOINCREMENT")) autoinc = true }
+                        for (const at of it) { if (isW(at, "AUTOINCREMENT")) autoinc = true; }
                     }
                 }
-                a = k + 1
+                a = k + 1;
             }
-            k = k + 1
+            k = k + 1;
         }
-        if (stopped) return { t: not, refs: [], errs: errs, stop: true }
+        if (stopped) return { t: not, refs: [], errs: errs, stop: true };
         // S479 ruling item 4 — E-SCHEMA-018 (§38.5.1): two column-level keys, a column-level key beside a
         // table-level `PRIMARY KEY (…)`, or two table-level ones (SQLite refuses each at CREATE). One
         // table-level `PRIMARY KEY (a, b)` is ONE key (the composite form) — legal.
-        if (pks > 1) errs = errs.concat([err("E-SCHEMA-018", "`CREATE TABLE " + name + "` declares " + pks + " primary keys — a table has one (§38.5.1: \"Exactly one column per table MAY be designated `primary key`\"; SQLite refuses it: \"has more than one primary key\"). A key over several columns is one table-level `PRIMARY KEY (a, b)`", start, end)])
+        if (pks > 1) errs = errs.concat([err("E-SCHEMA-018", "`CREATE TABLE " + name + "` declares " + pks + " primary keys — a table has one (§38.5.1: \"Exactly one column per table MAY be designated `primary key`\"; SQLite refuses it: \"has more than one primary key\"). A key over several columns is one table-level `PRIMARY KEY (a, b)`", start, end)]);
         // S478 ruling (user-voice): "`WITHOUT ROWID` and `STRICT` are ADMITTED, with their
         // nullability and storage written into §14.8.3: a `WITHOUT ROWID` table's PRIMARY KEY
         // columns are NOT NULL; a `STRICT` table stores only its declared type". SQLite reads
         // them as a `,`-separated list after the column list (verified: `STRICT, WITHOUT ROWID`
         // either order; `STRICT WITHOUT ROWID` without the `,` is a syntax error).
-        let strict = false
-        let noRowid = false
+        let strict = false;
+        let noRowid = false;
         if (isW(tk(ts, q), "STRICT") || isW(tk(ts, q), "WITHOUT")) {
-            let more = true
-            while (more) {
+            let more = true;
+            for (; more; ) {
                 if (isW(tk(ts, q), "STRICT")) {
-                    strict = true
-                    q = q + 1
+                    strict = true;
+                    q = q + 1;
                 } else if (isW(tk(ts, q), "WITHOUT") && isW(tk(ts, q + 1), "ROWID")) {
-                    noRowid = true
-                    q = q + 2
+                    noRowid = true;
+                    q = q + 2;
                 } else {
-                    return { t: not, refs: [], errs: errs.concat([refuse("`" + shownToks(ts, q) + "` in the table options of `CREATE TABLE " + name + "` is not one the bootstrap reads — it reads `STRICT` and `WITHOUT ROWID`, separated by `,` (INTERIM)", start, end)]), stop: true }
+                    return { t: not, refs: [], errs: errs.concat([refuse("`" + shownToks(ts, q) + "` in the table options of `CREATE TABLE " + name + "` is not one the bootstrap reads — it reads `STRICT` and `WITHOUT ROWID`, separated by `,` (INTERIM)", start, end)]), stop: true };
                 }
                 if (isPu(tk(ts, q), ",")) {
-                    q = q + 1
+                    q = q + 1;
                 } else {
-                    more = false
+                    more = false;
                 }
             }
         }
-        const optEnd: int = q
-        if (isPu(tk(ts, q), ";")) q = q + 1
+        const optEnd: int = q;
+        if (isPu(tk(ts, q), ";")) q = q + 1;
         if (q < ts.length) {
             if (isPu(tk(ts, optEnd), ";")) {
-                return { t: not, refs: [], errs: errs.concat([refuse("more than one SQL statement after `CREATE TABLE " + name + " (…);` in one `?" + LB() + "` … `}` — the bootstrap reads one `CREATE TABLE` statement per wrapper (INTERIM)", start, end)]), stop: true }
+                return { t: not, refs: [], errs: errs.concat([refuse("more than one SQL statement after `CREATE TABLE " + name + " (…);` in one `?" + LB() + "` … `}` — the bootstrap reads one `CREATE TABLE` statement per wrapper (INTERIM)", start, end)]), stop: true };
             }
-            return { t: not, refs: [], errs: errs.concat([refuse("`" + shownToks(ts, q) + "` after the column list of `CREATE TABLE " + name + "` is a trailing clause the bootstrap does not read (INTERIM — it reads `STRICT` and `WITHOUT ROWID`; a Postgres clause waits for Postgres DDL)", start, end)]), stop: true }
+            return { t: not, refs: [], errs: errs.concat([refuse("`" + shownToks(ts, q) + "` after the column list of `CREATE TABLE " + name + "` is a trailing clause the bootstrap does not read (INTERIM — it reads `STRICT` and `WITHOUT ROWID`; a Postgres clause waits for Postgres DDL)", start, end)]), stop: true };
         }
         if (noRowid) {
             // SQLite refuses both at CREATE (verified): "PRIMARY KEY missing on table …",
             // "AUTOINCREMENT not allowed on WITHOUT ROWID tables"
-            if (pks == 0) return { t: not, refs: [], errs: errs.concat([refuse("`CREATE TABLE " + name + " … WITHOUT ROWID` declares no PRIMARY KEY — SQLite refuses it (\"PRIMARY KEY missing on table\")", start, end)]), stop: true }
-            if (autoinc) return { t: not, refs: [], errs: errs.concat([refuse("`CREATE TABLE " + name + " … WITHOUT ROWID` declares AUTOINCREMENT — SQLite refuses it (\"AUTOINCREMENT not allowed on WITHOUT ROWID tables\")", start, end)]), stop: true }
+            if (pks == 0) return { t: not, refs: [], errs: errs.concat([refuse("`CREATE TABLE " + name + " … WITHOUT ROWID` declares no PRIMARY KEY — SQLite refuses it (\"PRIMARY KEY missing on table\")", start, end)]), stop: true };
+            if (autoinc) return { t: not, refs: [], errs: errs.concat([refuse("`CREATE TABLE " + name + " … WITHOUT ROWID` declares AUTOINCREMENT — SQLite refuses it (\"AUTOINCREMENT not allowed on WITHOUT ROWID tables\")", start, end)]), stop: true };
         }
         if (strict && notStrictTy.length > 0) {
             // SQLite refuses at CREATE (verified): "unknown datatype for t.c: \"VARCHAR(10)\""
-            return { t: not, refs: [], errs: errs.concat([refuse("`CREATE TABLE " + name + " … STRICT` declares `" + notStrictTy[0] + "` — a STRICT table's column types are INTEGER, INT, REAL, TEXT, BLOB (and ANY); SQLite refuses any other (\"unknown datatype\")", start, end)]), stop: true }
+            return { t: not, refs: [], errs: errs.concat([refuse("`CREATE TABLE " + name + " … STRICT` declares `" + notStrictTy[0] + "` — a STRICT table's column types are INTEGER, INT, REAL, TEXT, BLOB (and ANY); SQLite refuses any other (\"unknown datatype\")", start, end)]), stop: true };
         }
         // a WITHOUT ROWID table's PRIMARY KEY columns are NOT NULL (S478 ruling; SQLite: "NOT
         // NULL constraint failed" on INSERT / UPDATE / OR REPLACE of a NULL, composite keys
         // included — verified), and no column is the rowid alias
-        let outCols: SchemaCol[] = cols
+        let outCols: SchemaCol[] = cols;
         if (noRowid) {
-            outCols = []
+            outCols = [];
             for (const c of cols) {
-                let inPk = false
-                for (const pn of pkCols) { if (sameName(pn, c.name)) inPk = true }
-                outCols = outCols.concat([{ name: c.name, ty: c.ty, pk: false, nn: c.nn || inPk, start: c.start, end: c.end }])
+                let inPk = false;
+                for (const pn of pkCols) { if (sameName(pn, c.name)) inPk = true; }
+                outCols = outCols.concat([{ name: c.name, ty: c.ty, pk: false, nn: c.nn || inPk, start: c.start, end: c.end }]);
             }
         }
         // §38.5.1: "A `<schema>` table declaration with no `primary key` column SHALL generate a
         // compile warning (W-SCHEMA-001: table has no primary key)" — a raw table too (column-
         // or table-level PRIMARY KEY)
-        if (pks == 0) errs = errs.concat([err("W-SCHEMA-001", "`<schema>` table `" + name + "` has no PRIMARY KEY (§38.5.1)", start, end)])
-        return { t: { name: name, cols: outCols, start: start, end: end, strict: strict }, refs: refs, errs: errs, stop: false }
+        if (pks == 0) errs = errs.concat([err("W-SCHEMA-001", "`<schema>` table `" + name + "` has no PRIMARY KEY (§38.5.1)", start, end)]);
+        return { t: { name: name, cols: outCols, start: start, end: end, strict: strict }, refs: refs, errs: errs, stop: false };
     }
 
     // The extent of a bare `CREATE …` statement at `i`: to its `;` (included),
@@ -1293,211 +1299,211 @@ ${
     type DdlExt:struct = { end: int, why: string }
 
     fn ddlExtent(s: string, i: int, to: int) -> DdlExt {
-        let j: int = i
-        let depth: int = 0
-        let closed = false
-        while (j < to) {
-            const c: string = ch(s, j)
-            const two: string = s.substring(j, j + 2)
+        let j: int = i;
+        let depth: int = 0;
+        let closed = false;
+        for (; j < to; ) {
+            const c: string = ch(s, j);
+            const two: string = s.substring(j, j + 2);
             if (c == "'" || c == "\"") {
-                const e: int = quoteEnd(s, j, to)
-                if (e < 0) return { end: to, why: "a quoted literal or name that does not close on its line" }
-                j = e
+                const e: int = quoteEnd(s, j, to);
+                if (e < 0) return { end: to, why: "a quoted literal or name that does not close on its line" };
+                j = e;
             } else if (c == "`") {
-                return { end: to, why: "a backtick (the bootstrap reads `\"…\"` names)" }
+                return { end: to, why: "a backtick (the bootstrap reads `\"…\"` names)" };
             } else if (two == "--" || two == "/*" || two == "//") {
-                if (closed) return { end: j, why: "" }
-                return { end: to, why: "a comment inside the statement (write it on its own line, between statements)" }
+                if (closed) return { end: j, why: "" };
+                return { end: to, why: "a comment inside the statement (write it on its own line, between statements)" };
             } else if (c == ";" && depth == 0) {
-                return { end: j + 1, why: "" }
+                return { end: j + 1, why: "" };
             } else if (closed && depth == 0 && (two == "?" + LB() || two == "$" + LB())) {
-                return { end: j, why: "" }
+                return { end: j, why: "" };
             } else if (j > i && depth == 0 && isWordStart(c) && !isWordCh(ch(s, j - 1)) && wordAt(s, j, to).toLowerCase() == "create") {
-                return { end: j, why: "" }
+                return { end: j, why: "" };
             } else {
-                if (c == "(") depth = depth + 1
+                if (c == "(") depth = depth + 1;
                 if (c == ")") {
-                    depth = depth - 1
-                    if (depth == 0) closed = true
+                    depth = depth - 1;
+                    if (depth == 0) closed = true;
                 }
-                j = j + 1
+                j = j + 1;
             }
         }
-        return { end: to, why: "" }
+        return { end: to, why: "" };
     }
 
     // The bodies of the `'…'` string literals in `s[a, b)`, `"…"` names skipped, joined by " ".
     fn strBodies(s: string, a: int, b: int) -> string {
-        let out: string = ""
-        let j: int = a
-        while (j < b) {
-            const c: string = ch(s, j)
+        let out: string = "";
+        let j: int = a;
+        for (; j < b; ) {
+            const c: string = ch(s, j);
             if (c == "'" || c == "\"") {
-                const e: int = quoteEnd(s, j, b)
-                if (e < 0) return out + " " + s.substring(j, b)
-                if (c == "'") out = out + " " + s.substring(j + 1, e - 1)
-                j = e
+                const e: int = quoteEnd(s, j, b);
+                if (e < 0) return out + " " + s.substring(j, b);
+                if (c == "'") out = out + " " + s.substring(j + 1, e - 1);
+                j = e;
             } else {
-                j = j + 1
+                j = j + 1;
             }
         }
-        return out
+        return out;
     }
 
     // ---- the body -------------------------------------------------------------
     // Read the `<schema>` body `s[from, to)`.
     export fn readSchemaBody(s: string, from: int, to: int) -> SchemaRead {
-        let tables: SchemaTable[] = []
-        let refs: SchemaRef[] = []
-        let errs: SchemaErr[] = []
-        let content = false            // non-comment text in the body
-        let otherForm = false          // a recognized non-DSL form (refused DDL, `fn`, `${`) — refused, not "no table"
-        let liveA: int[] = []          // the spans of the raw statements read as declarations
-        let liveB: int[] = []
-        let i: int = skip(s, from, to)
-        let going = true
-        while (going && i < to) {
-          const two: string = s.substring(i, i + 2)
+        let tables: SchemaTable[] = [];
+        let refs: SchemaRef[] = [];
+        let errs: SchemaErr[] = [];
+        let content = false;            // non-comment text in the body
+        let otherForm = false;          // a recognized non-DSL form (refused DDL, `fn`, `${`) — refused, not "no table"
+        let liveA: int[] = [];          // the spans of the raw statements read as declarations
+        let liveB: int[] = [];
+        let i: int = skip(s, from, to);
+        let going = true;
+        for (; going && i < to; ) {
+          const two: string = s.substring(i, i + 2);
           if (two == "--") {
             // §39.2 "Comments and literals": a SQL `--` line comment. A carriage
             // return inside it ends the comment on Postgres but not on SQLite —
             // the text after it is a statement on one driver and comment on the
             // other — so it is refused (a CRLF line end is not).
-            const nl: int = s.indexOf("\n", i)
-            const le: int = nl < 0 || nl >= to ? to : nl
-            const line: string = s.substring(i, le)
-            const cr: int = line.indexOf("\r")
+            const nl: int = s.indexOf("\n", i);
+            const le: int = nl < 0 || nl >= to ? to : nl;
+            const line: string = s.substring(i, le);
+            const cr: int = line.indexOf("\r");
             if (cr >= 0 && cr != line.length - 1) {
-                otherForm = true
-                errs = errs.concat([refuse("a carriage return inside a SQL `--` comment in `<schema>` — it ends the comment on Postgres but not on SQLite, so the text after it is a statement on one driver and a comment on the other; the bootstrap does not read it (fail closed)", i, le)])
-                going = false
+                otherForm = true;
+                errs = errs.concat([refuse("a carriage return inside a SQL `--` comment in `<schema>` — it ends the comment on Postgres but not on SQLite, so the text after it is a statement on one driver and a comment on the other; the bootstrap does not read it (fail closed)", i, le)]);
+                going = false;
             } else {
-                i = skip(s, le, to)
+                i = skip(s, le, to);
             }
           } else if (two == "/*") {
             // a closed `/* … */` block comment — a nested `/*` (Postgres nests
             // block comments, SQLite does not) or an unclosed one is refused
-            const ce: int = s.indexOf("*/", i + 2)
+            const ce: int = s.indexOf("*/", i + 2);
             if (ce < 0 || ce + 2 > to) {
-                otherForm = true
-                errs = errs.concat([refuse("a `/*` comment in `<schema>` that is never closed", i, i + 2)])
-                going = false
+                otherForm = true;
+                errs = errs.concat([refuse("a `/*` comment in `<schema>` that is never closed", i, i + 2)]);
+                going = false;
             } else if (s.substring(i + 2, ce).indexOf("/*") >= 0) {
-                otherForm = true
-                errs = errs.concat([refuse("a nested `/*` inside a `/* … */` comment in `<schema>` — Postgres nests block comments and SQLite does not, so the comment ends at a different place on each driver; the bootstrap does not read it (fail closed)", i, ce + 2)])
-                going = false
+                otherForm = true;
+                errs = errs.concat([refuse("a nested `/*` inside a `/* … */` comment in `<schema>` — Postgres nests block comments and SQLite does not, so the comment ends at a different place on each driver; the bootstrap does not read it (fail closed)", i, ce + 2)]);
+                going = false;
             } else {
-                i = skip(s, ce + 2, to)
+                i = skip(s, ce + 2, to);
             }
           } else {
-            content = true
-            const re: int = runEnd(s, i, to)
-            const run: string = s.substring(i, re)
-            const after: int = skip(s, re, to)
-            const qh: QHead = qualHead(s, i, to)
-            let hName: string = ""
-            let hEnd: int = -1
-            let hOpen: int = -1
+            content = true;
+            const re: int = runEnd(s, i, to);
+            const run: string = s.substring(i, re);
+            const after: int = skip(s, re, to);
+            const qh: QHead = qualHead(s, i, to);
+            let hName: string = "";
+            let hEnd: int = -1;
+            let hOpen: int = -1;
             if (s.substring(i, i + 2) == "$" + LB()) {
-                otherForm = true
-                errs = errs.concat([refuse("a `" + "$" + LB() + " … }` body in `<schema>` (§41.15 `schemaFor`) is not in the bootstrap", i, i + 2)])
-                going = false
+                otherForm = true;
+                errs = errs.concat([refuse("a `" + "$" + LB() + " … }` body in `<schema>` (§41.15 `schemaFor`) is not in the bootstrap", i, i + 2)]);
+                going = false;
             } else if (wordAt(s, i, to).toLowerCase() == "create" || s.substring(i, i + 2) == "?" + LB()) {
                 // raw DDL — bare, or wrapped in `?{` + a backtick template + `}` (§39.2: "a
                 // backtick-quoted span is a quoted identifier or a `?{`…`}` wrapper around live DDL")
-                let text: string = ""
-                let tStart: int = i
-                let stEnd: int = i
-                let why: string = ""
+                let text: string = "";
+                let tStart: int = i;
+                let stEnd: int = i;
+                let why: string = "";
                 if (wordAt(s, i, to).toLowerCase() == "create") {
-                    const ex: DdlExt = ddlExtent(s, i, to)
-                    stEnd = ex.end
-                    why = ex.why
-                    text = s.substring(i, ex.end)
+                    const ex: DdlExt = ddlExtent(s, i, to);
+                    stEnd = ex.end;
+                    why = ex.why;
+                    text = s.substring(i, ex.end);
                 } else {
-                    const bt: int = wsEnd(s, i + 2, to)
-                    const be: int = ch(s, bt) == "`" ? s.indexOf("`", bt + 1) : -1
+                    const bt: int = wsEnd(s, i + 2, to);
+                    const be: int = ch(s, bt) == "`" ? s.indexOf("`", bt + 1) : -1;
                     if (be < 0 || be >= to) {
-                        why = "a `?" + LB() + "` in `<schema>` that does not hold one backtick-quoted SQL statement"
-                        stEnd = runEnd(s, i, to)
+                        why = "a `?" + LB() + "` in `<schema>` that does not hold one backtick-quoted SQL statement";
+                        stEnd = runEnd(s, i, to);
                     } else {
-                        tStart = bt + 1
-                        text = s.substring(bt + 1, be)
-                        const ce: int = wsEnd(s, be + 1, to)
-                        stEnd = ce + 1
-                        if (ch(s, ce) != "}") why = "a `?" + LB() + "` wrapper in `<schema>` that does not close with `}` right after its statement"
-                        if (text.indexOf("$" + LB()) >= 0) why = "a `" + "$" + LB() + " … }` bound value inside `<schema>` DDL — a declaration is text, never a value"
+                        tStart = bt + 1;
+                        text = s.substring(bt + 1, be);
+                        const ce: int = wsEnd(s, be + 1, to);
+                        stEnd = ce + 1;
+                        if (ch(s, ce) != "}") why = "a `?" + LB() + "` wrapper in `<schema>` that does not close with `}` right after its statement";
+                        if (text.indexOf("$" + LB()) >= 0) why = "a `" + "$" + LB() + " … }` bound value inside `<schema>` DDL — a declaration is text, never a value";
                     }
                 }
                 if (why != "") {
-                    otherForm = true
-                    errs = errs.concat([refuse("raw SQL DDL in `<schema>`: " + why + " — the bootstrap does not read it (INTERIM)", i, stEnd > i ? stEnd : i + 2)])
-                    going = false
+                    otherForm = true;
+                    errs = errs.concat([refuse("raw SQL DDL in `<schema>`: " + why + " — the bootstrap does not read it (INTERIM)", i, stEnd > i ? stEnd : i + 2)]);
+                    going = false;
                 } else {
-                    const rd: RDdl = readDdl(text, i, stEnd)
-                    errs = errs.concat(rd.errs)
-                    const dt: SchemaTable | not = rd.t
+                    const rd: RDdl = readDdl(text, i, stEnd);
+                    errs = errs.concat(rd.errs);
+                    const dt: SchemaTable | not = rd.t;
                     if (dt is given) {
                         for (const prior of tables) {
-                            if (sameName(prior.name, dt.name)) errs = errs.concat([err("E-SCHEMA-016", "`<schema>` declares table `" + dt.name + "` twice (table names compare case-insensitively) — §39.7: \"no duplicate table names\". Keep one declaration", i, stEnd)])
+                            if (sameName(prior.name, dt.name)) errs = errs.concat([err("E-SCHEMA-016", "`<schema>` declares table `" + dt.name + "` twice (table names compare case-insensitively) — §39.7: \"no duplicate table names\". Keep one declaration", i, stEnd)]);
                         }
-                        tables = tables.concat([dt])
-                        refs = refs.concat(rd.refs)
-                        liveA = liveA.concat([tStart])
-                        liveB = liveB.concat([tStart + text.length])
+                        tables = tables.concat([dt]);
+                        refs = refs.concat(rd.refs);
+                        liveA = liveA.concat([tStart]);
+                        liveB = liveB.concat([tStart + text.length]);
                     } else {
-                        otherForm = true
+                        otherForm = true;
                     }
                     if (rd.stop) {
-                        going = false
+                        going = false;
                     } else {
-                        i = skip(s, stEnd, to)
+                        i = skip(s, stEnd, to);
                     }
                 }
             } else if (wordAt(s, i, to) == "fn") {
-                otherForm = true
-                errs = errs.concat([refuse("a `fn` in `<schema>` is a §14.8.11.2 SECURITY-DEFINER function, which is not in the bootstrap", i, i + 2)])
-                going = false
+                otherForm = true;
+                errs = errs.concat([refuse("a `fn` in `<schema>` is a §14.8.11.2 SECURITY-DEFINER function, which is not in the bootstrap", i, i + 2)]);
+                going = false;
             } else if (headTail(run) != "" && ch(s, after) == "{") {
                 // §39.2 "Declarative heads are read whole": the head is the run's
                 // trailing name; a glued prefix is E-SCHEMA-012 (a `.` in it) or
                 // E-SCHEMA-013, and the table is still declared (no cascade)
-                const name: string = headTail(run)
+                const name: string = headTail(run);
                 if (name != run) {
                     if (run.indexOf(".") >= 0) {
-                        errs = errs.concat([err("E-SCHEMA-012", "the `<schema>` table head `" + run + "` carries a schema / database qualifier — §39.2: a declarative head is read whole, and a qualified table name is a compile error (select the schema through the connection, e.g. the Postgres `search_path`)", i, re)])
+                        errs = errs.concat([err("E-SCHEMA-012", "the `<schema>` table head `" + run + "` carries a schema / database qualifier — §39.2: a declarative head is read whole, and a qualified table name is a compile error (select the schema through the connection, e.g. the Postgres `search_path`)", i, re)]);
                     } else {
-                        errs = errs.concat([err("E-SCHEMA-013", "the `<schema>` table head `" + run + "` is not a table name the compiler can read — §39.2: a declarative head is read whole; a table name is letters, digits and `_`, not starting with a digit", i, re)])
+                        errs = errs.concat([err("E-SCHEMA-013", "the `<schema>` table head `" + run + "` is not a table name the compiler can read — §39.2: a declarative head is read whole; a table name is letters, digits and `_`, not starting with a digit", i, re)]);
                     }
                 }
-                hName = name
-                hEnd = re
-                hOpen = after
+                hName = name;
+                hEnd = re;
+                hOpen = after;
             } else if (qh.open >= 0) {
-                const shownQ: string = s.substring(i, qh.end).split("\n").join(" ")
-                errs = errs.concat([err("E-SCHEMA-012", "the `<schema>` table head `" + shownQ + "` carries a schema / database qualifier — §39.2: a `.`-qualified head, \"with any whitespace or closed comments around the `.`\", is a compile error (select the schema through the connection, e.g. the Postgres `search_path`)", i, qh.end)])
-                hName = qh.name
-                hEnd = qh.end
-                hOpen = qh.open
+                const shownQ: string = s.substring(i, qh.end).split("\n").join(" ");
+                errs = errs.concat([err("E-SCHEMA-012", "the `<schema>` table head `" + shownQ + "` carries a schema / database qualifier — §39.2: a `.`-qualified head, \"with any whitespace or closed comments around the `.`\", is a compile error (select the schema through the connection, e.g. the Postgres `search_path`)", i, qh.end)]);
+                hName = qh.name;
+                hEnd = qh.end;
+                hOpen = qh.open;
             } else {
-                errs = errs.concat([refuse("`" + (run == "" ? ch(s, i) : run) + "` in `<schema>` is not a §39.2 table declaration (`name { column: type constraint* }`) — the bootstrap reads nothing else in a `<schema>` body", i, re > i ? re : i + 1)])
-                going = false
+                errs = errs.concat([refuse("`" + (run == "" ? ch(s, i) : run) + "` in `<schema>` is not a §39.2 table declaration (`name { column: type constraint* }`) — the bootstrap reads nothing else in a `<schema>` body", i, re > i ? re : i + 1)]);
+                going = false;
             }
             if (hOpen >= 0) {
-                const name: string = hName
-                const rt: RTable = readTable(s, name, i, hEnd, hOpen, to)
+                const name: string = hName;
+                const rt: RTable = readTable(s, name, i, hEnd, hOpen, to);
                 for (const prior of tables) {
-                    if (sameName(prior.name, name)) errs = errs.concat([err("E-SCHEMA-016", "`<schema>` declares table `" + name + "` twice (table names compare case-insensitively) — §39.7: \"no duplicate table names\". Keep one declaration", i, hEnd)])
+                    if (sameName(prior.name, name)) errs = errs.concat([err("E-SCHEMA-016", "`<schema>` declares table `" + name + "` twice (table names compare case-insensitively) — §39.7: \"no duplicate table names\". Keep one declaration", i, hEnd)]);
                 }
-                tables = tables.concat([rt.t])
-                refs = refs.concat(rt.refs)
-                errs = errs.concat(rt.errs)
-                i = skip(s, rt.next, to)
+                tables = tables.concat([rt.t]);
+                refs = refs.concat(rt.refs);
+                errs = errs.concat(rt.errs);
+                i = skip(s, rt.next, to);
                 if (wordAt(s, i, to) == "db") {
-                    const de: int = runEnd(s, i, to)
+                    const de: int = runEnd(s, i, to);
                     if (s.substring(i, de) == "db-authoritative") {
-                        errs = errs.concat([refuse("`db-authoritative` after `<schema>` table `" + name + "` (§14.8.11) is not in the bootstrap", i, de)])
-                        i = skip(s, de, to)
+                        errs = errs.concat([refuse("`db-authoritative` after `<schema>` table `" + name + "` (§14.8.11) is not in the bootstrap", i, de)]);
+                        i = skip(s, de, to);
                     }
                 }
             }
@@ -1507,15 +1513,15 @@ ${
         // `<schema>` declaration (or in the existing database schema, if the
         // referenced table is not being created)" — E-SCHEMA-006.
         for (const fk of refs) {
-            const col: string = fk.targetCol
-            let target: SchemaTable | not = not
-            for (const t of tables) { if (sameName(t.name, fk.target)) target = t }
+            const col: string = fk.targetCol;
+            let target: SchemaTable | not = not;
+            for (const t of tables) { if (sameName(t.name, fk.target)) target = t; }
             if (target is not) {
-                errs = errs.concat([refuse("column `" + fk.table + "." + fk.col + "` references `" + fk.target + "`, which this `<schema>` does not declare — §39.5.5 allows a table of the existing database, which the bootstrap does not read (INTERIM), so it cannot tell whether `" + fk.target + "(" + col + ")` exists. Declare `" + fk.target + "` in the `<schema>`", fk.start, fk.end)])
+                errs = errs.concat([refuse("column `" + fk.table + "." + fk.col + "` references `" + fk.target + "`, which this `<schema>` does not declare — §39.5.5 allows a table of the existing database, which the bootstrap does not read (INTERIM), so it cannot tell whether `" + fk.target + "(" + col + ")` exists. Declare `" + fk.target + "` in the `<schema>`", fk.start, fk.end)]);
             } else {
-                let has = false
-                for (const c of target.cols) { if (sameName(c.name, col)) has = true }
-                if (!has) errs = errs.concat([err("E-SCHEMA-006", "column `" + fk.table + "." + fk.col + "` references `" + fk.target + "(" + col + ")`, and `<schema>` table `" + target.name + "` declares no column `" + col + "` (§39.5.5)", fk.start, fk.end)])
+                let has = false;
+                for (const c of target.cols) { if (sameName(c.name, col)) has = true; }
+                if (!has) errs = errs.concat([err("E-SCHEMA-006", "column `" + fk.table + "." + fk.col + "` references `" + fk.target + "(" + col + ")`, and `<schema>` table `" + target.name + "` declares no column `" + col + "` (§39.5.5)", fk.start, fk.end)]);
             }
         }
         // §39.2 "For the §14.8.9 / §14.8.10 floors every `CREATE TABLE` head in the body
@@ -1525,34 +1531,34 @@ ${
         // same-name declarations (E-SCHEMA-015's union), so `CREATE … TABLE` text anywhere
         // else — a `--` / `/* */` / `//` comment, a string — is refused rather than skipped
         // (fail closed).
-        let masked: string = ""
-        let mi: int = from
-        let li: int = 0
-        while (li < liveA.length) {
+        let masked: string = "";
+        let mi: int = from;
+        let li: int = 0;
+        for (; li < liveA.length; ) {
             // a live statement is blanked except its `'…'` string literals (S478 #1925 review
             // F3: `DEFAULT 'CREATE TABLE t (…)'` is `CREATE TABLE` text in a string)
-            masked = masked + s.substring(mi, liveA[li]) + " " + strBodies(s, liveA[li], liveB[li]) + " "
-            mi = liveB[li]
-            li = li + 1
+            masked = masked + s.substring(mi, liveA[li]) + " " + strBodies(s, liveA[li], liveB[li]) + " ";
+            mi = liveB[li];
+            li = li + 1;
         }
-        masked = (masked + s.substring(mi, to)).toLowerCase()
+        masked = (masked + s.substring(mi, to)).toLowerCase();
         if (!otherForm && hasWord(masked, "create") && hasWord(masked, "table")) {
-            otherForm = true
-            errs = errs.concat([refuse("this `<schema>` body holds `CREATE … TABLE` text outside a live declaration (in a comment or a string) — §39.2: the §14.8.9 / §14.8.10 floors read every `CREATE TABLE` head in the body text as a declaration wherever it appears, a commented-out one included, and the bootstrap reads only live declarations (INTERIM; it does not build E-SCHEMA-015's same-name union). Delete the text", from, to)])
+            otherForm = true;
+            errs = errs.concat([refuse("this `<schema>` body holds `CREATE … TABLE` text outside a live declaration (in a comment or a string) — §39.2: the §14.8.9 / §14.8.10 floors read every `CREATE TABLE` head in the body text as a declaration wherever it appears, a commented-out one included, and the bootstrap reads only live declarations (INTERIM; it does not build E-SCHEMA-015's same-name union). Delete the text", from, to)]);
         }
         // §14.8.10: "the `tenant_id` column's presence is the declaration" — the floor
         // reads every declaration in the body text, so a `tenant_id` anywhere in it (a
         // commented-out table, a string) is refused like a live one: the floor is not built.
-        const lowAll: string = s.substring(from, to).toLowerCase()
-        let tenantSaid = false
-        for (const e of errs) { if (e.text.indexOf("tenant isolation floor") >= 0) tenantSaid = true }
+        const lowAll: string = s.substring(from, to).toLowerCase();
+        let tenantSaid = false;
+        for (const e of errs) { if (e.text.indexOf("tenant isolation floor") >= 0) tenantSaid = true; }
         if (!tenantSaid && hasWord(lowAll, "tenant_id")) {
-            errs = errs.concat([refuse("this `<schema>` body names `tenant_id` — §14.8.10: the `tenant_id` column's presence is the declaration of a tenant-scoped table, read from every declaration in the body text, and the tenant isolation floor is not in the bootstrap (INTERIM)", from, to)])
+            errs = errs.concat([refuse("this `<schema>` body names `tenant_id` — §14.8.10: the `tenant_id` column's presence is the declaration of a tenant-scoped table, read from every declaration in the body text, and the tenant isolation floor is not in the bootstrap (INTERIM)", from, to)]);
         }
         // §34 W-SCHEMA-NO-TABLES-DECLARED: non-blank after comments, zero tables, no `fn`, no non-text child
         if (content && tables.length == 0 && !otherForm) {
-            errs = errs.concat([err("W-SCHEMA-NO-TABLES-DECLARED", "this `<schema>` has content but declares no table — it is inert, and every floor keyed on a `<schema>` table cannot engage (§34)", from, to)])
+            errs = errs.concat([err("W-SCHEMA-NO-TABLES-DECLARED", "this `<schema>` has content but declares no table — it is inert, and every floor keyed on a `<schema>` table cannot engage (§34)", from, to)]);
         }
-        return { tables: tables, errs: errs }
+        return { tables: tables, errs: errs };
     }
 }

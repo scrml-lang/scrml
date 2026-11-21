@@ -92,187 +92,187 @@ ${
     }
 
     // ---- shorthands used by the Core printer ---------------------------------
-    export fn jid(n: string) -> JsExpr { return JsExpr.JId(n) }
-    export fn jstr(s: string) -> JsExpr { return JsExpr.JStr(s) }
-    export fn jnum(n: int) -> JsExpr { return JsExpr.JNum("" + n) }
-    export fn jmember(o: JsExpr, p: string) -> JsExpr { return JsExpr.JMember(o, p) }
-    export fn jcall(f: JsExpr, args: JsExpr[]) -> JsExpr { return JsExpr.JCall(f, args) }
+    export fn jid(n: string) -> JsExpr { return JsExpr.JId(n); }
+    export fn jstr(s: string) -> JsExpr { return JsExpr.JStr(s); }
+    export fn jnum(n: int) -> JsExpr { return JsExpr.JNum("" + n); }
+    export fn jmember(o: JsExpr, p: string) -> JsExpr { return JsExpr.JMember(o, p); }
+    export fn jcall(f: JsExpr, args: JsExpr[]) -> JsExpr { return JsExpr.JCall(f, args); }
     // `obj.method(args)`
-    export fn jmcall(o: JsExpr, m: string, args: JsExpr[]) -> JsExpr { return JsExpr.JCall(JsExpr.JMember(o, m), args) }
-    export fn jthunk(e: JsExpr) -> JsExpr { return JsExpr.JArrowE([], e) }
-    export fn sexpr(e: JsExpr) -> JsStmt { return JsStmt.SExpr(e) }
+    export fn jmcall(o: JsExpr, m: string, args: JsExpr[]) -> JsExpr { return JsExpr.JCall(JsExpr.JMember(o, m), args); }
+    export fn jthunk(e: JsExpr) -> JsExpr { return JsExpr.JArrowE([], e); }
+    export fn sexpr(e: JsExpr) -> JsStmt { return JsStmt.SExpr(e); }
 
     // ---- precedence ----------------------------------------------------------
     fn opPrec(op: JsOp) -> int {
         return match op {
-            .Times :> 13
-            .Div :> 13
-            .Mod :> 13
-            .Plus :> 12
-            .Minus :> 12
-            .Lt :> 10
-            .Le :> 10
-            .Gt :> 10
-            .Ge :> 10
-            .StrictEq :> 9
-            .StrictNe :> 9
-            .LooseEq :> 9
-            .LooseNe :> 9
-            .And :> 5
-            .Or :> 4
+            .Times :> 13,
+            .Div :> 13,
+            .Mod :> 13,
+            .Plus :> 12,
+            .Minus :> 12,
+            .Lt :> 10,
+            .Le :> 10,
+            .Gt :> 10,
+            .Ge :> 10,
+            .StrictEq :> 9,
+            .StrictNe :> 9,
+            .LooseEq :> 9,
+            .LooseNe :> 9,
+            .And :> 5,
+            .Or :> 4,
             .Nullish :> 4
-        }
+        };
     }
 
     fn opText(op: JsOp) -> string {
         return match op {
-            .Plus :> "+"
-            .Minus :> "-"
-            .Times :> "*"
-            .Div :> "/"
-            .Mod :> "%"
-            .Lt :> "<"
-            .Le :> "<="
-            .Gt :> ">"
-            .Ge :> ">="
-            .StrictEq :> "==="
-            .StrictNe :> "!=="
-            .LooseEq :> "=="
-            .LooseNe :> "!="
-            .And :> "&&"
-            .Or :> "||"
+            .Plus :> "+",
+            .Minus :> "-",
+            .Times :> "*",
+            .Div :> "/",
+            .Mod :> "%",
+            .Lt :> "<",
+            .Le :> "<=",
+            .Gt :> ">",
+            .Ge :> ">=",
+            .StrictEq :> "===",
+            .StrictNe :> "!==",
+            .LooseEq :> "==",
+            .LooseNe :> "!=",
+            .And :> "&&",
+            .Or :> "||",
             .Nullish :> "??"
-        }
+        };
     }
 
     fn unText(op: JsUnOp) -> string {
         return match op {
-            .Not :> "!"
+            .Not :> "!",
             .Neg :> "-"
-        }
+        };
     }
 
     // 20 primary · 19 member/call · 15 unary · 13..4 binary · 3 conditional · 2 arrow
     fn prec(e: JsExpr) -> int {
         return match e {
-            .JId :> 20
-            .JNum(text: t) :> numPrec(t)
-            .JStr :> 20
-            .JBool :> 20
-            .JNull :> 20
-            .JUndefined :> 20
-            .JArray :> 20
-            .JObject :> 20
-            .JMember :> 19
-            .JIndex :> 19
-            .JCall :> 19
-            .JUn :> 15
-            .JBin(op: op) :> opPrec(op)
-            .JCond :> 3
-            .JArrow :> 2
-            .JArrowE :> 2
-            .JAnnot(e: inner) :> prec(inner)
-            .JAwait :> 15
-            .JNew :> 18
-            .JAssignE :> 20
+            .JId :> 20,
+            .JNum(text: t) :> numPrec(t),
+            .JStr :> 20,
+            .JBool :> 20,
+            .JNull :> 20,
+            .JUndefined :> 20,
+            .JArray :> 20,
+            .JObject :> 20,
+            .JMember :> 19,
+            .JIndex :> 19,
+            .JCall :> 19,
+            .JUn :> 15,
+            .JBin(op: op) :> opPrec(op),
+            .JCond :> 3,
+            .JArrow :> 2,
+            .JArrowE :> 2,
+            .JAnnot(e: inner) :> prec(inner),
+            .JAwait :> 15,
+            .JNew :> 18,
+            .JAssignE :> 20,
             .JText :> 20
-        }
+        };
     }
 
     fn wrap(e: JsExpr, minPrec: int, ind: string) -> string {
-        const s: string = expr(e, ind)
-        if (prec(e) < minPrec) return "(" + s + ")"
-        return s
+        const s: string = expr(e, ind);
+        if (prec(e) < minPrec) return "(" + s + ")";
+        return s;
     }
 
     // s480 (s480-boot-cheap-wins): an operand of a binary — parenthesized by precedence, and
     // ALWAYS where `??` meets `&&` / `||`: JavaScript refuses that mix unparenthesized
     // (`a || b ?? c` is a SyntaxError), whatever the precedence would say.
     fn wrapBin(op: JsOp, e: JsExpr, minPrec: int, ind: string) -> string {
-        if (nullishMixJs(op, e)) return "(" + expr(e, ind) + ")"
-        return wrap(e, minPrec, ind)
+        if (nullishMixJs(op, e)) return "(" + expr(e, ind) + ")";
+        return wrap(e, minPrec, ind);
     }
 
     fn nullishMixJs(op: JsOp, e: JsExpr) -> boolean {
         const child: JsOp | not = match e {
-            .JBin(op: o) :> o
+            .JBin(op: o) :> o,
             // no-default-arm: only a binary operand can mix
             _ :> not
-        }
-        if (child is not) return false
-        const logicP: boolean = op == JsOp.And || op == JsOp.Or
-        const logicC: boolean = child == JsOp.And || child == JsOp.Or
-        return (op == JsOp.Nullish && logicC) || (child == JsOp.Nullish && logicP)
+        };
+        if (child is not) return false;
+        const logicP: boolean = op == JsOp.And || op == JsOp.Or;
+        const logicC: boolean = child == JsOp.And || child == JsOp.Or;
+        return (op == JsOp.Nullish && logicC) || (child == JsOp.Nullish && logicP);
     }
 
     fn joinExprs(es: JsExpr[], minPrec: int, ind: string) -> string {
-        let out = ""
-        let first = true
+        let out = "";
+        let first = true;
         for (const e of es) {
-            if (!first) out = out + ", "
-            out = out + wrap(e, minPrec, ind)
-            first = false
+            if (!first) out = out + ", ";
+            out = out + wrap(e, minPrec, ind);
+            first = false;
         }
-        return out
+        return out;
     }
 
     fn paramList(ps: string[]) -> string {
-        if (ps.length == 1) return ps[0]
-        return "(" + ps.join(", ") + ")"
+        if (ps.length == 1) return ps[0];
+        return "(" + ps.join(", ") + ")";
     }
 
     fn isObject(e: JsExpr) -> boolean {
         return match e {
-            .JObject :> true
-            .JId :> false
-            .JNum :> false
-            .JStr :> false
-            .JBool :> false
-            .JNull :> false
-            .JUndefined :> false
-            .JMember :> false
-            .JIndex :> false
-            .JCall :> false
-            .JArrow :> false
-            .JArrowE :> false
-            .JBin :> false
-            .JUn :> false
-            .JCond :> false
-            .JArray :> false
-            .JAnnot :> false
-            .JAwait :> false
-            .JNew :> false
-            .JAssignE :> false
+            .JObject :> true,
+            .JId :> false,
+            .JNum :> false,
+            .JStr :> false,
+            .JBool :> false,
+            .JNull :> false,
+            .JUndefined :> false,
+            .JMember :> false,
+            .JIndex :> false,
+            .JCall :> false,
+            .JArrow :> false,
+            .JArrowE :> false,
+            .JBin :> false,
+            .JUn :> false,
+            .JCond :> false,
+            .JArray :> false,
+            .JAnnot :> false,
+            .JAwait :> false,
+            .JNew :> false,
+            .JAssignE :> false,
             .JText :> false
-        }
+        };
     }
 
     // An expression's text. `ind` is the indentation of the line it sits on,
     // so a multi-line arrow body can indent relative to it.
     export fn expr(e: JsExpr, ind: string) -> string {
         return match e {
-            .JId(name: n) :> n
-            .JNum(text: t) :> t
-            .JStr(value: v) :> quote(v)
-            .JBool(value: b) :> boolText(b)
-            .JNull :> "null"
-            .JUndefined :> "undefined"
-            .JMember(obj: o, prop: p) :> wrap(o, 19, ind) + "." + p
-            .JIndex(obj: o, index: i) :> wrap(o, 19, ind) + "[" + expr(i, ind) + "]"
-            .JCall(callee: f, args: args) :> wrap(f, 19, ind) + "(" + joinExprs(args, 2, ind) + ")"
-            .JArrow(params: ps, body: body) :> arrowBlock(ps, body, ind)
-            .JArrowE(params: ps, e: body) :> arrowExpr(ps, body, ind)
-            .JBin(op: op, l: l, r: r) :> wrapBin(op, l, opPrec(op), ind) + " " + opText(op) + " " + wrapBin(op, r, opPrec(op) + 1, ind)
-            .JUn(op: op, e: x) :> unJs(op, x, ind)
-            .JCond(test: t, a: a, b: b) :> wrap(t, 4, ind) + " ? " + wrap(a, 3, ind) + " : " + wrap(b, 3, ind)
-            .JArray(elems: es) :> "[" + joinExprs(es, 2, ind) + "]"
-            .JObject(props: ps) :> objectText(ps, ind)
-            .JAnnot(e: x, note: n) :> expr(x, ind) + " /* " + n + " */"
-            .JAwait(e: x) :> "await " + wrap(x, 15, ind)
-            .JNew(callee: f, args: args) :> "new (" + expr(f, ind) + ")(" + joinExprs(args, 2, ind) + ")"
-            .JAssignE(name: n, e: x) :> "(" + n + " = " + wrap(x, 2, ind) + ")"
+            .JId(name: n) :> n,
+            .JNum(text: t) :> t,
+            .JStr(value: v) :> quote(v),
+            .JBool(value: b) :> boolText(b),
+            .JNull :> "null",
+            .JUndefined :> "undefined",
+            .JMember(obj: o, prop: p) :> wrap(o, 19, ind) + "." + p,
+            .JIndex(obj: o, index: i) :> wrap(o, 19, ind) + "[" + expr(i, ind) + "]",
+            .JCall(callee: f, args: args) :> wrap(f, 19, ind) + "(" + joinExprs(args, 2, ind) + ")",
+            .JArrow(params: ps, body: body) :> arrowBlock(ps, body, ind),
+            .JArrowE(params: ps, e: body) :> arrowExpr(ps, body, ind),
+            .JBin(op: op, l: l, r: r) :> wrapBin(op, l, opPrec(op), ind) + " " + opText(op) + " " + wrapBin(op, r, opPrec(op) + 1, ind),
+            .JUn(op: op, e: x) :> unJs(op, x, ind),
+            .JCond(test: t, a: a, b: b) :> wrap(t, 4, ind) + " ? " + wrap(a, 3, ind) + " : " + wrap(b, 3, ind),
+            .JArray(elems: es) :> "[" + joinExprs(es, 2, ind) + "]",
+            .JObject(props: ps) :> objectText(ps, ind),
+            .JAnnot(e: x, note: n) :> expr(x, ind) + " /* " + n + " */",
+            .JAwait(e: x) :> "await " + wrap(x, 15, ind),
+            .JNew(callee: f, args: args) :> "new (" + expr(f, ind) + ")(" + joinExprs(args, 2, ind) + ")",
+            .JAssignE(name: n, e: x) :> "(" + n + " = " + wrap(x, 2, ind) + ")",
             .JText(value: v) :> templateText(v)
-        }
+        };
     }
 
     // s469 (templates review P1) — a prefix operator whose operand's text begins
@@ -280,178 +280,178 @@ ${
     // decrement) and `-` then `-1` printed `--1` (a SyntaxError). Such an operand
     // is parenthesized: `-(-x)`, `-(-1)`. (`!` merges with nothing.)
     fn unJs(op: JsUnOp, x: JsExpr, ind: string) -> string {
-        const o: string = unText(op)
-        const inner: string = wrap(x, 15, ind)
-        const c: string = inner.substring(0, 1)
-        if ((o == "-" || o == "+") && (c == "-" || c == "+")) return o + "(" + inner + ")"
-        return o + inner
+        const o: string = unText(op);
+        const inner: string = wrap(x, 15, ind);
+        const c: string = inner.substring(0, 1);
+        if ((o == "-" || o == "+") && (c == "-" || c == "+")) return o + "(" + inner + ")";
+        return o + inner;
     }
 
     // A negative numeric literal's text (`-1`) is a unary expression, not a
     // primary: as a member's object or an operand it is parenthesized.
     fn numPrec(t: string) -> int {
-        if (t.substring(0, 1) == "-") return 15
-        return 20
+        if (t.substring(0, 1) == "-") return 15;
+        return 20;
     }
 
     fn boolText(b: boolean) -> string {
-        if (b) return "true"
-        return "false"
+        if (b) return "true";
+        return "false";
     }
 
     // s477 — a template literal of `s`: the backslash is escaped first, so the
     // backslashes the backtick and dollar-brace escapes add are not doubled.
     fn templateText(s: string) -> string {
-        const bs: string = "\\"
-        const bt: string = "`"
-        return bt + s.replaceAll(bs, bs + bs).replaceAll(bt, bs + bt).replaceAll("$" + "{", bs + "$" + "{") + bt
+        const bs: string = "\\";
+        const bt: string = "`";
+        return bt + s.replaceAll(bs, bs + bs).replaceAll(bt, bs + bt).replaceAll("$" + "{", bs + "$" + "{") + bt;
     }
 
     fn quote(s: string) -> string {
-        const q: string = JSON.stringify(s)
-        return q
+        const q: string = JSON.stringify(s);
+        return q;
     }
 
     fn arrowExpr(ps: string[], body: JsExpr, ind: string) -> string {
-        if (isObject(body)) return paramList(ps) + " => (" + expr(body, ind) + ")"
-        return paramList(ps) + " => " + wrap(body, 2, ind)
+        if (isObject(body)) return paramList(ps) + " => (" + expr(body, ind) + ")";
+        return paramList(ps) + " => " + wrap(body, 2, ind);
     }
 
     fn arrowBlock(ps: string[], body: JsStmt[], ind: string) -> string {
-        if (body.length == 0) return paramList(ps) + " => {}"
-        return paramList(ps) + " => {\n" + stmts(body, ind + "  ") + ind + "}"
+        if (body.length == 0) return paramList(ps) + " => {}";
+        return paramList(ps) + " => {\n" + stmts(body, ind + "  ") + ind + "}";
     }
 
     fn objectText(ps: JsProp[], ind: string) -> string {
-        if (ps.length == 0) return "{}"
-        let out: string = "{ "
-        let first = true
+        if (ps.length == 0) return "{}";
+        let out: string = "{ ";
+        let first = true;
         for (const p of ps) {
-            if (!first) out = out + ", "
-            out = out + propKey(p.key) + ": " + wrap(p.value, 2, ind)
-            first = false
+            if (!first) out = out + ", ";
+            out = out + propKey(p.key) + ": " + wrap(p.value, 2, ind);
+            first = false;
         }
-        return out + " }"
+        return out + " }";
     }
 
     // A property key: bare when it is a plain identifier, else quoted.
     fn propKey(k: string) -> string {
-        if (isPlainIdent(k)) return k
-        return quote(k)
+        if (isPlainIdent(k)) return k;
+        return quote(k);
     }
 
     fn isIdentCode(c: int, first: boolean) -> boolean {
-        if ((c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95 || c == 36) return true
-        if (first) return false
-        return c >= 48 && c <= 57
+        if ((c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95 || c == 36) return true;
+        if (first) return false;
+        return c >= 48 && c <= 57;
     }
 
     fn isPlainIdent(k: string) -> boolean {
-        if (k.length == 0) return false
-        let i = 0
-        while (i < k.length) {
-            const c: int = k.charCodeAt(i)
-            if (!isIdentCode(c, i == 0)) return false
-            i = i + 1
+        if (k.length == 0) return false;
+        let i = 0;
+        for (; i < k.length; ) {
+            const c: int = k.charCodeAt(i);
+            if (!isIdentCode(c, i == 0)) return false;
+            i = i + 1;
         }
-        return true
+        return true;
     }
 
     // ---- statements ----------------------------------------------------------
     export fn stmts(ss: JsStmt[], ind: string) -> string {
-        let out = ""
-        for (const s of ss) { out = out + stmt(s, ind) }
-        return out
+        let out = "";
+        for (const s of ss) { out = out + stmt(s, ind); }
+        return out;
     }
 
     fn stmt(s: JsStmt, ind: string) -> string {
         return match s {
-            .SConst(name: n, e: e) :> ind + "const " + n + " = " + expr(e, ind) + ";\n"
-            .SLet(name: n, e: e) :> ind + "let " + n + " = " + expr(e, ind) + ";\n"
-            .SDecl(name: n) :> ind + "let " + n + ";\n"
-            .SAssign(target: t, e: e) :> ind + expr(t, ind) + " = " + expr(e, ind) + ";\n"
-            .SExpr(e: e) :> ind + exprStmtText(e, ind) + ";\n"
-            .SExprNote(e: e, note: n) :> ind + exprStmtText(e, ind) + "; // " + n + "\n"
-            .SReturn(e: e) :> ind + "return " + expr(e, ind) + ";\n"
-            .SIf(test: t, thenB: a, elseB: b) :> ifText(t, a, b, ind)
-            .STry(body: a, fin: f) :> ind + "try {\n" + stmts(a, ind + "  ") + ind + "} finally {\n" + stmts(f, ind + "  ") + ind + "}\n"
+            .SConst(name: n, e: e) :> ind + "const " + n + " = " + expr(e, ind) + ";\n",
+            .SLet(name: n, e: e) :> ind + "let " + n + " = " + expr(e, ind) + ";\n",
+            .SDecl(name: n) :> ind + "let " + n + ";\n",
+            .SAssign(target: t, e: e) :> ind + expr(t, ind) + " = " + expr(e, ind) + ";\n",
+            .SExpr(e: e) :> ind + exprStmtText(e, ind) + ";\n",
+            .SExprNote(e: e, note: n) :> ind + exprStmtText(e, ind) + "; // " + n + "\n",
+            .SReturn(e: e) :> ind + "return " + expr(e, ind) + ";\n",
+            .SIf(test: t, thenB: a, elseB: b) :> ifText(t, a, b, ind),
+            .STry(body: a, fin: f) :> ind + "try {\n" + stmts(a, ind + "  ") + ind + "} finally {\n" + stmts(f, ind + "  ") + ind + "}\n",
             .SFunc(name: n, params: ps, body: body) :>
-                ind + "function " + n + "(" + ps.join(", ") + ") {\n" + stmts(body, ind + "  ") + ind + "}\n"
+                ind + "function " + n + "(" + ps.join(", ") + ") {\n" + stmts(body, ind + "  ") + ind + "}\n",
             .SAsyncFunc(name: n, params: ps, body: body) :>
-                ind + "async function " + n + "(" + ps.join(", ") + ") {\n" + stmts(body, ind + "  ") + ind + "}\n"
-            .SExportConst(name: n, e: e) :> ind + "export const " + n + " = " + expr(e, ind) + ";\n"
+                ind + "async function " + n + "(" + ps.join(", ") + ") {\n" + stmts(body, ind + "  ") + ind + "}\n",
+            .SExportConst(name: n, e: e) :> ind + "export const " + n + " = " + expr(e, ind) + ";\n",
             .SExportFunc(name: n, params: ps, body: body) :>
-                ind + "export function " + n + "(" + ps.join(", ") + ") {\n" + stmts(body, ind + "  ") + ind + "}\n"
-            .SComment(text: t) :> ind + "// " + t + "\n"
-            .SImportAll(name: n, from: f) :> ind + "import * as " + n + " from " + quote(f) + ";\n"
-            .SBlank :> "\n"
-            .SLoop(label: l, head: h, body: body) :> ind + labelText(l) + loopHeadText(h, ind) + " {\n" + stmts(body, ind + "  ") + ind + "}\n"
-            .SBreak(label: l) :> ind + "break" + jumpLabelText(l) + ";\n"
+                ind + "export function " + n + "(" + ps.join(", ") + ") {\n" + stmts(body, ind + "  ") + ind + "}\n",
+            .SComment(text: t) :> ind + "// " + t + "\n",
+            .SImportAll(name: n, from: f) :> ind + "import * as " + n + " from " + quote(f) + ";\n",
+            .SBlank :> "\n",
+            .SLoop(label: l, head: h, body: body) :> ind + labelText(l) + loopHeadText(h, ind) + " {\n" + stmts(body, ind + "  ") + ind + "}\n",
+            .SBreak(label: l) :> ind + "break" + jumpLabelText(l) + ";\n",
             .SContinue(label: l) :> ind + "continue" + jumpLabelText(l) + ";\n"
-        }
+        };
     }
 
     // s469 — loops.
     fn labelText(l: string) -> string {
-        if (l == "") return ""
-        return l + ": "
+        if (l == "") return "";
+        return l + ": ";
     }
 
     fn jumpLabelText(l: string) -> string {
-        if (l == "") return ""
-        return " " + l
+        if (l == "") return "";
+        return " " + l;
     }
 
     fn loopHeadText(h: JsLoopHead, ind: string) -> string {
         return match h {
-            .JForever :> "for (;;)"
-            .JWhile(test: t) :> "while (" + expr(t, ind) + ")"
-            .JForC(init: i, test: t, step: st) :> "for (" + forInitText(i, ind) + "; " + maybeExprText(t, ind) + "; " + assignsText(st, ind) + ")"
+            .JForever :> "for (;;)",
+            .JWhile(test: t) :> "while (" + expr(t, ind) + ")",
+            .JForC(init: i, test: t, step: st) :> "for (" + forInitText(i, ind) + "; " + maybeExprText(t, ind) + "; " + assignsText(st, ind) + ")",
             .JForOf(name: n, mutable: m, iter: it) :> "for (" + declWord(m) + " " + n + " of " + expr(it, ind) + ")"
-        }
+        };
     }
 
     fn declWord(mutable: boolean) -> string {
-        if (mutable) return "let"
-        return "const"
+        if (mutable) return "let";
+        return "const";
     }
 
     fn forInitText(i: JsForInit, ind: string) -> string {
-        if (i.items.length == 0) return ""
-        if (i.isLet) return "let " + assignsText(i.items, ind)
-        return assignsText(i.items, ind)
+        if (i.items.length == 0) return "";
+        if (i.isLet) return "let " + assignsText(i.items, ind);
+        return assignsText(i.items, ind);
     }
 
     fn assignsText(ps: JsProp[], ind: string) -> string {
-        let out: string = ""
-        let first = true
+        let out: string = "";
+        let first = true;
         for (const p of ps) {
-            if (!first) out = out + ", "
-            out = out + p.key + " = " + wrap(p.value, 2, ind)
-            first = false
+            if (!first) out = out + ", ";
+            out = out + p.key + " = " + wrap(p.value, 2, ind);
+            first = false;
         }
-        return out
+        return out;
     }
 
     fn maybeExprText(t: JsExpr | not, ind: string) -> string {
-        if (t is not) return ""
-        return expr(t, ind)
+        if (t is not) return "";
+        return expr(t, ind);
     }
 
     // An expression statement may not start with `{` (or `function`).
     fn exprStmtText(e: JsExpr, ind: string) -> string {
-        if (isObject(e)) return "(" + expr(e, ind) + ")"
-        return expr(e, ind)
+        if (isObject(e)) return "(" + expr(e, ind) + ")";
+        return expr(e, ind);
     }
 
     fn ifText(t: JsExpr, a: JsStmt[], b: JsStmt[], ind: string) -> string {
-        const head: string = ind + "if (" + expr(t, ind) + ") {\n" + stmts(a, ind + "  ") + ind + "}"
-        if (b.length == 0) return head + "\n"
-        return head + " else {\n" + stmts(b, ind + "  ") + ind + "}\n"
+        const head: string = ind + "if (" + expr(t, ind) + ") {\n" + stmts(a, ind + "  ") + ind + "}";
+        if (b.length == 0) return head + "\n";
+        return head + " else {\n" + stmts(b, ind + "  ") + ind + "}\n";
     }
 
     // A whole module: the statement list printed once.
     export fn printModule(body: JsStmt[]) -> string {
-        return stmts(body, "")
+        return stmts(body, "");
     }
 }

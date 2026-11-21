@@ -1,14 +1,14 @@
+<program reset="none">
 // Loop-local lin declared and consumed each iteration — valid (§35.4.4 carve-out)
-${
-    function mintToken() { return "fresh-tok" }
-    function submitOne(t) { return t }
+    function mintToken() { return "fresh-tok"; }
+    function submitOne(t) { return t; }
 
     function run(items) {
         for (const item of items) {
-            lin token = mintToken()
-            submitOne(token)
+            lin token = mintToken();
+            submitOne(token);
         }
-        return "done"
+        return "done";
     }
-}
 <p>${run([1,2,3])}</>
+</program>

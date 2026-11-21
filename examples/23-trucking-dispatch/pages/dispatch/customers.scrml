@@ -14,9 +14,9 @@
 
   import {
       accountStatusClasses, accountStatusLabel, paymentTermsLabel
-  } from '../../components/customer-card.scrml'
-  import { createSessionStore } from 'scrml:store'
-  import { SESSION_DB_PATH } from '../../models/auth.scrml'
+  } from '../../components/customer-card.scrml';
+  import { createSessionStore } from 'scrml:store';
+  import { SESSION_DB_PATH } from '../../models/auth.scrml';
 
   <db src="../../dispatch.db" protect="password_hash" tables="users, customers, invoices, loads">
 
@@ -26,9 +26,9 @@
             // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
             // compiles to its own public route, and one taking a userId would let any caller
             // look up any user (S443 post-merge review of #1180).
-            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get();
             if (user is not || user.role != "dispatcher") {
-                return { unauthorized: true }
+                return { unauthorized: true };
             }
 
             // Customers + outstanding-invoice count (paid_at IS NULL).
@@ -42,9 +42,9 @@
                      WHERE l.customer_id = c.id) AS total_loads
                 FROM customers c
                 ORDER BY c.name ASC
-            `}.all()
+            `}.all();
 
-            return { user: user, customers: customers }
+            return { user: user, customers: customers };
         }
 
         <currentUser> = not
@@ -53,33 +53,33 @@
         <expandedId> = 0
 
         function getSessionToken() {
-            const c = document.cookie ? document.cookie : ""
-            const idx = c.indexOf("scrml_session=")
-            if (idx < 0) return ""
-            const tail = c.substring(idx + "scrml_session=".length)
-            const semi = tail.indexOf(";")
-            return semi < 0 ? tail : tail.substring(0, semi)
+            const c = document.cookie ? document.cookie : "";
+            const idx = c.indexOf("scrml_session=");
+            if (idx < 0) return "";
+            const tail = c.substring(idx + "scrml_session=".length);
+            const semi = tail.indexOf(";");
+            return semi < 0 ? tail : tail.substring(0, semi);
         }
 
         function refresh() {
-            const tok = getSessionToken()
-            const data = fetchCustomersServer(tok)
+            const tok = getSessionToken();
+            const data = fetchCustomersServer(tok);
             if (data.unauthorized) {
-                window.location.href = "/auth/login?reason=unauthorized"
-                return
+                window.location.href = "/auth/login?reason=unauthorized";
+                return;
             }
-            @currentUser = data.user
-            @customerRows = data.customers
-            @loaded = true
+            @currentUser = data.user;
+            @customerRows = data.customers;
+            @loaded = true;
         }
 
         function toggle(id) {
-            @expandedId = (@expandedId == id) ? 0 : id
+            @expandedId = (@expandedId == id) ? 0 : id;
         }
 
         on mount {
             refresh()
-        }
+        };
     }
 
     <div class="min-h-screen bg-slate-50 text-slate-900 font-sans">

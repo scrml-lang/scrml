@@ -1,10 +1,11 @@
+<program reset="none">
 // func-008-onsubmit.scrml
 // Form submit handler. Tests: onsubmit= attribute.
 
 <div>
     ${
         function handleSubmit() {
-            let submitted = true
+            let submitted = true;
         }
     }
     <form onsubmit=handleSubmit()>
@@ -12,3 +13,4 @@
         <button type="submit">Submit</>
     </form>
 </div>
+</program>

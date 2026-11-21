@@ -1,5 +1,5 @@
+<program reset="none">
 // type X:enum, comma-separated variants
-${
     type Color:enum = { Red, Green, Blue }
-}
 <p>x</>
+</program>

@@ -1,19 +1,19 @@
+<program>
 // if-in-for-in-while — 3-level nesting
 ${
-    let groups: number[][] = [[1, 2], [3, 4], [5]]
-    let hits = 0
-    let gi = 0
+    let groups: number[][] = [[1, 2], [3, 4], [5]];
+    let hits = 0;
+    let gi = 0;
     while (gi < groups.length) {
         for (let x of groups[gi]) {
             if (x % 2 == 0) {
-                hits = hits + 1
+                hits = hits + 1;
             }
         }
-        gi = gi + 1
+        gi = gi + 1;
     }
-    log(hits)
-    function log(n: number) { let _ = n }
+    log(hits);
+    function log(n: number) { let _ = n; }
 }
-<program>
     <p>ok</>
 </>

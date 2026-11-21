@@ -43,7 +43,7 @@
     // ordinary :enum (Pillar 5); the engine `match`es it, no event sub-DSL.
     type DragMsg:enum = { Start(id: number), Drop(col: string), End }
 
-    const columns = ["Inbox", "Doing", "Done"]
+    const columns = ["Inbox", "Doing", "Done"];
 
     <tasks>: Task[] = [
         { id: 1, title: "Triage incoming bug reports", column: "Inbox", order: 0 },
@@ -54,31 +54,31 @@
 
     // PURE — given tasks + a column, what's the next order value for a new task?
     fn nextOrderIn(tasks: Task[], column: string) -> number {
-        const existing = tasks.filter(t => t.column == column)
-        if (existing.length == 0) return 0
-        return Math.max(...existing.map(t => t.order)) + 1
+        const existing = tasks.filter(t => t.column == column);
+        if (existing.length == 0) return 0;
+        return Math.max(...existing.map(t => t.order)) + 1;
     }
 
     // PURE — return the task with the column/order updated, or the original.
     // (Extracted from taskMovedTo to avoid Bug 15: `fn`-body parser false-fires
     // E-FN-001 on `t.id == id ? { ...t, ... } : t` — reads `? {` as SQL block.)
     fn updateIfMatched(t: Task, id: number, column: string, order: number) -> Task {
-        if (t.id == id) return { ...t, column: column, order: order }
-        return t
+        if (t.id == id) return { ...t, column: column, order: order };
+        return t;
     }
 
     // PURE — given tasks + an id + a target column, return the new tasks list
     // with the moved task at the end of the target column.
     fn taskMovedTo(tasks: Task[], id: number, toColumn: string) -> Task[] {
-        const order = nextOrderIn(tasks, toColumn)
-        return tasks.map(t => updateIfMatched(t, id, toColumn, order))
+        const order = nextOrderIn(tasks, toColumn);
+        return tasks.map(t => updateIfMatched(t, id, toColumn, order));
     }
 
     // PURE — is the given task the one currently being dragged? Reads the
     // dragging id out of the .Dragging(id) state payload via match-binding.
     fn isDraggingTask(phase: DragPhase, id: number) -> boolean {
         match phase {
-            .Dragging(draggingId) :> draggingId == id
+            .Dragging(draggingId) :> draggingId == id,
             .Idle                 :> false
         }
     }
@@ -88,7 +88,7 @@
     // surface, not application state. Will remain even if the state system
     // grows a "dropzone" primitive that auto-handles this.
     function allowDrop(e) {
-        e.preventDefault()
+        e.preventDefault();
     }
 
     // STATE-SYSTEM: drag-lifecycle engine — singleton, OWNS its transitions.

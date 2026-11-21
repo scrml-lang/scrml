@@ -16,11 +16,11 @@
 
 <page db="../../dispatch.db" auth="required">
 
-  import { AddressForm } from '../../components/address-form.scrml'
-  import { createSessionStore } from 'scrml:store'
-  import { SESSION_DB_PATH } from '../../models/auth.scrml'
+  import { AddressForm } from '../../components/address-form.scrml';
+  import { createSessionStore } from 'scrml:store';
+  import { SESSION_DB_PATH } from '../../models/auth.scrml';
   // M5: centralized real-time channel — see SPEC §38.12.6.
-  import { "dispatch-board" as dispatchBoard } from '../../channels/dispatch-board.scrml'
+  import { "dispatch-board" as dispatchBoard } from '../../channels/dispatch-board.scrml';
 
   <db src="../../dispatch.db" protect="password_hash" tables="users, customers, loads">
 
@@ -31,16 +31,16 @@
             // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
             // compiles to its own public route, and one taking a userId would let any caller
             // look up any user (S443 post-merge review of #1180).
-            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get();
             if (user is not || user.role != "dispatcher") {
-                return { unauthorized: true }
+                return { unauthorized: true };
             }
             const customers = ?{`
                 SELECT id, name, account_status
                 FROM customers
                 ORDER BY name ASC
-            `}.all()
-            return { user: user, customers: customers }
+            `}.all();
+            return { user: user, customers: customers };
         }
 
         function createLoadServer(
@@ -54,16 +54,16 @@
             // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
             // compiles to its own public route, and one taking a userId would let any caller
             // look up any user (S443 post-merge review of #1180).
-            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get();
             if (user is not || user.role != "dispatcher") {
-                return { unauthorized: true }
+                return { unauthorized: true };
             }
 
             // Server-side guard: customer must be active.
-            const cust = ?{`SELECT id, account_status FROM customers WHERE id = ${customerId}`}.get()
-            if (cust is not) return { error: "Customer not found." }
+            const cust = ?{`SELECT id, account_status FROM customers WHERE id = ${customerId}`}.get();
+            if (cust is not) return { error: "Customer not found." };
             if (cust.account_status != "active") {
-                return { error: "Cannot tender a load for an inactive customer." }
+                return { error: "Cannot tender a load for an inactive customer." };
             }
 
             ?{`
@@ -82,7 +82,7 @@
                     ${commodity}, ${weightLbs}, ${rateDollars},
                     'Tendered'
                 )
-            `}.run()
+            `}.run();
 
             const newRow = ?{`
                 SELECT id FROM loads
@@ -91,9 +91,9 @@
                   AND pickup_at = ${pickupAt}
                 ORDER BY id DESC
                 LIMIT 1
-            `}.get()
+            `}.get();
 
-            return { ok: true, loadId: newRow ? newRow.id : not }
+            return { ok: true, loadId: newRow ? newRow.id : not };
         }
 
         <currentUser> = not
@@ -123,51 +123,51 @@
             <rateDollars gt(0)>: number = 0
         </>
 
-        <errorMessage> = ""
+        <errorMessage> = "";
         <submitting> = false
 
         function getSessionToken() {
-            const c = document.cookie ? document.cookie : ""
-            const idx = c.indexOf("scrml_session=")
-            if (idx < 0) return ""
-            const tail = c.substring(idx + "scrml_session=".length)
-            const semi = tail.indexOf(";")
-            return semi < 0 ? tail : tail.substring(0, semi)
+            const c = document.cookie ? document.cookie : "";
+            const idx = c.indexOf("scrml_session=");
+            if (idx < 0) return "";
+            const tail = c.substring(idx + "scrml_session=".length);
+            const semi = tail.indexOf(";");
+            return semi < 0 ? tail : tail.substring(0, semi);
         }
 
         function refresh() {
-            const tok = getSessionToken()
-            const data = fetchCustomersServer(tok)
+            const tok = getSessionToken();
+            const data = fetchCustomersServer(tok);
             if (data.unauthorized) {
-                window.location.href = "/auth/login?reason=unauthorized"
-                return
+                window.location.href = "/auth/login?reason=unauthorized";
+                return;
             }
-            @currentUser = data.user
-            @customerOptions = data.customers
-            @loaded = true
+            @currentUser = data.user;
+            @customerOptions = data.customers;
+            @loaded = true;
         }
 
-        function setOriginAddress(e)      { @loadForm.originAddress      = e.target.value }
-        function setOriginCity(e)         { @loadForm.originCity         = e.target.value }
-        function setOriginState(e)        { @loadForm.originState        = e.target.value }
-        function setDestinationAddress(e) { @loadForm.destinationAddress = e.target.value }
-        function setDestinationCity(e)    { @loadForm.destinationCity    = e.target.value }
-        function setDestinationState(e)   { @loadForm.destinationState   = e.target.value }
+        function setOriginAddress(e)      { @loadForm.originAddress      = e.target.value; }
+        function setOriginCity(e)         { @loadForm.originCity         = e.target.value; }
+        function setOriginState(e)        { @loadForm.originState        = e.target.value; }
+        function setDestinationAddress(e) { @loadForm.destinationAddress = e.target.value; }
+        function setDestinationCity(e)    { @loadForm.destinationCity    = e.target.value; }
+        function setDestinationState(e)   { @loadForm.destinationState   = e.target.value; }
 
         function submit() {
-            if (@submitting) return
-            @errorMessage = ""
+            if (@submitting) return;
+            @errorMessage = "";
 
             // The §55 validity surface replaces the manual client-side checks:
             // customer selected (min(1)), origin/destination city (req), pickup +
             // deliver (req), commodity (req), rate gt(0) — all roll up to isValid.
             if (!@loadForm.isValid) {
-                @errorMessage = "Please complete all required fields."
-                return
+                @errorMessage = "Please complete all required fields.";
+                return;
             }
 
-            @submitting = true
-            const tok = getSessionToken()
+            @submitting = true;
+            const tok = getSessionToken();
             const result = createLoadServer(
                 tok,
                 @loadForm.customerId,
@@ -175,28 +175,28 @@
                 @loadForm.destinationAddress, @loadForm.destinationCity, @loadForm.destinationState,
                 @loadForm.pickupAt, @loadForm.deliverBy,
                 @loadForm.commodity, @loadForm.weightLbs, @loadForm.rateDollars
-            )
+            );
 
             if (result.unauthorized) {
-                window.location.href = "/auth/login?reason=unauthorized"
-                return
+                window.location.href = "/auth/login?reason=unauthorized";
+                return;
             }
             if (result.error) {
-                @errorMessage = result.error
-                @submitting = false
-                return
+                @errorMessage = result.error;
+                @submitting = false;
+                return;
             }
 
             // M5: publish new-load event so other dispatchers see the new
             // tender land on their board immediately.
-            publishBoardEvent("new-load", result.loadId, "Tendered")
+            publishBoardEvent("new-load", result.loadId, "Tendered");
 
-            window.location.href = `/dispatch/loads/${result.loadId}`
+            window.location.href = `/dispatch/loads/${result.loadId}`;
         }
 
         on mount {
             refresh()
-        }
+        };
     }
 
     <!-- M5: dispatch-board channel — see channels/dispatch-board.scrml.
@@ -259,7 +259,7 @@
                   onAddressInput=setOriginAddress
                   onCityInput=setOriginCity
                   onStateInput=setOriginState
-              /></div> }
+              /></div>; }
               <errors of=@loadForm.originCity/>
 
               ${ lift <div><AddressForm
@@ -273,7 +273,7 @@
                   onAddressInput=setDestinationAddress
                   onCityInput=setDestinationCity
                   onStateInput=setDestinationState
-              /></div> }
+              /></div>; }
               <errors of=@loadForm.destinationCity/>
 
               <div class="grid grid-cols-1 md:grid-cols-2 gap-4">

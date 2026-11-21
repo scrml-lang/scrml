@@ -1,8 +1,8 @@
+<program reset="none">
 // const inside fn body
-${
     fn double(x) {
-        const factor = 2
-        return x * factor
+        const factor = 2;
+        return x * factor;
     }
-}
 <p>${double(5)}</>
+</program>

@@ -1,11 +1,11 @@
+<program>
 // return; bare form with no value inside a void function
 ${
     function sideEffect() {
-        let _ = 1
-        return
+        let _ = 1;
+        return;
     }
-    sideEffect()
+    sideEffect();
 }
-<program>
     <p>ok</>
 </>

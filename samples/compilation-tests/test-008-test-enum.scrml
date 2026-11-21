@@ -6,10 +6,10 @@ type Color:enum = { Red, Green, Blue }
 ${
     function label(c: Color) {
         return match c {
-            .Red :> "red"
-            .Green :> "green"
+            .Red :> "red",
+            .Green :> "green",
             .Blue :> "blue"
-        }
+        };
     }
 }
 

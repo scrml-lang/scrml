@@ -9,11 +9,11 @@
   <count> = 0
   <step>  = 1
 
-  function increment() { @count = @count + @step }
-  function decrement() { @count = @count - @step }
+  function increment() { @count = @count + @step; }
+  function decrement() { @count = @count - @step; }
   // `reset` is a reserved keyword (§6.8) — `reset(@cell)` is the keyword form.
   // For a clear-to-zero handler, use a distinct name like `clearCount`.
-  function clearCount() { reset(@count) }
+  function clearCount() { reset(@count); }
 
 
 <div class="flex flex-col items-center gap-6 p-8 min-h-screen bg-gray-50">

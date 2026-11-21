@@ -1,23 +1,23 @@
+<program reset="none">
 // Phase 7: !{} inline catch handler (§19.4.3)
 // Should compile clean.
 
-${
   type LoadError:enum = { NotFound(msg:string), Forbidden }
 
   function loadItem(id)! -> LoadError {
     if (id == 0) {
-      fail LoadError.NotFound("no item")
+      fail LoadError.NotFound("no item");
     }
-    return "item"
+    return "item";
   }
-}
 
 <div>
 ${
   let item = loadItem(1) !{
-    ::NotFound(msg) -> "missing"
+    ::NotFound(msg) -> "missing",
     ::Forbidden -> "denied"
-  }
+  };
 }
 <p>${item}</>
 </div>
+</program>

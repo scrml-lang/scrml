@@ -1,7 +1,5 @@
-// `??` inside markup interpolation
-${
-    <price>: number | not = not
-}
 <program>
+// `??` inside markup interpolation
+    <price>: number | not = not
     <p>Price: ${@price ?? "loading..."}</>
 </>

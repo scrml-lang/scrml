@@ -1,15 +1,17 @@
+<program reset="none">
 // control-014-break-continue.scrml
 // Break and continue in loops. Tests: loop control flow.
 
 <div>
     ${
-        let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-        let sum = 0
+        let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        let sum = 0;
         for (let n of numbers) {
-            if (n > 7) { break }
-            if (n % 2 == 0) { continue }
-            sum = sum + n
+            if (n > 7) { break; }
+            if (n % 2 == 0) { continue; }
+            sum = sum + n;
         }
     }
     <p>Sum of odds up to 7</>
 </div>
+</program>

@@ -1,10 +1,10 @@
+<program>
 // Equality inside an if condition — scrml has only `==` (strict). `===` is rejected (E-EQ-004; see phase3-eq-strict-rewrite-017). Per §45.
 ${
-    let x = 1
-    if (x == 1) { x = 2 }
-    log(x)
-    function log(n: number) { let _ = n }
+    let x = 1;
+    if (x == 1) { x = 2; }
+    log(x);
+    function log(n: number) { let _ = n; }
 }
-<program>
     <p>ok</>
 </>

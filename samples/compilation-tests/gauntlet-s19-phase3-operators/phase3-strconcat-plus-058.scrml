@@ -1,8 +1,8 @@
-${
-    let first = "hello"
-    let last = "world"
-    const both = first + " " + last
-}
 <program>
+${
+    let first = "hello";
+    let last = "world";
+    const both = first + " " + last;
+}
     <p>${both}</>
 </>

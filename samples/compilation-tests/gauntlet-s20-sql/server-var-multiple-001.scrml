@@ -2,11 +2,9 @@
 // Should coalesce into __mountHydrate.
 
 <program db="./test.db">
-${
-  server @userCount = ?{`SELECT COUNT(*) as count FROM users`}.get()
-  server @postCount = ?{`SELECT COUNT(*) as count FROM posts`}.get()
-  server @latestUser = ?{`SELECT name FROM users ORDER BY id DESC LIMIT 1`}.get()
-}
+  server @userCount = ?{`SELECT COUNT(*) as count FROM users`}.get();
+  server @postCount = ?{`SELECT COUNT(*) as count FROM posts`}.get();
+  server @latestUser = ?{`SELECT name FROM users ORDER BY id DESC LIMIT 1`}.get();
 <div>
   <p>Users: ${@userCount.count}</>
   <p>Posts: ${@postCount.count}</>

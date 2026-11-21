@@ -11,9 +11,9 @@
 
 <page db="../../dispatch.db" auth="required">
 
-  import { accountStatusLabel, accountStatusClasses, accountStatusClassesOf, paymentTermsLabel } from '../../components/customer-card.scrml'
-  import { createSessionStore } from 'scrml:store'
-  import { SESSION_DB_PATH } from '../../models/auth.scrml'
+  import { accountStatusLabel, accountStatusClasses, accountStatusClassesOf, paymentTermsLabel } from '../../components/customer-card.scrml';
+  import { createSessionStore } from 'scrml:store';
+  import { SESSION_DB_PATH } from '../../models/auth.scrml';
 
   <db src="../../dispatch.db" protect="password_hash" tables="users, customers">
 
@@ -23,19 +23,19 @@
             // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
             // compiles to its own public route, and one taking a userId would let any caller
             // look up any user (S443 post-merge review of #1180).
-            const user = ?{`SELECT id, email, role, created_at, last_login_at FROM users WHERE id = ${session.userId}`}.get()
+            const user = ?{`SELECT id, email, role, created_at, last_login_at FROM users WHERE id = ${session.userId}`}.get();
             if (user is not || user.role != "customer") {
-                return { unauthorized: true }
+                return { unauthorized: true };
             }
             const customer = ?{`
                 SELECT id, name, contact_name, contact_email, contact_phone,
                        billing_address, payment_terms, account_status, created_at
                 FROM customers
                 WHERE user_id = ${user.id}
-            `}.get()
-            if (customer is not) return { error: "No customer record." }
+            `}.get();
+            if (customer is not) return { error: "No customer record." };
 
-            return { user: user, customer: customer }
+            return { user: user, customer: customer };
         }
 
         <currentUser> = not
@@ -44,39 +44,39 @@
         <errorMessage> = ""
 
         function getSessionToken() {
-            const c = document.cookie ? document.cookie : ""
-            const idx = c.indexOf("scrml_session=")
-            if (idx < 0) return ""
-            const tail = c.substring(idx + "scrml_session=".length)
-            const semi = tail.indexOf(";")
-            return semi < 0 ? tail : tail.substring(0, semi)
+            const c = document.cookie ? document.cookie : "";
+            const idx = c.indexOf("scrml_session=");
+            if (idx < 0) return "";
+            const tail = c.substring(idx + "scrml_session=".length);
+            const semi = tail.indexOf(";");
+            return semi < 0 ? tail : tail.substring(0, semi);
         }
 
         function refresh() {
-            const tok = getSessionToken()
-            const data = fetchProfile(tok)
+            const tok = getSessionToken();
+            const data = fetchProfile(tok);
             if (data.unauthorized) {
-                window.location.href = "/auth/login?reason=unauthorized"
-                return
+                window.location.href = "/auth/login?reason=unauthorized";
+                return;
             }
             if (data.error) {
-                @errorMessage = data.error
-                @loaded = true
-                return
+                @errorMessage = data.error;
+                @loaded = true;
+                return;
             }
-            @currentUser = data.user
-            @currentCustomer = data.customer
-            @loaded = true
+            @currentUser = data.user;
+            @currentCustomer = data.customer;
+            @loaded = true;
         }
 
         function logout() {
-            document.cookie = "scrml_session=; Path=/; Max-Age=0"
-            window.location.href = "/auth/login?logout=1"
+            document.cookie = "scrml_session=; Path=/; Max-Age=0";
+            window.location.href = "/auth/login?logout=1";
         }
 
         on mount {
             refresh()
-        }
+        };
     }
 
       <div class="min-h-screen bg-slate-50 text-slate-900 font-sans">

@@ -1,9 +1,11 @@
+<program reset="none">
 // comp-001-basic.scrml
 // Basic component definition. Tests: const ComponentName = pattern.
 
 <div>
     ${
-        const Card = "card-component"
+        const Card = "card-component";
     }
     <p>Component defined</>
 </div>
+</program>

@@ -1,3 +1,4 @@
+<program reset="none">
 // sql-007-delete.scrml
 // SQL DELETE. Tests: ?{} with delete operation.
 
@@ -7,3 +8,4 @@
     }
     <p>Delete done</>
 </div>
+</program>

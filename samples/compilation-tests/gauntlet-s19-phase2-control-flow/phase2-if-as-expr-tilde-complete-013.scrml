@@ -1,11 +1,11 @@
+<program>
 // Complete if/else → ~ is unconditionally initialized (§17.6.9 ex 3)
 ${
-    let cond = true
+    let cond = true;
     if (cond) lift 1; else lift 2;
-    let dbl = ~ * 2
-    log(dbl)
-    function log(n: number) { let _ = n }
+    let dbl = ~ * 2;
+    log(dbl);
+    function log(n: number) { let _ = n; }
 }
-<program>
     <p>ok</>
 </>

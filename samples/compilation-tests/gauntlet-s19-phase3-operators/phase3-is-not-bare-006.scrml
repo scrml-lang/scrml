@@ -1,10 +1,10 @@
+<program>
 // `is not` — absence check on optional var
 ${
-    let name: string | not = not
+    let name: string | not = not;
     if (name is not) {
-        let _absent = 1
+        let _absent = 1;
     }
 }
-<program>
     <p>ok</>
 </>

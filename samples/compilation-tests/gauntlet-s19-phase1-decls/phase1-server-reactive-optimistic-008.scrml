@@ -1,10 +1,8 @@
 // server @var with optimistic write via assignment in client function
 <program db="./test.db">
-    ${
-        server @count = 0
+        server @count = 0;
         function bump() {
-            @count = @count + 1
+            @count = @count + 1;
         }
-    }
     <button onclick=bump()>${@count}</>
 </>

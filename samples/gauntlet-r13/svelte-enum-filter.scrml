@@ -1,3 +1,4 @@
+<program reset="none">
 // gauntlet-r13: svelte dev — reactive filter with enums
 // Tests: Enum::Variant compilation, match expression, bind:value, reactive arrays
 // R13 focus: Enum::Variant compiles to "Variant", bind:value ordering
@@ -6,25 +7,25 @@
     ${
         type FilterMode:enum = { All, Active, Completed }
 
-        @filter = FilterMode::All
-        @searchTerm = ""
+        @filter = FilterMode::All;
+        @searchTerm = "";
         @items = [
             { text: "Build compiler", done: true },
             { text: "Write tests", done: false },
             { text: "Ship it", done: false }
-        ]
+        ];
 
         function visibleItems() {
-            return @items
+            return @items;
         }
 
         function toggleItem(idx) {
-            @items = [...@items]
+            @items = [...@items];
         }
 
-        function setAll() { @filter = FilterMode::All }
-        function setActive() { @filter = FilterMode::Active }
-        function setCompleted() { @filter = FilterMode::Completed }
+        function setAll() { @filter = FilterMode::All; }
+        function setActive() { @filter = FilterMode::Active; }
+        function setCompleted() { @filter = FilterMode::Completed; }
     }
     <h1>Task Filter</>
     <input type="text" bind:value=@searchTerm placeholder="Search..."/>
@@ -41,3 +42,4 @@
         }
     </ul>
 </div>
+</program>

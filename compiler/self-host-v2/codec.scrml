@@ -39,8 +39,8 @@
 // closed: every Named type gets ONE def slot, referenced by `WRef(def)`.
 // =============================================================================
 ${
-    import { Sym, Type, SeqGrants, LengthGrant, FieldDef, VariantDef, TypeDef, CoreProgram, findTypeDef } from "./core.scrml"
-    import { JsExpr, JsProp, jstr, jnum, expr } from "./js.scrml"
+    import { Sym, Type, SeqGrants, LengthGrant, FieldDef, VariantDef, TypeDef, CoreProgram, findTypeDef } from "./core.scrml";
+    import { JsExpr, JsProp, jstr, jnum, expr } from "./js.scrml";
 
     // -------------------------------------------------------------------------
     // The descriptor. Field names and enum tags are the DECLARED names (the
@@ -83,7 +83,7 @@ ${
     export type WireBuild:struct = { table: WireTable | not, why: string[] }
 
     // The envelope key (§57.2). The runtime half carries the same constant.
-    export fn absentKey() -> string { return "__scrml_absent" }
+    export fn absentKey() -> string { return "__scrml_absent"; }
 
     // -------------------------------------------------------------------------
     // Pass 1 — the closure of Named types reachable from the root, in first-
@@ -91,74 +91,74 @@ ${
     // -------------------------------------------------------------------------
     fn symListed(ss: Sym[], s: Sym) -> boolean {
         for (const x of ss) {
-            if (x.id == s.id) return true
+            if (x.id == s.id) return true;
         }
-        return false
+        return false;
     }
 
     fn symIndex(ss: Sym[], s: Sym) -> int {
-        let i = 0
+        let i = 0;
         for (const x of ss) {
-            if (x.id == s.id) return i
-            i = i + 1
+            if (x.id == s.id) return i;
+            i = i + 1;
         }
-        return -1
+        return -1;
     }
 
     // s478 — a function type at any depth (a struct or variant field's type is never one:
     // analyze refuses a function type there).
     fn holdsFn(t: Type) -> boolean {
         return match t {
-            .Fn(params: ps) :> true
-            .Maybe(inner: i) :> holdsFn(i)
-            .Seq(elem: e) :> holdsFn(e)
-            .Int :> false
-            .Num :> false
-            .Str :> false
-            .Bool :> false
+            .Fn(params: ps) :> true,
+            .Maybe(inner: i) :> holdsFn(i),
+            .Seq(elem: e) :> holdsFn(e),
+            .Int :> false,
+            .Num :> false,
+            .Str :> false,
+            .Bool :> false,
             .Named(sym: s) :> false
-        }
+        };
     }
 
     fn reach(p: CoreProgram, t: Type, acc: Sym[]) -> Sym[] {
         return match t {
-            .Int :> acc
-            .Num :> acc
-            .Str :> acc
-            .Bool :> acc
-            .Maybe(inner: i) :> reach(p, i, acc)
-            .Seq(elem: e) :> reach(p, e, acc)
-            .Named(sym: s) :> reachNamed(p, s, acc)
+            .Int :> acc,
+            .Num :> acc,
+            .Str :> acc,
+            .Bool :> acc,
+            .Maybe(inner: i) :> reach(p, i, acc),
+            .Seq(elem: e) :> reach(p, e, acc),
+            .Named(sym: s) :> reachNamed(p, s, acc),
             .Fn(params: ps) :> acc
-        }
+        };
     }
 
     fn reachNamed(p: CoreProgram, s: Sym, acc: Sym[]) -> Sym[] {
-        if (symListed(acc, s)) return acc
-        const out: Sym[] = acc.concat([s])
-        const td: TypeDef | not = findTypeDef(p, s)
-        if (td is not) return out
-        return reachDef(p, td, out)
+        if (symListed(acc, s)) return acc;
+        const out: Sym[] = acc.concat([s]);
+        const td: TypeDef | not = findTypeDef(p, s);
+        if (td is not) return out;
+        return reachDef(p, td, out);
     }
 
     fn reachDef(p: CoreProgram, td: TypeDef, acc: Sym[]) -> Sym[] {
         return match td {
-            .StructDef(fields: fs) :> reachFields(p, fs, acc)
-            .EnumDef(variants: vs) :> reachVariants(p, vs, acc)
+            .StructDef(fields: fs) :> reachFields(p, fs, acc),
+            .EnumDef(variants: vs) :> reachVariants(p, vs, acc),
             .HostDef(sym: hs) :> acc
-        }
+        };
     }
 
     fn reachFields(p: CoreProgram, fs: FieldDef[], acc: Sym[]) -> Sym[] {
-        let out: Sym[] = acc
-        for (const f of fs) { out = reach(p, f.ty, out) }
-        return out
+        let out: Sym[] = acc;
+        for (const f of fs) { out = reach(p, f.ty, out); }
+        return out;
     }
 
     fn reachVariants(p: CoreProgram, vs: VariantDef[], acc: Sym[]) -> Sym[] {
-        let out: Sym[] = acc
-        for (const v of vs) { out = reachFields(p, v.fields, out) }
-        return out
+        let out: Sym[] = acc;
+        for (const v of vs) { out = reachFields(p, v.fields, out); }
+        return out;
     }
 
     // -------------------------------------------------------------------------
@@ -166,37 +166,37 @@ ${
     // -------------------------------------------------------------------------
     fn wireTy(syms: Sym[], t: Type) -> WireTy {
         return match t {
-            .Int :> WireTy.WInt
-            .Num :> WireTy.WNum
-            .Str :> WireTy.WStr
-            .Bool :> WireTy.WBool
-            .Maybe(inner: i) :> WireTy.WMaybe(wireTy(syms, unMaybe(i)))
-            .Seq(elem: e, grants: g) :> WireTy.WSeq(wireTy(syms, e), wireBound(g))
-            .Named(sym: s) :> WireTy.WRef(symIndex(syms, s))
+            .Int :> WireTy.WInt,
+            .Num :> WireTy.WNum,
+            .Str :> WireTy.WStr,
+            .Bool :> WireTy.WBool,
+            .Maybe(inner: i) :> WireTy.WMaybe(wireTy(syms, unMaybe(i))),
+            .Seq(elem: e, grants: g) :> WireTy.WSeq(wireTy(syms, e), wireBound(g)),
+            .Named(sym: s) :> WireTy.WRef(symIndex(syms, s)),
             .Fn(params: ps) :> WireTy.WInt
-        }
+        };
     }
 
     // §42.3.1: `(T | not) | not` is `T | not`.
     fn unMaybe(t: Type) -> Type {
         return match t {
-            .Maybe(inner: i) :> unMaybe(i)
-            .Int :> t
-            .Num :> t
-            .Str :> t
-            .Bool :> t
-            .Fn(params: ps) :> t
-            .Named :> t
+            .Maybe(inner: i) :> unMaybe(i),
+            .Int :> t,
+            .Num :> t,
+            .Str :> t,
+            .Bool :> t,
+            .Fn(params: ps) :> t,
+            .Named :> t,
             .Seq :> t
-        }
+        };
     }
 
     fn wireBound(g: SeqGrants) -> WireBound {
         return match g.length {
-            .Free :> WireBound.Free
-            .Fixed :> WireBound.Fixed
+            .Free :> WireBound.Free,
+            .Fixed :> WireBound.Fixed,
             .Bounded(min: lo, max: hi) :> WireBound.Bounded(lo, hi)
-        }
+        };
     }
 
     // -------------------------------------------------------------------------
@@ -205,39 +205,39 @@ ${
     export type DefBuild:struct = { def: WireDef | not, why: string[] }
 
     fn defOf(p: CoreProgram, syms: Sym[], s: Sym) -> DefBuild {
-        const td: TypeDef | not = findTypeDef(p, s)
+        const td: TypeDef | not = findTypeDef(p, s);
         if (td is not) {
-            return { def: not, why: ["Named(" + s.hint + "#" + s.id + ") names no type definition (a declaration-typed value has no wire form in this codec)"] }
+            return { def: not, why: ["Named(" + s.hint + "#" + s.id + ") names no type definition (a declaration-typed value has no wire form in this codec)"] };
         }
-        return defOfTypeDef(syms, td)
+        return defOfTypeDef(syms, td);
     }
 
     fn defOfTypeDef(syms: Sym[], td: TypeDef) -> DefBuild {
         return match td {
-            .StructDef(sym: ts, fields: fs) :> structDef(syms, ts, fs)
-            .EnumDef(sym: es, variants: vs) :> enumDef(syms, es, vs)
+            .StructDef(sym: ts, fields: fs) :> structDef(syms, ts, fs),
+            .EnumDef(sym: es, variants: vs) :> enumDef(syms, es, vs),
             .HostDef(sym: hs) :> hostNoWire(hs)
-        }
+        };
     }
 
     // s473: a declared `:host` handle type (DRAFT §21.3.3 rule 15) has NO wire
     // form — a handle is not data (analyze refuses it at every boundary it
     // builds: E-HOST-HANDLE-NOT-DATA); should one reach the codec, it is refused here.
     fn hostNoWire(hs: Sym) -> DefBuild {
-        return { def: not, why: ["Named(" + hs.hint + ") is a declared `:host` handle type — a host handle has no wire form (§21.3.3 rule 15)"] }
+        return { def: not, why: ["Named(" + hs.hint + ") is a declared `:host` handle type — a host handle has no wire form (§21.3.3 rule 15)"] };
     }
 
     fn structDef(syms: Sym[], ts: Sym, fs: FieldDef[]) -> DefBuild {
-        let fields: WireField[] = []
-        let why: string[] = []
+        let fields: WireField[] = [];
+        let why: string[] = [];
         for (const f of fs) {
             if (f.sym.hint == absentKey()) {
-                why = why.concat(["struct " + ts.hint + " has a field named " + absentKey() + ": a present value would be the §57.2 absence envelope"])
+                why = why.concat(["struct " + ts.hint + " has a field named " + absentKey() + ": a present value would be the §57.2 absence envelope"]);
             }
-            fields = fields.concat([{ name: f.sym.hint, ty: wireTy(syms, f.ty) }])
+            fields = fields.concat([{ name: f.sym.hint, ty: wireTy(syms, f.ty) }]);
         }
-        if (why.length > 0) return { def: not, why: why }
-        return { def: WireDef.WStruct(ts.hint, fields), why: [] }
+        if (why.length > 0) return { def: not, why: why };
+        return { def: WireDef.WStruct(ts.hint, fields), why: [] };
     }
 
     // §57.8: a variant's wire `data` keys are its DECLARED field names. A
@@ -245,15 +245,15 @@ ${
     // field): the `data` object never stands in a `T | not` position, so it
     // can never be read as the §57.2 envelope.
     fn enumDef(syms: Sym[], es: Sym, vs: VariantDef[]) -> DefBuild {
-        let variants: WireVariant[] = []
+        let variants: WireVariant[] = [];
         for (const v of vs) {
-            let fields: WireField[] = []
+            let fields: WireField[] = [];
             for (const f of v.fields) {
-                fields = fields.concat([{ name: f.sym.hint, ty: wireTy(syms, f.ty) }])
+                fields = fields.concat([{ name: f.sym.hint, ty: wireTy(syms, f.ty) }]);
             }
-            variants = variants.concat([{ name: v.sym.hint, fields: fields }])
+            variants = variants.concat([{ name: v.sym.hint, fields: fields }]);
         }
-        return { def: WireDef.WEnum(es.hint, variants), why: [] }
+        return { def: WireDef.WEnum(es.hint, variants), why: [] };
     }
 
     // -------------------------------------------------------------------------
@@ -263,21 +263,21 @@ ${
         // s478 (s478-boot-fn-type) — §14.3 (S474, PERMANENT): "a closure cannot be serialized —
         // its code and captured environment have no wire form". A function type anywhere in a
         // wire type has no table (analyze refuses it before; this is the backstop).
-        if (holdsFn(t)) return { table: not, why: ["a function value has no wire form — a closure cannot be serialized (§14.3)"] }
-        const syms: Sym[] = reach(p, t, [])
-        let defs: WireDef[] = []
-        let why: string[] = []
+        if (holdsFn(t)) return { table: not, why: ["a function value has no wire form — a closure cannot be serialized (§14.3)"] };
+        const syms: Sym[] = reach(p, t, []);
+        let defs: WireDef[] = [];
+        let why: string[] = [];
         for (const s of syms) {
-            const b: DefBuild = defOf(p, syms, s)
-            why = why.concat(b.why)
-            const d: WireDef | not = b.def
+            const b: DefBuild = defOf(p, syms, s);
+            why = why.concat(b.why);
+            const d: WireDef | not = b.def;
             // a refused def contributes only its `why`
             if (d is given) {
-                defs = defs.concat([d])
+                defs = defs.concat([d]);
             }
         }
-        if (why.length > 0) return { table: not, why: why }
-        return { table: { defs: defs, root: wireTy(syms, t) }, why: [] }
+        if (why.length > 0) return { table: not, why: why };
+        return { table: { defs: defs, root: wireTy(syms, t) }, why: [] };
     }
 
     // -------------------------------------------------------------------------
@@ -290,112 +290,112 @@ ${
     //      | { k: "seq", elem: ty, bound: { k: "free" | "fixed" } | { k: "bounded", min, max } }
     //      | { k: "ref", def: <index into defs> }
     // -------------------------------------------------------------------------
-    fn prop(k: string, v: JsExpr) -> JsProp { return { key: k, value: v } }
+    fn prop(k: string, v: JsExpr) -> JsProp { return { key: k, value: v }; }
 
-    fn kind(k: string) -> JsProp { return prop("k", jstr(k)) }
+    fn kind(k: string) -> JsProp { return prop("k", jstr(k)); }
 
     export fn wireTyJs(t: WireTy) -> JsExpr {
         return match t {
-            .WInt :> JsExpr.JObject([kind("int")])
-            .WNum :> JsExpr.JObject([kind("num")])
-            .WStr :> JsExpr.JObject([kind("str")])
-            .WBool :> JsExpr.JObject([kind("bool")])
-            .WMaybe(inner: i) :> JsExpr.JObject([kind("maybe"), prop("inner", wireTyJs(i))])
-            .WSeq(elem: e, bound: b) :> JsExpr.JObject([kind("seq"), prop("elem", wireTyJs(e)), prop("bound", boundJs(b))])
+            .WInt :> JsExpr.JObject([kind("int")]),
+            .WNum :> JsExpr.JObject([kind("num")]),
+            .WStr :> JsExpr.JObject([kind("str")]),
+            .WBool :> JsExpr.JObject([kind("bool")]),
+            .WMaybe(inner: i) :> JsExpr.JObject([kind("maybe"), prop("inner", wireTyJs(i))]),
+            .WSeq(elem: e, bound: b) :> JsExpr.JObject([kind("seq"), prop("elem", wireTyJs(e)), prop("bound", boundJs(b))]),
             .WRef(def: d) :> JsExpr.JObject([kind("ref"), prop("def", jnum(d))])
-        }
+        };
     }
 
     fn boundJs(b: WireBound) -> JsExpr {
         return match b {
-            .Free :> JsExpr.JObject([kind("free")])
-            .Fixed :> JsExpr.JObject([kind("fixed")])
+            .Free :> JsExpr.JObject([kind("free")]),
+            .Fixed :> JsExpr.JObject([kind("fixed")]),
             .Bounded(min: lo, max: hi) :> JsExpr.JObject([kind("bounded"), prop("min", jnum(lo)), prop("max", jnum(hi))])
-        }
+        };
     }
 
     fn wireDefJs(d: WireDef) -> JsExpr {
         return match d {
-            .WStruct(name: n, fields: fs) :> JsExpr.JObject([kind("struct"), prop("name", jstr(n)), prop("fields", fieldsJs(fs))])
+            .WStruct(name: n, fields: fs) :> JsExpr.JObject([kind("struct"), prop("name", jstr(n)), prop("fields", fieldsJs(fs))]),
             .WEnum(name: n, variants: vs) :> JsExpr.JObject([kind("enum"), prop("name", jstr(n)), prop("variants", variantsJs(vs))])
-        }
+        };
     }
 
     fn variantsJs(vs: WireVariant[]) -> JsExpr {
-        let out: JsExpr[] = []
+        let out: JsExpr[] = [];
         for (const v of vs) {
-            out = out.concat([JsExpr.JObject([prop("name", jstr(v.name)), prop("fields", fieldsJs(v.fields))])])
+            out = out.concat([JsExpr.JObject([prop("name", jstr(v.name)), prop("fields", fieldsJs(v.fields))])]);
         }
-        return JsExpr.JArray(out)
+        return JsExpr.JArray(out);
     }
 
     fn fieldsJs(fs: WireField[]) -> JsExpr {
-        let out: JsExpr[] = []
+        let out: JsExpr[] = [];
         for (const f of fs) {
-            out = out.concat([JsExpr.JObject([prop("name", jstr(f.name)), prop("ty", wireTyJs(f.ty))])])
+            out = out.concat([JsExpr.JObject([prop("name", jstr(f.name)), prop("ty", wireTyJs(f.ty))])]);
         }
-        return JsExpr.JArray(out)
+        return JsExpr.JArray(out);
     }
 
     export fn wireTableJs(t: WireTable) -> JsExpr {
-        let defs: JsExpr[] = []
-        for (const d of t.defs) { defs = defs.concat([wireDefJs(d)]) }
-        return JsExpr.JObject([prop("defs", JsExpr.JArray(defs)), prop("root", wireTyJs(t.root))])
+        let defs: JsExpr[] = [];
+        for (const d of t.defs) { defs = defs.concat([wireDefJs(d)]); }
+        return JsExpr.JObject([prop("defs", JsExpr.JArray(defs)), prop("root", wireTyJs(t.root))]);
     }
 
     // The literal's text (tests, debugging, and any printer that wants a string).
-    export fn wireTableText(t: WireTable) -> string { return expr(wireTableJs(t), "") }
+    export fn wireTableText(t: WireTable) -> string { return expr(wireTableJs(t), ""); }
 
     // s451 (U5): does the descriptor hold a FIXED-length sequence anywhere?
     // `Fixed` constrains writes against the length the value was CONSTRUCTED
     // with and has no static length (see WireBound), so a decoder cannot judge
     // a stored value against it alone — `persist=` refuses such a type.
     export fn hasFixedLength(t: WireTable) -> boolean {
-        if (tyHasFixed(t.root)) return true
+        if (tyHasFixed(t.root)) return true;
         for (const d of t.defs) {
-            if (defHasFixed(d)) return true
+            if (defHasFixed(d)) return true;
         }
-        return false
+        return false;
     }
 
     fn tyHasFixed(t: WireTy) -> boolean {
         return match t {
-            .WInt :> false
-            .WNum :> false
-            .WStr :> false
-            .WBool :> false
-            .WMaybe(inner: i) :> tyHasFixed(i)
-            .WSeq(elem: e, bound: b) :> boundIsFixed(b) || tyHasFixed(e)
+            .WInt :> false,
+            .WNum :> false,
+            .WStr :> false,
+            .WBool :> false,
+            .WMaybe(inner: i) :> tyHasFixed(i),
+            .WSeq(elem: e, bound: b) :> boundIsFixed(b) || tyHasFixed(e),
             .WRef(def: d) :> false
-        }
+        };
     }
 
     fn boundIsFixed(b: WireBound) -> boolean {
         return match b {
-            .Fixed :> true
-            .Free :> false
+            .Fixed :> true,
+            .Free :> false,
             .Bounded(min: lo) :> false
-        }
+        };
     }
 
     fn defHasFixed(d: WireDef) -> boolean {
         return match d {
-            .WStruct(fields: fs) :> fieldsHaveFixed(fs)
+            .WStruct(fields: fs) :> fieldsHaveFixed(fs),
             .WEnum(variants: vs) :> variantsHaveFixed(vs)
-        }
+        };
     }
 
     fn variantsHaveFixed(vs: WireVariant[]) -> boolean {
         for (const v of vs) {
-            if (fieldsHaveFixed(v.fields)) return true
+            if (fieldsHaveFixed(v.fields)) return true;
         }
-        return false
+        return false;
     }
 
     fn fieldsHaveFixed(fs: WireField[]) -> boolean {
         for (const f of fs) {
-            if (tyHasFixed(f.ty)) return true
+            if (tyHasFixed(f.ty)) return true;
         }
-        return false
+        return false;
     }
 }

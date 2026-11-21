@@ -1,8 +1,6 @@
-// for/lift over primitive array without key — W-KEY-001 should NOT fire (§17.4b "objects")
-${
-    <names>: string[] = ["a", "b", "c"]
-}
 <program>
+// for/lift over primitive array without key — W-KEY-001 should NOT fire (§17.4b "objects")
+    <names>: string[] = ["a", "b", "c"]
     <ul>
         ${ for (let n of @names) {
             lift <li>${n}/

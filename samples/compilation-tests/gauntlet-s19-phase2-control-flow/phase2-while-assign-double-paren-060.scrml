@@ -1,12 +1,12 @@
+<program>
 // while ((x = readNext())) — double paren suppresses W-ASSIGN-001
 ${
-    let x = 0
+    let x = 0;
     while ((x = readNext())) {
-        log(x)
+        log(x);
     }
-    function readNext(): number { return 0 }
-    function log(n: number) { let _ = n }
+    function readNext(): number { return 0; }
+    function log(n: number) { let _ = n; }
 }
-<program>
     <p>ok</>
 </>

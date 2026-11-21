@@ -1,3 +1,4 @@
+<program>
 // machine-basic — canonical modern <engine> form (§51.0.B + §51.0.F).
 // State-children carry `rule=` attributes that declare the transition contract.
 // The legacy `< engine name=X for=Y>` + arrow-rule body form is retired in
@@ -6,9 +7,7 @@
 // The engine auto-declares its reactive variable from `for=` (§51.0.C):
 // OrderStatus → @orderStatus.
 
-${
     type OrderStatus:enum = { Pending, Processing, Shipped, Delivered, Cancelled }
-}
 
 <engine for=OrderStatus initial=.Pending>
     <Pending    rule=(.Processing | .Cancelled)></>
@@ -17,8 +16,6 @@ ${
     <Delivered  rule=.Pending></>
     <Cancelled  rule=.Pending></>
 </>
-
-<program>
 <div>
     <h1>Order Status: ${@orderStatus.variant}</>
     <button onclick=${@orderStatus = .Processing}>Advance</>

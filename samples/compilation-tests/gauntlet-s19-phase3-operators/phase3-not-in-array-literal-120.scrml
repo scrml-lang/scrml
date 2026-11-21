@@ -1,7 +1,7 @@
+<program>
 // `not` as array element
 ${
-    const arr: (string | not)[] = ["a", not, "c"]
+    const arr: (string | not)[] = ["a", not, "c"];
 }
-<program>
     <p>${arr.length}</>
 </>

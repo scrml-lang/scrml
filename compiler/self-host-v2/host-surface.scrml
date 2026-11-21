@@ -45,177 +45,179 @@
 // guarded(attr-name)). A result may be `waiting T`.
 // =============================================================================
 ${
-    import { logicWriteSink, logicCallSink, executableAttrName, isUrlAttrName } from "./url.scrml"
+    import { logicWriteSink, logicCallSink, executableAttrName, isUrlAttrName } from "./url.scrml";
 
     export type HIface:struct = { name: string, parent: string }
     export type HEntry:struct = { id: string, iface: string, member: string, access: string, sig: string, cls: string, idl: string }
     export type HTag:struct = { tag: string, iface: string }
     export type HDict:struct = { name: string, keys: string[] }
 
-    fn iface(n: string, p: string) -> HIface { return { name: n, parent: p } }
+    fn iface(n: string, p: string) -> HIface { return { name: n, parent: p }; }
     fn entry(id: string, i: string, m: string, a: string, s: string, c: string, w: string) -> HEntry {
-        return { id: id, iface: i, member: m, access: a, sig: s, cls: c, idl: w }
+        return { id: id, iface: i, member: m, access: a, sig: s, cls: c, idl: w };
     }
-    fn tag(t: string, i: string) -> HTag { return { tag: t, iface: i } }
+    fn tag(t: string, i: string) -> HTag { return { tag: t, iface: i }; }
 
     // ---- lookups ------------------------------------------------------------
 
     // Is `n` an Appendix H interface (a built-in host type, rule 8.1)?
     export fn isSurfaceIface(n: string) -> boolean {
         for (const f of surfaceInterfaces()) {
-            if (f.name == n) return true
+            if (f.name == n) return true;
         }
-        return false
+        return false;
     }
 
     export fn ifaceParent(n: string) -> string {
         for (const f of surfaceInterfaces()) {
-            if (f.name == n) return f.parent
+            if (f.name == n) return f.parent;
         }
-        return ""
+        return "";
     }
 
     // Does `sub` inherit from `sup` (reflexive), as WebIDL states (H.2)?
     export fn ifaceInherits(sub: string, sup: string) -> boolean {
-        let x: string = sub
-        let guard: int = 0
-        while (x != "" && guard < 32) {
-            if (x == sup) return true
-            x = ifaceParent(x)
-            guard = guard + 1
+        let x: string = sub;
+        let guard: int = 0;
+        for (;;) {
+            if (!(x != "" && guard < 32)) { break; }
+            if (x == sup) return true;
+            x = ifaceParent(x);
+            guard = guard + 1;
         }
-        return false
+        return false;
     }
 
     // A DOM element type: an Appendix H interface that inherits from `Element`
     // (rule 16 as amended — member access on one in logic stays open).
     export fn isDomElementIface(n: string) -> boolean {
-        return isSurfaceIface(n) && ifaceInherits(n, "Element")
+        return isSurfaceIface(n) && ifaceInherits(n, "Element");
     }
 
     // The entry `(iface, member, access)`, found on `iface` or an interface it
     // inherits from (rule 8.1); `not` — none (rule 8.3: E-HOST-TARGET-NOT-ALLOWED).
     export fn findEntry(i: string, m: string, a: string) -> HEntry | not {
-        let x: string = i
-        let guard: int = 0
-        while (x != "" && guard < 32) {
+        let x: string = i;
+        let guard: int = 0;
+        for (;;) {
+            if (!(x != "" && guard < 32)) { break; }
             for (const e of surfaceEntries()) {
-                if (e.iface == x && e.member == m && e.access == a) return e
+                if (e.iface == x && e.member == m && e.access == a) return e;
             }
-            x = ifaceParent(x)
-            guard = guard + 1
+            x = ifaceParent(x);
+            guard = guard + 1;
         }
-        return not
+        return not;
     }
 
     // The access kinds `member` has on `i` (for a diagnostic that names what IS there).
     export fn accessesOf(i: string, m: string) -> string[] {
-        let out: string[] = []
+        let out: string[] = [];
         for (const a of ["read", "write", "call", "construct"]) {
-            const e: HEntry | not = findEntry(i, m, a)
-            if (e is given) out = out.concat([a])
+            const e: HEntry | not = findEntry(i, m, a);
+            if (e is given) out = out.concat([a]);
         }
-        return out
+        return out;
     }
 
     // ---- the signature notation (H.1) -----------------------------------------
 
     // Split `s` at each top-level ", " (outside parentheses).
     fn splitTop(s: string) -> string[] {
-        let out: string[] = []
-        let depth: int = 0
-        let start: int = 0
-        let i: int = 0
-        while (i < s.length) {
-            const c: string = s.charAt(i)
-            if (c == "(") depth = depth + 1
-            if (c == ")") depth = depth - 1
+        let out: string[] = [];
+        let depth: int = 0;
+        let start: int = 0;
+        let i: int = 0;
+        for (; i < s.length; ) {
+            const c: string = s.charAt(i);
+            if (c == "(") depth = depth + 1;
+            if (c == ")") depth = depth - 1;
             if (c == "," && depth == 0) {
-                out = out.concat([s.substring(start, i).trim()])
-                start = i + 1
+                out = out.concat([s.substring(start, i).trim()]);
+                start = i + 1;
             }
-            i = i + 1
+            i = i + 1;
         }
-        const last: string = s.substring(start, s.length).trim()
-        if (last != "") out = out.concat([last])
-        return out
+        const last: string = s.substring(start, s.length).trim();
+        if (last != "") out = out.concat([last]);
+        return out;
     }
 
     // The index of the `)` that closes the `(` at 0.
     fn closeParen(s: string) -> int {
-        let depth: int = 0
-        let i: int = 0
-        while (i < s.length) {
-            const c: string = s.charAt(i)
-            if (c == "(") depth = depth + 1
+        let depth: int = 0;
+        let i: int = 0;
+        for (; i < s.length; ) {
+            const c: string = s.charAt(i);
+            if (c == "(") depth = depth + 1;
             if (c == ")") {
-                depth = depth - 1
-                if (depth == 0) return i
+                depth = depth - 1;
+                if (depth == 0) return i;
             }
-            i = i + 1
+            i = i + 1;
         }
-        return -1
+        return -1;
     }
 
     // A call / construct entry's parameters, each `name: T` or `name?: T`.
     export fn sigParams(e: HEntry) -> string[] {
-        if (e.access == "read" || e.access == "write") return []
-        const close: int = closeParen(e.sig)
-        if (close < 0) return []
-        return splitTop(e.sig.substring(1, close))
+        if (e.access == "read" || e.access == "write") return [];
+        const close: int = closeParen(e.sig);
+        if (close < 0) return [];
+        return splitTop(e.sig.substring(1, close));
     }
 
     // An entry's result: the property type of a read, `void` for a write, the
     // `-> R` of a call / construct.
     export fn sigResult(e: HEntry) -> string {
-        if (e.access == "read") return e.sig
-        if (e.access == "write") return "void"
-        const close: int = closeParen(e.sig)
-        if (close < 0) return "void"
-        const rest: string = e.sig.substring(close + 1, e.sig.length).trim()
-        if (rest.startsWith("->")) return rest.substring(2, rest.length).trim()
-        return "void"
+        if (e.access == "read") return e.sig;
+        if (e.access == "write") return "void";
+        const close: int = closeParen(e.sig);
+        if (close < 0) return "void";
+        const rest: string = e.sig.substring(close + 1, e.sig.length).trim();
+        if (rest.startsWith("->")) return rest.substring(2, rest.length).trim();
+        return "void";
     }
 
     // A write entry's value slot type.
-    export fn writeSlot(e: HEntry) -> string { return e.sig }
+    export fn writeSlot(e: HEntry) -> string { return e.sig; }
 
     // `name: T` → `T`.
     export fn slotType(p: string) -> string {
-        const at: int = p.indexOf(":")
-        if (at < 0) return p
-        return p.substring(at + 1, p.length).trim()
+        const at: int = p.indexOf(":");
+        if (at < 0) return p;
+        return p.substring(at + 1, p.length).trim();
     }
 
     // `name?: T` is optional.
     export fn slotOptional(p: string) -> boolean {
-        const at: int = p.indexOf(":")
-        if (at < 1) return false
-        return p.charAt(at - 1) == "?"
+        const at: int = p.indexOf(":");
+        if (at < 1) return false;
+        return p.charAt(at - 1) == "?";
     }
 
     // A callback slot type `(…) => U`.
-    export fn isCallbackSlot(t: string) -> boolean { return t.startsWith("(") }
+    export fn isCallbackSlot(t: string) -> boolean { return t.startsWith("("); }
 
     // A slot / result type `A | B` — its alternatives (one when there is no `|`).
     // `T | not` is NOT split here (`not` is the optional mark, rule 13).
     export fn slotAlternatives(t: string) -> string[] {
-        if (isCallbackSlot(t)) return [t]
-        const parts: string[] = t.split(" | ")
-        let out: string[] = []
+        if (isCallbackSlot(t)) return [t];
+        const parts: string[] = t.split(" | ");
+        let out: string[] = [];
         for (const p of parts) {
-            if (p.trim() != "not") out = out.concat([p.trim()])
+            if (p.trim() != "not") out = out.concat([p.trim()]);
         }
-        return out
+        return out;
     }
 
     // Does `t` admit `not` (`T | not`)?
-    export fn slotAdmitsNot(t: string) -> boolean { return t.endsWith(" | not") }
+    export fn slotAdmitsNot(t: string) -> boolean { return t.endsWith(" | not"); }
 
     // `waiting T` → `T`.
     export fn unWaiting(t: string) -> string {
-        if (t.startsWith("waiting ")) return t.substring(8, t.length)
-        return t
+        if (t.startsWith("waiting ")) return t.substring(8, t.length);
+        return t;
     }
 
     // ---- what the RUNTIME carries (lane A, s473-host-allowlist-a) -------------
@@ -227,34 +229,34 @@ ${
     // hostAttrValue, and an interface result decodes as `{ k: "iface" }` (the
     // brand check). Set either to false and every entry needing it is refused BY
     // NAME again (E-BOOTSTRAP-UNSUPPORTED), never emitted unguarded.
-    export fn runtimeGuardsBuilt() -> boolean { return true }
-    export fn brandChecksBuilt() -> boolean { return true }
+    export fn runtimeGuardsBuilt() -> boolean { return true; }
+    export fn brandChecksBuilt() -> boolean { return true; }
 
     // ---- classes (rule 8.5) ---------------------------------------------------
 
     // The guards of an entry's class (`open` — none): a subset of `url`,
     // `attr-name`, `inert-receiver`.
     export fn entryGuards(e: HEntry) -> string[] {
-        if (!e.cls.startsWith("guarded(")) return []
-        return splitTop(e.cls.substring(8, e.cls.length - 1))
+        if (!e.cls.startsWith("guarded(")) return [];
+        return splitTop(e.cls.substring(8, e.cls.length - 1));
     }
 
-    export fn hasGuard(e: HEntry, g: string) -> boolean { return entryGuards(e).indexOf(g) >= 0 }
+    export fn hasGuard(e: HEntry, g: string) -> boolean { return entryGuards(e).indexOf(g) >= 0; }
 
     // The H.4 inert element list: the interface of a literal tag ("" — not inert).
     export fn inertTagIface(t: string) -> string {
         for (const x of inertElements()) {
-            if (x.tag == t) return x.iface
+            if (x.tag == t) return x.iface;
         }
-        return ""
+        return "";
     }
 
     // An H.5 dictionary's keys (`not` — no such dictionary).
     export fn dictKeys(n: string) -> string[] | not {
         for (const d of surfaceDicts()) {
-            if (d.name == n) return d.keys
+            if (d.name == n) return d.keys;
         }
-        return not
+        return not;
     }
 
     // guarded(attr-name), judged at compile time on a LITERAL name: "" — admitted;
@@ -262,38 +264,38 @@ ${
     // §5.2's test, one definition): E-HOST-TARGET-NOT-ALLOWED; "url" — a §5.2
     // rule 3 URL-valued name (url.scrml isUrlAttrName): it takes guarded(url).
     export fn attrNameVerdict(name: string) -> string {
-        if (executableAttrName(name)) return "exec"
-        if (isUrlAttrName(name)) return "url"
-        return ""
+        if (executableAttrName(name)) return "exec";
+        if (isUrlAttrName(name)) return "url";
+        return "";
     }
 
     // ONE SOURCE (the header): does entry `e` agree with url.scrml's executable-
     // sink table? "" — yes; otherwise why it is not admitted.
     export fn entryConflict(e: HEntry) -> string {
-        const m: string = e.member
+        const m: string = e.member;
         // #1674 review F1: §65.4.2 — "you cannot apply an arbitrary runtime string as a style-value";
         // the one data-to-CSS door is the §25.7 bridge (the runtime's cssValueOf). A CSSStyleDeclaration
         // write, or a call taking a value (setProperty), is never on the surface (H-094 removed).
-        if (e.iface == "CSSStyleDeclaration" && (e.access == "write" || (e.access == "call" && sigParams(e).length > 1))) return "§65.4.2 refuses a CSS value from data (the door is the §25.7 bridge); `" + m + "` is never on the surface"
+        if (e.iface == "CSSStyleDeclaration" && (e.access == "write" || (e.access == "call" && sigParams(e).length > 1))) return "§65.4.2 refuses a CSS value from data (the door is the §25.7 bridge); `" + m + "` is never on the surface";
         if (e.access == "write") {
-            const k: string = logicWriteSink(m)
-            if (k == "html" || k == "exec" || k == "on") return "url.scrml's sink table marks a write of `" + m + "` as an executable sink (" + k + ")"
-            if (k == "nav" && !hasGuard(e, "url")) return "url.scrml's sink table marks a write of `" + m + "` as a navigation / load (nav), which the surface admits only as guarded(url)"
-            return ""
+            const k: string = logicWriteSink(m);
+            if (k == "html" || k == "exec" || k == "on") return "url.scrml's sink table marks a write of `" + m + "` as an executable sink (" + k + ")";
+            if (k == "nav" && !hasGuard(e, "url")) return "url.scrml's sink table marks a write of `" + m + "` as a navigation / load (nav), which the surface admits only as guarded(url)";
+            return "";
         }
-        const k: string = logicCallSink(m)
+        const k: string = logicCallSink(m);
         if (e.access == "read") {
-            if (k == "exec") return "url.scrml's sink table marks `" + m + "` as source-text execution; it is never read as a value"
-            return ""
+            if (k == "exec") return "url.scrml's sink table marks `" + m + "` as source-text execution; it is never read as a value";
+            return "";
         }
-        if (k == "exec" || k == "html" || k == "execcmd" || k == "attrnode" || k == "nav" || k == "open") return "url.scrml's sink table marks a call of `" + m + "` as an executable sink (" + k + ")"
+        if (k == "exec" || k == "html" || k == "execcmd" || k == "attrnode" || k == "nav" || k == "open") return "url.scrml's sink table marks a call of `" + m + "` as an executable sink (" + k + ")";
         if (k == "timer") {
-            const ps: string[] = sigParams(e)
-            if (ps.length == 0 || !isCallbackSlot(slotType(ps[0]))) return "url.scrml's sink table marks `" + m + "` as a timer, admitted only with a callback first slot"
-            return ""
+            const ps: string[] = sigParams(e);
+            if (ps.length == 0 || !isCallbackSlot(slotType(ps[0]))) return "url.scrml's sink table marks `" + m + "` as a timer, admitted only with a callback first slot";
+            return "";
         }
-        if (k == "attr" && !hasGuard(e, "attr-name")) return "url.scrml's sink table marks `" + m + "` as an attribute-name call, admitted only as guarded(attr-name)"
-        return ""
+        if (k == "attr" && !hasGuard(e, "attr-name")) return "url.scrml's sink table marks `" + m + "` as an attribute-name call, admitted only as guarded(attr-name)";
+        return "";
     }
 
     // ---- THE DATA (Appendix H, one-to-one) ------------------------------------
@@ -334,7 +336,7 @@ ${
             iface("MediaQueryList", "EventTarget"),
             iface("DOMRectReadOnly", ""),
             iface("DOMRect", "DOMRectReadOnly"),
-        ]
+        ];
     }
 
     export fn surfaceEntries() -> HEntry[] {
@@ -503,7 +505,7 @@ ${
             entry("H-163", "DOMRectReadOnly", "right", "read", "number", "open", "Geometry DOMRectReadOnly"),
             entry("H-164", "DOMRectReadOnly", "bottom", "read", "number", "open", "Geometry DOMRectReadOnly"),
             entry("H-165", "DOMRectReadOnly", "left", "read", "number", "open", "Geometry DOMRectReadOnly"),
-        ]
+        ];
     }
 
     // S478 (open-Qs ruling item 9) — Appendix H.6, the event interfaces of a listener: "A
@@ -526,15 +528,15 @@ ${
             tag("mouseout", "MouseEvent"),
             tag("mouseover", "MouseEvent"),
             tag("mouseup", "MouseEvent"),
-        ]
+        ];
     }
 
     export fn eventIfaceOf(ev: string) -> string {
-        const n: string = ev.toLowerCase()
+        const n: string = ev.toLowerCase();
         for (const x of eventInterfaces()) {
-            if (x.tag == n) return x.iface
+            if (x.tag == n) return x.iface;
         }
-        return "Event"
+        return "Event";
     }
 
     export fn inertElements() -> HTag[] {
@@ -618,12 +620,12 @@ ${
             tag("var", "HTMLElement"),
             tag("video", "HTMLVideoElement"),
             tag("wbr", "HTMLElement"),
-        ]
+        ];
     }
 
     export fn surfaceDicts() -> HDict[] {
         return [
             { name: "IntersectionObserverInit", keys: ["rootMargin?: string", "threshold?: number"] },
-        ]
+        ];
     }
 }

@@ -1,3 +1,4 @@
+<program reset="none">
 // reactive-016-bind-value.scrml
 // Two-way binding demonstrations: bind:value, bind:checked, bind:group, path binding.
 // Tests: §5.4 bind directives — text input, number input, select, checkbox, radio, path.
@@ -36,3 +37,4 @@
     // Path binding: bind:value on nested object field @profile.city
     <input type="text" id="city-input" placeholder="City" bind:value=@profile.city />
 </div>
+</program>

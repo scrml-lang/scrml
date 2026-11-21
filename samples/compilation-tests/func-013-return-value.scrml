@@ -1,14 +1,16 @@
+<program reset="none">
 // func-013-return-value.scrml
 // Functions with return values. Tests: return statement.
 
 <div>
     ${
         function getFullName(first, last) {
-            return first + " " + last
+            return first + " " + last;
         }
         function isEven(n) {
-            return n % 2 == 0
+            return n % 2 == 0;
         }
     }
     <p>Functions with returns</>
 </div>
+</program>

@@ -1,0 +1,33 @@
+{
+  "id": "body-top-free-display-reads-in-place",
+  "description": "A display of a `free` value reads it where it stands in the body's run: 1 before the write, 10 after it (S481 P3).",
+  "language-version": "1.0",
+  "spec": "§40.8 (S481), §66.12",
+  "source-test": "compiler/self-host-v2/slice-m4/body-run-order-s481.test.js",
+  "rationale": "§40.8 S481: the body-top statements, the file-scope initializers and the displays run as one sequence, in source order; a display of a `free` value reads the value where it stands in that run. ruling:user-voice-scrml.md-S481-body-run-order — \"The program body runs once, top to bottom, in source order, and that sequence is the module initialization. Every file-scope initializer runs whether or not anything reads it, so the S480 tool ruling extends to web programs. A display of a `free` value reads it where it stands.\" (owner: \"yes, adopt your rec on P1–P3\") Gap g-spec-body-render-order-free-s481; impl#1 shows 10 twice and carries it (g-impl1-body-run-order-s481).",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "dom": "<p id=\"a\">1</p><p id=\"c\">10</p>",
+    "domAnchored": [
+      {
+        "selector": "#a",
+        "text": "1"
+      },
+      {
+        "selector": "#c",
+        "text": "10"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-body-run-order-s481",
+      "fails": {
+        "runtime": "sha256:95524a1bcca91763"
+      }
+    }
+  }
+}

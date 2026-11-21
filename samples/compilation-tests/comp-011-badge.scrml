@@ -1,11 +1,13 @@
+<program reset="none">
 // comp-011-badge.scrml
 // Badge/tag pattern. Tests: small UI elements.
 
 <div class="tag-list">
     ${
-        let tags = ["JavaScript", "TypeScript", "React", "Svelte", "Vue"]
+        let tags = ["JavaScript", "TypeScript", "React", "Svelte", "Vue"];
         for (let tag of tags) {
-            lift <span class="badge">${tag}</>
+            lift <span class="badge">${tag}</>;
         }
     }
 </div>
+</program>

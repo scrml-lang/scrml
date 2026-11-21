@@ -1,4 +1,6 @@
+<program reset="none">
 // Whitespace-only element content.
 <div>
 
 </div>
+</program>

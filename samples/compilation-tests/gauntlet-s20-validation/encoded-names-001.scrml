@@ -1,9 +1,10 @@
+<program reset="none">
 // Phase 9: encoded variable names in output (§47)
 // All JS output should use _<kind><hash><seq> names. Should compile clean.
 
 ${
-  let userName = "Alice"
-  const maxRetries = 3
+  let userName = "Alice";
+  const maxRetries = 3;
   <counter> = 0
 }
 
@@ -11,3 +12,4 @@ ${
   <p>${userName} (${maxRetries} retries)</>
   <p>Count: ${@counter}</>
 </div>
+</program>

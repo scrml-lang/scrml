@@ -2927,3 +2927,9 @@ Each `probe=` names the reviewed head of every round and the report path. Where 
 <!-- @review pr=2036 verdict=carve-out by=S481-bryan date=2026-11-20 probe=hand-off addendum only (hand-off.md) -->
 <!-- @review pr=2037 verdict=carve-out by=S481-bryan date=2026-11-20 probe=bot post-merge regen of generated blocks -->
 <!-- @review pr=2038 verdict=carve-out by=S481-bryan date=2026-11-20 probe=bot post-merge regen of generated blocks -->
+<!-- @review pr=2039 verdict=carve-out by=S481-bryan date=2026-11-21 probe=records PR: review markers + known-gaps entries only, no code path -->
+<!-- @review pr=2040 verdict=carve-out by=S481-bryan date=2026-11-21 probe=bot post-merge regen of generated blocks -->
+<!-- @review pr=2042 verdict=clean by=S481-bryan date=2026-11-21 probe=S239 LAND (no finding above INFO): impl#1 compile+run of all 625 changed single-file programs base vs head identical, multi-file apps identical, commit 1 reproduced byte-for-byte on 25 files, 154 newly boot-clean programs run, 7 FAIL→PASS genuine; + PA test fix 5af659c67 (fix-refuse-broken §7 exit code after migration); review ~/.cache/scrml/review/s481-2042/review.md -->
+<!-- @review pr=2043 verdict=finding by=S481-bryan date=2026-11-21 probe=S239 LAND-W-F/U: insert-only subsequence check over 32 files, impl#1 bundle rebuilt byte-identical (own hash), conformance identical, loop-rule attack program PASS on the bootstrap path; LOW-1 no note for loops in ~{}/^{}, LOW-2 capture guard first name only — both fixed in #2046; review ~/.cache/scrml/review/s481-2043/review.md -->
+<!-- @review pr=2044 verdict=carve-out by=S481-bryan date=2026-11-21 probe=bot post-merge regen of generated blocks -->
+<!-- @review pr=2047 verdict=carve-out by=S481-bryan date=2026-11-21 probe=bot post-merge regen of generated blocks -->

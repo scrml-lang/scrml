@@ -1,11 +1,13 @@
+<program reset="none">
 // lift-001-basic.scrml
 // Basic lift in a for loop. Tests: lift keyword.
 
 <ul>
     ${
-        let items = ["one", "two", "three"]
+        let items = ["one", "two", "three"];
         for (let item of items) {
-            lift <li>${item}</>
+            lift <li>${item}</>;
         }
     }
 </ul>
+</program>

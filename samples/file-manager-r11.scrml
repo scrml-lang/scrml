@@ -4,7 +4,6 @@
 
 <program db="./files.db">
 
-${
     type FileType:enum = {
         Document
         Image
@@ -12,125 +11,116 @@ ${
         Archive
         Other
     }
-}
 
-${
-    @files = []
-    @selectedIds = []
-    @sortCol = "name"
-    @sortDir = "asc"
-    @filterType = "All"
-    @showConfirm = false
-    @breadcrumbs = ["Home", "Documents", "Projects"]
-}
+    @files = [];
+    @selectedIds = [];
+    @sortCol = "name";
+    @sortDir = "asc";
+    @filterType = "All";
+    @showConfirm = false;
+    @breadcrumbs = ["Home", "Documents", "Projects"];
 
-${
     server function loadFiles() {
         return ?{`
             SELECT id, name, size, type, modified
             FROM files
             ORDER BY name ASC
-        `}.all() !{ _ :> [] }
+        `}.all() !{ _ :> [] };
     }
 
     server function deleteFiles(ids) {
         for (let id of ids) {
-            ?{`DELETE FROM files WHERE id = ${id}`}.run()
+            ?{`DELETE FROM files WHERE id = ${id}`}.run();
         }
         return ?{`
             SELECT id, name, size, type, modified
             FROM files
             ORDER BY name ASC
-        `}.all() !{ _ :> [] }
+        `}.all() !{ _ :> [] };
     }
-}
 
-${
     function initLoad() {
-        @files = loadFiles() !{ .Transport(_) :> return }
+        @files = loadFiles() !{ .Transport(_) :> return };
     }
-}
 
-${ initLoad() }
+${ initLoad(); }
 
-${
     function toggleSelect(id) {
         if (@selectedIds.includes(id)) {
-            @selectedIds = @selectedIds.filter(x => x != id)
+            @selectedIds = @selectedIds.filter(x => x != id);
         } else {
-            @selectedIds = [...@selectedIds, id]
+            @selectedIds = [...@selectedIds, id];
         }
     }
 
     function selectAll() {
-        let visible = getVisibleFiles()
-        @selectedIds = visible.map(f => f.id)
+        let visible = getVisibleFiles();
+        @selectedIds = visible.map(f => f.id);
     }
 
     function clearSelection() {
-        @selectedIds = []
+        @selectedIds = [];
     }
 
     function setSort(col) {
         if (@sortCol == col) {
-            @sortDir = @sortDir == "asc" ? "desc" : "asc"
+            @sortDir = @sortDir == "asc" ? "desc" : "asc";
         } else {
-            @sortCol = col
-            @sortDir = "asc"
+            @sortCol = col;
+            @sortDir = "asc";
         }
     }
 
     function setFilter(ft) {
-        @filterType = ft
-        @selectedIds = []
+        @filterType = ft;
+        @selectedIds = [];
     }
 
     function getVisibleFiles() {
         let filtered = @filterType == "All"
             ? @files
-            : @files.filter(f => f.type == @filterType)
+            : @files.filter(f => f.type == @filterType);
         return filtered.slice().sort((a, b) => {
-            let av = a[@sortCol]
-            let bv = b[@sortCol]
-            if (av < bv) return @sortDir == "asc" ? -1 : 1
-            if (av > bv) return @sortDir == "asc" ? 1 : -1
-            return 0
-        })
+            let av = a[@sortCol];
+            let bv = b[@sortCol];
+            if (av < bv) return @sortDir == "asc" ? -1 : 1;
+            if (av > bv) return @sortDir == "asc" ? 1 : -1;
+            return 0;
+        });
     }
 
     function fileIcon(fileType) {
-        if (fileType == "Document") return "[D]"
-        if (fileType == "Image") return "[I]"
-        if (fileType == "Video") return "[V]"
-        if (fileType == "Archive") return "[A]"
-        return "[?]"
+        if (fileType == "Document") return "[D]";
+        if (fileType == "Image") return "[I]";
+        if (fileType == "Video") return "[V]";
+        if (fileType == "Archive") return "[A]";
+        return "[?]";
     }
 
     function formatSize(bytes) {
-        if (bytes < 1024) return bytes + " B"
-        if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " KB"
-        return (bytes / 1048576).toFixed(1) + " MB"
+        if (bytes < 1024) return bytes + " B";
+        if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " KB";
+        return (bytes / 1048576).toFixed(1) + " MB";
     }
 
     function confirmDelete() {
-        @showConfirm = true
+        @showConfirm = true;
     }
 
     function cancelDelete() {
-        @showConfirm = false
+        @showConfirm = false;
     }
 
     function doDelete() {
-        @files = deleteFiles(@selectedIds) !{ .Transport(_) :> return }
-        @selectedIds = []
-        @showConfirm = false
+        @files = deleteFiles(@selectedIds) !{ .Transport(_) :> return };
+        @selectedIds = [];
+        @showConfirm = false;
     }
 
     function sortIndicator(col) {
-        if (@sortCol != col) return ""
-        return @sortDir == "asc" ? " ^" : " v"
+        if (@sortCol != col) return "";
+        return @sortDir == "asc" ? " ^" : " v";
     }
-}
 
 <div class="file-manager">
 

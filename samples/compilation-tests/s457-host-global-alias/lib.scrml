@@ -4,6 +4,6 @@
 // `_scrml/_global.js`, never a `data:` module (a browser refuses that under a
 // `script-src 'self'` CSP). Scanned by scripts/host-global-scan.ts (R2, R4).
 ${
-  export fn f(a) { return { s: `${a}`, same: { a: 1 } == { a: 1 } } }
+  export fn f(a) { return { s: `${a}`, same: { a: 1 } == { a: 1 } }; }
   export type Color:enum = { Red, Green }
 }

@@ -1,12 +1,14 @@
+<program reset="none">
 // control-007-while.scrml
 // While loop. Tests: while statement in logic.
 
 <div>
     ${
-        let count = 0
+        let count = 0;
         while (count < 5) {
-            count = count + 1
+            count = count + 1;
         }
     }
     <p>Loop completed</>
 </div>
+</program>

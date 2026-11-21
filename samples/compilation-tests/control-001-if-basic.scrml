@@ -1,12 +1,14 @@
+<program reset="none">
 // control-001-if-basic.scrml
 // Basic if conditional in logic. Tests: if statement inside ${}.
 
 <div>
     ${
-        let age = 21
+        let age = 21;
         if (age >= 18) {
-            let status = "adult"
+            let status = "adult";
         }
     }
     <p>Age checked</>
 </div>
+</program>

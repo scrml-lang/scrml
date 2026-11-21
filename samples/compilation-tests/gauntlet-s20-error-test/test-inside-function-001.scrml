@@ -1,11 +1,10 @@
+<program reset="none">
 // Phase 7: ~{} test block inside function (§19.12)
 // Tests inside functions should be stripped from production.
 
-${
   function add(a, b) {
-    return a + b
+    return a + b;
   }
-}
 
 <p>Calculator</>
 
@@ -14,3 +13,4 @@ ${
   test "handles zero" { assert add(0, 0) == 0 }
   test "handles negatives" { assert add(-1, 1) == 0 }
 }
+</program>

@@ -1,11 +1,11 @@
+<program>
 // arrow function, block body with return
 ${
-    const nums = [1, 2, 3]
+    const nums = [1, 2, 3];
     const doubled = nums.map(n => {
-        let x = n * 2
-        return x
-    })
+        let x = n * 2;
+        return x;
+    });
 }
-<program>
     <p>${doubled.length}</>
 </>

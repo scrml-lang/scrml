@@ -1,3 +1,4 @@
+<program reset="none">
 // basic-013-inferred-closers.scrml
 // All inferred closers using bare /. Tests: inferred closer form.
 
@@ -6,3 +7,4 @@
     <p>Card description goes here.</>
     <button>Click Me</>
 </>
+</program>

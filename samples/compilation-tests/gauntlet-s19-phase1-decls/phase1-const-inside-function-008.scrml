@@ -1,9 +1,9 @@
+<program reset="none">
 // const inside function (not fn) body
-${
     function compute(x) {
-        const factor = 2
-        const offset = 10
-        return x * factor + offset
+        const factor = 2;
+        const offset = 10;
+        return x * factor + offset;
     }
-}
 <p>${compute(5)}</>
+</program>

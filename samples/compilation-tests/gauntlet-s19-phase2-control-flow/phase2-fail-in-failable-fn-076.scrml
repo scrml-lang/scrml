@@ -1,14 +1,14 @@
+<program>
 // fail inside ! function — canonical (§19.3, §19.4.1)
 ${
     type PaymentError:enum = { InvalidAmount(msg: string) }
     function charge(amt: number)! -> PaymentError {
-        if (amt <= 0) fail PaymentError::InvalidAmount("must be positive")
-        return amt
+        if (amt <= 0) fail PaymentError::InvalidAmount("must be positive");
+        return amt;
     }
-    let r = charge(10) !{ ::InvalidAmount(m) -> 0 }
-    log(r)
-    function log(n: number) { let _ = n }
+    let r = charge(10) !{ ::InvalidAmount(m) -> 0 };
+    log(r);
+    function log(n: number) { let _ = n; }
 }
-<program>
     <p>ok</>
 </>

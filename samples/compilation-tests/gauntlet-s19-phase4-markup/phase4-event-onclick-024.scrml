@@ -1,5 +1,5 @@
 // onclick wired to function call.
 <program>
-    ${ function save() { let _ = 1 } }
+     function save() { let _ = 1; } 
     <button onclick=save()>Save</button>
 </program>

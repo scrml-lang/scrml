@@ -17,10 +17,10 @@
 
 <page db="../../dispatch.db" auth="required">
 
-  import { createSessionStore } from 'scrml:store'
-  import { SESSION_DB_PATH } from '../../models/auth.scrml'
+  import { createSessionStore } from 'scrml:store';
+  import { SESSION_DB_PATH } from '../../models/auth.scrml';
   // M5: centralized real-time channel — see SPEC §38.12.6.
-  import { "dispatch-board" as dispatchBoard } from '../../channels/dispatch-board.scrml'
+  import { "dispatch-board" as dispatchBoard } from '../../channels/dispatch-board.scrml';
 
   <db src="../../dispatch.db" protect="password_hash" tables="users, customers, loads">
 
@@ -30,15 +30,15 @@
             // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
             // compiles to its own public route, and one taking a userId would let any caller
             // look up any user (S443 post-merge review of #1180).
-            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get();
             if (user is not || user.role != "customer") {
-                return { unauthorized: true }
+                return { unauthorized: true };
             }
             const customer = ?{`
                 SELECT id, name, account_status FROM customers WHERE user_id = ${user.id}
-            `}.get()
-            if (customer is not) return { error: "No customer record." }
-            return { user: user, customer: customer }
+            `}.get();
+            if (customer is not) return { error: "No customer record." };
+            return { user: user, customer: customer };
         }
 
         function createTenderServer(
@@ -51,27 +51,27 @@
             // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
             // compiles to its own public route, and one taking a userId would let any caller
             // look up any user (S443 post-merge review of #1180).
-            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get();
             if (user is not || user.role != "customer") {
-                return { unauthorized: true }
+                return { unauthorized: true };
             }
             const customer = ?{`
                 SELECT id, account_status FROM customers WHERE user_id = ${user.id}
-            `}.get()
-            if (customer is not) return { error: "No customer record." }
+            `}.get();
+            if (customer is not) return { error: "No customer record." };
             if (customer.account_status != "active") {
-                return { error: "Account is not active. Contact your dispatcher." }
+                return { error: "Account is not active. Contact your dispatcher." };
             }
 
             // Server-side validation in addition to client-side.
             if (originCity == "" || destinationCity == "") {
-                return { error: "Origin and destination city are required." }
+                return { error: "Origin and destination city are required." };
             }
             if (pickupAt == "" || deliverBy == "") {
-                return { error: "Pickup and delivery date/time are required." }
+                return { error: "Pickup and delivery date/time are required." };
             }
             if (commodity == "") {
-                return { error: "Commodity is required." }
+                return { error: "Commodity is required." };
             }
 
             // rate_dollars left NULL — dispatcher fills it in. status=Tendered.
@@ -91,7 +91,7 @@
                     ${commodity}, ${weightLbs},
                     'Tendered'
                 )
-            `}.run()
+            `}.run();
 
             const newRow = ?{`
                 SELECT id FROM loads
@@ -100,9 +100,9 @@
                   AND pickup_at = ${pickupAt}
                 ORDER BY id DESC
                 LIMIT 1
-            `}.get()
+            `}.get();
 
-            return { ok: true, loadId: newRow ? newRow.id : 0 }
+            return { ok: true, loadId: newRow ? newRow.id : 0 };
         }
 
         <currentUser> = not
@@ -131,82 +131,82 @@
         </>
 
         function getSessionToken() {
-            const c = document.cookie ? document.cookie : ""
-            const idx = c.indexOf("scrml_session=")
-            if (idx < 0) return ""
-            const tail = c.substring(idx + "scrml_session=".length)
-            const semi = tail.indexOf(";")
-            return semi < 0 ? tail : tail.substring(0, semi)
-        }
+            const c = document.cookie ? document.cookie : "";
+            const idx = c.indexOf("scrml_session=");
+            if (idx < 0) return "";
+            const tail = c.substring(idx + "scrml_session=".length);
+            const semi = tail.indexOf(";");
+            return semi < 0 ? tail : tail.substring(0, semi);
+        };
 
         function refresh() {
-            const tok = getSessionToken()
-            const data = fetchCustomerServer(tok)
+            const tok = getSessionToken();
+            const data = fetchCustomerServer(tok);
             if (data.unauthorized) {
-                window.location.href = "/auth/login?reason=unauthorized"
-                return
+                window.location.href = "/auth/login?reason=unauthorized";
+                return;
             }
             if (data.error) {
-                @errorMessage = data.error
-                @loaded = true
-                return
+                @errorMessage = data.error;
+                @loaded = true;
+                return;
             }
-            @currentUser = data.user
-            @currentCustomer = data.customer
-            @loaded = true
+            @currentUser = data.user;
+            @currentCustomer = data.customer;
+            @loaded = true;
         }
 
         // F-RI-001 anchor + setError indirection.
         function submit(event) {
-            if (event && event.preventDefault) event.preventDefault()
-            if (@submitting) return
+            if (event && event.preventDefault) event.preventDefault();
+            if (@submitting) return;
 
-            @errorMessage = ""
+            @errorMessage = "";
 
             // The §55 validity surface replaces the manual client-side checks:
             // origin/destination city (req), pickup + deliver (req), commodity (req)
             // — all roll up to @quoteForm.isValid. Server still re-validates.
             if (!@quoteForm.isValid) {
-                setError("Please complete all required fields.")
-                return
+                setError("Please complete all required fields.");
+                return;
             }
 
-            @submitting = true
-            const tok = getSessionToken()
+            @submitting = true;
+            const tok = getSessionToken();
             const result = createTenderServer(
                 tok,
                 @quoteForm.originAddress, @quoteForm.originCity, @quoteForm.originState,
                 @quoteForm.destinationAddress, @quoteForm.destinationCity, @quoteForm.destinationState,
                 @quoteForm.pickupAt, @quoteForm.deliverBy,
                 @quoteForm.commodity, @quoteForm.weightLbs
-            )
+            );
             if (result.unauthorized) {
-                window.location.href = "/auth/login?reason=unauthorized"
-                return
+                window.location.href = "/auth/login?reason=unauthorized";
+                return;
             }
             if (result.error) {
-                @errorMessage = result.error
-                @submitting = false
-                return
+                @errorMessage = result.error;
+                @submitting = false;
+                return;
             }
-            const newId = result.loadId
+            const newId = result.loadId;
             // M5: broadcast new-load to dispatch-board.
-            publishBoardEvent("new-load", newId, "Tendered")
-            window.location.href = `/customer/loads/${newId}`
+            publishBoardEvent("new-load", newId, "Tendered");
+            window.location.href = `/customer/loads/${newId}`;
         }
 
         function setError(msg) {
-            @errorMessage = msg
+            @errorMessage = msg;
         }
 
         function logout() {
-            document.cookie = "scrml_session=; Path=/; Max-Age=0"
-            window.location.href = "/auth/login?logout=1"
+            document.cookie = "scrml_session=; Path=/; Max-Age=0";
+            window.location.href = "/auth/login?logout=1";
         }
 
         on mount {
             refresh()
-        }
+        };
     }
 
     <!-- M5: dispatch-board channel — see channels/dispatch-board.scrml.

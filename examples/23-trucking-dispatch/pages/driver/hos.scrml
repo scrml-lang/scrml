@@ -66,10 +66,10 @@
 
   // `DriverStatus` is the shared enum (schema.scrml); the `match` helpers
   // below + in driver-card.scrml dispatch on its variant names.
-  import { DriverStatus } from '../../schema.scrml'
-  import { driverStatusClasses, driverStatusLabel, isValidHosTransition } from '../../components/driver-card.scrml'
-  import { createSessionStore } from 'scrml:store'
-  import { SESSION_DB_PATH } from '../../models/auth.scrml'
+  import { DriverStatus } from '../../schema.scrml';
+  import { driverStatusClasses, driverStatusLabel, isValidHosTransition } from '../../components/driver-card.scrml';
+  import { createSessionStore } from 'scrml:store';
+  import { SESSION_DB_PATH } from '../../models/auth.scrml';
 
   // HOS state machine — the server-authoritative `<engine for=DriverStatus
   // server=@currentDriver.current_status>` LANDED S199 (the E-leg). It renders
@@ -88,16 +88,16 @@
             // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
             // compiles to its own public route, and one taking a userId would let any caller
             // look up any user (S443 post-merge review of #1180).
-            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get();
             if (user is not || user.role != "driver") {
-                return { unauthorized: true }
+                return { unauthorized: true };
             }
             const driver = ?{`
                 SELECT id, name, current_status, current_location
                 FROM drivers
                 WHERE user_id = ${user.id}
-            `}.get()
-            if (driver is not) return { error: "No driver record." }
+            `}.get();
+            if (driver is not) return { error: "No driver record." };
 
             // 24h cycle history — hos_change entries for THIS driver from
             // the last day. SQLite datetime("now", "-1 day") is our window.
@@ -108,7 +108,7 @@
                   AND type = 'hos_change'
                   AND at >= datetime('now', '-1 day')
                 ORDER BY at DESC
-            `}.all()
+            `}.all();
 
             // The most-recent hos_change anchors "time-in-current-state".
             // If none in the 24h window, the driver hasn't changed state
@@ -119,17 +119,17 @@
                   AND type = 'hos_change'
                 ORDER BY at DESC
                 LIMIT 1
-            `}.get()
+            `}.get();
 
             // Avoid `null` literal as a value (F-NULL-001) — return empty
             // string instead and convert in the consumer.
-            const lastAt = lastChange ? lastChange.at : ""
+            const lastAt = lastChange ? lastChange.at : "";
 
             return {
                 user: user, driver: driver,
                 cycleEntries: cycleEntries,
                 lastChangeAt: lastAt
-            }
+            };
         }
 
         // HOS state change: validate transition, update drivers.current_status,
@@ -138,31 +138,31 @@
             // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
             // compiles to its own public route, and one taking a userId would let any caller
             // look up any user (S443 post-merge review of #1180).
-            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get();
             if (user is not || user.role != "driver") {
-                return { unauthorized: true }
+                return { unauthorized: true };
             }
-            const driver = ?{`SELECT id, current_status FROM drivers WHERE user_id = ${user.id}`}.get()
-            if (driver is not) return { error: "No driver record." }
+            const driver = ?{`SELECT id, current_status FROM drivers WHERE user_id = ${user.id}`}.get();
+            if (driver is not) return { error: "No driver record." };
 
             // Validate the HOS transition via the shared `match`-based validator
             // (components/driver-card.scrml). `cur` and `newStatus` are the
             // stored DriverStatus variant names; they flow into the
             // DriverStatus-typed params directly (no mapper).
-            const cur = driver.current_status
+            const cur = driver.current_status;
             if (!isValidHosTransition(cur, newStatus)) {
-                return { error: `Cannot transition from ${cur} to ${newStatus}.` }
+                return { error: `Cannot transition from ${cur} to ${newStatus}.` };
             }
 
-            ?{`UPDATE drivers SET current_status = ${newStatus} WHERE id = ${driver.id}`}.run()
+            ?{`UPDATE drivers SET current_status = ${newStatus} WHERE id = ${driver.id}`}.run();
 
-            const payload = `{"from":"${cur}","to":"${newStatus}"}`
+            const payload = `{"from":"${cur}","to":"${newStatus}"}`;
             ?{`
                 INSERT INTO log_entries (driver_id, load_id, type, payload)
                 VALUES (${driver.id}, NULL, 'hos_change', ${payload})
-            `}.run()
+            `}.run();
 
-            return { ok: true }
+            return { ok: true };
         }
 
         <currentUser> = not
@@ -177,133 +177,133 @@
         // sums durations where the FROM state matches `target`. The
         // current state's run-up to "now" is tacked on at the end.
         function computeHoursIn(target) {
-            const list = @cycleEntryRows
-            const len = list.length
-            const driver = @currentDriver
-            if (!driver) return 0
+            const list = @cycleEntryRows;
+            const len = list.length;
+            const driver = @currentDriver;
+            if (!driver) return 0;
 
             if (len == 0) {
                 // No state changes in 24h; if driver is in target now,
                 // count up to 24h. Else 0.
-                if (driver.current_status == target) return 24
-                return 0
+                if (driver.current_status == target) return 24;
+                return 0;
             }
 
-            let ms = 0
-            const nowMs = Date.now()
-            const oneDayMs = 24 * 60 * 60 * 1000
-            const dayAgoMs = nowMs - oneDayMs
-            let prevMs = dayAgoMs
+            let ms = 0;
+            const nowMs = Date.now();
+            const oneDayMs = 24 * 60 * 60 * 1000;
+            const dayAgoMs = nowMs - oneDayMs;
+            let prevMs = dayAgoMs;
 
             // Walk from oldest → newest by index = len-1 down to 0.
             for (let i = len - 1; i >= 0; i = i - 1) {
-                const entry = list[i]
-                const fromState = parseFromPayload(entry.payload)
-                const atMs = Date.parse(entry.at)
+                const entry = list[i];
+                const fromState = parseFromPayload(entry.payload);
+                const atMs = Date.parse(entry.at);
                 if (fromState == target) {
-                    const diff = atMs - prevMs
-                    ms = ms + diff
+                    const diff = atMs - prevMs;
+                    ms = ms + diff;
                 }
-                prevMs = atMs
+                prevMs = atMs;
             }
 
             // Tail segment: most recent entry to now, in current state.
             if (driver.current_status == target) {
-                const tail = nowMs - prevMs
-                ms = ms + tail
+                const tail = nowMs - prevMs;
+                ms = ms + tail;
             }
 
-            const hourMs = 60 * 60 * 1000
-            const hours = ms / hourMs
-            return Math.round(hours * 10) / 10
+            const hourMs = 60 * 60 * 1000;
+            const hours = ms / hourMs;
+            return Math.round(hours * 10) / 10;
         }
 
         // Parses '{"from":"X","to":"Y"}' payload — naive scanner, fixed shape.
         function parseFromPayload(payload) {
-            if (!payload) return ""
-            if (payload == "") return ""
-            const idx = payload.indexOf(`"from":"`)
-            if (idx < 0) return ""
-            const startIdx = idx + `"from":"`.length
-            const endIdx = payload.indexOf(`"`, startIdx)
-            if (endIdx < 0) return ""
-            return payload.substring(startIdx, endIdx)
+            if (!payload) return "";
+            if (payload == "") return "";
+            const idx = payload.indexOf(`"from":"`);
+            if (idx < 0) return "";
+            const startIdx = idx + `"from":"`.length;
+            const endIdx = payload.indexOf(`"`, startIdx);
+            if (endIdx < 0) return "";
+            return payload.substring(startIdx, endIdx);
         }
 
         function parseToPayload(payload) {
-            if (!payload) return ""
-            if (payload == "") return ""
-            const idx = payload.indexOf(`"to":"`)
-            if (idx < 0) return ""
-            const startIdx = idx + `"to":"`.length
-            const endIdx = payload.indexOf(`"`, startIdx)
-            if (endIdx < 0) return ""
-            return payload.substring(startIdx, endIdx)
+            if (!payload) return "";
+            if (payload == "") return "";
+            const idx = payload.indexOf(`"to":"`);
+            if (idx < 0) return "";
+            const startIdx = idx + `"to":"`.length;
+            const endIdx = payload.indexOf(`"`, startIdx);
+            if (endIdx < 0) return "";
+            return payload.substring(startIdx, endIdx);
         }
 
         function getSessionToken() {
-            const c = document.cookie ? document.cookie : ""
-            const idx = c.indexOf("scrml_session=")
-            if (idx < 0) return ""
-            const tail = c.substring(idx + "scrml_session=".length)
-            const semi = tail.indexOf(";")
-            return semi < 0 ? tail : tail.substring(0, semi)
+            const c = document.cookie ? document.cookie : "";
+            const idx = c.indexOf("scrml_session=");
+            if (idx < 0) return "";
+            const tail = c.substring(idx + "scrml_session=".length);
+            const semi = tail.indexOf(";");
+            return semi < 0 ? tail : tail.substring(0, semi);
         }
 
         function refresh() {
-            const tok = getSessionToken()
-            const data = fetchHosData(tok)
+            const tok = getSessionToken();
+            const data = fetchHosData(tok);
             if (data.unauthorized) {
-                window.location.href = "/auth/login?reason=unauthorized"
-                return
+                window.location.href = "/auth/login?reason=unauthorized";
+                return;
             }
             if (data.error) {
-                @errorMessage = data.error
-                @loaded = true
-                return
+                @errorMessage = data.error;
+                @loaded = true;
+                return;
             }
-            @currentUser = data.user
-            @currentDriver = data.driver
-            @cycleEntryRows = data.cycleEntries
-            @lastChangeAt = data.lastChangeAt
-            @loaded = true
+            @currentUser = data.user;
+            @currentDriver = data.driver;
+            @cycleEntryRows = data.cycleEntries;
+            @lastChangeAt = data.lastChangeAt;
+            @loaded = true;
         }
 
         function setStatus(target) {
-            const tok = getSessionToken()
-            const result = changeHosServer(tok, target)
+            const tok = getSessionToken();
+            const result = changeHosServer(tok, target);
             if (result.unauthorized) {
-                window.location.href = "/auth/login?reason=unauthorized"
-                return
+                window.location.href = "/auth/login?reason=unauthorized";
+                return;
             }
             if (result.error) {
-                @errorMessage = result.error
-                return
+                @errorMessage = result.error;
+                return;
             }
-            refresh()
+            refresh();
         }
 
         function setError(msg) {
-            @errorMessage = msg
+            @errorMessage = msg;
         }
 
         // Pure: time-in-current-state, in hours, formatted "Xh Ym".
         // anchorAt is the most-recent hos_change.at; "" means ≥24h.
         function formatTimeInState(anchorAt) {
-            if (!anchorAt) return "≥ 24h"
-            if (anchorAt == "") return "≥ 24h"
-            const sinceMs = Date.now() - Date.parse(anchorAt)
-            const hourMs = 60 * 60 * 1000
-            const minuteMs = 60 * 1000
-            const hours = Math.floor(sinceMs / hourMs)
-            const remainAfterHours = sinceMs - hours * hourMs
-            const mins = Math.floor(remainAfterHours / minuteMs)
-            return `${hours}h ${mins}m`
+            if (!anchorAt) return "≥ 24h";
+            if (anchorAt == "") return "≥ 24h";
+            const sinceMs = Date.now() - Date.parse(anchorAt);
+            const hourMs = 60 * 60 * 1000;
+            const minuteMs = 60 * 1000;
+            const hours = Math.floor(sinceMs / hourMs);
+            const remainAfterHours = sinceMs - hours * hourMs;
+            const mins = Math.floor(remainAfterHours / minuteMs);
+            return `${hours}h ${mins}m`;
         }
 
         on mount {
             refresh()
-        }
+        };
     }
 
       <div class="min-h-screen bg-slate-50 text-slate-900 font-sans">

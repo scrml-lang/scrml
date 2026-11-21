@@ -11,7 +11,7 @@ ${
         { href: "/",        label: "Home"    },
         { href: "/about",   label: "About"   },
         { href: "/contact", label: "Contact" },
-    ]
+    ];
 }
 
 <nav class="main-nav">

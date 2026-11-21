@@ -1,14 +1,16 @@
+<program reset="none">
 // func-014-nested-calls.scrml
 // Functions calling other functions. Tests: function composition.
 
 <div>
     ${
         function square(n) {
-            return n * n
+            return n * n;
         }
         function sumOfSquares(a, b) {
-            return square(a) + square(b)
+            return square(a) + square(b);
         }
     }
     <p>Nested function calls</>
 </div>
+</program>

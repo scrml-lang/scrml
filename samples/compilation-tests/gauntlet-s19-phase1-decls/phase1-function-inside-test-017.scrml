@@ -1,7 +1,6 @@
+<program reset="none">
 // function declared inside ~{} test block (uncommon — usually tests CALL fns)
-${
-    function add(a, b) { return a + b }
-}
+    function add(a, b) { return a + b; }
 ~{ "add tests"
     test "1+1" {
         function double(x) { return x + x }
@@ -9,3 +8,4 @@ ${
     }
 }
 <p>x</>
+</program>

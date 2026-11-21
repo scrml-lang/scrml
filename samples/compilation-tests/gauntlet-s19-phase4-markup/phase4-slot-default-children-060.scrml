@@ -1,10 +1,8 @@
 // Default slot via `${children}` spread in component body.
 <program>
-    ${
         const Wrap = <section class="wrap">
             <div class="inner">${children}</>
-        </>
-    }
+        </>;
     <Wrap>
         <p>body1</p>
         <p>body2</p>

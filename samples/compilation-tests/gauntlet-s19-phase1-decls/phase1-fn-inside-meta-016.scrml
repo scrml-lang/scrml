@@ -1,7 +1,6 @@
+<program reset="none">
 // function declared inside a ^{} meta block (`fn` is logic-block-only — §48.2 / E-PARSE-002; meta blocks use plain `function`)
-${
     type User:struct = { name: string, age: number }
-}
 ^{
     function buildSchema() {
         let s = reflect(User)
@@ -9,3 +8,4 @@ ${
     }
 }
 <p>x</>
+</program>

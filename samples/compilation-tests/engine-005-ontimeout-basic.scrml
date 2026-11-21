@@ -13,9 +13,7 @@
 // form (`after=${expr}<unit>`).
 
 <program>
-${
     type LoadPhase:enum = { Idle, Loading, Done, TimedOut }
-}
 
 <engine for=LoadPhase initial=.Idle>
     <Idle rule=.Loading>

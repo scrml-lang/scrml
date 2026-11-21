@@ -1,10 +1,12 @@
+<program reset="none">
 // logic-008-nested-logic.scrml
 // Logic blocks inside nested markup. Tests: logic at different nesting depths.
 
 <div class="outer">
-    ${ let outerVal = "hello" }
+    ${ let outerVal = "hello"; }
     <div class="inner">
-        ${ let innerVal = "world" }
+        ${ let innerVal = "world"; }
         <p>Nested logic</>
     </div>
 </div>
+</program>

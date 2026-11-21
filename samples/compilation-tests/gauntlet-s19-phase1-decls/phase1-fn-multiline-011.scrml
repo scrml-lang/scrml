@@ -1,15 +1,15 @@
+<program reset="none">
 // fn with multi-line body and local lift accumulation
-${
     fn buildItems(names) {
         for (const name of names) {
-            let item = { label: name, length: name.length }
-            lift item
+            let item = { label: name, length: name.length };
+            lift item;
         }
-        return ~
+        return ~;
     }
-}
 <ul>
     <each in=buildItems(["a","bb","ccc"]) as it>
         <li>${it.label}-${it.length}</li>
     </each>
 </ul>
+</program>

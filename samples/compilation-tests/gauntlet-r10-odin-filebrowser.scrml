@@ -144,16 +144,16 @@ ${
     function findNode(nodes, id) {
         for (let node of nodes) {
             if (node.id == id) {
-                return node
+                return node;
             }
             if (node.children.length > 0) {
-                let found = findNode(node.children, id)
+                let found = findNode(node.children, id);
                 if (!(found is not)) {
-                    return found
+                    return found;
                 }
             }
         }
-        return not
+        return not;
     }
 
     function toggleExpand(id) {
@@ -168,38 +168,38 @@ ${
         function patchNode(nodes, targetId) {
             return nodes.map(n => {
                 if (n.id == targetId) {
-                    return { ...n, expanded: !n.expanded }
+                    return { ...n, expanded: !n.expanded };
                 }
                 if (n.children.length > 0) {
-                    return { ...n, children: patchNode(n.children, targetId) }
+                    return { ...n, children: patchNode(n.children, targetId) };
                 }
-                return n
-            })
+                return n;
+            });
         }
-        @tree = patchNode(@tree, id)
+        @tree = patchNode(@tree, id);
     }
 
     function selectNode(id) {
-        let node = findNode(@tree, id)
-        @selectedId = id
-        @selectedNode = node
+        let node = findNode(@tree, id);
+        @selectedId = id;
+        @selectedNode = node;
     }
 
     function getIconForNode(node) {
         if (node.type == "folder") {
-            return node.expanded ? "[v]" : "[>]"
+            return node.expanded ? "[v]" : "[>]";
         }
-        if (node.ext == "odin") { return "[O]" }
-        if (node.ext == "md")   { return "[M]" }
-        if (node.ext == "bin")  { return "[B]" }
-        return "[F]"
+        if (node.ext == "odin") { return "[O]"; }
+        if (node.ext == "md")   { return "[M]"; }
+        if (node.ext == "bin")  { return "[B]"; }
+        return "[F]";
     }
 
     function formatSize(bytes) {
-        if (bytes == 0) { return "--" }
-        if (bytes < 1024) { return bytes + " B" }
-        if (bytes < 1048576) { return Math.round(bytes / 1024) + " KB" }
-        return Math.round(bytes / 1048576) + " MB"
+        if (bytes == 0) { return "--"; }
+        if (bytes < 1024) { return bytes + " B"; }
+        if (bytes < 1048576) { return Math.round(bytes / 1024) + " KB"; }
+        return Math.round(bytes / 1048576) + " MB";
     }
 
     // ========================================
@@ -211,32 +211,32 @@ ${
     // ========================================
 
     function runSearch() {
-        @isSearching = @searchQuery.length > 0
+        @isSearching = @searchQuery.length > 0;
         if (!@isSearching) {
-            @searchResults = []
-            return
+            @searchResults = [];
+            return;
         }
-        let q = @searchQuery.toLowerCase()
+        let q = @searchQuery.toLowerCase();
         function collectMatches(nodes) {
-            let acc = []
+            let acc = [];
             for (let n of nodes) {
                 if (n.name.toLowerCase().indexOf(q) != -1) {
-                    acc = [...acc, n]
+                    acc = [...acc, n];
                 }
                 if (n.children.length > 0) {
-                    let sub = collectMatches(n.children)
-                    acc = [...acc, ...sub]
+                    let sub = collectMatches(n.children);
+                    acc = [...acc, ...sub];
                 }
             }
-            return acc
+            return acc;
         }
-        @searchResults = collectMatches(@tree)
+        @searchResults = collectMatches(@tree);
     }
 
     function clearSearch() {
-        @searchQuery = ""
-        @searchResults = []
-        @isSearching = false
+        @searchQuery = "";
+        @searchResults = [];
+        @isSearching = false;
     }
 
     // ========================================
@@ -249,8 +249,8 @@ ${
     // ========================================
 
     function confirmCreateFolder() {
-        if (@newFolderName.length == 0) { return }
-        let newId = Date.now()
+        if (@newFolderName.length == 0) { return; }
+        let newId = Date.now();
         let newFolder = {
             id: newId,
             name: @newFolderName,
@@ -260,15 +260,15 @@ ${
             modified: "2026-03-31",
             expanded: false,
             children: []
-        }
-        @tree = [...@tree, newFolder]
-        @newFolderName = ""
-        @showCreateFolder = false
+        };
+        @tree = [...@tree, newFolder];
+        @newFolderName = "";
+        @showCreateFolder = false;
     }
 
     function cancelCreateFolder() {
-        @newFolderName = ""
-        @showCreateFolder = false
+        @newFolderName = "";
+        @showCreateFolder = false;
     }
 
     // ========================================
@@ -279,34 +279,34 @@ ${
     // ========================================
 
     function startRename(id, currentName) {
-        @renamingId = id
-        @renameValue = currentName
+        @renamingId = id;
+        @renameValue = currentName;
     }
 
     function confirmRename() {
-        if (@renameValue.length == 0) { return }
+        if (@renameValue.length == 0) { return; }
         function patchName(nodes, targetId, newName) {
             return nodes.map(n => {
                 if (n.id == targetId) {
-                    return { ...n, name: newName }
+                    return { ...n, name: newName };
                 }
                 if (n.children.length > 0) {
-                    return { ...n, children: patchName(n.children, targetId, newName) }
+                    return { ...n, children: patchName(n.children, targetId, newName) };
                 }
-                return n
-            })
+                return n;
+            });
         }
-        @tree = patchName(@tree, @renamingId, @renameValue)
+        @tree = patchName(@tree, @renamingId, @renameValue);
         if (!(@selectedNode is not) && @selectedNode.id == @renamingId) {
-            @selectedNode = { ...@selectedNode, name: @renameValue }
+            @selectedNode = { ...@selectedNode, name: @renameValue };
         }
-        @renamingId = not
-        @renameValue = ""
+        @renamingId = not;
+        @renameValue = "";
     }
 
     function cancelRename() {
-        @renamingId = not
-        @renameValue = ""
+        @renamingId = not;
+        @renameValue = "";
     }
 }
 
@@ -337,12 +337,12 @@ ${
     // for...of gives value only. We use manual index tracking.
     <nav class="fb-breadcrumb">
         ${
-            let crumbIndex = 0
+            let crumbIndex = 0;
             for (let crumb of @breadcrumb) {
                 lift <span class="crumb">
                     <span>${crumb}</>
-                </span>
-                crumbIndex = crumbIndex + 1
+                </span>;
+                crumbIndex = crumbIndex + 1;
             }
         }
     </nav>
@@ -376,7 +376,7 @@ ${
                 <ul>
                     ${
                         if (@searchResults.length == 0) {
-                            lift <li class="fb-no-results">No files found</>
+                            lift <li class="fb-no-results">No files found</>;
                         } else {
                             for (let result of @searchResults) {
                                 lift <li class="fb-search-item">
@@ -384,7 +384,7 @@ ${
                                         <span class="fb-icon">${getIconForNode(result)}</>
                                         <span class="fb-name">${result.name + (result.ext ? "." + result.ext : "")}</>
                                     </button>
-                                </li>
+                                </li>;
                             }
                         }
                     }
@@ -547,7 +547,7 @@ ${
 
 ${
     function toggleShowCreateFolder() {
-        @showCreateFolder = !@showCreateFolder
+        @showCreateFolder = !@showCreateFolder;
     }
 
     function updateNewFolderName() {
@@ -570,17 +570,17 @@ ${
         // scrml has no DOM access API exposed. We are stuck.
         // We leave this as a known friction item and acknowledge
         // the input state will not be wired to @newFolderName.
-        @newFolderName = "new-folder"
+        @newFolderName = "new-folder";
     }
 
     function updateRenameValue() {
         // Same problem as updateNewFolderName.
         // Cannot read input.value without event object or bind:value.
-        @renameValue = "renamed"
+        @renameValue = "renamed";
     }
 
     function toggleDetails() {
-        @detailsOpen = !@detailsOpen
+        @detailsOpen = !@detailsOpen;
     }
 }
 

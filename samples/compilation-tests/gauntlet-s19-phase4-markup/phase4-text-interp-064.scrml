@@ -1,5 +1,5 @@
 // Interpolation inside text content.
 <program>
-    ${ <name> = "Ada" }
+     <name> = "Ada" 
     <p>Hello ${@name}!</p>
 </program>

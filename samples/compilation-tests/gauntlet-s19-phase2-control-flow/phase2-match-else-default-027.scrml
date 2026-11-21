@@ -1,14 +1,14 @@
+<program>
 // else default covers remaining variants
 ${
     type Status:enum = { Active, Banned, Pending }
-    let s:Status = .Active
+    let s:Status = .Active;
     let x = match s {
-        .Active => 1
+        .Active => 1,
         else    => 0
-    }
-    log(x)
-    function log(n: number) { let _ = n }
+    };
+    log(x);
+    function log(n: number) { let _ = n; }
 }
-<program>
     <p>ok</>
 </>

@@ -1,11 +1,13 @@
+<program reset="none">
 // §10.8.2 — conditional lift: only the taken branch emits.
 <ul>${
-    let items = [{name:"a",f:true},{name:"b",f:false}]
+    let items = [{name:"a",f:true},{name:"b",f:false}];
     for (let it of items) {
         if (it.f) {
-            lift <li class="featured">${it.name}</>
+            lift <li class="featured">${it.name}</>;
         } else {
-            lift <li>${it.name}</>
+            lift <li>${it.name}</>;
         }
     }
 }</ul>
+</program>

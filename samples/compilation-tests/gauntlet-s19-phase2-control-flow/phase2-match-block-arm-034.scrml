@@ -1,17 +1,17 @@
+<program>
 // block arm with intermediate stmts (§18.5)
 ${
     type Shape:enum = { Circle(r: number), Point }
-    let s:Shape = .Circle(2)
+    let s:Shape = .Circle(2);
     let v = match s {
         .Circle(r) => {
-            let scaled = r * 2
-            scaled * scaled
-        }
+            let scaled = r * 2;
+            scaled * scaled;
+        },
         .Point => 0
-    }
-    log(v)
-    function log(n: number) { let _ = n }
+    };
+    log(v);
+    function log(n: number) { let _ = n; }
 }
-<program>
     <p>ok</>
 </>

@@ -1,15 +1,13 @@
+<program>
 // partial match — statement position, subset of variants (§18.18)
-${
     type Status:enum = { Active, Pending, Failed, Timeout, Cancelled }
     <status>: Status = .Active
     function handleTerminal() {
         partial match @status {
-            .Failed  => log("failed")
+            .Failed  => log("failed"),
             .Timeout => log("timeout")
         }
     }
-    function log(s: string) { let _ = s }
-}
-<program>
+    function log(s: string) { let _ = s; }
     <p>ok</>
 </>

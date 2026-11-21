@@ -48,7 +48,7 @@
   ]
 
   fn showAll() {
-    console.log("Showing all users")
+    console.log("Showing all users");
   }
 
   // App-shell + card-chrome styles — co-located with the markup section

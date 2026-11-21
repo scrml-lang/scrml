@@ -41,8 +41,8 @@
 // absolute path, a working directory, a clock, or an environment.
 // =============================================================================
 ${
-    import { AItem, AItemK, AImport, ALink, AProgram, ASpan, FileAst, Diag, stdlibPathPrefix } from "./ast.scrml"
-    import { Parsed, parseFile } from "./parse.scrml"
+    import { AItem, AItemK, AImport, ALink, AProgram, ASpan, FileAst, Diag, stdlibPathPrefix } from "./ast.scrml";
+    import { Parsed, parseFile } from "./parse.scrml";
 
     export type Source:struct = { path: string, src: string }
 
@@ -53,109 +53,109 @@ ${
     // ---- 1. code-unit order ----------------------------------------------------
     // -1 / 0 / 1: `a` before / equal to / after `b`, by UTF-16 code unit.
     export fn codeUnitCompare(a: string, b: string) -> int {
-        let i: int = 0
-        while (i < a.length && i < b.length) {
-            const x: int = a.charCodeAt(i)
-            const y: int = b.charCodeAt(i)
-            if (x < y) return -1
-            if (x > y) return 1
-            i = i + 1
+        let i: int = 0;
+        for (; i < a.length && i < b.length; ) {
+            const x: int = a.charCodeAt(i);
+            const y: int = b.charCodeAt(i);
+            if (x < y) return -1;
+            if (x > y) return 1;
+            i = i + 1;
         }
-        if (a.length < b.length) return -1
-        if (a.length > b.length) return 1
-        return 0
+        if (a.length < b.length) return -1;
+        if (a.length > b.length) return 1;
+        return 0;
     }
 
     fn sourceBefore(a: Source, b: Source) -> boolean {
-        const c: int = codeUnitCompare(a.path, b.path)
-        if (c != 0) return c < 0
-        return codeUnitCompare(a.src, b.src) < 0
+        const c: int = codeUnitCompare(a.path, b.path);
+        if (c != 0) return c < 0;
+        return codeUnitCompare(a.src, b.src) < 0;
     }
 
     // The sources in canonical order (an insertion sort: the result depends on
     // the set, not on the order `xs` lists it in).
     export fn canonicalSources(xs: Source[]) -> Source[] {
-        let out: Source[] = []
+        let out: Source[] = [];
         for (const x of xs) {
-            let placed: Source[] = []
-            let done = false
+            let placed: Source[] = [];
+            let done = false;
             for (const y of out) {
                 if (!done && sourceBefore(x, y)) {
-                    placed = placed.concat([x])
-                    done = true
+                    placed = placed.concat([x]);
+                    done = true;
                 }
-                placed = placed.concat([y])
+                placed = placed.concat([y]);
             }
-            if (!done) placed = placed.concat([x])
-            out = placed
+            if (!done) placed = placed.concat([x]);
+            out = placed;
         }
-        return out
+        return out;
     }
 
     // ---- 2. import edges ---------------------------------------------------------
     // The directory part of a project-relative path ("lib/a.scrml" → "lib").
     fn dirOf(p: string) -> string {
-        const i: int = p.lastIndexOf("/")
-        if (i < 0) return ""
-        return p.substring(0, i)
+        const i: int = p.lastIndexOf("/");
+        if (i < 0) return "";
+        return p.substring(0, i);
     }
 
     // `from`, resolved against `dir`; "" when it is not a relative source or
     // climbs above the project root.
     export fn resolveFrom(dir: string, from: string) -> string {
-        if (!(from.startsWith("./") || from.startsWith("../"))) return ""
-        let segs: string[] = []
-        if (dir != "") segs = dir.split("/")
+        if (!(from.startsWith("./") || from.startsWith("../"))) return "";
+        let segs: string[] = [];
+        if (dir != "") segs = dir.split("/");
         for (const s of from.split("/")) {
             if (s == "..") {
-                if (segs.length == 0) return ""
-                segs = segs.slice(0, segs.length - 1)
+                if (segs.length == 0) return "";
+                segs = segs.slice(0, segs.length - 1);
             } else if (s != "." && s != "") {
-                segs = segs.concat([s])
+                segs = segs.concat([s]);
             }
         }
-        return segs.join("/")
+        return segs.join("/");
     }
 
     // s471 — the path prefix a driver names stdlib files under (`scrml:format/index.scrml`).
-    export fn stdlibPrefix() -> string { return stdlibPathPrefix() }
+    export fn stdlibPrefix() -> string { return stdlibPathPrefix(); }
 
-    fn inStdlib(p: string) -> boolean { return p.startsWith(stdlibPrefix()) }
+    fn inStdlib(p: string) -> boolean { return p.startsWith(stdlibPrefix()); }
 
     // THE import resolver: the path in `paths` that `from`, written in the file
     // `importer`, names — "" when it names none (see the header).
     export fn importTarget(importer: string, from: string, paths: string[]) -> string {
         if (inStdlib(from)) {
-            const asDir: string = from + "/index.scrml"
-            if (paths.indexOf(asDir) >= 0) return asDir
-            const asFile: string = from + ".scrml"
-            if (paths.indexOf(asFile) >= 0) return asFile
-            return ""
+            const asDir: string = from + "/index.scrml";
+            if (paths.indexOf(asDir) >= 0) return asDir;
+            const asFile: string = from + ".scrml";
+            if (paths.indexOf(asFile) >= 0) return asFile;
+            return "";
         }
-        const p: string = resolveFrom(dirOf(importer), from)
-        if (p == "" || inStdlib(p) != inStdlib(importer)) return ""
-        if (paths.indexOf(p) < 0) return ""
-        return p
+        const p: string = resolveFrom(dirOf(importer), from);
+        if (p == "" || inStdlib(p) != inStdlib(importer)) return "";
+        if (paths.indexOf(p) < 0) return "";
+        return p;
     }
 
     // Every import statement in `items` (plain and host), a `<program>`'s own included.
     fn allImportsOfItems(items: AItem[]) -> AImport[] {
-        let out: AImport[] = []
-        for (const it of items) { out = out.concat(importOfItem(it)) }
-        return out
+        let out: AImport[] = [];
+        for (const it of items) { out = out.concat(importOfItem(it)); }
+        return out;
     }
 
     fn importOfItem(it: AItem) -> AImport[] {
-        const k: AItemK = it.k
+        const k: AItemK = it.k;
         return match k {
-            .ImportItem(i: i) :> [i]
-            .TypeItem(t: t) :> []
-            .FnItem(f: f) :> []
-            .DeclItem(d: d) :> []
-            .MarkupItem(n: n) :> []
-            .ProgramItem(p: p) :> allImportsOfItems(p.items)
+            .ImportItem(i: i) :> [i],
+            .TypeItem(t: t) :> [],
+            .FnItem(f: f) :> [],
+            .DeclItem(d: d) :> [],
+            .MarkupItem(n: n) :> [],
+            .ProgramItem(p: p) :> allImportsOfItems(p.items),
             .ConstItem(c: c) :> []
-        }
+        };
     }
 
     // Every MODULE import in `items` (`import { … } from "…"`, §21.3), a
@@ -166,30 +166,30 @@ ${
     // s478: an export list (AImport.re other than Import) is not an import: a re-export binds
     // nothing in its file's scope (`reexportsOfItems`, `localExportsOfItems`).
     export fn importsOfItems(items: AItem[]) -> AImport[] {
-        let out: AImport[] = []
+        let out: AImport[] = [];
         for (const imp of allImportsOfItems(items)) {
-            if (imp.host is not && imp.re == ALink.Import) out = out.concat([imp])
+            if (imp.host is not && imp.re == ALink.Import) out = out.concat([imp]);
         }
-        return out
+        return out;
     }
 
     // s478 (s478-boot-modules) — every RE-EXPORT in `items` (`export { … } from
     // "…"`, `export * from "…"`, §21.4), a `<program>`'s own included.
     export fn reexportsOfItems(items: AItem[]) -> AImport[] {
-        let out: AImport[] = []
+        let out: AImport[] = [];
         for (const imp of allImportsOfItems(items)) {
-            if (imp.host is not && (imp.re == ALink.Reexport || imp.re == ALink.ReexportAll)) out = out.concat([imp])
+            if (imp.host is not && (imp.re == ALink.Reexport || imp.re == ALink.ReexportAll)) out = out.concat([imp]);
         }
-        return out
+        return out;
     }
 
     // s478 — every local export list (`export { a, b as c };`, no `from`) in `items`.
     export fn localExportsOfItems(items: AItem[]) -> AImport[] {
-        let out: AImport[] = []
+        let out: AImport[] = [];
         for (const imp of allImportsOfItems(items)) {
-            if (imp.re == ALink.ExportList) out = out.concat([imp])
+            if (imp.re == ALink.ExportList) out = out.concat([imp]);
         }
-        return out
+        return out;
     }
 
     // s478 — every statement in `items` that LINKS a module: an import and a
@@ -200,27 +200,27 @@ ${
     // the cycle check and a driver's module closure (slice-m2/lowered.js
     // `importFroms`) read this; scope binding reads `importsOfItems`.
     export fn linkFromsOfItems(items: AItem[]) -> AImport[] {
-        let out: AImport[] = []
+        let out: AImport[] = [];
         for (const imp of allImportsOfItems(items)) {
-            if (imp.host is not && imp.re != ALink.ExportList) out = out.concat([imp])
+            if (imp.host is not && imp.re != ALink.ExportList) out = out.concat([imp]);
         }
-        return out
+        return out;
     }
 
     // s472 — every `import:<tag>` host-import declaration in `items` (§21.3.1).
     export fn hostImportsOfItems(items: AItem[]) -> AImport[] {
-        let out: AImport[] = []
+        let out: AImport[] = [];
         for (const imp of allImportsOfItems(items)) {
-            if (imp.host is given) out = out.concat([imp])
+            if (imp.host is given) out = out.concat([imp]);
         }
-        return out
+        return out;
     }
 
     // The host-tag of an import ("" for a plain one).
     export fn hostTagOf(imp: AImport) -> string {
-        const h: string | not = imp.host
-        if (h is given) return h
-        return ""
+        const h: string | not = imp.host;
+        if (h is given) return h;
+        return "";
     }
 
     // s472 (boot-math-port) — WHERE A STDLIB FILE'S HOST MODULE LANDS (§21.3.1,
@@ -238,77 +238,77 @@ ${
     export type HostLoc:struct = { module: string, file: string }
 
     export fn hostLocOf(importer: string, from: string) -> HostLoc | not {
-        if (!inStdlib(importer)) return not
-        const rest: string = importer.slice(stdlibPrefix().length)
-        const slash: int = rest.indexOf("/")
-        if (slash <= 0) return not
-        const module: string = rest.slice(0, slash)
-        const p: string = resolveFrom(dirOf(importer), from)
-        const base: string = stdlibPrefix() + module + "/"
-        if (!p.startsWith(base) || p.length == base.length) return not
-        return { module: module, file: p.slice(base.length) }
+        if (!inStdlib(importer)) return not;
+        const rest: string = importer.slice(stdlibPrefix().length);
+        const slash: int = rest.indexOf("/");
+        if (slash <= 0) return not;
+        const module: string = rest.slice(0, slash);
+        const p: string = resolveFrom(dirOf(importer), from);
+        const base: string = stdlibPrefix() + module + "/";
+        if (!p.startsWith(base) || p.length == base.length) return not;
+        return { module: module, file: p.slice(base.length) };
     }
 
     // s472 — `path` is a stdlib file: the driver names stdlib files under the
     // prefix (slice-m2/lowered.js `stdlibSources`; `importTarget` resolves
     // `scrml:NAME` to them), and a project file can never carry it (lowered.js
     // `frontEndStdlib` throws on one). Structural — never a scan of the source.
-    export fn isStdlibPath(path: string) -> boolean { return inStdlib(path) }
+    export fn isStdlibPath(path: string) -> boolean { return inStdlib(path); }
 
     // The paths (in the set `paths`) the file `f` imports or (s478) re-exports from.
     fn importedPaths(f: FileAst, paths: string[]) -> string[] {
-        let out: string[] = []
+        let out: string[] = [];
         for (const imp of linkFromsOfItems(f.items)) {
-            const p: string = importTarget(f.path, imp.from, paths)
-            if (p != "" && p != f.path && out.indexOf(p) < 0) out = out.concat([p])
+            const p: string = importTarget(f.path, imp.from, paths);
+            if (p != "" && p != f.path && out.indexOf(p) < 0) out = out.concat([p]);
         }
-        return out
+        return out;
     }
 
     // ---- link order --------------------------------------------------------------
     // Indexes into `asts` (already in canonical order), in link order.
     export fn linkOrder(asts: FileAst[], entry: string) -> int[] {
-        let paths: string[] = []
-        for (const a of asts) { paths = paths.concat([a.path]) }
-        let deps: string[][] = []
-        for (const a of asts) { deps = deps.concat([importedPaths(a, paths)]) }
-        let order: int[] = []
-        let placed: string[] = []
-        let rest: int = 0
+        let paths: string[] = [];
+        for (const a of asts) { paths = paths.concat([a.path]); }
+        let deps: string[][] = [];
+        for (const a of asts) { deps = deps.concat([importedPaths(a, paths)]); }
+        let order: int[] = [];
+        let placed: string[] = [];
+        let rest: int = 0;
         for (const a of asts) {
-            if (a.path != entry) rest = rest + 1
+            if (a.path != entry) rest = rest + 1;
         }
-        while (rest > 0) {
-            let pick: int = -1
-            let i: int = 0
-            while (pick < 0 && i < asts.length) {
-                if (asts[i].path != entry && order.indexOf(i) < 0 && allPlaced(deps[i], placed, entry)) pick = i
-                i = i + 1
+        for (; rest > 0; ) {
+            let pick: int = -1;
+            let i: int = 0;
+            for (; pick < 0 && i < asts.length; ) {
+                if (asts[i].path != entry && order.indexOf(i) < 0 && allPlaced(deps[i], placed, entry)) pick = i;
+                i = i + 1;
             }
             // an import cycle: the first unplaced file in path order
-            i = 0
-            while (pick < 0 && i < asts.length) {
-                if (asts[i].path != entry && order.indexOf(i) < 0) pick = i
-                i = i + 1
+            i = 0;
+            for (; pick < 0 && i < asts.length; ) {
+                if (asts[i].path != entry && order.indexOf(i) < 0) pick = i;
+                i = i + 1;
             }
-            order = order.concat([pick])
-            placed = placed.concat([asts[pick].path])
-            rest = rest - 1
+            order = order.concat([pick]);
+            placed = placed.concat([asts[pick].path]);
+            rest = rest - 1;
         }
-        let j: int = 0
-        while (j < asts.length) {
-            if (asts[j].path == entry) order = order.concat([j])
-            j = j + 1
+        let j: int = 0;
+        for (; j < asts.length; ) {
+            if (asts[j].path == entry) order = order.concat([j]);
+            j = j + 1;
         }
-        return order
+        return order;
     }
 
     // Every dependency placed (the entry, always last, never blocks a file).
     fn allPlaced(ds: string[], placed: string[], entry: string) -> boolean {
         for (const d of ds) {
-            if (d != entry && placed.indexOf(d) < 0) return false
+            if (d != entry && placed.indexOf(d) < 0) return false;
         }
-        return true
+        return true;
     }
 
     // ---- s478: import cycles (E-IMPORT-002) ---------------------------------------
@@ -330,139 +330,139 @@ ${
     export type ImportCycle:struct = { file: string, at: ASpan, cycle: string[] }
 
     export fn importCycles(files: FileAst[]) -> ImportCycle[] {
-        let paths: string[] = []
-        for (const f of files) { paths = paths.concat([f.path]) }
-        let deps: int[][] = []
-        for (const f of files) { deps = deps.concat([edgeIndexes(f, paths)]) }
-        let out: ImportCycle[] = []
-        let i: int = 0
-        while (i < files.length) {
-            const c: int[] = cycleThrough(deps, i)
+        let paths: string[] = [];
+        for (const f of files) { paths = paths.concat([f.path]); }
+        let deps: int[][] = [];
+        for (const f of files) { deps = deps.concat([edgeIndexes(f, paths)]); }
+        let out: ImportCycle[] = [];
+        let i: int = 0;
+        for (; i < files.length; ) {
+            const c: int[] = cycleThrough(deps, i);
             if (c.length > 0) {
-                let next: int = c[0]
-                if (c.length > 1) next = c[1]
-                let names: string[] = []
-                for (const j of c) { names = names.concat([paths[j]]) }
-                out = out.concat([{ file: paths[i], at: edgeSpan(files[i], paths, paths[next]), cycle: names.concat([paths[i]]) }])
+                let next: int = c[0];
+                if (c.length > 1) next = c[1];
+                let names: string[] = [];
+                for (const j of c) { names = names.concat([paths[j]]); }
+                out = out.concat([{ file: paths[i], at: edgeSpan(files[i], paths, paths[next]), cycle: names.concat([paths[i]]) }]);
             }
-            i = i + 1
+            i = i + 1;
         }
-        return out
+        return out;
     }
 
     // The indexes (into `paths`) of the files `f` links, itself included.
     fn edgeIndexes(f: FileAst, paths: string[]) -> int[] {
-        let out: int[] = []
+        let out: int[] = [];
         for (const imp of linkFromsOfItems(f.items)) {
-            const p: string = importTarget(f.path, imp.from, paths)
+            const p: string = importTarget(f.path, imp.from, paths);
             if (p != "") {
-                const k: int = paths.indexOf(p)
-                if (out.indexOf(k) < 0) out = out.concat([k])
+                const k: int = paths.indexOf(p);
+                if (out.indexOf(k) < 0) out = out.concat([k]);
             }
         }
-        return out
+        return out;
     }
 
     // The span of the first statement of `f` that links `target`.
     fn edgeSpan(f: FileAst, paths: string[], target: string) -> ASpan {
         for (const imp of linkFromsOfItems(f.items)) {
-            if (importTarget(f.path, imp.from, paths) == target) return imp.span
+            if (importTarget(f.path, imp.from, paths) == target) return imp.span;
         }
-        return { start: 0, end: 0 }
+        return { start: 0, end: 0 };
     }
 
     // The shortest cycle through `s` (breadth first): its files from `s` on,
     // without the closing `s`; empty when `s` is on no cycle. `parents[k]` is
     // the queue position `queue[k]` was first reached from.
     fn cycleThrough(deps: int[][], s: int) -> int[] {
-        let queue: int[] = [s]
-        let parents: int[] = [-1]
-        let head: int = 0
-        while (head < queue.length) {
-            const u: int = queue[head]
+        let queue: int[] = [s];
+        let parents: int[] = [-1];
+        let head: int = 0;
+        for (; head < queue.length; ) {
+            const u: int = queue[head];
             for (const v of deps[u]) {
-                if (v == s) return pathTo(queue, parents, head)
+                if (v == s) return pathTo(queue, parents, head);
                 if (queue.indexOf(v) < 0) {
-                    queue = queue.concat([v])
-                    parents = parents.concat([head])
+                    queue = queue.concat([v]);
+                    parents = parents.concat([head]);
                 }
             }
-            head = head + 1
+            head = head + 1;
         }
-        return []
+        return [];
     }
 
     fn pathTo(queue: int[], parents: int[], at: int) -> int[] {
-        let out: int[] = []
-        let k: int = at
-        while (k >= 0) {
-            out = [queue[k]].concat(out)
-            k = parents[k]
+        let out: int[] = [];
+        let k: int = at;
+        for (; k >= 0; ) {
+            out = [queue[k]].concat(out);
+            k = parents[k];
         }
-        return out
+        return out;
     }
 
     // ---- 3. the parse phase --------------------------------------------------------
     fn parseInOrder(xs: Source[]) -> Linked {
-        let next: int = 0
-        let files: FileAst[] = []
-        let diags: Diag[] = []
+        let next: int = 0;
+        let files: FileAst[] = [];
+        let diags: Diag[] = [];
         for (const x of xs) {
-            const r: Parsed = parseFile(x.path, x.src, next)
-            next = r.nextId
-            files = files.concat([r.ast])
-            diags = diags.concat(r.diags)
+            const r: Parsed = parseFile(x.path, x.src, next);
+            next = r.nextId;
+            files = files.concat([r.ast]);
+            diags = diags.concat(r.diags);
         }
-        return { files: files, diags: diags, nextId: next }
+        return { files: files, diags: diags, nextId: next };
     }
 
     fn isIdentity(order: int[]) -> boolean {
-        let i: int = 0
-        while (i < order.length) {
-            if (order[i] != i) return false
-            i = i + 1
+        let i: int = 0;
+        for (; i < order.length; ) {
+            if (order[i] != i) return false;
+            i = i + 1;
         }
-        return true
+        return true;
     }
 
     fn hasProgramItem(items: AItem[]) -> boolean {
         for (const it of items) {
-            const k: AItemK = it.k
+            const k: AItemK = it.k;
             const isProgram: boolean = match k {
-                .ImportItem(i: i) :> false
-                .TypeItem(t: t) :> false
-                .FnItem(f: f) :> false
-                .DeclItem(d: d) :> false
-                .MarkupItem(n: n) :> false
-                .ProgramItem(p: p) :> true
+                .ImportItem(i: i) :> false,
+                .TypeItem(t: t) :> false,
+                .FnItem(f: f) :> false,
+                .DeclItem(d: d) :> false,
+                .MarkupItem(n: n) :> false,
+                .ProgramItem(p: p) :> true,
                 .ConstItem(c: c) :> false
-            }
-            if (isProgram) return true
+            };
+            if (isProgram) return true;
         }
-        return false
+        return false;
     }
 
     // The paths (in canonical order) of the files with a top-level
     // `<program>` — the entry candidates when a driver names no entry. The
     // answer depends only on the set.
     export fn programPaths(xs: Source[]) -> string[] {
-        let out: string[] = []
+        let out: string[] = [];
         for (const f of parseInOrder(canonicalSources(xs)).files) {
-            if (hasProgramItem(f.items)) out = out.concat([f.path])
+            if (hasProgramItem(f.items)) out = out.concat([f.path]);
         }
-        return out
+        return out;
     }
 
     // Parse a linked program: `xs` in ANY order; `entry` the path of the file
     // with the `<program>`. The result depends only on the set and `entry`.
     export fn parseProgram(xs: Source[], entry: string) -> Linked {
-        const sorted: Source[] = canonicalSources(xs)
-        const first: Linked = parseInOrder(sorted)
-        const order: int[] = linkOrder(first.files, entry)
-        if (isIdentity(order)) return first
+        const sorted: Source[] = canonicalSources(xs);
+        const first: Linked = parseInOrder(sorted);
+        const order: int[] = linkOrder(first.files, entry);
+        if (isIdentity(order)) return first;
         // node ids run in link order: parse again, in that order
-        let linked: Source[] = []
-        for (const i of order) { linked = linked.concat([sorted[i]]) }
-        return parseInOrder(linked)
+        let linked: Source[] = [];
+        for (const i of order) { linked = linked.concat([sorted[i]]); }
+        return parseInOrder(linked);
     }
 }

@@ -1,7 +1,7 @@
+<program reset="none">
 // fn — the canonical pure form (the `pure` modifier is deprecated; §33/§48.11)
-${
     fn cube(x) {
-        return x * x * x
+        return x * x * x;
     }
-}
 <p>${cube(3)}</>
+</program>

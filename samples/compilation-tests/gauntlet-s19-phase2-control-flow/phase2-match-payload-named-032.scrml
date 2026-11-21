@@ -1,13 +1,13 @@
+<program>
 // Payload named destructuring
 ${
     type Person:enum = { Employee(name: string, dept: string) }
-    let p:Person = .Employee("alice", "eng")
+    let p:Person = .Employee("alice", "eng");
     let s = match p {
         .Employee(name: n, dept: d) => "${n} in ${d}"
-    }
-    log(s)
-    function log(s: string) { let _ = s }
+    };
+    log(s);
+    function log(s: string) { let _ = s; }
 }
-<program>
     <p>ok</>
 </>

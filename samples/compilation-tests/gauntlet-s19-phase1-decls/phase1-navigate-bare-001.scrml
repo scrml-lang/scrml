@@ -1,7 +1,7 @@
+<program reset="none">
 // navigate(path) bare — §20.1
-${
     function go() {
-        navigate("/dashboard")
+        navigate("/dashboard");
     }
-}
 <button onclick=go()>Go</>
+</program>

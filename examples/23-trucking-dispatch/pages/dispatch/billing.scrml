@@ -11,29 +11,29 @@
 
   import {
       invoiceStatus, invoiceStatusClasses, invoiceStatusLabel, formatIsoDate
-  } from '../../components/invoice-card.scrml'
-  import { formatRate } from '../../components/load-card.scrml'
-  import { createSessionStore } from 'scrml:store'
-  import { randomInt } from 'scrml:random'
-  import { SESSION_DB_PATH } from '../../models/auth.scrml'
+  } from '../../components/invoice-card.scrml';
+  import { formatRate } from '../../components/load-card.scrml';
+  import { createSessionStore } from 'scrml:store';
+  import { randomInt } from 'scrml:random';
+  import { SESSION_DB_PATH } from '../../models/auth.scrml';
   // M5: centralized real-time channel — see SPEC §38.12.6.
-  import { "customer-events" as customerEvents } from '../../channels/customer-events.scrml'
+  import { "customer-events" as customerEvents } from '../../channels/customer-events.scrml';
 
   <db src="../../dispatch.db" protect="password_hash" tables="users, invoices, customers, loads, lin_tokens">
 
     ${
         // Today as ISO date — used for overdue detection. Hardcoded to seed
         // window so the demo isn't anchored to a moving target.
-        const TODAY_ISO = "2026-04-29"
+        const TODAY_ISO = "2026-04-29";
 
 
         function fetchInvoicesServer(sessionToken) {
             // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
             // compiles to its own public route, and one taking a userId would let any caller
             // look up any user (S443 post-merge review of #1180).
-            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get();
             if (user is not || user.role != "dispatcher") {
-                return { unauthorized: true }
+                return { unauthorized: true };
             }
 
             // M6: LEFT JOIN to a derived (most-recent unconsumed payment
@@ -54,9 +54,9 @@
                 LEFT JOIN customers c ON c.id = i.customer_id
                 LEFT JOIN loads l ON l.id = i.load_id
                 ORDER BY i.sent_at DESC
-            `}.all()
+            `}.all();
 
-            return { user: user, invoices: invoices }
+            return { user: user, invoices: invoices };
         }
 
         // M2 demo seeds invoices on first call so the billing page has rows
@@ -71,8 +71,8 @@
             // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
             // compiles to its own public route, and one taking a userId would let any caller
             // look up any user (S443 post-merge review of #1180).
-            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
-            if (user is not || user.role != "dispatcher") return { ok: false }
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get();
+            if (user is not || user.role != "dispatcher") return { ok: false };
 
             ?{`
                 INSERT INTO invoices (load_id, customer_id, amount_dollars, due_at)
@@ -80,7 +80,7 @@
                 FROM loads l
                 WHERE l.status IN ('Delivered', 'Invoiced', 'Paid')
                   AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.load_id = l.id)
-            `}.run()
+            `}.run();
 
             // M6: mint payment tokens for any invoiced load that doesn't
             // already have an active payment token. Idempotent.
@@ -94,35 +94,35 @@
                       AND lt.kind = 'payment'
                       AND lt.consumed_at IS NULL
                   )
-            `}.all()
+            `}.all();
 
             for (let i = 0; i < newlyInvoiced.length; i = i + 1) {
-                const lid = newlyInvoiced[i].load_id
-                const t = `pay_${lid}_${Date.now()}_${randomInt(0, 100000)}`
+                const lid = newlyInvoiced[i].load_id;
+                const t = `pay_${lid}_${Date.now()}_${randomInt(0, 100000)}`;
                 ?{`
                     INSERT INTO lin_tokens (token, load_id, kind)
                     VALUES (${t}, ${lid}, 'payment')
-                `}.run()
+                `}.run();
             }
 
-            return { ok: true }
+            return { ok: true };
         }
 
         function markPaidServer(sessionToken, invoiceId) {
             // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
             // compiles to its own public route, and one taking a userId would let any caller
             // look up any user (S443 post-merge review of #1180).
-            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get();
             if (user is not || user.role != "dispatcher") {
-                return { unauthorized: true }
+                return { unauthorized: true };
             }
-            const ref = `PAY-DEMO-${invoiceId}`
+            const ref = `PAY-DEMO-${invoiceId}`;
             ?{`
                 UPDATE invoices
                 SET paid_at = CURRENT_TIMESTAMP, payment_reference = ${ref}
                 WHERE id = ${invoiceId}
-            `}.run()
-            return { ok: true }
+            `}.run();
+            return { ok: true };
         }
 
         <currentUser> = not
@@ -132,75 +132,75 @@
         <errorMessage> = ""
 
         function getSessionToken() {
-            const c = document.cookie ? document.cookie : ""
-            const idx = c.indexOf("scrml_session=")
-            if (idx < 0) return ""
-            const tail = c.substring(idx + "scrml_session=".length)
-            const semi = tail.indexOf(";")
-            return semi < 0 ? tail : tail.substring(0, semi)
+            const c = document.cookie ? document.cookie : "";
+            const idx = c.indexOf("scrml_session=");
+            if (idx < 0) return "";
+            const tail = c.substring(idx + "scrml_session=".length);
+            const semi = tail.indexOf(";");
+            return semi < 0 ? tail : tail.substring(0, semi);
         }
 
         function refresh() {
-            const tok = getSessionToken()
-            const data = fetchInvoicesServer(tok)
+            const tok = getSessionToken();
+            const data = fetchInvoicesServer(tok);
             if (data.unauthorized) {
-                window.location.href = "/auth/login?reason=unauthorized"
-                return
+                window.location.href = "/auth/login?reason=unauthorized";
+                return;
             }
-            @currentUser = data.user
-            @invoiceRows = data.invoices
-            @loaded = true
+            @currentUser = data.user;
+            @invoiceRows = data.invoices;
+            @loaded = true;
         }
 
         function ensureAndRefresh() {
-            const tok = getSessionToken()
-            ensureInvoicesServer(tok)
-            refresh()
+            const tok = getSessionToken();
+            ensureInvoicesServer(tok);
+            refresh();
         }
 
         function markPaid(invoiceId, customerId) {
-            const tok = getSessionToken()
-            const result = markPaidServer(tok, invoiceId)
+            const tok = getSessionToken();
+            const result = markPaidServer(tok, invoiceId);
             if (result.unauthorized) {
-                window.location.href = "/auth/login?reason=unauthorized"
-                return
+                window.location.href = "/auth/login?reason=unauthorized";
+                return;
             }
             if (!result.ok) {
-                @errorMessage = "Could not mark invoice paid."
-                return
+                @errorMessage = "Could not mark invoice paid.";
+                return;
             }
             // M5: broadcast invoice-paid to customer-events so the
             // customer's invoices view + home badge update live.
-            publishCustomerEvent("invoice-paid", customerId, invoiceId, 0)
-            refresh()
+            publishCustomerEvent("invoice-paid", customerId, invoiceId, 0);
+            refresh();
         }
 
         // M5: dispatcher manually announces "invoice sent" to a customer.
         // The server fn ensureInvoicesServer creates rows; this client
         // function broadcasts to customer-events for a specific invoice.
         function announceInvoice(invoiceId, customerId, loadId) {
-            publishCustomerEvent("invoice-sent", customerId, invoiceId, loadId)
+            publishCustomerEvent("invoice-sent", customerId, invoiceId, loadId);
         }
 
         function setError(msg) {
-            @errorMessage = msg
+            @errorMessage = msg;
         }
 
         // Pure helper — does this invoice match the dropdown filter? `filter` is
         // the dropdown <option value> ("all" or an InvoiceStatus variant name).
         // The `match` dispatches the derived InvoiceStatus variant exhaustively.
         fn matchesFilter(inv: asIs, filter: string, today: string) -> boolean {
-            if (filter == "all") return true
+            if (filter == "all") return true;
             return match invoiceStatus(inv, today) {
-                .Paid        :> filter == "Paid"
-                .Overdue     :> filter == "Overdue"
+                .Paid        :> filter == "Paid",
+                .Overdue     :> filter == "Overdue",
                 .Outstanding :> filter == "Outstanding"
-            }
+            };
         }
 
         on mount {
             ensureAndRefresh()
-        }
+        };
     }
 
     <!-- M5: customer-events channel — see channels/customer-events.scrml.

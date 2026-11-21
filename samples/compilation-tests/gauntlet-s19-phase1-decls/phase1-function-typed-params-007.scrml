@@ -1,7 +1,7 @@
+<program reset="none">
 // function with typed params and -> return type
-${
     function add(a: number, b: number) -> number {
-        return a + b
+        return a + b;
     }
-}
 <p>${add(2, 3)}</>
+</program>

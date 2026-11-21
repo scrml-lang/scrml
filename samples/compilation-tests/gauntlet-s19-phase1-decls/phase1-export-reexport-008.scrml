@@ -1,4 +1,4 @@
 // Re-export — §21.4
 ${
-    export { Status, formatStatus } from './_helper-types.scrml'
+    export { Status, formatStatus } from './_helper-types.scrml';
 }

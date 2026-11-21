@@ -19,10 +19,10 @@
   <db src="../../dispatch.db" protect="password_hash" tables="users, customers">
 
     ${
-        import { hashPassword } from 'scrml:auth'
-        import { generateToken } from 'scrml:crypto'
-        import { createSessionStore, set as kvSet } from 'scrml:store'
-        import { SESSION_TTL_SECONDS, SESSION_DB_PATH, buildSessionSetCookie } from '../../models/auth.scrml'
+        import { hashPassword } from 'scrml:auth';
+        import { generateToken } from 'scrml:crypto';
+        import { createSessionStore, set as kvSet } from 'scrml:store';
+        import { SESSION_TTL_SECONDS, SESSION_DB_PATH, buildSessionSetCookie } from '../../models/auth.scrml';
 
         // Shape-2 decl-coupled compound form (§6.2 / §55): validators ride as bare
         // attrs; the compiler synthesizes @registerForm.isValid + per-field .errors.
@@ -37,57 +37,57 @@
             <password req length(>=6)> = <input type="password"/>
         </>
 
-        <errorMessage> = ""
+        <errorMessage> = "";
         <submitting> = false
 
         function registerServer(emailArg, passwordArg, nameArg, contactPhoneArg, billingAddressArg) {
-            const existing = ?{`SELECT id FROM users WHERE email = ${emailArg}`}.get()
-            if (existing is given) return { error: "Email already registered" }
+            const existing = ?{`SELECT id FROM users WHERE email = ${emailArg}`}.get();
+            if (existing is given) return { error: "Email already registered" };
 
-            const hash = hashPassword(passwordArg)
-            ?{`INSERT INTO users (email, password_hash, role) VALUES (${emailArg}, ${hash}, 'customer')`}.run()
-            const userRow = ?{`SELECT id, email, role FROM users WHERE email = ${emailArg}`}.get()
+            const hash = hashPassword(passwordArg);
+            ?{`INSERT INTO users (email, password_hash, role) VALUES (${emailArg}, ${hash}, 'customer')`}.run();
+            const userRow = ?{`SELECT id, email, role FROM users WHERE email = ${emailArg}`}.get();
 
             ?{`
                 INSERT INTO customers (user_id, name, contact_email, contact_phone, billing_address, payment_terms, account_status)
                 VALUES (${userRow.id}, ${nameArg}, ${emailArg}, ${contactPhoneArg}, ${billingAddressArg}, 'net_30', 'active')
-            `}.run()
+            `}.run();
 
             // The FRAMEWORK session (§20.5.1) — what `<program auth="required">` checks.
-            session.set("userId", userRow.id)
-            session.set("role", "customer")
+            session.set("userId", userRow.id);
+            session.set("role", "customer");
 
             // The app's own page-level token (each page's getCurrentUser reads it).
-            const token = generateToken(32)
-            const store = createSessionStore(SESSION_DB_PATH)
-            kvSet(store, token, userRow.id, SESSION_TTL_SECONDS)
+            const token = generateToken(32);
+            const store = createSessionStore(SESSION_DB_PATH);
+            kvSet(store, token, userRow.id, SESSION_TTL_SECONDS);
 
             return {
                 token: token,
                 user: userRow,
                 redirectTo: "/customer/home"
-            }
+            };
         }
 
         function submit() {
-            if (@submitting) return
-            @errorMessage = ""
+            if (@submitting) return;
+            @errorMessage = "";
 
             // The §55 validity surface replaces the manual client-side checks —
             // req/length/pattern fire reactively; the rollup gates submit. Server
             // still enforces email uniqueness.
-            if (!@registerForm.isValid) return
+            if (!@registerForm.isValid) return;
 
-            @submitting = true
-            const result = registerServer(@registerForm.email, @registerForm.password, @registerForm.companyName, @registerForm.contactPhone, @registerForm.billingAddress)
+            @submitting = true;
+            const result = registerServer(@registerForm.email, @registerForm.password, @registerForm.companyName, @registerForm.contactPhone, @registerForm.billingAddress);
             if (result.error) {
-                @errorMessage = result.error
-                @submitting = false
-                return
+                @errorMessage = result.error;
+                @submitting = false;
+                return;
             }
 
-            document.cookie = buildSessionSetCookie(result.token)
-            window.location.href = result.redirectTo
+            document.cookie = buildSessionSetCookie(result.token);
+            window.location.href = result.redirectTo;
         }
     }
 

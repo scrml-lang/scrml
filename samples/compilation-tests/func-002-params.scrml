@@ -1,11 +1,13 @@
+<program reset="none">
 // func-002-params.scrml
 // Function with parameters. Tests: function params.
 
 <div>
     ${
         function add(a, b) {
-            return a + b
+            return a + b;
         }
     }
     <p>Function with params</>
 </div>
+</program>

@@ -1,16 +1,18 @@
+<program reset="none">
 // control-003-if-elseif.scrml
 // If/else-if/else chain. Tests: multiple conditional branches.
 
 <div>
     ${
-        let temp = 72
+        let temp = 72;
         if (temp > 90) {
-            let weather = "hot"
+            let weather = "hot";
         } else if (temp > 60) {
-            let weather = "mild"
+            let weather = "mild";
         } else {
-            let weather = "cold"
+            let weather = "cold";
         }
     }
     <p>Weather classified</>
 </div>
+</program>

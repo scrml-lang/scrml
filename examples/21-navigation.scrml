@@ -30,7 +30,7 @@
   // const initialView = route.query.view || "Home"
 
   function go(target: View) {
-    @currentView = target
+    @currentView = target;
     // For real cross-page navigation, navigate("/profile/42") would
     // server-redirect (Hard) or history-push (Soft) based on context.
     // .Hard / .Soft override:
@@ -92,9 +92,9 @@
     }
     <main class="view">
       ${ match @currentView {
-        .Home     :> { lift <h1>Home</h1> }
-        .Profile  :> { lift <h1>Profile</h1> }
-        .Settings :> { lift <h1>Settings</h1> }
+        .Home     :> { lift <h1>Home</h1>; },
+        .Profile  :> { lift <h1>Profile</h1>; },
+        .Settings :> { lift <h1>Settings</h1>; }
       } }
 
       <p class="hint">

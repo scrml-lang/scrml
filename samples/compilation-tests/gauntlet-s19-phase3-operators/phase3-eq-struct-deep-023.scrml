@@ -1,12 +1,12 @@
+<program>
 // `==` on structs → deep structural
 ${
     type Point:struct = { x: number, y: number }
-    let p1:Point = { x: 1, y: 2 }
-    let p2:Point = { x: 1, y: 2 }
+    let p1:Point = { x: 1, y: 2 };
+    let p2:Point = { x: 1, y: 2 };
     if (p1 == p2) {
-        let _same = 1
+        let _same = 1;
     }
 }
-<program>
     <p>ok</>
 </>

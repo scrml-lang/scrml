@@ -1,10 +1,10 @@
+<program>
 // assign-expr as outermost in if condition — requires double parens (§50.2.3)
 ${
-    let x = 0
+    let x = 0;
     if ((x = 5)) {
-        let _ok = 1
+        let _ok = 1;
     }
 }
-<program>
     <p>ok</>
 </>

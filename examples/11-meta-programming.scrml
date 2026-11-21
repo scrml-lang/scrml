@@ -18,7 +18,7 @@
     { name: "emerald", hex: "#10b981" },
     { name: "sky",     hex: "#0ea5e9" },
     { name: "violet",  hex: "#8b5cf6" },
-  ]
+  ];
 
   // Palette + swatch styles — co-located with the markup section below.
   #{

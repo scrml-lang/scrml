@@ -1,3 +1,4 @@
+<program reset="none">
 // combined-020-calculator.scrml
 // Simple calculator. Tests: reactive + functions + events + logic.
 
@@ -9,30 +10,30 @@
 
         function pressDigit(d) {
             if (@display == "0") {
-                @display = d
+                @display = d;
             } else {
-                @display = @display + d
+                @display = @display + d;
             }
         }
         function pressOp(op) {
-            @current = Number(@display)
-            @operator = op
-            @display = "0"
+            @current = Number(@display);
+            @operator = op;
+            @display = "0";
         }
         function calculate() {
-            let b = Number(@display)
+            let b = Number(@display);
             if (@operator == "+") {
-                @display = String(@current + b)
+                @display = String(@current + b);
             }
             if (@operator == "-") {
-                @display = String(@current - b)
+                @display = String(@current - b);
             }
-            @operator = ""
+            @operator = "";
         }
         function clear() {
-            @display = "0"
-            @current = 0
-            @operator = ""
+            @display = "0";
+            @current = 0;
+            @operator = "";
         }
     }
     <div class="calc-display">
@@ -55,3 +56,4 @@
         <button onclick=clear()>C</>
     </div>
 </div>
+</program>

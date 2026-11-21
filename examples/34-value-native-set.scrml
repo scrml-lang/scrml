@@ -1,3 +1,4 @@
+<program reset="none">
 // Example 34: Value-native set — `set[K]` (§59.12).
 //
 // THE ONE LESSON: a set is the MAP. There is no separate set collection, no
@@ -45,15 +46,15 @@
         function certify(lane: string) {
             // .add is reassignment-canonical (COW) and dedups by construction —
             // certifying the same lane twice leaves the set unchanged.
-            @certified = @certified.add(lane)
+            @certified = @certified.add(lane);
         }
 
         function revoke(lane: string) {
-            @certified = @certified.remove(lane)
+            @certified = @certified.remove(lane);
         }
 
         function requireLane(lane: string) {
-            @required = @required.add(lane)
+            @required = @required.add(lane);
         }
 
         // Set algebra, derived. Each is itself a set (the map underneath), so
@@ -113,3 +114,4 @@
         <button onclick=requireLane("SAT-ELP")>Require SAT-ELP</>
     </section>
 </div>
+</program>

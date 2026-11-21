@@ -113,10 +113,10 @@
     // that has no states. That is the over-reach the discipline prevents.
     // ────────────────────────────────────────────────────────────────────
     fn numericLiteralValue(raw: string) -> number {
-        if (raw.startsWith("0x") or raw.startsWith("0X")) return parseInt(raw.slice(2), 16)
-        if (raw.startsWith("0o") or raw.startsWith("0O")) return parseInt(raw.slice(2), 8)
-        if (raw.startsWith("0b") or raw.startsWith("0B")) return parseInt(raw.slice(2), 2)
-        return parseFloat(raw)
+        if (raw.startsWith("0x") or raw.startsWith("0X")) return parseInt(raw.slice(2), 16);
+        if (raw.startsWith("0o") or raw.startsWith("0O")) return parseInt(raw.slice(2), 8);
+        if (raw.startsWith("0b") or raw.startsWith("0B")) return parseInt(raw.slice(2), 2);
+        return parseFloat(raw);
     }
 
     <div class="calc">

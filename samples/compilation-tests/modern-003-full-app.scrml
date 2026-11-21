@@ -1,3 +1,4 @@
+<program reset="none">
 // modern-003-full-app.scrml
 // Complete small app using multiple features. Tests: full feature set.
 
@@ -6,8 +7,8 @@ type Role:enum = { Admin, User, Guest }
 < userBadge name(string) role(Role)>
     <span class="badge">
         ${name} (${ match role {
-            .Admin :> "Admin"
-            .User :> "User"
+            .Admin :> "Admin",
+            .User :> "User",
             .Guest :> "Guest"
         } })
     </>
@@ -16,15 +17,13 @@ type Role:enum = { Admin, User, Guest }
 <users> = []
 <filter> = "all"
 
-${
     function addUser(name, role) {
-        @users = [...@users, { name: name, role: role }]
+        @users = [...@users, { name: name, role: role }];
     }
     function filteredUsers() {
-        if (@filter == "all") return @users
-        return @users
+        if (@filter == "all") return @users;
+        return @users;
     }
-}
 
 <div class="app">
     <h1>User Manager</>
@@ -34,7 +33,7 @@ ${
     </>
     <div class="list">
         ${ for (let u of filteredUsers()) {
-            lift <userBadge name=u.name role=u.role></>
+            lift <userBadge name=u.name role=u.role></>;
         } }
     </>
 </>
@@ -42,3 +41,4 @@ ${
 ~{ "user app"
     test "starts empty" { assert @users.length == 0 }
 }
+</program>

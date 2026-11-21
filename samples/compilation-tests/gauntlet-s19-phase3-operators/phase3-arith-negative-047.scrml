@@ -1,8 +1,8 @@
-${
-    const a = -5
-    const b = a + -3
-    const c = -(1 + 2)
-}
 <program>
+${
+    const a = -5;
+    const b = a + -3;
+    const c = -(1 + 2);
+}
     <p>${c}</>
 </>

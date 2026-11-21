@@ -1,9 +1,11 @@
+<program reset="none">
 // logic-011-object-decl.scrml
 // Object declarations in logic blocks. Tests: object literals.
 
 <div>
     ${
-        let user = { name: "Alice", age: 30, active: true }
+        let user = { name: "Alice", age: 30, active: true };
     }
     <p>Object created</>
 </div>
+</program>

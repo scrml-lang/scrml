@@ -1,14 +1,12 @@
 // Basic snippet/slot — named slots filled at call site.
 <program>
-    ${
         const Panel = <div class="panel" props={
             title:   snippet,
             content: snippet,
         }>
             <div class="panel__title">${render title()}</>
             <div class="panel__content">${render content()}</>
-        </>
-    }
+        </>;
     <Panel>
         <h2 slot="title">Hello</h2>
         <p slot="content">Body text</p>

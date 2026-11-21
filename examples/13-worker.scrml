@@ -16,29 +16,29 @@
     ${
         // Sieve of Eratosthenes up to limit.
         function sieve(limit: number) -> number[] {
-            const flags = Array(limit + 1).fill(true)
-            flags[0] = false
-            flags[1] = false
+            const flags = Array(limit + 1).fill(true);
+            flags[0] = false;
+            flags[1] = false;
             for (let i = 2; i * i <= limit; i++) {
                 if (flags[i]) {
                     for (let j = i * i; j <= limit; j += i) {
-                        flags[j] = false
+                        flags[j] = false;
                     }
                 }
             }
             // Collect the primes.
-            const primes = []
+            const primes = [];
             for (let i = 2; i <= limit; i++) {
-                if (flags[i]) primes.push(i)
+                if (flags[i]) primes.push(i);
             }
-            return primes
+            return primes;
         }
 
         // when message fires whenever the parent calls <#primes>.send(data).
         when message(data) {
-            const result = sieve(data.limit)
+            const result = sieve(data.limit);
             // Send result back to parent.
-            send({ limit: data.limit, primes: result, count: result.length })
+            send({ limit: data.limit, primes: result, count: result.length });
         }
     }
 </>
@@ -50,19 +50,19 @@ ${
     <running> = false
 
     function findPrimes() {
-        @running = true
-        @result  = { count: 0, limit: 0, primes: [] }
+        @running = true;
+        @result  = { count: 0, limit: 0, primes: [] };
         <#primes>.send({ limit: @limit })
     }
 
     // when message from <#primes> fires when the worker calls send().
     when message from <#primes> (data) {
-        @result  = data
-        @running = false
+        @result  = data;
+        @running = false;
     }
 
     when error from <#primes> (e) {
-        @running = false
+        @running = false;
         // In a real app, surface this to the user.
     }
 }

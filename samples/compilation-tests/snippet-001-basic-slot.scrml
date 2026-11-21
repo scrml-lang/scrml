@@ -4,7 +4,6 @@
 
 <program>
 
-${
     const Panel = <div class="panel" props={
         title:    snippet,
         content:  snippet,
@@ -12,8 +11,7 @@ ${
         ${children}
         <div class="panel__title">${render title()}</>
         <div class="panel__content">${render content()}</>
-    </>
-}
+    </>;
 
 <Panel>
     <h2 slot="title">Hello from a slot</>

@@ -1,7 +1,7 @@
-${
-    const a = [1, 2, 3]
-    const b = [0, ...a, 4]
-}
 <program>
+${
+    const a = [1, 2, 3];
+    const b = [0, ...a, 4];
+}
     <p>${b.length}</>
 </>

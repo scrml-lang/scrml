@@ -1,14 +1,16 @@
+<program reset="none">
 // control-002-if-else.scrml
 // If/else conditional. Tests: if/else branches in logic.
 
 <div>
     ${
-        let score = 75
+        let score = 75;
         if (score >= 60) {
-            let result = "pass"
+            let result = "pass";
         } else {
-            let result = "fail"
+            let result = "fail";
         }
     }
     <p>Score evaluated</>
 </div>
+</program>

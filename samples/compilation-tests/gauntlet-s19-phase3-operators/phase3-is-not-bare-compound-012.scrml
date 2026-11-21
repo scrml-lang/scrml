@@ -1,10 +1,10 @@
+<program>
 // DQ-12 Phase B deferred: bare compound (no parens) — expected to compile but produce incorrect JS
 ${
-    let arr = [1, 2, 3]
+    let arr = [1, 2, 3];
     if (arr.find(x => x == 2) is not) {
-        let _miss = 1
+        let _miss = 1;
     }
 }
-<program>
     <p>trap</>
 </>

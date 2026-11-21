@@ -58,27 +58,27 @@
             // the client requires mutating @reactive vars — which means the client
             // knows about validation state. That IS more complex than returning HTML.
 
-            let errors = {}
-            let hasErrors = false
+            let errors = {};
+            let hasErrors = false;
 
             if (@feedbackText.length == 0) {
-                errors.feedbackText = "Please share your feedback"
-                hasErrors = true
+                errors.feedbackText = "Please share your feedback";
+                hasErrors = true;
             }
 
             if (@feedbackText.length > 2000) {
-                errors.feedbackText = "Feedback must be under 2000 characters"
-                hasErrors = true
+                errors.feedbackText = "Feedback must be under 2000 characters";
+                hasErrors = true;
             }
 
             if (@rating < 1 || @rating > 5) {
-                errors.rating = "Please select a rating from 1 to 5"
-                hasErrors = true
+                errors.rating = "Please select a rating from 1 to 5";
+                hasErrors = true;
             }
 
             if (@selectedChoice == "") {
-                errors.selectedChoice = "Please pick one option"
-                hasErrors = true
+                errors.selectedChoice = "Please pick one option";
+                hasErrors = true;
             }
 
             if (@contactEmail.length > 0) {
@@ -86,56 +86,56 @@
                 // FRICTION: HTMX devs rely on type="email" + required from HTML.
                 // scrml has no equivalent of HTML5 constraint validation at the server
                 // level. We fall back to manual checks.
-                let hasAt = @contactEmail.indexOf("@") > -1
+                let hasAt = @contactEmail.indexOf("@") > -1;
                 if (!hasAt) {
-                    errors.contactEmail = "Enter a valid email address"
-                    hasErrors = true
+                    errors.contactEmail = "Enter a valid email address";
+                    hasErrors = true;
                 }
             }
 
             if (hasErrors) {
-                @fieldErrors = errors
-                @errorMsg = "Please fix the errors below"
-                return
+                @fieldErrors = errors;
+                @errorMsg = "Please fix the errors below";
+                return;
             }
 
             // All valid — persist to DB
             ?{`INSERT INTO feedback_responses (feedback_text, rating, choice, contact_email, created_at)
-               VALUES (${@feedbackText}, ${@rating}, ${@selectedChoice}, ${@contactEmail}, datetime('now'))`}.run()
+               VALUES (${@feedbackText}, ${@rating}, ${@selectedChoice}, ${@contactEmail}, datetime('now'))`}.run();
 
             // Reset state after successful save
-            @fieldErrors = {}
-            @errorMsg = ""
-            @feedbackText = ""
-            @rating = 0
-            @selectedChoice = ""
-            @contactEmail = ""
-            @submitted = true
-            @submitting = false
+            @fieldErrors = {};
+            @errorMsg = "";
+            @feedbackText = "";
+            @rating = 0;
+            @selectedChoice = "";
+            @contactEmail = "";
+            @submitted = true;
+            @submitting = false;
         }
 
         function handleSubmit() {
-            @submitting = true
-            @errorMsg = ""
-            submitFeedback() !{ .Transport(_) :> return }
+            @submitting = true;
+            @errorMsg = "";
+            submitFeedback() !{ .Transport(_) :> return };
         }
 
         function resetForm() {
-            @submitted = false
-            @feedbackText = ""
-            @rating = 0
-            @selectedChoice = ""
-            @contactEmail = ""
-            @errorMsg = ""
-            @fieldErrors = {}
+            @submitted = false;
+            @feedbackText = "";
+            @rating = 0;
+            @selectedChoice = "";
+            @contactEmail = "";
+            @errorMsg = "";
+            @fieldErrors = {};
         }
 
         function setRating(val) {
-            @rating = val
+            @rating = val;
         }
 
         function chooseOption(val) {
-            @selectedChoice = val
+            @selectedChoice = val;
         }
     }
 
@@ -291,12 +291,12 @@
             // In a real browser event handler: event.target.value
             // scrml's event model is unspecified for value capture.
             // This is a BLOCKER for any form that syncs input values to @vars.
-            @feedbackText = ""
+            @feedbackText = "";
         }
 
         function captureEmail() {
             // Same problem as above. Placeholder only.
-            @contactEmail = ""
+            @contactEmail = "";
         }
     }
 

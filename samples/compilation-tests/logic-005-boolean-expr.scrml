@@ -1,12 +1,14 @@
+<program reset="none">
 // logic-005-boolean-expr.scrml
 // Boolean expressions and comparisons. Tests: ==, !=, >, <, &&, ||.
 
 <div>
     ${
-        let age = 25
-        let isAdult = age >= 18
-        let isRetired = age >= 65
-        let canWork = isAdult && !isRetired
+        let age = 25;
+        let isAdult = age >= 18;
+        let isRetired = age >= 65;
+        let canWork = isAdult && !isRetired;
     }
     <p>Logic evaluated</>
 </div>
+</program>

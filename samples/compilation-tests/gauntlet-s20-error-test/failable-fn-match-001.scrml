@@ -1,24 +1,24 @@
+<program reset="none">
 // Phase 7: calling ! function with match (§19.4.3)
 // Should compile clean.
 
-${
   type FetchError:enum = { Network(msg:string), Timeout }
 
   function fetchData(url)! -> FetchError {
     if (url == "") {
-      fail FetchError.Network("empty url")
+      fail FetchError.Network("empty url");
     }
-    return "data"
+    return "data";
   }
-}
 
 <div>
 ${
   let result = match fetchData("/api") {
-    ::Ok(data) => data
-    ::Network(msg) => "Network error: " + msg
+    ::Ok(data) => data,
+    ::Network(msg) => "Network error: " + msg,
     ::Timeout => "Timed out"
-  }
+  };
 }
 <p>${result}</>
 </div>
+</program>

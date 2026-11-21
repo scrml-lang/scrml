@@ -4,10 +4,10 @@
         <count>: number = 0
         function bump() {
             if (@count < 10) {
-                @count = @count + 1
+                @count = @count + 1;
             }
         }
-        bump()
+        bump();
     }
     <p>${@count}</>
 </>

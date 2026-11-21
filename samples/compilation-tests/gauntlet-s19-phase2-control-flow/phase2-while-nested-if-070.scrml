@@ -1,17 +1,17 @@
+<program>
 // Nested if-in-while — compound control flow
 ${
-    let xs = [1, 2, 3, 4]
-    let evens = 0
-    let i = 0
+    let xs = [1, 2, 3, 4];
+    let evens = 0;
+    let i = 0;
     while (i < xs.length) {
         if (xs[i] % 2 == 0) {
-            evens = evens + 1
+            evens = evens + 1;
         }
-        i = i + 1
+        i = i + 1;
     }
-    log(evens)
-    function log(n: number) { let _ = n }
+    log(evens);
+    function log(n: number) { let _ = n; }
 }
-<program>
     <p>ok</>
 </>

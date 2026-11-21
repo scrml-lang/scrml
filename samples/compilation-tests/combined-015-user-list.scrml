@@ -4,7 +4,7 @@
 < db src="./test.db" tables="users">
     ${
         server function getUsers() {
-            return ?{`SELECT id, name, email FROM users`} !{ _ :> [] }
+            return ?{`SELECT id, name, email FROM users`} !{ _ :> [] };
         }
         <users> = []
     }
@@ -15,7 +15,7 @@
                 lift <div class="user-card">
                     <h3>${user.name}</>
                     <p>${user.email}</>
-                </div>
+                </div>;
             }
         }
     </div>

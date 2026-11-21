@@ -1,7 +1,5 @@
-// `not` stored in a reactive optional
-${
-    <session>: string | not = not
-}
 <program>
+// `not` stored in a reactive optional
+    <session>: string | not = not
     <p>@${@session}</>
 </>

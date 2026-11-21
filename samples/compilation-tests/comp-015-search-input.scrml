@@ -1,3 +1,4 @@
+<program reset="none">
 // comp-015-search-input.scrml
 // Search input with clear button. Tests: input with actions.
 
@@ -5,7 +6,7 @@
     ${
         <query> = ""
         function clearSearch() {
-            @query = ""
+            @query = "";
         }
     }
     <div class="search-input-group">
@@ -14,3 +15,4 @@
         <button class="search-submit">Search</>
     </div>
 </div>
+</program>

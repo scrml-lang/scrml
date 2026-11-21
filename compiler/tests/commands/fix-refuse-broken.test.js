@@ -361,9 +361,10 @@ describe("§7 a component module that compiles as part of its project", () => {
       expect(compileErrorsTogether(["app.scrml", "components.scrml", "types.scrml"].map((n) => join(dir, n)))).toEqual([]);
       const r = run([dir, "--check"]);
       expect(r.err).not.toContain("refused");
-      // S480: the example still owes the S469 `;` / arm `,` (stmt-semi / arm-comma, default rules),
-      // so --check reports "would change" (1) — never "refused" (3).
-      expect(r.code).toBe(1);
+      // S481: the example is migrated to the S469 `;` / arm `,` (#2042). One `;` is left for a human
+      // (components.scrml's import line: its scratch compile diverges, so it cannot be verified), so
+      // --check reports "construct left" (2) — never "would change" (1), never "refused" (3).
+      expect(r.code).toBe(2);
     });
   });
 

@@ -1,3 +1,4 @@
+<program reset="none">
 // combined-006-search-filter.scrml
 // Search with filter. Tests: reactive + events + conditionals.
 
@@ -8,9 +9,9 @@
         <loading> = false
 
         function doSearch() {
-            @loading = true
-            @results = ["Result 1", "Result 2", "Result 3"]
-            @loading = false
+            @loading = true;
+            @results = ["Result 1", "Result 2", "Result 3"];
+            @loading = false;
         }
     }
     <h1>Search</>
@@ -23,8 +24,9 @@
             for (let result of @results) {
                 lift <div class="result-item">
                     <p>${result}</>
-                </div>
+                </div>;
             }
         }
     </div>
 </div>
+</program>

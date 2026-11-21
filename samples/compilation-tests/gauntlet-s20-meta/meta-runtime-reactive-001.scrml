@@ -2,9 +2,7 @@
 // Should compile clean as runtime meta, NOT fire E-META-001.
 
 <program>
-${
   <themeMode> = "dark"
-}
 
 <div>
   ^{

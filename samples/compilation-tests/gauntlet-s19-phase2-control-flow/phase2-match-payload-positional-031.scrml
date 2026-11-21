@@ -1,14 +1,14 @@
+<program>
 // Payload positional destructuring
 ${
     type Shape:enum = { Circle(r: number), Rect(w: number, h: number) }
-    let s:Shape = .Rect(3, 4)
+    let s:Shape = .Rect(3, 4);
     let area = match s {
-        .Circle(r)    => r * r * 3
+        .Circle(r)    => r * r * 3,
         .Rect(w, h)   => w * h
-    }
-    log(area)
-    function log(n: number) { let _ = n }
+    };
+    log(area);
+    function log(n: number) { let _ = n; }
 }
-<program>
     <p>ok</>
 </>

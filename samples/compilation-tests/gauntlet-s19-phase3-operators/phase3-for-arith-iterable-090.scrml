@@ -1,8 +1,6 @@
-// arithmetic on the per-item value inside a canonical `<each>` iteration (§17.7)
-${
-    <items>: number[] = [1, 2, 3]
-}
 <program>
+// arithmetic on the per-item value inside a canonical `<each>` iteration (§17.7)
+    <items>: number[] = [1, 2, 3]
     <ul>
         <each in=@items as item>
             <li>${item * 2}</li>

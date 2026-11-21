@@ -1,18 +1,18 @@
+<program reset="none">
 // lift-5-repro.scrml
 // Repro for LIFT-5: for { if { lift }} with reactive iterable.
 // The reconciler factory _scrml_create_item_N must set _scrml_lift_target
 // before calling _scrml_lift() inside an if-body.
 
-${
-  @items = [1, 2, 3, 4, 5]
-}
+  @items = [1, 2, 3, 4, 5];
 
 <ul>
   ${
     for (let item of @items) {
       if (item % 2 == 0) {
-        lift <li class="even">Even: ${item}</li>
+        lift <li class="even">Even: ${item}</li>;
       }
     }
   }
 </ul>
+</program>

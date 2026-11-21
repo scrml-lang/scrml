@@ -12,8 +12,8 @@
 
 <page db="../../dispatch.db" auth="required">
 
-  import { createSessionStore } from 'scrml:store'
-  import { SESSION_DB_PATH } from '../../models/auth.scrml'
+  import { createSessionStore } from 'scrml:store';
+  import { SESSION_DB_PATH } from '../../models/auth.scrml';
 
   <db src="../../dispatch.db" protect="password_hash" tables="users, drivers, loads, log_entries">
 
@@ -23,15 +23,15 @@
             // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
             // compiles to its own public route, and one taking a userId would let any caller
             // look up any user (S443 post-merge review of #1180).
-            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get();
             if (user is not || user.role != "driver") {
-                return { unauthorized: true }
+                return { unauthorized: true };
             }
-            const driver = ?{`SELECT id FROM drivers WHERE user_id = ${user.id}`}.get()
-            if (driver is not) return { error: "No driver record." }
+            const driver = ?{`SELECT id FROM drivers WHERE user_id = ${user.id}`}.get();
+            if (driver is not) return { error: "No driver record." };
 
-            const load = ?{`SELECT id, origin_city, origin_state, destination_city, destination_state FROM loads WHERE id = ${loadId}`}.get()
-            if (load is not) return { notFound: true }
+            const load = ?{`SELECT id, origin_city, origin_state, destination_city, destination_state FROM loads WHERE id = ${loadId}`}.get();
+            if (load is not) return { notFound: true };
 
             const entries = ?{`
                 SELECT le.id, le.driver_id, le.type, le.at, le.payload,
@@ -40,9 +40,9 @@
                 LEFT JOIN drivers d ON d.id = le.driver_id
                 WHERE le.load_id = ${loadId}
                 ORDER BY le.at DESC
-            `}.all()
+            `}.all();
 
-            return { user: user, load: load, entries: entries }
+            return { user: user, load: load, entries: entries };
         }
 
         <currentUser> = not
@@ -53,78 +53,78 @@
         <errorMessage> = ""
 
         function getSessionToken() {
-            const c = document.cookie ? document.cookie : ""
-            const idx = c.indexOf("scrml_session=")
-            if (idx < 0) return ""
-            const tail = c.substring(idx + "scrml_session=".length)
-            const semi = tail.indexOf(";")
-            return semi < 0 ? tail : tail.substring(0, semi)
+            const c = document.cookie ? document.cookie : "";
+            const idx = c.indexOf("scrml_session=");
+            if (idx < 0) return "";
+            const tail = c.substring(idx + "scrml_session=".length);
+            const semi = tail.indexOf(";");
+            return semi < 0 ? tail : tail.substring(0, semi);
         }
 
         function getLoadId() {
             // Path is /driver/loads/:id/log — id is the second-to-last segment.
-            const path = window.location.pathname
-            const parts = path.split("/")
+            const path = window.location.pathname;
+            const parts = path.split("/");
             // Drop empty trailing segment if any.
-            let lastIdx = parts.length - 1
-            if (parts[lastIdx] == "") { lastIdx = lastIdx - 1 }
+            let lastIdx = parts.length - 1;
+            if (parts[lastIdx] == "") { lastIdx = lastIdx - 1; }
             // parts[lastIdx] is "log", parts[lastIdx-1] is the id.
-            const idStr = parts[lastIdx - 1]
-            const n = parseInt(idStr, 10)
-            return isNaN(n) ? 0 : n
+            const idStr = parts[lastIdx - 1];
+            const n = parseInt(idStr, 10);
+            return isNaN(n) ? 0 : n;
         }
 
         function refresh() {
-            const tok = getSessionToken()
-            const loadId = getLoadId()
-            const data = fetchLogServer(tok, loadId)
+            const tok = getSessionToken();
+            const loadId = getLoadId();
+            const data = fetchLogServer(tok, loadId);
             if (data.unauthorized) {
-                window.location.href = "/auth/login?reason=unauthorized"
-                return
+                window.location.href = "/auth/login?reason=unauthorized";
+                return;
             }
             if (data.notFound) {
-                @notFound = true
-                @loaded = true
-                return
+                @notFound = true;
+                @loaded = true;
+                return;
             }
             if (data.error) {
-                @errorMessage = data.error
-                @loaded = true
-                return
+                @errorMessage = data.error;
+                @loaded = true;
+                return;
             }
-            @currentUser = data.user
-            @currentLoad = data.load
-            @entryRows = data.entries
-            @loaded = true
+            @currentUser = data.user;
+            @currentLoad = data.load;
+            @entryRows = data.entries;
+            @loaded = true;
         }
 
         // Pretty label for log entry types.
         fn logTypeLabel(t: string) -> string {
-            if (t == "pre_trip")     return "Pre-trip inspection"
-            if (t == "post_trip")    return "Post-trip inspection"
-            if (t == "bol_received") return "BOL received"
-            if (t == "pod_signed")   return "POD signed"
-            if (t == "fuel_stop")    return "Fuel stop"
-            if (t == "breakdown")    return "Breakdown"
-            if (t == "hos_change")   return "Status change"
-            return t
+            if (t == "pre_trip")     return "Pre-trip inspection";
+            if (t == "post_trip")    return "Post-trip inspection";
+            if (t == "bol_received") return "BOL received";
+            if (t == "pod_signed")   return "POD signed";
+            if (t == "fuel_stop")    return "Fuel stop";
+            if (t == "breakdown")    return "Breakdown";
+            if (t == "hos_change")   return "Status change";
+            return t;
         }
 
         // Color the type badge to surface critical events visually.
         fn logTypeBadgeClasses(t: string) -> string {
-            if (t == "pre_trip")     return "bg-slate-100 text-slate-700 border-slate-200"
-            if (t == "post_trip")    return "bg-slate-100 text-slate-700 border-slate-200"
-            if (t == "bol_received") return "bg-blue-100 text-blue-800 border-blue-200"
-            if (t == "pod_signed")   return "bg-emerald-100 text-emerald-800 border-emerald-200"
-            if (t == "fuel_stop")    return "bg-amber-100 text-amber-800 border-amber-200"
-            if (t == "breakdown")    return "bg-red-100 text-red-800 border-red-200"
-            if (t == "hos_change")   return "bg-violet-100 text-violet-800 border-violet-200"
-            return "bg-slate-100 text-slate-700 border-slate-200"
+            if (t == "pre_trip")     return "bg-slate-100 text-slate-700 border-slate-200";
+            if (t == "post_trip")    return "bg-slate-100 text-slate-700 border-slate-200";
+            if (t == "bol_received") return "bg-blue-100 text-blue-800 border-blue-200";
+            if (t == "pod_signed")   return "bg-emerald-100 text-emerald-800 border-emerald-200";
+            if (t == "fuel_stop")    return "bg-amber-100 text-amber-800 border-amber-200";
+            if (t == "breakdown")    return "bg-red-100 text-red-800 border-red-200";
+            if (t == "hos_change")   return "bg-violet-100 text-violet-800 border-violet-200";
+            return "bg-slate-100 text-slate-700 border-slate-200";
         }
 
         on mount {
             refresh()
-        }
+        };
     }
 
     <div class="min-h-screen bg-slate-50 text-slate-900 font-sans">

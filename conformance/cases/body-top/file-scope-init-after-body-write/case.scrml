@@ -1,0 +1,6 @@
+<program>
+${ let n: int = 1; }
+${ n = 5; }
+${ const k: int = n; }
+<p id="c">${k}</p>
+</program>

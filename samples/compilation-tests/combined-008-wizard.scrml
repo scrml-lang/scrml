@@ -1,3 +1,4 @@
+<program reset="none">
 // combined-008-wizard.scrml
 // Multi-step wizard. Tests: state + conditionals + events.
 
@@ -9,13 +10,13 @@
         <plan> = "basic"
 
         function nextStep() {
-            @step = @step + 1
+            @step = @step + 1;
         }
         function prevStep() {
-            @step = @step - 1
+            @step = @step - 1;
         }
         function submit() {
-            @step = 4
+            @step = 4;
         }
     }
     <h1>Setup Wizard</>
@@ -32,3 +33,4 @@
         </div>
     </div>
 </div>
+</program>

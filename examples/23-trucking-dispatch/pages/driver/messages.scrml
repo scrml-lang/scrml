@@ -19,10 +19,10 @@
 
 <page db="../../dispatch.db" auth="required">
 
-  import { createSessionStore } from 'scrml:store'
-  import { SESSION_DB_PATH } from '../../models/auth.scrml'
+  import { createSessionStore } from 'scrml:store';
+  import { SESSION_DB_PATH } from '../../models/auth.scrml';
   // M5: centralized real-time channel — see SPEC §38.12.6.
-  import { "driver-events" as driverEvents } from '../../channels/driver-events.scrml'
+  import { "driver-events" as driverEvents } from '../../channels/driver-events.scrml';
 
   <db src="../../dispatch.db" protect="password_hash" tables="users, drivers, messages">
 
@@ -32,14 +32,14 @@
             // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
             // compiles to its own public route, and one taking a userId would let any caller
             // look up any user (S443 post-merge review of #1180).
-            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get();
             if (user is not || user.role != "driver") {
-                return { unauthorized: true }
+                return { unauthorized: true };
             }
-            const driver = ?{`SELECT id, name FROM drivers WHERE user_id = ${user.id}`}.get()
-            if (driver is not) return { error: "No driver record." }
+            const driver = ?{`SELECT id, name FROM drivers WHERE user_id = ${user.id}`}.get();
+            if (driver is not) return { error: "No driver record." };
 
-            const channelIdStr = `driver-${driver.id}`
+            const channelIdStr = `driver-${driver.id}`;
 
             // Pull driver-:id and dispatch-board messages — joined on
             // sender role for display.
@@ -52,37 +52,37 @@
                    OR m.channel_id = 'dispatch-board'
                 ORDER BY m.at ASC
                 LIMIT 200
-            `}.all()
+            `}.all();
 
             return {
                 user: user,
                 driver: driver,
                 channelId: channelIdStr,
                 messages: messages
-            }
+            };
         }
 
         function sendMessageServer(sessionToken, body) {
             // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
             // compiles to its own public route, and one taking a userId would let any caller
             // look up any user (S443 post-merge review of #1180).
-            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get();
             if (user is not || user.role != "driver") {
-                return { unauthorized: true }
+                return { unauthorized: true };
             }
-            const driver = ?{`SELECT id FROM drivers WHERE user_id = ${user.id}`}.get()
-            if (driver is not) return { error: "No driver record." }
+            const driver = ?{`SELECT id FROM drivers WHERE user_id = ${user.id}`}.get();
+            if (driver is not) return { error: "No driver record." };
 
-            const trimmed = body.trim()
-            if (trimmed == "") return { error: "Message body required." }
+            const trimmed = body.trim();
+            if (trimmed == "") return { error: "Message body required." };
 
-            const channelIdStr = `driver-${driver.id}`
+            const channelIdStr = `driver-${driver.id}`;
             ?{`
                 INSERT INTO messages (channel_id, from_user_id, body)
                 VALUES (${channelIdStr}, ${user.id}, ${trimmed})
-            `}.run()
+            `}.run();
 
-            return { ok: true }
+            return { ok: true };
         }
 
         <currentUser> = not
@@ -107,92 +107,92 @@
         </>
 
         function getSessionToken() {
-            const c = document.cookie ? document.cookie : ""
-            const idx = c.indexOf("scrml_session=")
-            if (idx < 0) return ""
-            const tail = c.substring(idx + "scrml_session=".length)
-            const semi = tail.indexOf(";")
-            return semi < 0 ? tail : tail.substring(0, semi)
-        }
+            const c = document.cookie ? document.cookie : "";
+            const idx = c.indexOf("scrml_session=");
+            if (idx < 0) return "";
+            const tail = c.substring(idx + "scrml_session=".length);
+            const semi = tail.indexOf(";");
+            return semi < 0 ? tail : tail.substring(0, semi);
+        };
 
         function refresh() {
-            const tok = getSessionToken()
-            const data = fetchMessages(tok)
+            const tok = getSessionToken();
+            const data = fetchMessages(tok);
             if (data.unauthorized) {
-                window.location.href = "/auth/login?reason=unauthorized"
-                return
+                window.location.href = "/auth/login?reason=unauthorized";
+                return;
             }
             if (data.error) {
-                @errorMessage = data.error
-                @loaded = true
-                return
+                @errorMessage = data.error;
+                @loaded = true;
+                return;
             }
-            @currentUser = data.user
-            @currentDriver = data.driver
-            @channelId = data.channelId
-            @messageHistory = data.messages
-            @loaded = true
+            @currentUser = data.user;
+            @currentDriver = data.driver;
+            @channelId = data.channelId;
+            @messageHistory = data.messages;
+            @loaded = true;
         }
 
         function sendMessage(event) {
-            if (event && event.preventDefault) event.preventDefault()
+            if (event && event.preventDefault) event.preventDefault();
             if (!@messageForm.isValid) {
-                setError("Type a message first.")
-                return
+                setError("Type a message first.");
+                return;
             }
-            const tok = getSessionToken()
-            const body = @messageForm.draft
-            const result = sendMessageServer(tok, body)
+            const tok = getSessionToken();
+            const body = @messageForm.draft;
+            const result = sendMessageServer(tok, body);
             if (result.unauthorized) {
-                window.location.href = "/auth/login?reason=unauthorized"
-                return
+                window.location.href = "/auth/login?reason=unauthorized";
+                return;
             }
             if (result.error) {
-                @errorMessage = result.error
-                return
+                @errorMessage = result.error;
+                return;
             }
             // M5: publish to driver-events so the dispatcher sees it
             // live. The DB write already happened inside sendMessageServer;
             // this is the "live wire" so subscribers update without
             // reload.
-            const driverId = @currentDriver ? @currentDriver.id : 0
-            const userId = @currentUser ? @currentUser.id : 0
-            publishDriverEvent("message", driverId, userId, body, 0)
-            reset(@messageForm.draft)
-            refresh()
+            const driverId = @currentDriver ? @currentDriver.id : 0;
+            const userId = @currentUser ? @currentUser.id : 0;
+            publishDriverEvent("message", driverId, userId, body, 0);
+            reset(@messageForm.draft);
+            refresh();
         }
 
         // Filter live events to only messages relevant to THIS driver.
         // Per F-CHANNEL-001 (no name interpolation) all driver-events
         // arrive on a single broadcast; we filter by targetDriverId.
         fn isForThisDriver(targetDriverId, ourDriverId) -> boolean {
-            return targetDriverId == ourDriverId
+            return targetDriverId == ourDriverId;
         }
 
         function setError(msg) {
-            @errorMessage = msg
+            @errorMessage = msg;
         }
 
         // Pure helper — render the sender label for a message row.
         // Driver messages render right-aligned, dispatcher messages left.
         fn senderLabel(role: string, email: string) -> string {
-            if (role == "dispatcher") return `Dispatcher · ${email}`
-            if (role == "driver")     return `You`
-            return email
+            if (role == "dispatcher") return `Dispatcher · ${email}`;
+            if (role == "driver")     return `You`;
+            return email;
         }
 
         fn isFromDriver(role: string) -> boolean {
-            return role == "driver"
+            return role == "driver";
         }
 
         fn bubbleClasses(role: string) -> string {
-            if (role == "driver") return "bg-blue-600 text-white ml-auto"
-            return "bg-slate-100 text-slate-900 mr-auto"
+            if (role == "driver") return "bg-blue-600 text-white ml-auto";
+            return "bg-slate-100 text-slate-900 mr-auto";
         }
 
         on mount {
             refresh()
-        }
+        };
     }
 
     <!-- M5: driver-events channel — see channels/driver-events.scrml.

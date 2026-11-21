@@ -1,3 +1,4 @@
+<program reset="none">
 // reactive-014-form-state.scrml
 // Reactive variables for form state management. Tests: @ for UI state.
 
@@ -14,3 +15,4 @@
         <button type="submit">Submit</>
     </form>
 </div>
+</program>

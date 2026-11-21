@@ -1,9 +1,9 @@
+<program reset="none">
 // type X:struct
-${
     type User:struct = {
         id: number,
         name: string,
         email: string
     }
-}
 <p>x</>
+</program>

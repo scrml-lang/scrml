@@ -9,7 +9,7 @@ type UserRole:enum = { Anonymous, Customer, Driver, Dispatch, Admin }
 <count> = 0
 
 function increment() {
-  @count = @count + 1
+  @count = @count + 1;
 }
 
 <nav class="flex items-center gap-3 p-4 border-b">

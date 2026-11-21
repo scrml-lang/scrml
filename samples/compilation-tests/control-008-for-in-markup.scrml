@@ -1,11 +1,13 @@
+<program reset="none">
 // control-008-for-in-markup.scrml
 // For loop with lift to produce markup. Tests: lift inside for.
 
 <ul>
     ${
-        let fruits = ["apple", "banana", "cherry"]
+        let fruits = ["apple", "banana", "cherry"];
         for (let f of fruits) {
-            lift <li>${f}</>
+            lift <li>${f}</>;
         }
     }
 </ul>
+</program>

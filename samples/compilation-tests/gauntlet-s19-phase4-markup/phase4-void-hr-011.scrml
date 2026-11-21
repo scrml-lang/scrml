@@ -1,6 +1,8 @@
+<program reset="none">
 // Void element <hr/>.
 <section>
     <h1>a</h1>
     <hr/>
     <h1>b</h1>
 </section>
+</program>

@@ -1,2 +1,4 @@
+<program reset="none">
 // Single plain tag with text content.
 <div>hello</div>
+</program>

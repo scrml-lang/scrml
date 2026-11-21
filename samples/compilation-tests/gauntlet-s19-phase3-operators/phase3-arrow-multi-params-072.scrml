@@ -1,7 +1,7 @@
-${
-    const nums = [[1,2],[3,4]]
-    const sums = nums.map((pair, i) => pair[0] + pair[1] + i)
-}
 <program>
+${
+    const nums = [[1,2],[3,4]];
+    const sums = nums.map((pair, i) => pair[0] + pair[1] + i);
+}
     <p>${sums.length}</>
 </>

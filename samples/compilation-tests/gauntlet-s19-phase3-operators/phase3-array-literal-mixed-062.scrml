@@ -1,11 +1,11 @@
+<program>
 // array of struct literals
 ${
     type Todo:struct = { id: number, text: string }
     const todos = [
         { id: 1, text: "buy milk" },
         { id: 2, text: "walk dog" }
-    ]
+    ];
 }
-<program>
     <p>${todos.length}</>
 </>

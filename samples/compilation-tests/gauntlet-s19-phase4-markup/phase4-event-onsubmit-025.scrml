@@ -1,10 +1,8 @@
 // onsubmit on a form with args.
 <program>
-    ${
         <email> = ""
         <password> = ""
-        function authenticate(e: string, p: string) { let _ = e }
-    }
+        function authenticate(e: string, p: string) { let _ = e; }
     <form onsubmit=authenticate(@email, @password)>
         <input type="text" bind:value=@email/>
         <input type="text" bind:value=@password/>

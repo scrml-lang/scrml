@@ -1,6 +1,8 @@
+<program reset="none">
 // let without initializer
 ${
     let placeholder
-    placeholder = "later"
+    placeholder = "later";
 }
 <p>${placeholder}</>
+</program>

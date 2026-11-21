@@ -1,9 +1,10 @@
+<program reset="none">
 // lift-010-complex.scrml
 // Lift with complex nested structure. Tests: deep lift markup.
 
 <div class="user-list">
     ${
-        let users = ["Alice", "Bob", "Charlie"]
+        let users = ["Alice", "Bob", "Charlie"];
         for (let user of users) {
             lift <div class="user-row">
                 <div class="avatar">
@@ -13,7 +14,8 @@
                     <strong>${user}</>
                     <span class="role">Member</>
                 </div>
-            </div>
+            </div>;
         }
     }
 </div>
+</program>

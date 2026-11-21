@@ -1,6 +1,6 @@
 // Iterate a reactive collection into markup via the canonical `<each>` structural form (§17.7).
 <program>
-    ${ <items> = ["a", "b", "c"] }
+     <items> = ["a", "b", "c"] 
     <ul>
         <each in=@items>
             <li>${@.}</li>

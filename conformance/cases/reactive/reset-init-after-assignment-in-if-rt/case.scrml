@@ -1,10 +1,10 @@
 ${
     <ticks> = 0
     if (true) {
-        @ticks = @ticks + 1
+        @ticks = @ticks + 1;
     }
     function doReset() {
-        reset(@ticks)
+        reset(@ticks);
     }
 }
 <button id="rs" onclick=doReset()>reset</>

@@ -1,3 +1,4 @@
+<program reset="none">
 // comp-006-alert.scrml
 // Alert/notification pattern. Tests: dismissible alert.
 
@@ -5,7 +6,7 @@
     ${
         <showAlert> = true
         function dismiss() {
-            @showAlert = false
+            @showAlert = false;
         }
     }
     <div class="alert alert-info" if=@showAlert>
@@ -13,3 +14,4 @@
         <button onclick=dismiss()>Dismiss</>
     </div>
 </div>
+</program>

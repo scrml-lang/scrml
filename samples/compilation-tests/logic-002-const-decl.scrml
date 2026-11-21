@@ -1,8 +1,10 @@
+<program reset="none">
 // logic-002-const-decl.scrml
 // Const declarations inside logic blocks. Tests: ${ const }.
 
 <div>
-    ${ const greeting = "Hello" }
-    ${ const maxItems = 100 }
+    ${ const greeting = "Hello"; }
+    ${ const maxItems = 100; }
     <p>Page loaded</>
 </div>
+</program>

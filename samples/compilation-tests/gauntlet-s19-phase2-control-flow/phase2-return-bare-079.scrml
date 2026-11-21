@@ -1,14 +1,14 @@
+<program>
 // return inside function (canonical). also: return in match arm body
 ${
     function pick(n: number): string {
         if (n > 0) {
-            return "pos"
+            return "pos";
         }
-        return "neg"
+        return "neg";
     }
-    log(pick(5))
-    function log(s: string) { let _ = s }
+    log(pick(5));
+    function log(s: string) { let _ = s; }
 }
-<program>
     <p>ok</>
 </>

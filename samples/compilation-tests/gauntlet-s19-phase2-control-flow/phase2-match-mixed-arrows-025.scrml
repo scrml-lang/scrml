@@ -1,16 +1,16 @@
+<program>
 // Mixed => and -> in same match body. Spec says both accepted — mixing unclear.
 ${
     type Dir:enum = { North, South, East, West }
-    let d:Dir = .North
+    let d:Dir = .North;
     let s = match d {
-        .North => "up"
-        .South -> "down"
-        .East  => "right"
+        .North => "up",
+        .South -> "down",
+        .East  => "right",
         .West  -> "left"
-    }
-    log(s)
-    function log(s: string) { let _ = s }
+    };
+    log(s);
+    function log(s: string) { let _ = s; }
 }
-<program>
     <p>ok</>
 </>

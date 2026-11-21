@@ -25,9 +25,7 @@
 // machinery. Computed-delay `${expr}<unit>` is supported (rides parseAfterDuration).
 
 <program>
-${
     type SessionState:enum = { Active, Editing, Reviewing, Locked }
-}
 
 <engine for=SessionState initial=.Active>
     <onIdle after=30s to=.Locked/>

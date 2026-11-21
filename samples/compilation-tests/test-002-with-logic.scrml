@@ -1,16 +1,16 @@
+<program reset="none">
 // test-002-with-logic.scrml
 // Test block with reactive vars. Tests: @reactive in test context.
 
 <counter> = 0
 
-${
     function increment() {
-        @counter = @counter + 1
+        @counter = @counter + 1;
     }
-}
 
 <p>${@counter}</>
 
 ~{ "logic tests"
     test "counter starts at zero" { assert @counter == 0 }
 }
+</program>

@@ -1,9 +1,7 @@
+<program>
 // match inside for/lift body (§18.9 allows match inside ${})
-${
     type Status:enum = { Ok, Err }
     <items>: Status[] = [.Ok, .Err, .Ok]
-}
-<program>
     <ul>
         ${ for (let s of @items) {
             lift <li>${ match s {

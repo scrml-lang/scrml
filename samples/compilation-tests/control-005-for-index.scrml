@@ -1,12 +1,14 @@
+<program reset="none">
 // control-005-for-index.scrml
 // For loop with index. Tests: traditional for loop in logic.
 
 <div>
     ${
-        let total = 0
+        let total = 0;
         for (let i = 0; i < 10; i++) {
-            total = total + i
+            total = total + i;
         }
     }
     <p>Sum computed</>
 </div>
+</program>

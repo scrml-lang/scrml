@@ -1,10 +1,10 @@
+<program reset="none">
 // multi-line :enum body, one variant per line
-${
     type ViewMode:enum = {
         Grid
         List
         Table
         Card
     }
-}
 <p>x</>
+</program>

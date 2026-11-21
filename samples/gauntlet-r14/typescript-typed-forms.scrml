@@ -1,3 +1,4 @@
+<program reset="none">
 // gauntlet-r14: typescript dev — typed form with validation and enums
 // Tests R13 fixes: Enum::Variant, nested functions, if= parenthesized expressions
 // New: ~ tilde-decl, enum in conditionals, multiple nested validations
@@ -6,58 +7,58 @@
     ${
         type Status:enum = { Draft, Review, Published }
 
-        @title = ""
-        @content = ""
-        @status = Status::Draft
-        @isDraft = true
-        @isReview = false
-        @isPublished = false
-        @isValid = false
-        @validationMsg = ""
+        @title = "";
+        @content = "";
+        @status = Status::Draft;
+        @isDraft = true;
+        @isReview = false;
+        @isPublished = false;
+        @isValid = false;
+        @validationMsg = "";
 
-        formLabel = "Content Editor v2"
+        formLabel = "Content Editor v2";
 
         function validate() {
             function checkLength(str, min) {
-                return str.length >= min
+                return str.length >= min;
             }
             function checkNotEmpty(str) {
-                return checkLength(str, 1)
+                return checkLength(str, 1);
             }
             function formatError(field, rule) {
-                return field + " " + rule
+                return field + " " + rule;
             }
-            let titleOk = checkNotEmpty(@title)
-            let contentOk = checkLength(@content, 10)
+            let titleOk = checkNotEmpty(@title);
+            let contentOk = checkLength(@content, 10);
             if (!titleOk) {
-                @validationMsg = formatError("Title", "is required")
+                @validationMsg = formatError("Title", "is required");
             }
             if (!contentOk) {
-                @validationMsg = formatError("Content", "must be 10+ chars")
+                @validationMsg = formatError("Content", "must be 10+ chars");
             }
-            @isValid = titleOk && contentOk
-            return @isValid
+            @isValid = titleOk && contentOk;
+            return @isValid;
         }
 
         function submit() {
             if (validate()) {
-                @status = Status::Review
-                @isDraft = false
-                @isReview = true
+                @status = Status::Review;
+                @isDraft = false;
+                @isReview = true;
             }
         }
 
         function publish() {
-            @status = Status::Published
-            @isReview = false
-            @isPublished = true
+            @status = Status::Published;
+            @isReview = false;
+            @isPublished = true;
         }
 
         function backToDraft() {
-            @status = Status::Draft
-            @isDraft = true
-            @isReview = false
-            @isPublished = false
+            @status = Status::Draft;
+            @isDraft = true;
+            @isReview = false;
+            @isPublished = false;
         }
     }
     <h1>${formLabel}</>
@@ -75,3 +76,4 @@
         </div>
     </div>
 </div>
+</program>

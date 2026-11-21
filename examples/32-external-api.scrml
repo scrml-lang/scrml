@@ -26,7 +26,6 @@
 
 <program>
 
-${
   // The request shape for the endpoint — a §53 struct. Its fields are the
   // source for the `${id}` path-template parameter (§60.2): every `${param}`
   // in the path SHALL be a field of the request shape, or the compiler fires
@@ -65,7 +64,6 @@ ${
     Rejected(reason: string)
   }
   <feedback>: FeedbackInput = { rating: 5, note: "great" }
-}
 
 // The `<api>` declaration (§60.2). `base=` is the external HTTP boundary's
 // address; each endpoint binds a name, an optional request shape, an HTTP

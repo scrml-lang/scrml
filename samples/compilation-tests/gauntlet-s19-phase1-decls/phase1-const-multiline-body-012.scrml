@@ -1,9 +1,11 @@
+<program reset="none">
 // const with multi-line object literal
 ${
     const config = {
         timeout: 5000,
         retries: 3,
         endpoint: "/api/v1/users"
-    }
+    };
 }
 <p>${config.endpoint}</>
+</program>

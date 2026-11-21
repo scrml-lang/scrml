@@ -12,12 +12,12 @@ ${
     // Reset page to 1 whenever the search query changes.
     // Body does NOT run on mount — only on subsequent changes.
     when @query changes {
-        @page = 1
+        @page = 1;
     }
 
     // Effect that reads a variable not in the dep list — valid, dep list is explicit.
     when @page changes {
-        @status = "loading"
+        @status = "loading";
     }
 }
 

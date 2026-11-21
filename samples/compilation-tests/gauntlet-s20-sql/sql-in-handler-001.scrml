@@ -4,10 +4,10 @@
 < db src="./test.db" tables="items">
 ${
   server function deleteItem(id) {
-    ?{`DELETE FROM items WHERE id = ${id}`}.run()
+    ?{`DELETE FROM items WHERE id = ${id}`}.run();
   }
 }
 <div>
-  <button onclick={ deleteItem(5) !{ .Transport(_) :> return } }>Delete</>
+  <button onclick={ deleteItem(5) !{ .Transport(_) :> return }; }>Delete</>
 </div>
 </>

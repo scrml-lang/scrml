@@ -1,3 +1,4 @@
+<program>
 // engine-modern-001-basic — minimal §51.0 modern engine (state-children form).
 //
 // Modern form (§51.0.B + §51.0.F): state-children carry `rule=` attributes that
@@ -14,17 +15,13 @@
 // false-positive `E-ENGINE-005` previously fired by `parseMachineRules` on
 // state-child bodies.
 
-${
     type PhaseTag:enum = { Idle, Loading, Done }
-}
 
 <engine for=PhaseTag initial=.Idle>
     <Idle rule=.Loading></>
     <Loading rule=.Done></>
     <Done rule=.Idle></>
 </>
-
-<program>
 <div class="phase-app">
     <h1>Phase: ${@phaseTag.variant}</>
     <button onclick=${@phaseTag = PhaseTag.Loading}>Start</>

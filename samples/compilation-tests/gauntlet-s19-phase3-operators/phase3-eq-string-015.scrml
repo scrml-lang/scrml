@@ -1,11 +1,11 @@
+<program>
 // `==` on strings
 ${
-    let a = "hello"
-    let b = "world"
+    let a = "hello";
+    let b = "world";
     if (a == b) {
-        let _same = 1
+        let _same = 1;
     }
 }
-<program>
     <p>ok</>
 </>

@@ -1,16 +1,16 @@
+<program reset="none">
 // Both branches consume — valid
-${
-    function fetchToken() { return "tok" }
-    function adminAuth(t) { return "admin:" + t }
-    function userAuth(t) { return "user:" + t }
+    function fetchToken() { return "tok"; }
+    function adminAuth(t) { return "admin:" + t; }
+    function userAuth(t) { return "user:" + t; }
 
     function run(isAdmin) {
-        lin token = fetchToken()
+        lin token = fetchToken();
         if (isAdmin) {
-            return adminAuth(token)
+            return adminAuth(token);
         } else {
-            return userAuth(token)
+            return userAuth(token);
         }
     }
-}
 <p>${run(false)}</>
+</program>
