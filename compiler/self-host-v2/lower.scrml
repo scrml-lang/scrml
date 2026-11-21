@@ -1935,6 +1935,19 @@ ${
         return lower == "pre" || lower == "code";
     }
 
+    // s482 (#2041 r2 review LOW-1) — an element whose content the HTML parser reads as TEXT, not
+    // markup: `<textarea>` and `<title>` (RCDATA), `<script>` and `<style>` (raw text). A comment
+    // anchor printed inside one is not a comment in a real browser (`<textarea><!--run--></textarea>`
+    // shows the literal text `<!--run-->`), so a place written inside one is not put among its
+    // children (lowerPlaced): it is put just after the element, like raw content's.
+    fn isTextOnlyElem(e: AElem) -> boolean {
+        if (e.star || e.tag.length == 0) return false;
+        const first: string = e.tag.substring(0, 1);
+        if (first >= "A" && first <= "Z") return false;
+        const t: string = e.tag.toLowerCase();
+        return t == "textarea" || t == "title" || t == "script" || t == "style";
+    }
+
     fn rawViews(c: LC, ns: ANode[]) -> View[] {
         let out: View[] = [];
         for (const n of ns) {
@@ -2922,7 +2935,9 @@ ${
     // content, a `<match>`, `<pre>` / `<code>` raw content — "in its place" names no single
     // point of the one run (the content runs conditionally, per row, or where the component
     // puts its slot), and a file-scope initializer runs ONCE (§7.6): the place is put just
-    // after that construct (INTERIM, g-boot-nested-init-place-in-construct-s481).
+    // after that construct (INTERIM, g-boot-nested-init-place-in-construct-s481). s482: so is one
+    // inside an element the HTML parser reads as text (`<textarea>`, `<title>`, `<script>`,
+    // `<style>` — isTextOnlyElem): an anchor there is text, not a comment (#2041 r2 review LOW-1).
     fn lowerPlaced(c: LC, n: ANode, ms: ConstMark[]) -> View[] {
         const e: AElem | not = elemOf(n);
         if (e is given) {
@@ -2942,7 +2957,7 @@ ${
                     .MStar(decl: d) :> 0,
                     not :> 0
                 };
-                if (kind == 1 && !isRawContentElem(e)) return [View.El(e.tag, noValidate(c, e).concat(htmlAttrs(c, e.attrs)), placedNodes(c, e.kids, ms))];
+                if (kind == 1 && !isRawContentElem(e) && !isTextOnlyElem(e)) return [View.El(e.tag, noValidate(c, e).concat(htmlAttrs(c, e.attrs)), placedNodes(c, e.kids, ms))];
                 if (kind == 2) return placedNodes(c, e.kids, ms);
             }
         }
