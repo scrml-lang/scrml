@@ -717,7 +717,7 @@ ${
             todo = todo.concat([sf.sym.id]);
         }
         let more = true;
-        while (more) {
+        for (; more; ) {
             out = reachClose(p, out, todo);
             todo = [];
             let roots: Node[] = [];
@@ -772,7 +772,7 @@ ${
             }
         }
         let out: int[] = [];
-        while (todo.length > 0) {
+        for (; todo.length > 0; ) {
             const id: int = todo[0];
             todo = todo.slice(1);
             if (out.indexOf(id) < 0) {
@@ -793,7 +793,7 @@ ${
     fn reachClose(p: CoreProgram, out0: int[], todo0: int[]) -> int[] {
         let out: int[] = out0;
         let todo: int[] = todo0;
-        while (todo.length > 0) {
+        for (; todo.length > 0; ) {
             const id: int = todo[0];
             todo = todo.slice(1);
             for (const c of calleesOf(p, id)) {

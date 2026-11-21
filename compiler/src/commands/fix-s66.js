@@ -1518,6 +1518,8 @@ function parseDeclSite(src, node, filePath) {
  *   wrapPageRoot  program-wrap an entry whose root is `<page>` (S475 ruling) — for the twin
  *               generator, where each case is a whole program. The CLI never sets it: in a
  *               project a `<page>` root is a route file, and stays unwrapped (reported).
+ *   loopInterim  the loop rules write the INTERIM impl#1-compilable heads `for (; cond; )` / `for (;;)`
+ *               (fix-loops.js `interim`; PA decision S481, the self-host) instead of `for (cond)` / `for {}`.
  *   verify     compile the structural-only rewrite with impl#1 and withdraw it unless the diagnostic
  *               codes are unchanged (default true).
  * @returns {{ output: string, changed: boolean, applied: Array<{rule:string,line:number,detail:string}>,
@@ -1648,7 +1650,7 @@ export function fixS66(source, opts = {}) {
   if (LOOP_RULES.some((r) => enabled.has(r))) {
     const lr = fixLoops(src, {
       filePath, auxSources: opts.auxSources, verify: opts.verify, inPlaceClean: opts.inPlaceClean,
-      allowNonCompiling: opts.allowNonCompiling, rules: LOOP_RULES.filter((r) => enabled.has(r)),
+      allowNonCompiling: opts.allowNonCompiling, rules: LOOP_RULES.filter((r) => enabled.has(r)), interim: opts.loopInterim === true,
     });
     loopEdits = lr.edits;
     applied.push(...lr.applied);

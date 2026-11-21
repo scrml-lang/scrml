@@ -94,7 +94,7 @@ ${
         let j = i;
         if (j < s.length && isNameStart(charAt(s, j))) {
             j = j + 1;
-            while (j < s.length && isNameChar(charAt(s, j))) { j = j + 1; }
+            for (; j < s.length && isNameChar(charAt(s, j)); ) { j = j + 1; }
         }
         return s.substring(i, j);
     }
@@ -103,7 +103,7 @@ ${
         let j = i;
         if (j < s.length && isRefStart(charAt(s, j))) {
             j = j + 1;
-            while (j < s.length && isRefChar(charAt(s, j))) { j = j + 1; }
+            for (; j < s.length && isRefChar(charAt(s, j)); ) { j = j + 1; }
         }
         return s.substring(i, j);
     }
@@ -112,7 +112,7 @@ ${
     fn skipQuoted(s: string, i: int) -> int {
         const q: string = charAt(s, i);
         let j = i + 1;
-        while (j < s.length) {
+        for (; j < s.length; ) {
             const c: string = charAt(s, j);
             if (c == "\\") {
                 j = j + 2;
@@ -129,7 +129,7 @@ ${
     fn closeOf(s: string, i: int, open: string, close: string) -> int {
         let depth = 0;
         let j = i;
-        while (j < s.length) {
+        for (; j < s.length; ) {
             const c: string = charAt(s, j);
             if (isQuote(c)) {
                 const k: int = skipQuoted(s, j);
@@ -159,7 +159,7 @@ ${
         let depth = 0;
         let start = 0;
         let j = 0;
-        while (j < s.length) {
+        for (; j < s.length; ) {
             const c: string = charAt(s, j);
             if (isQuote(c)) {
                 const k: int = skipQuoted(s, j);
@@ -186,7 +186,7 @@ ${
         let parts: SimpleSel[] = [];
         let j = i;
         let going = true;
-        while (going && j < s.length) {
+        for (; going && j < s.length; ) {
             const c: string = charAt(s, j);
             if (c == "*") {
                 parts = parts.concat([SimpleSel.Universal]);
@@ -258,9 +258,9 @@ ${
         if (head.parts.length == 0) return complexErr("unexpected `" + charAt(t, 0) + "`");
         let links: SelLink[] = [];
         let j: int = head.next;
-        while (j < t.length) {
+        for (; j < t.length; ) {
             let sawSpace = false;
-            while (j < t.length && isSpace(charAt(t, j))) {
+            for (; j < t.length && isSpace(charAt(t, j)); ) {
                 j = j + 1;
                 sawSpace = true;
             }
@@ -270,7 +270,7 @@ ${
                 if (explicit is given) {
                     comb = explicit;
                     j = j + 1;
-                    while (j < t.length && isSpace(charAt(t, j))) { j = j + 1; }
+                    for (; j < t.length && isSpace(charAt(t, j)); ) { j = j + 1; }
                 } else if (!sawSpace) {
                     return complexErr("unexpected `" + charAt(t, j) + "`");
                 }
@@ -326,7 +326,7 @@ ${
         let why: string[] = [];
         let buf = "";
         let j = 0;
-        while (j < t.length) {
+        for (; j < t.length; ) {
             const c: string = charAt(t, j);
             if (isQuote(c)) {
                 const k: int = skipQuoted(t, j);

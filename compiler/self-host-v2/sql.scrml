@@ -130,7 +130,7 @@ ${
     fn scanRun(s: string) -> SScan {
         let toks: STok[] = [];
         let i: int = 0;
-        while (i < s.length) {
+        for (; i < s.length; ) {
             const c: string = ch(s, i);
             if (isSpace(c)) {
                 i = i + 1;
@@ -150,17 +150,17 @@ ${
                 i = r.end;
             } else if (isWordStart(c)) {
                 let j: int = i + 1;
-                while (j < s.length && isWordCh(ch(s, j))) { j = j + 1; }
+                for (; j < s.length && isWordCh(ch(s, j)); ) { j = j + 1; }
                 toks = toks.concat([tok(SK.Word, s.substring(i, j))]);
                 i = j;
             } else if (isDigit(c)) {
                 let j2: int = i + 1;
-                while (j2 < s.length && (isDigit(ch(s, j2)) || ch(s, j2) == ".")) { j2 = j2 + 1; }
+                for (;;) { if (!(j2 < s.length && (isDigit(ch(s, j2)) || ch(s, j2) == "."))) { break; } j2 = j2 + 1; }
                 toks = toks.concat([tok(SK.Num, s.substring(i, j2))]);
                 i = j2;
             } else if (isOpCh(c)) {
                 let j3: int = i + 1;
-                while (j3 < s.length && isOpCh(ch(s, j3))) { j3 = j3 + 1; }
+                for (; j3 < s.length && isOpCh(ch(s, j3)); ) { j3 = j3 + 1; }
                 const op: string = s.substring(i, j3);
                 if (!opOk(op)) return { toks: toks, broken: true };
                 toks = toks.concat([tok(SK.Punct, op)]);
@@ -206,7 +206,7 @@ ${
 
     fn quotedEnd(s: string, i: int, q: string) -> StrEnd {
         let j: int = i + 1;
-        while (j < s.length) {
+        for (; j < s.length; ) {
             if (ch(s, j) == q) {
                 if (ch(s, j + 1) == q) {
                     j = j + 2;
@@ -241,7 +241,7 @@ ${
         const raw: string = sr.chunks.join(" ? ").toLowerCase();
         let t: string = "";
         let i: int = 0;
-        while (i < raw.length) {
+        for (; i < raw.length; ) {
             const c: string = ch(raw, i);
             if (" \t\n\r'\"`".indexOf(c) < 0) t = t + c;
             i = i + 1;
@@ -266,7 +266,7 @@ ${
         let ci: int = 0;
         for (const s of chunks) {
             let i: int = 0;
-            while (i < s.length) {
+            for (; i < s.length; ) {
                 const c: string = ch(s, i);
                 if (state == "") {
                     if (c == "'" || c == "\"" || c == "`") {
@@ -392,7 +392,7 @@ ${
     fn txControlPlain(s: string) -> string {
         for (const part of s.split(";")) {
             let i: int = 0;
-            while (i < part.length && isCtlSpace(ch(part, i))) { i = i + 1; }
+            for (; i < part.length && isCtlSpace(ch(part, i)); ) { i = i + 1; }
             if (i < part.length) {
                 const kw: string = txWordAt(part, i);
                 if (kw != "") return kw;
@@ -406,7 +406,7 @@ ${
         const s: string = chunks.join(" ? ");
         let i: int = 0;
         let atStart = true;
-        while (i < s.length) {
+        for (; i < s.length; ) {
             if (atStart) {
                 i = skipSqlTrivia(s, i);
                 if (i < 0 || i >= s.length) return "";
@@ -424,7 +424,7 @@ ${
                     if (close < 0) return "";
                     i = close + 1;
                 } else if (c == "-" && ch(s, i + 1) == "-") {
-                    while (i < s.length && ch(s, i) != "\n") { i = i + 1; }
+                    for (;;) { if (!(i < s.length && ch(s, i) != "\n")) { break; } i = i + 1; }
                 } else if (c == "/" && ch(s, i + 1) == "*") {
                     const close2: int = s.indexOf("*/", i + 2);
                     if (close2 < 0) return "";
@@ -443,12 +443,12 @@ ${
     // Past whitespace and comments from `i` (-1: an unterminated block comment).
     fn skipSqlTrivia(s: string, i0: int) -> int {
         let i: int = i0;
-        while (i < s.length) {
+        for (; i < s.length; ) {
             const c: string = ch(s, i);
             if (isCtlSpace(c)) {
                 i = i + 1;
             } else if (c == "-" && ch(s, i + 1) == "-") {
-                while (i < s.length && ch(s, i) != "\n") { i = i + 1; }
+                for (;;) { if (!(i < s.length && ch(s, i) != "\n")) { break; } i = i + 1; }
             } else if (c == "/" && ch(s, i + 1) == "*") {
                 const close: int = s.indexOf("*/", i + 2);
                 if (close < 0) return -1;
@@ -465,7 +465,7 @@ ${
 
     fn sqlWordAt(s: string, i: int) -> SqlWord {
         let j: int = i;
-        while (j < s.length && isWordCh(ch(s, j))) { j = j + 1; }
+        for (; j < s.length && isWordCh(ch(s, j)); ) { j = j + 1; }
         return { w: s.substring(i, j).toUpperCase(), end: j };
     }
 
@@ -523,7 +523,7 @@ ${
         const lead: string = at(ts, 0).w;
         if (!isWord(at(ts, 0)) || (lead != "SELECT" && lead != "WITH")) return SqlKind.SqlWrite;
         let i: int = 0;
-        while (i < ts.length) {
+        for (; i < ts.length; ) {
             const t: STok = ts[i];
             if (isWord(t) && isWriteVerb(t.w)) return SqlKind.SqlWrite;
             // A CALL, by construction: ANY token followed by `(` — a word, a
@@ -551,7 +551,7 @@ ${
         let writes: string[] = [];
         let doubt = false;
         let i: int = 0;
-        while (i < ts.length) {
+        for (; i < ts.length; ) {
             const t: STok = ts[i];
             if (isWord(t) && (t.w == "FROM" || t.w == "JOIN")) {
                 const delTarget: boolean = t.w == "FROM" && at(ts, i - 1).w == "DELETE";
@@ -560,7 +560,7 @@ ${
                 } else {
                     let going = true;
                     let j: int = i + 1;
-                    while (going) {
+                    for (; going; ) {
                         const r: TName = tableName(ts, j, true);
                         if (!r.ok) {
                             doubt = true;
@@ -692,7 +692,7 @@ ${
         let i: int = 1;
         if (at(ts, i).w == "RECURSIVE") i = i + 1;
         let depth: int = 0;
-        while (i < ts.length) {
+        for (; i < ts.length; ) {
             const t: STok = ts[i];
             if (isP(t, "(")) depth = depth + 1;
             if (isP(t, ")")) depth = depth - 1;
@@ -726,7 +726,7 @@ ${
     // qualified to another schema.
     fn createsTable(ts: STok[]) -> boolean {
         let i: int = 0;
-        while (i < ts.length) {
+        for (; i < ts.length; ) {
             if (ts[i].w == "CREATE" && isWord(ts[i])) {
                 let j: int = i + 1;
                 let temp = false;
@@ -755,7 +755,7 @@ ${
         if (lead == "WITH") return SqlColumns.ColsUnknown;
         let i: int = 0;
         let depth: int = 0;
-        while (i < ts.length) {
+        for (; i < ts.length; ) {
             if (isP(ts[i], "(")) depth = depth + 1;
             if (isP(ts[i], ")")) depth = depth - 1;
             if (depth == 0 && ts[i].w == "RETURNING" && isWord(ts[i])) return listColumns(ts, i + 1);
@@ -778,7 +778,7 @@ ${
         let depth: int = 0;
         let i: int = from;
         let going = true;
-        while (going) {
+        for (; going; ) {
             const t: STok = at(ts, i);
             const atEnd: boolean = i >= ts.length;
             const isFrom: boolean = depth == 0 && isWord(t) && (t.w == "FROM" || t.w == "WHERE" || t.w == "GROUP" || t.w == "ORDER" || t.w == "LIMIT" || t.w == "UNION");
@@ -859,7 +859,7 @@ ${
         if (at(ts, 0).w != "SELECT" || !isWord(at(ts, 0))) return noProj();
         if (kindOf(ts) != SqlKind.SqlSelect) return noProj();
         let i: int = 0;
-        while (i < ts.length) {
+        for (; i < ts.length; ) {
             const t: STok = ts[i];
             if (i > 0 && isWord(t) && ["SELECT", "JOIN", "UNION", "EXCEPT", "INTERSECT", "WITH"].indexOf(t.w) >= 0) return noProj();
             if (isP(t, ";") && i != ts.length - 1) return noProj();
@@ -870,7 +870,7 @@ ${
         let depth: int = 0;
         let j: int = selectListStart(ts, 1);
         const first: int = j;
-        while (j < ts.length && from < 0) {
+        for (; j < ts.length && from < 0; ) {
             const t2: STok = ts[j];
             if (isP(t2, "(")) depth = depth + 1;
             if (isP(t2, ")")) depth = depth - 1;
@@ -889,7 +889,7 @@ ${
         let star = false;
         let item: STok[] = [];
         let k: int = first;
-        while (k <= from) {
+        for (; k <= from; ) {
             const t3: STok = at(ts, k);
             if (k == from || isP(t3, ",")) {
                 const n: int = item.length;
@@ -951,7 +951,7 @@ ${
         const sc: SScan = scanSql(chunks);
         const ts: STok[] = sc.toks;
         let i: int = 0;
-        while (i < ts.length) {
+        for (; i < ts.length; ) {
             if (isP(ts[i], ";") && i + 1 < ts.length) return { multi: true, plain: false };
             i = i + 1;
         }
@@ -963,7 +963,7 @@ ${
         for (const part of chunks.join(" ? ").split(";")) {
             if (n > 0) {
                 let j: int = 0;
-                while (j < part.length) {
+                for (; j < part.length; ) {
                     if (!isCtlSpace(ch(part, j))) return { multi: true, plain: true };
                     j = j + 1;
                 }
@@ -995,7 +995,7 @@ ${
         let i: int = 0;
         let semi: boolean = semi0;
         let out: string = "";
-        while (i < s.length) {
+        for (; i < s.length; ) {
             const c: string = ch(s, i);
             let next: int = i + 1;
             let comment = false;
@@ -1007,7 +1007,8 @@ ${
                 const w: string = ch(s, i + 2);
                 if (!(w == " " || w == "\t" || w == "\n")) return { state: -1, semi: semi, text: "" };
                 let j: int = i + 2;
-                while (j < s.length && ch(s, j) != "\n") {
+                for (;;) {
+                    if (!(j < s.length && ch(s, j) != "\n")) { break; }
                     if (ch(s, j) == "\r" && ch(s, j + 1) != "\n") return { state: -1, semi: semi, text: "" };
                     j = j + 1;
                 }
@@ -1030,7 +1031,7 @@ ${
                     const r: StrEnd = quotedEnd(s, i, c);
                     if (r.end < 0) return { state: -1, semi: semi, text: "" };
                     let k: int = i + 1;
-                    while (k < r.end - 1) {
+                    for (; k < r.end - 1; ) {
                         const kc: int = ch(s, k).charCodeAt(0);
                         if (ch(s, k) == "\\") return { state: -1, semi: semi, text: "" };
                         if (c == "\"" && (kc < 32 || kc > 126)) return { state: -1, semi: semi, text: "" };
@@ -1039,7 +1040,7 @@ ${
                     next = r.end;
                 } else if (isWordStart(c) || isDigit(c)) {
                     let j2: int = i + 1;
-                    while (j2 < s.length && (isWordCh(ch(s, j2)) || ch(s, j2) == ".")) { j2 = j2 + 1; }
+                    for (;;) { if (!(j2 < s.length && (isWordCh(ch(s, j2)) || ch(s, j2) == "."))) { break; } j2 = j2 + 1; }
                     next = j2;
                 } else if (c == ":") {
                     if (ch(s, i + 1) != ":") return { state: -1, semi: semi, text: "" };
@@ -1148,7 +1149,7 @@ ${
         }
         if (sc.broken) return brokenVerdict(chunks, lead, ts);
         let i: int = 0;
-        while (i < ts.length) {
+        for (; i < ts.length; ) {
             if (isP(ts[i], "?")) return notAdmitted("a `?` driver parameter is outside the closed lexical subset — every value is a bound slot (§8.1)");
             i = i + 1;
         }
@@ -1158,7 +1159,7 @@ ${
         if (lead == "PRAGMA") return pragmaVerdict(ts);
         if (lead == "BEGIN" || lead == "COMMIT" || lead == "ROLLBACK" || lead == "SAVEPOINT" || lead == "RELEASE") {
             let j: int = 1;
-            while (j < ts.length) {
+            for (; j < ts.length; ) {
                 if (!isWord(ts[j])) return notAdmitted("transaction control is admitted followed only by words");
                 j = j + 1;
             }
@@ -1194,7 +1195,7 @@ ${
     // right after `INSERT`, `REPLACE`, or `INSERT OR <word>`.
     fn dmlVerdict(ts: STok[]) -> StmtVerdict {
         let i: int = 0;
-        while (i < ts.length) {
+        for (; i < ts.length; ) {
             if (isWord(ts[i]) && ts[i].w == "INTO") {
                 const p: string = at(ts, i - 1).w;
                 const own: boolean = p == "INSERT" || p == "REPLACE" || (at(ts, i - 2).w == "OR" && at(ts, i - 3).w == "INSERT");
@@ -1209,7 +1210,7 @@ ${
     fn closeParen(ts: STok[], i: int) -> int {
         let depth: int = 0;
         let j: int = i;
-        while (j < ts.length) {
+        for (; j < ts.length; ) {
             if (isP(ts[j], "(")) depth = depth + 1;
             if (isP(ts[j], ")")) {
                 depth = depth - 1;
@@ -1225,7 +1226,7 @@ ${
         let out: int[] = [open + 1];
         let depth: int = 0;
         let j: int = open + 1;
-        while (j < close) {
+        for (; j < close; ) {
             if (isP(ts[j], "(")) depth = depth + 1;
             if (isP(ts[j], ")")) depth = depth - 1;
             if (depth == 0 && isP(ts[j], ",")) out = out.concat([j + 1]);
@@ -1271,7 +1272,7 @@ ${
         }
         // optionally SQLite's `WITHOUT ROWID` / `STRICT`, comma-separated
         let m: int = close + 1;
-        while (m < ts.length) {
+        for (; m < ts.length; ) {
             if (at(ts, m).w == "WITHOUT" && at(ts, m + 1).w == "ROWID") {
                 m = m + 2;
             } else if (at(ts, m).w == "STRICT" && isWord(at(ts, m))) {
@@ -1300,7 +1301,7 @@ ${
         if (isWord(at(ts, j)) && ["CONSTRAINT", "PRIMARY", "UNIQUE", "CHECK", "FOREIGN"].indexOf(at(ts, j).w) >= 0) return notAdmitted("an `ADD` of a constraint is not admitted");
         let depth: int = 0;
         let m: int = j;
-        while (m < ts.length) {
+        for (; m < ts.length; ) {
             if (isP(ts[m], "(")) depth = depth + 1;
             if (isP(ts[m], ")")) depth = depth - 1;
             if (depth == 0 && isP(ts[m], ",")) return notAdmitted("an `ALTER TABLE` adds ONE column");
@@ -1392,7 +1393,7 @@ ${
         if (!isDmlLead(lead)) return notAdmitted("the compiler cannot read it exactly (a comment, a quoting form or a character outside its scanner), and only a DML statement is judged on what can be proved without that reading");
         // the characters the closed lexical subset never admits — anywhere, literals included (fail closed)
         let i: int = 0;
-        while (i < s.length) {
+        for (; i < s.length; ) {
             const c: string = ch(s, i);
             if ("$#@[]\\`{}".indexOf(c) >= 0 || c.charCodeAt(0) > 126) return notAdmitted("it holds `" + c + "`, which the closed lexical subset admits only inside a literal read exactly — and the compiler cannot read this statement exactly");
             i = i + 1;
@@ -1400,10 +1401,10 @@ ${
         // every `into` word is right after `insert` / `replace` / `insert or <word>`
         let words: string[] = [];
         let j: int = 0;
-        while (j < low.length) {
+        for (; j < low.length; ) {
             if (isWordCh(ch(low, j))) {
                 let e: int = j;
-                while (e < low.length && isWordCh(ch(low, e))) { e = e + 1; }
+                for (; e < low.length && isWordCh(ch(low, e)); ) { e = e + 1; }
                 words = words.concat([low.substring(j, e)]);
                 j = e;
             } else {
@@ -1411,7 +1412,7 @@ ${
             }
         }
         let w: int = 0;
-        while (w < words.length) {
+        for (; w < words.length; ) {
             if (words[w] == "into") {
                 let p: string = "";
                 if (w > 0) p = words[w - 1];

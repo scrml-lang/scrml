@@ -646,7 +646,7 @@ ${
         }
         let at: int[] = minusOnes(top + 1);
         let i: int = nids.length - 1;
-        while (i >= 0) {
+        for (; i >= 0; ) {
             // backwards: a node's first entry is written last, and stays
             if (nids[i] >= 0) at[nids[i]] = i;
             i = i - 1;
@@ -658,7 +658,7 @@ ${
     fn minusOnes(n: int) -> int[] {
         if (n <= 0) return [];
         let out: int[] = [-1];
-        while (out.length + out.length <= n) { out = out.concat(out); }
+        for (; out.length + out.length <= n; ) { out = out.concat(out); }
         return out.concat(minusOnes(n - out.length));
     }
 
@@ -1032,7 +1032,7 @@ ${
         if (st.locs.length <= from) return st;
         let ls: LocDecl[] = st.locs.slice(0, from);
         let i: int = from;
-        while (i < st.locs.length) {
+        for (; i < st.locs.length; ) {
             const l: LocDecl = st.locs[i];
             if (l.arm == 1) {
                 ls = ls.concat([{ file: l.file, nid: l.nid, sym: l.sym, name: l.name, span: l.span, arm: 3 }]);
@@ -1337,7 +1337,7 @@ ${
         if (hi - lo <= 8) {
             let out: ATypeDecl[] = [];
             let i: int = lo;
-            while (i < hi) {
+            for (; i < hi; ) {
                 if (!later[i]) out = out.concat(typeItemOf(items[i]));   // s451: a second top-level program is E-PROGRAM-002, not read
                 i = i + 1;
             }
@@ -1485,7 +1485,7 @@ ${
     fn exportTables(files: FileAst[], own: OwnName[], paths: string[]) -> ExpTable[] {
         let done: ExpTable[] = [];
         let left: FileAst[] = files;
-        while (left.length > 0) {
+        for (; left.length > 0; ) {
             let rest: FileAst[] = [];
             let moved = false;
             for (const f of left) {
@@ -1672,7 +1672,7 @@ ${
                 const pre: string = name + sepChar() + kindTag(k) + sepChar();
                 let lo: int = 0;
                 let hi: int = fs.ix.length;
-                while (lo < hi) {
+                for (; lo < hi; ) {
                     const mid: int = Math.floor((lo + hi) / 2);
                     if (fs.ix[mid] < pre) {
                         lo = mid + 1;
@@ -1705,7 +1705,7 @@ ${
         if (hi - lo <= 8) {
             let out: string[] = [];
             let i: int = lo;
-            while (i < hi) {
+            for (; i < hi; ) {
                 const n: ScopeName = names[i];
                 out = out.concat([n.name + sepChar() + kindTag(n.kind) + sepChar() + padPos(i)]);
                 i = i + 1;
@@ -1749,7 +1749,7 @@ ${
 
     fn padPos(i: int) -> string {
         let s: string = "" + i;
-        while (s.length < 9) { s = "0" + s; }
+        for (; s.length < 9; ) { s = "0" + s; }
         return s;
     }
 
@@ -1793,7 +1793,7 @@ ${
         const pre: string = declName + sep + declFile + sep;
         let lo: int = 0;
         let hi: int = ix.keys.length;
-        while (lo < hi) {
+        for (; lo < hi; ) {
             const mid: int = Math.floor((lo + hi) / 2);
             if (ix.keys[mid] < pre) {
                 lo = mid + 1;
@@ -1802,7 +1802,7 @@ ${
             }
         }
         let out: string[] = [];
-        while (lo < ix.keys.length && ix.keys[lo].startsWith(pre)) {
+        for (; lo < ix.keys.length && ix.keys[lo].startsWith(pre); ) {
             const key: string = ix.keys[lo];
             const n: ScopeName = ix.names[parseInt(key.substring(pre.length), 10)];
             if (out.indexOf(n.name) < 0) out = out.concat([n.name]);
@@ -2101,7 +2101,7 @@ ${
         if (from == "") return not;
         const orig: string = scopeOrig(te.link, te.file, NameKind.KDecl, name);
         let i = 0;
-        while (i < te.declNames.length) {
+        for (; i < te.declNames.length; ) {
             if (te.declNames[i] == orig && te.declFiles[i] == from) return te.declSyms[i];
             i = i + 1;
         }
@@ -2866,7 +2866,7 @@ ${
         const pre: string = orig + sepChar() + from + sepChar();
         let lo: int = 0;
         let hi: int = g.fnIx.length;
-        while (lo < hi) {
+        for (; lo < hi; ) {
             const mid: int = Math.floor((lo + hi) / 2);
             if (g.fnIx[mid] < pre) {
                 lo = mid + 1;
@@ -2886,7 +2886,7 @@ ${
         if (hi - lo <= 8) {
             let out: string[] = [];
             let i: int = lo;
-            while (i < hi) {
+            for (; i < hi; ) {
                 const f: FnSrc = fs[i];
                 if (f.info.outer < 0) out = out.concat([f.info.name + sepChar() + f.info.file + sepChar() + padPos(i)]);
                 i = i + 1;
@@ -3099,7 +3099,7 @@ ${
         if (hi - lo <= 8) {
             let out: boolean[] = [];
             let i: int = lo;
-            while (i < hi) {
+            for (; i < hi; ) {
                 out = out.concat([at[src[i]] == 1]);
                 i = i + 1;
             }
@@ -3315,7 +3315,7 @@ ${
         }
         const parts: string[] = rel.split("/");
         let i = 0;
-        while (i < parts.length - 1) {
+        for (; i < parts.length - 1; ) {
             if (parts[i] == "pages" || parts[i] == "routes") return true;
             i = i + 1;
         }
@@ -3888,7 +3888,7 @@ ${
         const slash: int = v.indexOf("/");
         if (slash < 1) return false;
         let i = 0;
-        while (i < slash) {
+        for (; i < slash; ) {
             if ("0123456789".indexOf(v.substring(i, i + 1)) < 0) return false;
             i = i + 1;
         }
@@ -4145,7 +4145,7 @@ ${
     // s478 — did an Error-severity diagnostic join `st` after its first `n`?
     fn errorSince(st: AS, n: int) -> boolean {
         let i: int = n;
-        while (i < st.diags.length) {
+        for (; i < st.diags.length; ) {
             if (st.diags[i].severity == Severity.Error) return true;
             i = i + 1;
         }
@@ -4651,7 +4651,7 @@ ${
     // (F5). Any other binding whose type is not determined is unresolved.
     fn scopeInf(ps: ParamT[], n: string) -> Inf {
         let i = ps.length - 1;
-        while (i >= 0) {
+        for (; i >= 0; ) {
             const p: ParamT = ps[i];
             if (p.name == n) {
                 const t: Type | not = p.ty;
@@ -4669,7 +4669,7 @@ ${
         let seg: string[] = [];
         let viaFn = false;
         let i = at;
-        while (i < stack.length) {
+        for (; i < stack.length; ) {
             const s: string = stack[i];
             if (s.substring(0, 1) == "@") {
                 seg = seg.concat([s.substring(1)]);
@@ -5861,7 +5861,7 @@ ${
         let i = 1;
         let depth = 0;
         const end: int = src.length - 1;
-        while (i < end) {
+        for (; i < end; ) {
             const c: string = src.substring(i, i + 1);
             if (c == "\\") {
                 if (!safeEscape(src.substring(i + 1, i + 2))) return false;
@@ -5918,7 +5918,7 @@ ${
         let i: int = from;
         if (src.substring(i, i + 1) == "^") i = i + 1;
         let first = true;
-        while (i < src.length) {
+        for (; i < src.length; ) {
             const c: string = src.substring(i, i + 1);
             if (c == "]") {
                 if (first) return -1;
@@ -5944,14 +5944,15 @@ ${
     fn quantEnd(src: string, from: int) -> int {
         let i: int = from;
         let digits = 0;
-        while (i < src.length && src.substring(i, i + 1) >= "0" && src.substring(i, i + 1) <= "9") {
+        for (;;) {
+            if (!(i < src.length && src.substring(i, i + 1) >= "0" && src.substring(i, i + 1) <= "9")) { break; }
             i = i + 1;
             digits = digits + 1;
         }
         if (digits == 0) return -1;
         if (src.substring(i, i + 1) == ",") {
             i = i + 1;
-            while (i < src.length && src.substring(i, i + 1) >= "0" && src.substring(i, i + 1) <= "9") { i = i + 1; }
+            for (;;) { if (!(i < src.length && src.substring(i, i + 1) >= "0" && src.substring(i, i + 1) <= "9")) { break; } i = i + 1; }
         }
         if (src.substring(i, i + 1) != "}") return -1;
         return i;
@@ -7075,7 +7076,7 @@ ${
     fn containsHost(ts: TypeInfo[], t: Type) -> boolean {
         let work: Type[] = [t];
         let seen: int[] = [];
-        while (work.length > 0) {
+        for (; work.length > 0; ) {
             const cur: Type = work[work.length - 1];
             work = work.slice(0, work.length - 1);
             if (isHostType(ts, cur)) return true;
@@ -7138,11 +7139,11 @@ ${
             }
         }
         let head: int = 0;
-        while (head < hosty.length) {
+        for (; head < hosty.length; ) {
             const j: int = hosty[head];
             head = head + 1;
             let k: int = 0;
-            while (k < eto.length) {
+            for (; k < eto.length; ) {
                 if (eto[k] == j && hosty.indexOf(efrom[k]) < 0) hosty = hosty.concat([efrom[k]]);
                 k = k + 1;
             }
@@ -7154,7 +7155,7 @@ ${
     fn hostRefId(t0: Type) -> int | not {
         let t: Type = t0;
         let steps: int = 0;
-        while (steps < 64) {
+        for (; steps < 64; ) {
             const mi: Type | not = maybeInner(t);
             const el: Type | not = seqElemOf(t);
             const s: Sym | not = namedOf(t);
@@ -7405,7 +7406,7 @@ ${
         // (`e.classList.add(t)`: the classList read is guarded). The static type is never the proof.
         let inertAt: string[] = [];
         let i: int = 0;
-        while (i < ms.length - 1) {
+        for (; i < ms.length - 1; ) {
             const e0: HEntry | not = findEntry(cur, ms[i], "read");
             if (e0 is not) return hostNotAllowed(name, cur, ms[i], "read");
             if (entryGuards(e0).indexOf("inert-receiver") >= 0) inertAt = inertAt.concat(["inert@" + i]);
@@ -7637,7 +7638,7 @@ ${
         let work: Type[] = [t0];
         let depths: int[] = [0];
         let seen: int[] = [];
-        while (work.length > 0) {
+        for (; work.length > 0; ) {
             const n: int = work.length - 1;
             const t: Type = work[n];
             const depth: int = depths[n];
@@ -7687,7 +7688,7 @@ ${
             if (hb.src == "") return not;
             let all: HostArg[] = [];
             let i: int = 0;
-            while (i < ps.length) {
+            for (; i < ps.length; ) {
                 all = all.concat([HostArg.HParam(i)]);
                 i = i + 1;
             }
@@ -7863,7 +7864,7 @@ ${
         if (twice) return "`" + h + "` is already wrapped by another function in this file — a host function has one type, so it has one wrapper";
         if (c.args.length != fs.f.params.length) return "the call passes " + c.args.length + " argument(s) and `" + fs.info.name + "` takes " + fs.f.params.length + " — the host function receives exactly its wrapper's parameters, in order";
         let i: int = 0;
-        while (i < c.args.length) {
+        for (; i < c.args.length; ) {
             if (exprName(c.args[i]) != fs.f.params[i].name) return "argument " + (i + 1) + " is not the parameter `" + fs.f.params[i].name + "` — the host function receives exactly its wrapper's parameters, in order (its type is the wrapper's signature)";
             i = i + 1;
         }
@@ -8301,7 +8302,7 @@ ${
         if (hi - lo <= 8) {
             let out: AFn[] = [];
             let i: int = lo;
-            while (i < hi) {
+            for (; i < hi; ) {
                 if (!later[i]) out = out.concat(fnItemOf(items[i]));   // s451: a second top-level program is E-PROGRAM-002, not read
                 i = i + 1;
             }
@@ -8334,7 +8335,7 @@ ${
         if (hi - lo <= 8) {
             let out: AConst[] = [];
             let i: int = lo;
-            while (i < hi) {
+            for (; i < hi; ) {
                 if (!later[i]) out = out.concat(constItemOf(items[i]));
                 i = i + 1;
             }
@@ -8869,7 +8870,7 @@ ${
         }
         let members: int[] = [];
         let k = 0;
-        while (k < ns.length) {
+        for (; k < ns.length; ) {
             const path: int[] = derivedPath(es, k, k, []);
             const at: DeclSrc = decls[ns[k].di];
             const fk: FieldInfo = at.info.fields[ns[k].fi];
@@ -9219,7 +9220,7 @@ ${
     // enclosing block (innermost first), else the file-scope one (fnNamed).
     fn fnNamedIn(env: Env, name: string) -> FnInfo | not {
         let i: int = env.nest.fns.length - 1;
-        while (i >= 0) {
+        for (; i >= 0; ) {
             if (env.nest.fns[i].name == name) return env.nest.fns[i];
             i = i - 1;
         }
@@ -9228,7 +9229,7 @@ ${
 
     fn localFnNamed(env: Env, name: string) -> FnInfo | not {
         let i: int = env.nest.fns.length - 1;
-        while (i >= 0) {
+        for (; i >= 0; ) {
             if (env.nest.fns[i].name == name) return env.nest.fns[i];
             i = i - 1;
         }
@@ -9525,7 +9526,7 @@ ${
 
     fn lookupNarrow(env: Env, name: string) -> NarrowB | not {
         let i: int = env.narrows.length - 1;
-        while (i >= 0) {
+        for (; i >= 0; ) {
             if (env.narrows[i].name == name) return env.narrows[i];
             i = i - 1;
         }
@@ -9534,7 +9535,7 @@ ${
 
     fn lookupLocal(env: Env, name: string) -> LocalB | not {
         let i: int = env.locals.length - 1;
-        while (i >= 0) {
+        for (; i >= 0; ) {
             if (env.locals[i].name == name) return env.locals[i];
             i = i - 1;
         }
@@ -9543,7 +9544,7 @@ ${
 
     fn lookupHandle(env: Env, name: string) -> HandleInfo | not {
         let i: int = env.handles.length - 1;
-        while (i >= 0) {
+        for (; i >= 0; ) {
             if (env.handles[i].name == name) return env.handles[i];
             i = i - 1;
         }
@@ -11046,7 +11047,7 @@ ${
     fn aliasedTypeSym(te: TypeEnv, s0: TypeStub) -> Sym | not {
         let s: TypeStub = s0;
         let hops: int = 0;
-        while (hops < 64) {
+        for (; hops < 64; ) {
             const rhs: AType | not = aliasRhs(s);
             if (rhs is not) return s.sym;
             const m: string = aTypeBareName(rhs);
@@ -11223,7 +11224,7 @@ ${
         if (hi - lo <= 8) {
             let out: int[] = [];
             let i: int = lo;
-            while (i < hi) {
+            for (; i < hi; ) {
                 out = out.concat([fs[i].info.sym.id]);
                 i = i + 1;
             }
@@ -12288,7 +12289,7 @@ ${
         // file are read once, not once per function per round
         const scoped: FileFns[] = fnsInScopes(fs, lk);
         let changed = true;
-        while (changed) {
+        for (; changed; ) {
             changed = false;
             let next: int[] = [];
             for (const f of fs) {
@@ -13397,7 +13398,7 @@ ${
         let first = true;
         let same = true;
         let i: int = n0;
-        while (i < st.rets.length) {
+        for (; i < st.rets.length; ) {
             const r: LamRet = st.rets[i];
             if (r.lam == lam.nid) {
                 const t: Type | not = r.ty;
@@ -13459,7 +13460,7 @@ ${
         if (lambdaBlock(lam) is not) ps = lambdaTypedParams(lam);
         const names: string[] = lambdaParams(lam);
         let i = 0;
-        while (i < names.length) {
+        for (; i < names.length; ) {
             const pn: string = names[i];
             let at: AType | not = not;
             let pspan: ASpan = lam.span;
@@ -14379,7 +14380,7 @@ ${
     fn dupKeys(env: Env, ps: AProp[], st0: AS) -> AS {
         let st: AS = st0;
         let j = 0;
-        while (j < ps.length) {
+        for (; j < ps.length; ) {
             if (!ps[j].spread && keyBefore(ps, j)) st = dupOverride(env, st, ps[j]);
             j = j + 1;
         }
@@ -14389,7 +14390,7 @@ ${
     // Is prop `j`'s key named by an earlier (non-spread) prop?
     fn keyBefore(ps: AProp[], j: int) -> boolean {
         let k = 0;
-        while (k < j) {
+        for (; k < j; ) {
             if (!ps[k].spread && ps[k].name == ps[j].name) return true;
             k = k + 1;
         }
@@ -14760,7 +14761,7 @@ ${
     fn reachableVariants(g: TransitionGraph, initial: int) -> int[] {
         let seen: int[] = [initial];
         let i = 0;
-        while (i < seen.length) {
+        for (; i < seen.length; ) {
             const at: int = seen[i];
             for (const e of g.edges) {
                 if (e.origin == at) {
@@ -15524,7 +15525,7 @@ ${
     // Does `ch` name `what` before position `upto`?
     fn sinkChainHas(ch: string[], upto: int, what: string) -> boolean {
         let i = 0;
-        while (i < upto && i < ch.length) {
+        for (; i < upto && i < ch.length; ) {
             if (ch[i] == what) return true;
             i = i + 1;
         }
@@ -15551,13 +15552,13 @@ ${
         const ch: string[] = deepChain(e);
         let j: int = -1;
         let i = 0;
-        while (i < ch.length) {
+        for (; i < ch.length; ) {
             if (attrNodeMember(ch[i])) j = i;
             i = i + 1;
         }
         if (j < 0) return false;
         let k: int = j + 1;
-        while (k < ch.length) {
+        for (; k < ch.length; ) {
             const r: string = ch[k];
             if (r == "length" || r == "name" || r == "localName" || r == "namespaceURI" || r == "prefix" || r == "specified" || attrNodeValueMember(r)) return false;
             k = k + 1;
@@ -15647,7 +15648,7 @@ ${
             if (cw != "") return cw;
         }
         let i = 0;
-        while (i < ch.length) {
+        for (; i < ch.length; ) {
             const s: string = ch[i];
             const kind: string = logicCallSink(s);
             const isLast: boolean = i == last;
@@ -15720,7 +15721,7 @@ ${
             if (t is given) {
                 const typed: boolean = sinkView(t).kind == 6 || sinkScrmlTyped(env, t);
                 let j = 1;
-                while (j < args.length) {
+                for (; j < args.length; ) {
                     const sv: SinkView = sinkView(args[j]);
                     if (sv.kind == 6) {
                         const w: string = sinkPropsWhy(env, t, sv.props, typed, ch[1] == "defineProperties");
@@ -16028,7 +16029,7 @@ ${
         st = resolveHandleSubject(env, ps[0].value, st).st;
         let ws: SpreadWrite[] = [];
         let j = 1;
-        while (j < ps.length) {
+        for (; j < ps.length; ) {
             const pr: AProp = ps[j];
             const i: int = fieldIndex(d.info, pr.name);
             if (overriddenBefore(ps, j)) {
@@ -16097,7 +16098,7 @@ ${
     // RULED S440: a spread-override literal names each field at most once.
     fn overriddenBefore(ps: AProp[], j: int) -> boolean {
         let k = 1;
-        while (k < j) {
+        for (; k < j; ) {
             if (ps[k].name == ps[j].name) return true;
             k = k + 1;
         }
@@ -16206,7 +16207,7 @@ ${
         if (ps.length == 0) return false;
         if (!ps[0].spread) return false;
         let i = 1;
-        while (i < ps.length) {
+        for (; i < ps.length; ) {
             if (ps[i].spread) return false;
             i = i + 1;
         }
@@ -16277,7 +16278,7 @@ ${
         st = resolveExpr(env, ps[0].value, f.ty, st).st;
         let ws: SpreadWrite[] = [];
         let j = 1;
-        while (j < ps.length) {
+        for (; j < ps.length; ) {
             const pr: AProp = ps[j];
             let idx: int = -1;
             let i = 0;
@@ -17015,7 +17016,7 @@ ${
         let k = 0;
         let cur: AExpr | not = v;
         let walking = true;
-        while (walking && k < n) {
+        for (; walking && k < n; ) {
             walking = false;
             if (cur is given) {
                 const ps: AProp[] = propsOf(cur);
@@ -17038,7 +17039,7 @@ ${
         let at: string = label;
         let t: Type = unMaybe(ty);
         let i = 0;
-        while (i < k) {
+        for (; i < k; ) {
             at = at + "." + segs[i];
             const ft: Type | not = fieldTypeIn(types, t, segs[i]);
             if (ft is not) return keepWords;
@@ -17062,7 +17063,7 @@ ${
         let t: Type = unMaybe(ty);
         let at: string = label;
         let i = 0;
-        while (i < segs.length - 1) {
+        for (; i < segs.length - 1; ) {
             const ft: Type | not = fieldTypeIn(types, t, segs[i]);
             if (ft is not) return "";
             at = at + "." + segs[i];
@@ -17500,7 +17501,7 @@ ${
     fn boundEnd(t: string) -> int {
         if (t.length == 0) return -1;
         let i: int = 0;
-        while (i < t.length) {
+        for (; i < t.length; ) {
             if ("0123456789".indexOf(t.slice(i, i + 1)) < 0) return -1;
             i = i + 1;
         }
@@ -20200,7 +20201,7 @@ ${
     fn samePayload(a: VariantDef, b: VariantDef) -> boolean {
         if (a.fields.length != b.fields.length) return false;
         let i = 0;
-        while (i < a.fields.length) {
+        for (; i < a.fields.length; ) {
             if (!(a.fields[i].ty == b.fields[i].ty)) return false;
             i = i + 1;
         }
@@ -21644,7 +21645,7 @@ ${
         let st: AS = st1;
         let env2: Env = env;
         let i = 0;
-        while (i < n - 1) {
+        for (; i < n - 1; ) {
             const r: RB = resolveStmt(env2, b.stmts[i], st);
             env2 = r.env;
             st = r.st;
@@ -21680,7 +21681,7 @@ ${
         let st: AS = st0;
         let env2: Env = env;
         let i = 0;
-        while (i < n - 1) {
+        for (; i < n - 1; ) {
             const r: RB = resolveStmt(env2, b.stmts[i], st);
             env2 = r.env;
             st = r.st;
@@ -22566,7 +22567,7 @@ ${
     fn reqHint(id: string) -> string {
         let out: string = "";
         let i: int = 0;
-        while (i < id.length) {
+        for (; i < id.length; ) {
             const c: int = id.charCodeAt(i);
             if ((c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57)) {
                 out = out + id.substring(i, i + 1);
@@ -22801,7 +22802,7 @@ ${
         let h: int = v;
         let out: string = "";
         let k: int = 0;
-        while (k < 4) {
+        for (; k < 4; ) {
             const d: int = h % 16;
             out = "0123456789abcdef".substring(d, d + 1) + out;
             h = (h - d) / 16;
@@ -23764,7 +23765,7 @@ ${
         let elem: Type | not = not;
         let known = true;
         let i: int = n0;
-        while (i < st.lifts.length) {
+        for (; i < st.lifts.length; ) {
             const l: LiftSeen = st.lifts[i];
             if (l.into == into.id) {
                 count = count + 1;
@@ -24087,7 +24088,7 @@ ${
     fn plainParamName(n: string) -> boolean {
         if (n == "") return false;
         let i: int = 0;
-        while (i < n.length) {
+        for (; i < n.length; ) {
             const c: string = n.substring(i, i + 1);
             const letter: boolean = (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || c == "_";
             const digit: boolean = c >= "0" && c <= "9";
@@ -25047,10 +25048,10 @@ ${
     fn loopDupLabels(file: string, ls: LabelAt[], st0: AS) -> AS {
         let st: AS = st0;
         let j: int = 0;
-        while (j < ls.length) {
+        for (; j < ls.length; ) {
             let i: int = 0;
             let dup = false;
-            while (i < j) {
+            for (; i < j; ) {
                 if (!dup && ls[i].name == ls[j].name) {
                     st = addDiag(st, file, ls[j].span, "E-LOOP-006", "the label `" + ls[j].name + "` is already used by the loop at " + offsetOf(ls[i].span) + " in this body — loop labels are unique within a function body (§49.2.2, §49.4.2); rename one");
                     dup = true;
@@ -25116,7 +25117,7 @@ ${
             // program's — an unlabelled jump passes over its frame (§49.9)
             let j: int = stack.length - 1;
             let overIf = false;
-            while (j >= 0 && stack[j].label == tier0IfLabel()) {
+            for (; j >= 0 && stack[j].label == tier0IfLabel(); ) {
                 overIf = true;
                 j = j - 1;
             }
@@ -25129,7 +25130,7 @@ ${
         }
         let i: int = stack.length - 1;
         let crossed = false;
-        while (i >= 0) {
+        for (; i >= 0; ) {
             if (stack[i].label == label) {
                 // s469 (§49.6 rule 6): past a bound loop's own frame, a label names a loop outside it
                 if (crossed) return addDiag(st, file, s.span, "E-LOOP-005", "`" + kw + " " + label + "` attempts to exit a loop outside the bound loop that contains it — `" + kw + "` cannot leave a loop bound as a value for a loop outside it (§49.4.3, §49.6 rule 6). Restructure so the loop control is not inside the bound loop, or lift a signal value and handle it after the loop");
@@ -26190,16 +26191,16 @@ ${
     fn elemFactNow(st: AS, nid: int) -> ElemFact | not {
         const t: ElemTable = st.facts.elems;
         let i: int = t.nids.length - 1;
-        while (i >= 0) {
+        for (; i >= 0; ) {
             if (t.nids[i] == nid) return t.facts[i];
             i = i - 1;
         }
         let c: int = st.facts.old.length - 1;
-        while (c >= 0) {
+        for (; c >= 0; ) {
             const ct: ElemTable = st.facts.old[c].elems;
             let j: int = ct.nids.length - 1;
             if (!chunkMay(st.facts.old[c], 3, nid)) j = -1;
-            while (j >= 0) {
+            for (; j >= 0; ) {
                 if (ct.nids[j] == nid) return ct.facts[j];
                 j = j - 1;
             }
@@ -26416,7 +26417,7 @@ ${
         };
         if (!binary) return st;
         let i: int = before;
-        while (i < st.diags.length) {
+        for (; i < st.diags.length; ) {
             if (st.diags[i].code == "E-SCOPE-001") return st;
             i = i + 1;
         }
@@ -26579,7 +26580,7 @@ ${
 
     fn hasNul(t: string) -> boolean {
         let i: int = 0;
-        while (i < t.length) {
+        for (; i < t.length; ) {
             if (t.charCodeAt(i) == 0) return true;
             i = i + 1;
         }
@@ -27273,7 +27274,7 @@ ${
         let runSpan: ASpan = mkSpan(0, 0);
         let inRun = false;
         let i: int = 0;
-        while (i <= kids.length) {
+        for (; i <= kids.length; ) {
             let piece = "";
             let isText = false;
             if (i < kids.length) {
@@ -27332,7 +27333,7 @@ ${
     // "Tap if (and only if) ready" — is never refused.
     fn controlFlowHead(t: string) -> string {
         let i: int = 0;
-        while (i < t.length) {
+        for (; i < t.length; ) {
             if (i == 0 || !isWordChar(t.substring(i - 1, i))) {
                 const kw: string = cfKeywordAt(t, i);
                 if (kw != "" && cfStatementAt(t, i + kw.length, kw)) return kw;
@@ -27367,7 +27368,7 @@ ${
         }
         if (c != "(") return false;
         let k: int = t.indexOf(")", j + 1);
-        while (k >= 0) {
+        for (; k >= 0; ) {
             const m: int = skipBlank(t, k + 1);
             if (m < t.length && t.substring(m, m + 1) == "{") return true;
             k = t.indexOf(")", k + 1);
@@ -27377,7 +27378,7 @@ ${
 
     fn skipBlank(t: string, from: int) -> int {
         let m: int = from;
-        while (m < t.length && t.substring(m, m + 1).trim() == "") { m = m + 1; }
+        for (;;) { if (!(m < t.length && t.substring(m, m + 1).trim() == "")) { break; } m = m + 1; }
         return m;
     }
 
@@ -28552,7 +28553,7 @@ ${
         let out: string[] = [];
         let cur: string = "";
         let i: int = 0;
-        while (i < text.length) {
+        for (; i < text.length; ) {
             const c: string = text.substring(i, i + 1);
             if (c == " " || c == "\t" || c == "\n" || c == "\r") {
                 if (cur != "") out = out.concat([cur]);
@@ -28576,7 +28577,7 @@ ${
         if (tok0 == "") return false;
         const parts: string[] = tok0.split(":");
         let i: int = 0;
-        while (i < parts.length - 1) {
+        for (; i < parts.length - 1; ) {
             if (!isTwVariant(parts[i])) return false;
             i = i + 1;
         }
@@ -28669,7 +28670,7 @@ ${
         if (v == "") return false;
         let i: int = 0;
         let digits: int = 0;
-        while (i < v.length) {
+        for (; i < v.length; ) {
             const c: string = v.substring(i, i + 1);
             if ("0123456789".indexOf(c) >= 0) {
                 digits = digits + 1;
@@ -28908,7 +28909,7 @@ ${
         const letters: string = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
         if (letters.indexOf(n.substring(0, 1)) < 0) return false;
         let i: int = 1;
-        while (i < n.length) {
+        for (; i < n.length; ) {
             const c: string = n.substring(i, i + 1);
             if (letters.indexOf(c) < 0 && "0123456789_-".indexOf(c) < 0) return false;
             i = i + 1;
@@ -29690,7 +29691,7 @@ ${
 
     fn allCovered(covered: int[], n: int) -> boolean {
         let i = 0;
-        while (i < n) {
+        for (; i < n; ) {
             if (covered.indexOf(i) < 0) return false;
             i = i + 1;
         }
@@ -29866,10 +29867,10 @@ ${
         let st: AS = st0;
         let done: ConstInfo[] = [];
         let i = 0;
-        while (i < g.consts.length) {
+        for (; i < g.consts.length; ) {
             let rest: ConstInfo[] = [];
             let j = i;
-            while (j < g.consts.length) {
+            for (; j < g.consts.length; ) {
                 rest = rest.concat([constAs(g.consts[j], g.consts[j].ty, false, g.consts[j].ok)]);
                 j = j + 1;
             }
@@ -30902,7 +30903,7 @@ ${
         let lids: int[] = [];
         let lat: int[] = [];
         let i: int = 0;
-        while (i < ss.length) {
+        for (; i < ss.length; ) {
             const b: int = topBindId(t, ss[i]);
             if (b >= 0) {
                 lids = lids.concat([b]);
@@ -30930,7 +30931,7 @@ ${
             calls = calls.concat([k]);
         }
         let changed = true;
-        while (changed) {
+        for (; changed; ) {
             changed = false;
             let next: int[][] = [];
             let j: int = 0;
@@ -30951,7 +30952,7 @@ ${
         }
         let out: Diag[] = [];
         i = 0;
-        while (i < ss.length) {
+        for (; i < ss.length; ) {
             for (const x of stmtNameExprs(ss[i])) {
                 const fsy: int = fnSymOfName(t, x.nid);
                 const fi: int = fids.indexOf(fsy);
@@ -31053,7 +31054,7 @@ ${
     // The index of the first of `names[0 .. j)` equal to `names[j]`, else -1.
     fn earlierSame(names: string[], j: int) -> int {
         let i = 0;
-        while (i < j) {
+        for (; i < j; ) {
             if (names[i] == names[j]) return i;
             i = i + 1;
         }
@@ -31219,7 +31220,7 @@ ${
             let names: string[] = [];
             for (const f of d.fields) { names = names.concat([f.sym.hint]); }
             let j = 0;
-            while (j < names.length) {
+            for (; j < names.length; ) {
                 const i: int = earlierSame(names, j);
                 if (i >= 0) {
                     const f: FieldInfo = d.fields[j];
@@ -31326,7 +31327,7 @@ ${
     // The position of `file` in link order (`files`); an unknown file sorts last.
     fn fileRank(files: FileAst[], file: string) -> int {
         let i = 0;
-        while (i < files.length) {
+        for (; i < files.length; ) {
             if (files[i].path == file) return i;
             i = i + 1;
         }
@@ -31508,7 +31509,7 @@ ${
         const pre: string = name + sepChar();
         let lo: int = 0;
         let hi: int = keys.length;
-        while (lo < hi) {
+        for (; lo < hi; ) {
             const mid: int = Math.floor((lo + hi) / 2);
             if (keys[mid] < pre) {
                 lo = mid + 1;
@@ -31517,7 +31518,7 @@ ${
             }
         }
         let out: FileName[] = [];
-        while (lo < keys.length && keys[lo].startsWith(pre)) {
+        for (; lo < keys.length && keys[lo].startsWith(pre); ) {
             out = out.concat([ns[parseInt(keys[lo].substring(pre.length), 10)]]);
             lo = lo + 1;
         }
@@ -31594,7 +31595,7 @@ ${
         let names: string[] = [];
         for (const p of ps) { names = names.concat([p.name]); }
         let j = 0;
-        while (j < names.length) {
+        for (; j < names.length; ) {
             const i: int = earlierSame(names, j);
             if (i >= 0) {
                 out = out.concat([mkDiag(file, ps[j].span, "E-BOOTSTRAP-REDECLARE", "parameter `" + names[j] + "` is already declared (at " + offsetOf(ps[i].span) + ") — a parameter list names each parameter once (the SPEC names no code for this; bootstrap-local)")]);
@@ -31626,11 +31627,11 @@ ${
             if (d.sym.id != t.program.id) users = users.concat([d]);
         }
         let j = 0;
-        while (j < users.length) {
+        for (; j < users.length; ) {
             const d: DeclInfo = users[j];
             let i = 0;
             let hit = false;
-            while (i < j && !hit) {
+            for (; i < j && !hit; ) {
                 const m: DeclInfo = users[i];
                 const kb: string = t.css.keyBase;
                 if (m.file != d.file && m.sym.hint == d.sym.hint && declScopeKey(kb, m.file, m.sym.hint) == declScopeKey(kb, d.file, d.sym.hint)) {
@@ -31661,7 +31662,7 @@ ${
             }
         }
         let j = 0;
-        while (j < names.length) {
+        for (; j < names.length; ) {
             const i: int = earlierSame(names, j);
             if (i >= 0) {
                 const f: FnInfo = fns[j];
@@ -31968,11 +31969,11 @@ ${
             }
         }
         let j = 0;
-        while (j < t.handles.length) {
+        for (; j < t.handles.length; ) {
             const h: HandleInfo = t.handles[j];
             let dup: HandleInfo | not = not;
             let i = 0;
-            while (i < j) {
+            for (; i < j; ) {
                 const o: HandleInfo = t.handles[i];
                 if (dup is not && o.owner == h.owner && o.name == h.name) dup = o;
                 i = i + 1;
@@ -32034,7 +32035,7 @@ ${
                     if (hasDefer) out = out.concat([mkDiag(file, lf.span, "E-DEFER-DUPLICATE-FUNCTION", "`function " + lf.name + "` is declared twice in a block that contains a `defer` (here and at " + offsetOf(fnSpans[fi]) + ") — the deferred block is lowered to a host `try` block, where a second declaration of one function name is not allowed (§19.16.6); rename one, or remove one declaration")]);
                 } else {
                     let j: int = nParams;
-                    while (j < names.length) {
+                    for (; j < names.length; ) {
                         if (names[j] == lf.name) out = out.concat([redeclareDiag(file, lf.name, lf.span, spans[j], false, inFn)]);
                         j = j + 1;
                     }
@@ -32344,7 +32345,7 @@ ${
         }
         let at: int[] = minusOnes(top + 1);
         let i: int = exprs.length - 1;
-        while (i >= 0) {
+        for (; i >= 0; ) {
             if (exprs[i].nid >= 0) at[exprs[i].nid] = i;
             i = i - 1;
         }
@@ -33078,7 +33079,7 @@ ${
         if (hi - lo <= 8) {
             let out: string[] = [];
             let i: int = lo;
-            while (i < hi) {
+            for (; i < hi; ) {
                 let k: string = ws[i].name;
                 if (byNid) k = padPos(ws[i].nid);
                 out = out.concat([k + sepChar() + padPos(i)]);
@@ -33095,7 +33096,7 @@ ${
         const pre: string = key + sepChar();
         let lo: int = 0;
         let hi: int = keys.length;
-        while (lo < hi) {
+        for (; lo < hi; ) {
             const mid: int = Math.floor((lo + hi) / 2);
             if (keys[mid] < pre) {
                 lo = mid + 1;
@@ -33104,7 +33105,7 @@ ${
             }
         }
         let out: FnW[] = [];
-        while (lo < keys.length && keys[lo].startsWith(pre)) {
+        for (; lo < keys.length && keys[lo].startsWith(pre); ) {
             out = out.concat([ws[parseInt(keys[lo].substring(pre.length), 10)]]);
             lo = lo + 1;
         }
@@ -33214,7 +33215,7 @@ ${
         }
         let changed = true;
         let pass = 0;
-        while (changed && pass < ws.length + 2) {
+        for (; changed && pass < ws.length + 2; ) {
             changed = false;
             let next: FnW[] = [];
             // s477 (s477-boot-compile-perf): `ws` is fixed for the whole pass, so the write sets in
@@ -33326,7 +33327,7 @@ ${
 
     fn findLocalT(ls: LocalT[], id: int) -> VType | not {
         let i: int = ls.length - 1;
-        while (i >= 0) {
+        for (; i >= 0; ) {
             if (ls[i].id == id) return ls[i].vt;
             i = i - 1;
         }
@@ -34384,7 +34385,7 @@ ${
         }
         if (a.ps.length != b.ps.length) return Verdict.Fails;
         let i = 0;
-        while (i < a.ps.length) {
+        for (; i < a.ps.length; ) {
             if (!sameType(a.ps[i], b.ps[i])) return Verdict.Fails;
             i = i + 1;
         }
@@ -37346,7 +37347,7 @@ ${
         }
         if (pnids.length != args.length) return ts;
         let i = 0;
-        while (i < args.length) {
+        for (; i < args.length; ) {
             let pt: Type | not = knownOf(paramType(bindFact(env.t.binds, pnids[i])));
             if (env.t.unresolved.params.indexOf(pnids[i]) >= 0) pt = not;      // r8: an unresolved parameter type
             if (pt is given) {
@@ -37571,7 +37572,7 @@ ${
         if (n != args.length) ts = report(ts, env, e.span, "E-CALL-ARITY", "the function value `" + name + "` is `" + fnTypeName(ft.ps, ft.ret, ft.pure, ft.err) + "`, which takes " + n + " argument(s), and is called with " + args.length + " (§7.3, E-CALL-ARITY: a call is checked against the signature it calls)");
         if (n == args.length) {
             let i = 0;
-            while (i < args.length) {
+            for (; i < args.length; ) {
                 const what: string = "argument " + (i + 1) + " of the function value `" + name + "`";
                 ts = checkValue(env, exprType0(ts, args[i].nid), ft.ps[i], args[i].span, what, ts);
                 ts = checkNotElems(env, args[i], ft.ps[i], ts);
@@ -39092,15 +39093,15 @@ ${
     fn exprType0(ts: TypeState, nid: int) -> VType {
         const t: ExprType[] = ts.exprs.tail;
         let i: int = t.length - 1;
-        while (i >= 0) {
+        for (; i >= 0; ) {
             if (t[i].nid == nid) return t[i].vt;
             i = i - 1;
         }
         let c: int = ts.exprs.old.length - 1;
-        while (c >= 0) {
+        for (; c >= 0; ) {
             const xs: ExprType[] = ts.exprs.old[c];
             let j: int = xs.length - 1;
-            while (j >= 0) {
+            for (; j >= 0; ) {
                 if (xs[j].nid == nid) return xs[j].vt;
                 j = j - 1;
             }
@@ -39894,7 +39895,7 @@ ${
         let prev: LocalT[] = [];
         let pass = 0;
         let bound = 2;
-        while (pass < bound) {
+        for (; pass < bound; ) {
             const ts: TypeState = typePass(files, t, settled, prior, lk);
             const next: LocalT[] = joinContribs(ts.contribs);
             if (pass == 0) bound = 3 * next.length + 2;
@@ -39944,7 +39945,7 @@ ${
         if (hi - lo <= 8) {
             let out: ASpan[] = [];
             let i: int = lo;
-            while (i < hi) {
+            for (; i < hi; ) {
                 const d: Diag = ds[i];
                 if (d.file == path && d.severity == Severity.Error) out = out.concat([d.span]);
                 i = i + 1;
@@ -41359,7 +41360,7 @@ ${
             next = next.concat([ns]);
         }
         let i: int = 0;
-        while (i < rs.length) {
+        for (; i < rs.length; ) {
             // breadth-first from i's followers, keeping each reached request's predecessor
             let from: int[] = [];
             for (const x of rs) { from = from.concat([-2]); }
@@ -41371,7 +41372,7 @@ ${
                 }
             }
             let k: int = 0;
-            while (k < todo.length && from[i] == -2) {
+            for (; k < todo.length && from[i] == -2; ) {
                 const c: int = todo[k];
                 k = k + 1;
                 for (const n of next[c]) {
@@ -41386,7 +41387,7 @@ ${
                 let back: int[] = [];
                 let c2: int = from[i];
                 let guard: int = 0;
-                while (c2 != i && guard < rs.length) {
+                for (; c2 != i && guard < rs.length; ) {
                     back = [c2].concat(back);
                     c2 = from[c2];
                     guard = guard + 1;
@@ -41525,7 +41526,7 @@ ${
             if (li is given) todo = todo.concat(calledSyms(t, li));
         }
         let k: int = 0;
-        while (k < todo.length) {
+        for (; k < todo.length; ) {
             const sym: int = todo[k];
             k = k + 1;
             if (seen.indexOf(sym) < 0) {
@@ -41615,7 +41616,7 @@ ${
         let roots: int[] = [];
         let calls: int = 0;
         let k: int = 0;
-        while (k < todo.length) {
+        for (; k < todo.length; ) {
             const sym: int = todo[k];
             k = k + 1;
             if (seen.indexOf(sym) < 0) {
@@ -41648,7 +41649,7 @@ ${
         let seen: int[] = [];
         let todo: int[] = roots;
         let k: int = 0;
-        while (k < todo.length) {
+        for (; k < todo.length; ) {
             const sym: int = todo[k];
             k = k + 1;
             if (seen.indexOf(sym) < 0) {
@@ -41956,7 +41957,7 @@ ${
         let seen: int[] = [];
         let reads = false;
         let cells: int[] = [];
-        while (todo.length > 0) {
+        for (; todo.length > 0; ) {
             const s: int = todo[0];
             todo = todo.slice(1);
             if (seen.indexOf(s) < 0) {
@@ -42998,12 +42999,12 @@ ${
     fn durationText(s: string) -> DurParse {
         if (s.indexOf(dollarBrace()) == 0) return { ms: 0, why: "", computed: true };
         let i: int = 0;
-        while (i < s.length && s.charAt(i) >= "0" && s.charAt(i) <= "9") { i = i + 1; }
+        for (;;) { if (!(i < s.length && s.charAt(i) >= "0" && s.charAt(i) <= "9")) { break; } i = i + 1; }
         if (i == 0) return durBad("`" + s + "` does not begin with a non-negative number");
         if (i < s.length && s.charAt(i) == ".") {
             const f0: int = i + 1;
             i = f0;
-            while (i < s.length && s.charAt(i) >= "0" && s.charAt(i) <= "9") { i = i + 1; }
+            for (;;) { if (!(i < s.length && s.charAt(i) >= "0" && s.charAt(i) <= "9")) { break; } i = i + 1; }
             if (i == f0) return durBad("`" + s + "` has no digit after its `.`");
         }
         const unit: string = s.substring(i);
@@ -44378,7 +44379,7 @@ ${
         if (colon <= 0) return "";
         const s: string = v.substring(0, colon);
         let i: int = 0;
-        while (i < s.length) {
+        for (; i < s.length; ) {
             const c: string = s.substring(i, i + 1);
             const ok: boolean = c.toUpperCase() != c.toLowerCase() || "0123456789+.-".indexOf(c) >= 0;
             if (!ok) return "";
@@ -44597,7 +44598,7 @@ ${
         const reach: boolean[] = bangReach(nodes, tq);
         let bangWrites: int[] = ownWrites;
         let i: int = 0;
-        while (i < nodes.length) {
+        for (; i < nodes.length; ) {
             if (nodes[i].kind == CallableK.KFn && nodes[i].f.failable) {
                 for (const a of tq.all[i]) {   // s475: `.nobatch()` writes run in the envelope too (§8.9.2 "Amendment S474" item 2)
                     const site: SqlSite = nodes[a.root].f.sqls[a.pos];
@@ -44759,7 +44760,7 @@ ${
             if (!nestedSym(g, f.sym) && (placeOf(s.places, f.sym) == PlaceK.Server || s.inherited.indexOf(f.sym) >= 0)) todo = todo.concat([f]);
         }
         let envs: Envelope[] = envs0;
-        while (todo.length > 0) {
+        for (; todo.length > 0; ) {
             const f: FnFacts = todo[0];
             todo = todo.slice(1);
             for (const r of fnRefs(all, f)) {
@@ -44812,7 +44813,7 @@ ${
     fn keepNewDiags(st: AS, before: Diag[]) -> AS {
         let ds: Diag[] = before;
         let i: int = before.length;
-        while (i < st.diags.length) {
+        for (; i < st.diags.length; ) {
             const d: Diag = st.diags[i];
             let dup: boolean = false;
             for (const b of before) {
@@ -45252,10 +45253,10 @@ ${
         let r: boolean[] = [];
         for (const c of nodes) { r = r.concat([c.kind == CallableK.KFn && c.f.doms.length > 0]); }
         let changed = true;
-        while (changed) {
+        for (; changed; ) {
             changed = false;
             let i: int = 0;
-            while (i < nodes.length) {
+            for (; i < nodes.length; ) {
                 if (!r[i]) {
                     for (const j of tq.edges[i]) {
                         if (!r[i] && r[j] && !isServerPlace(placeOf(places, nodes[j].f.sym))) {
@@ -45781,10 +45782,10 @@ ${
             }
         }
         let changed = true;
-        while (changed) {
+        for (; changed; ) {
             changed = false;
             let i: int = 0;
-            while (i < cand.length) {
+            for (; i < cand.length; ) {
                 const sid: int = cand[i].info.sym.id;
                 const fold: CFold = folds[i];
                 if (syms.indexOf(sid) < 0) {
@@ -45860,7 +45861,7 @@ ${
         let lo: int = -1;
         let hi: int = -1;
         let k: int = 0;
-        while (k < ss.length) {
+        for (; k < ss.length; ) {
             if (fx[k].remote.length > 0 || fx[k].via != "") {
                 if (lo < 0) lo = k;
                 hi = k;
@@ -45871,16 +45872,16 @@ ${
         const lastCall: int = hi;
         // rule 1, to a fixpoint: a later statement reading a local the batch declares joins it
         let changed = true;
-        while (changed) {
+        for (; changed; ) {
             changed = false;
             let bsyms: int[] = [];
             k = lo;
-            while (k <= hi) {
+            for (; k <= hi; ) {
                 bsyms = bsyms.concat(topBinds(t, ss[k]));
                 k = k + 1;
             }
             k = hi + 1;
-            while (!changed && k < ss.length) {
+            for (; !changed && k < ss.length; ) {
                 const fk: CFold = cfStmt(ss[k], cf0());
                 if (anyIn(localSymsOf(t, fk.names), bsyms)) {
                     hi = k;
@@ -45896,7 +45897,7 @@ ${
         }
         let calls: string[] = [];
         k = lo;
-        while (k <= hi) {
+        for (; k <= hi; ) {
             for (const r of fx[k].remote) {
                 if (calls.indexOf(r) < 0) calls = calls.concat([r]);
             }
@@ -45906,7 +45907,7 @@ ${
         // last call, a browser statement joined the batch only by reading a value it computes: §19.9.9.8
         // rule 3 permits it on the client — the value comes back — which is INTERIM, below.)
         k = lo;
-        while (k <= lastCall) {
+        for (; k <= lastCall; ) {
             if (fx[k].browser != "") {
                 return { plan: not, st: addDiag(st, file, ss[k].span, "E-TX-CLIENT-MULTI-CALL", "'" + name + "' is declared '!' and runs on the client; its server calls (" + calls.join(", ") + ") must run in ONE request inside ONE transaction (§19.9.9.8 rule 1, S474) — but this statement (line " + lineOf(g, file, ss[k].span.start) + ") uses " + fx[k].browser + ", which needs the browser and cannot move into the server batch (§19.9.9.8 rule 3), and it stands between them: the calls would be two requests, and no transaction spans two requests, so the all-or-nothing guarantee cannot hold (§19.10.5). Move the browser work before the first server call or after the last one, or split the function") };
             }
@@ -45922,7 +45923,7 @@ ${
         let presyms: int[] = [];
         let prestmt: int[] = [];
         k = 0;
-        while (k < lo) {
+        for (; k < lo; ) {
             for (const s of topBinds(t, ss[k])) {
                 presyms = presyms.concat([s]);
                 prestmt = prestmt.concat([k]);
@@ -45942,7 +45943,7 @@ ${
         let seenRet = false;
         let body: CFold = cf0();
         k = lo;
-        while (k <= hi) {
+        for (; k <= hi; ) {
             const s: AStmt = ss[k];
             const x: StmtFx = fx[k];
             const one: CFold = cfStmt(s, cf0());
@@ -46001,7 +46002,7 @@ ${
         }
         // a statement after the batch may not read what it computed (rule 1 joined every one that could)
         k = hi + 1;
-        while (k < ss.length) {
+        for (; k < ss.length; ) {
             if (anyIn(localSymsOf(t, cfStmt(ss[k], cf0()).names), bsyms)) return composeRefuse(st, file, ss[k].span, name, why, "this statement reads a local the batch computes, and it cannot join the batch: the value would come back in the cell envelope as a cell write (§19.9.9.8 rule 1). Write the cells in the batch's place, or return the value");
             k = k + 1;
         }
@@ -46059,7 +46060,7 @@ ${
         // does the batch, as it will run (the dropped handlers' arms gone), return?
         let bss: AStmt[] = [];
         k = lo;
-        while (k <= hi) {
+        for (; k <= hi; ) {
             if (deferred.indexOf(k) < 0) bss = bss.concat([ss[k]]);
             k = k + 1;
         }
@@ -46250,7 +46251,7 @@ ${
     // put a `return` in the batch with client work after it — the exit flag is not built)
     fn cpRetsIn(ss: AStmt[], from: int, to: int) -> boolean {
         let k: int = from;
-        while (k <= to) {
+        for (; k <= to; ) {
             if (cfStmt(ss[k], cf0()).rets) return true;
             k = k + 1;
         }
@@ -46261,7 +46262,7 @@ ${
     // read is marshalled since s475-boot-nonbang-callee-envelope — no client function, no effect, no `defer`)
     fn movableRun(t: Tables, ss: AStmt[], fx: StmtFx[], from: int, to: int) -> boolean {
         let k: int = from;
-        while (k <= to) {
+        for (; k <= to; ) {
             const x: StmtFx = fx[k];
             if (x.browser != "" || x.client != "" || x.via != "" || x.remote.length > 0) return false;
             if (cfStmt(ss[k], cf0()).effects || cpIsDefer(ss[k])) return false;
@@ -46278,7 +46279,7 @@ ${
         const ss: AStmt[] = fs.f.body.stmts;
         let k: int = from + 1;
         let blocked: string = "";
-        while (k < ss.length) {
+        for (; k < ss.length; ) {
             const x: StmtFx = fx[k];
             if (blocked == "" && x.write != "") blocked = "it writes `" + x.write + "` in the same statement";
             if (blocked == "" && x.client != "") blocked = "it calls `" + x.client + "`, which reads or writes client state";
@@ -46608,7 +46609,7 @@ ${
         const fx: StmtFx[] = stmtFxs(sum, tq, places, dr, f, t, ss);
         let at: int = -1;
         let k: int = 0;
-        while (k < ss.length) {
+        for (; k < ss.length; ) {
             if (fx[k].remote.length > 0 || fx[k].via != "") at = k;
             k = k + 1;
         }
@@ -46623,7 +46624,7 @@ ${
             hits = pwStmts(ss, csp, { after: false, hits: [] }).hits;
         } else {
             k = at + 1;
-            while (k < ss.length) {
+            for (; k < ss.length; ) {
                 hits = hits.concat(cfStmt(ss[k], cf0()).exitAt);
                 k = k + 1;
             }
@@ -46871,7 +46872,7 @@ ${
         let bstmts: AStmt[] = [];
         let retVal: AExpr | not = not;
         let k: int = pl.lo;
-        while (k <= pl.hi) {
+        for (; k <= pl.hi; ) {
             const cw: ComposeCell | not = cellAt(pl.cells, k);
             if (pl.deferred.indexOf(k) >= 0) {
                 // a deferred write: F applies it after the batch
@@ -46962,7 +46963,7 @@ ${
             let after: AStmt[] = [{ nid: next, span: sp, k: AStmtK.Local("#r", false, rty0, prop, false) }];
             next = next + 2;
             k = pl.lo;
-            while (k <= pl.hi) {
+            for (; k <= pl.hi; ) {
                 const cw2: ComposeCell | not = cellAt(pl.cells, k);
                 if (pl.deferred.indexOf(k) >= 0) {
                     after = after.concat([ss[k]]);
@@ -47345,7 +47346,7 @@ ${
         const homeName: string = dbLabel(dbs, home);
         let k: int = 0;
         let readElse: int = -1;
-        while (k < rinfos.length) {
+        for (; k < rinfos.length; ) {
             if (dbKey(dbs, rinfos[k].db) != homeKey) {
                 if (rinfos[k].kind == SqlKind.SqlWrite) {
                     const path: string = sqlPathOf(sum, tq.all, i, reached[k]);
@@ -47446,7 +47447,7 @@ ${
     // s474 r2: some server-run function (server-placed, or server-only by §12.2 T5) calls callable i in place.
     fn calledInPlace(sum: Summary, tq: TxQ, places: PlaceFact[], i: int) -> boolean {
         let m: int = 0;
-        while (m < sum.nodes.length) {
+        for (; m < sum.nodes.length; ) {
             if (sum.nodes[m].kind == CallableK.KFn && tq.edges[m].indexOf(i) >= 0) {
                 if (isServerPlace(placeOf(places, sum.nodes[m].f.sym)) || sum.inherited.indexOf(sum.nodes[m].f.sym) >= 0) return true;
             }
@@ -47460,7 +47461,7 @@ ${
         let out: int[] = [];
         let seen: int[] = [i];
         let todo: int[] = [i];
-        while (todo.length > 0) {
+        for (; todo.length > 0; ) {
             const m: int = todo[0];
             todo = todo.slice(1);
             for (const j of tq.edges[m]) {
@@ -47641,7 +47642,7 @@ ${
         }
         let cedges: int[][] = emptyIntLists(nn);
         i = 0;
-        while (i < nn) {
+        for (; i < nn; ) {
             if (cc[i]) {
                 let ce: int[] = [];
                 for (const j of edges[i]) {
@@ -47718,10 +47719,10 @@ ${
         let r: boolean[] = [];
         for (const c of nodes) { r = r.concat([c.kind == CallableK.KFn && c.f.failable]); }
         let changed = true;
-        while (changed) {
+        for (; changed; ) {
             changed = false;
             let i: int = 0;
-            while (i < nodes.length) {
+            for (; i < nodes.length; ) {
                 if (r[i]) {
                     for (const j of tq.edges[i]) {
                         if (!r[j]) {
@@ -48045,7 +48046,7 @@ ${
         if (hi - lo <= 8) {
             let out: Callable[] = [];
             let i: int = lo;
-            while (i < hi) {
+            for (; i < hi; ) {
                 const fs: FnSrc = fss[i];
                 out = out.concat([{ kind: CallableK.KFn, label: fs.info.name + "()", f: fnFacts(cx, fs), clock: blockClock(fs.f.body),
                                     noValue: ownNoValue(fs), rets: retCallsOf(t, fs) }]);
@@ -48062,7 +48063,7 @@ ${
         if (hi - lo <= 8) {
             let out: PlaceFact[] = [];
             let i: int = lo;
-            while (i < hi) {
+            for (; i < hi; ) {
                 const c: Callable = nodes[i];
                 if (c.kind == CallableK.KFn) out = out.concat([{ sym: c.f.sym, name: c.f.name, place: directPlace(c.f) }]);
                 i = i + 1;
@@ -48078,7 +48079,7 @@ ${
         if (hi - lo <= 8) {
             let out: PlaceFact[] = [];
             let i: int = lo;
-            while (i < hi) {
+            for (; i < hi; ) {
                 const p: PlaceFact = direct[i];
                 let pk: PlaceK = p.place;
                 if (pk == PlaceK.Ambient && client[ixGet(six, p.sym)].length > 0) pk = PlaceK.Client;
@@ -48162,7 +48163,7 @@ ${
         let start: int[] = minusOnes(n + 1);
         start[0] = 0;
         let j: int = 0;
-        while (j < n) {
+        for (; j < n; ) {
             start[j + 1] = start[j] + deg[j] + 1;
             j = j + 1;
         }
@@ -48187,7 +48188,7 @@ ${
         if (hi - lo <= 8) {
             let out: int[][] = [];
             let j: int = lo;
-            while (j < hi) {
+            for (; j < hi; ) {
                 out = out.concat([flat.slice(start[j], start[j + 1])]);
                 j = j + 1;
             }
@@ -48242,7 +48243,7 @@ ${
             qn = qn + 1;
         }
         let qi: int = 0;
-        while (qi < qn) {
+        for (; qi < qn; ) {
             const k: int = queue[qi];
             qi = qi + 1;
             if (member[k] == 1 && !inheritOk(nodes, rev, pix, places, six, member, k)) {
@@ -48263,7 +48264,7 @@ ${
         // the old loop, from the worklist's set: one pass confirms it
         // (`isym` is in the set iff its node is marked: a node's Sym is the one marked there)
         let changed = true;
-        while (changed) {
+        for (; changed; ) {
             changed = false;
             let keep: int[] = [];
             let drop: int[] = [];
@@ -48299,7 +48300,7 @@ ${
         if (hi - lo <= 8) {
             let out: int[] = [];
             let i: int = lo;
-            while (i < hi) {
+            for (; i < hi; ) {
                 out = out.concat([ps[i].sym]);
                 i = i + 1;
             }
@@ -48466,7 +48467,7 @@ ${
         if (hi - lo <= 8) {
             let out: int[] = [];
             let i: int = lo;
-            while (i < hi) {
+            for (; i < hi; ) {
                 out = out.concat([nodes[i].f.sym]);
                 i = i + 1;
             }
@@ -48484,7 +48485,7 @@ ${
         if (hi - lo <= 8) {
             let out: int[] = [];
             let i: int = lo;
-            while (i < hi) {
+            for (; i < hi; ) {
                 out = out.concat([ps[i].sym]);
                 i = i + 1;
             }
@@ -48506,28 +48507,28 @@ ${
     fn emptyAtomLists(n: int) -> FxAtom[][] {
         if (n <= 0) return [];
         let out: FxAtom[][] = [[]];
-        while (out.length + out.length <= n) { out = out.concat(out); }
+        for (; out.length + out.length <= n; ) { out = out.concat(out); }
         return out.concat(emptyAtomLists(n - out.length));
     }
 
     fn emptyIntLists(n: int) -> int[][] {
         if (n <= 0) return [];
         let out: int[][] = [[]];
-        while (out.length + out.length <= n) { out = out.concat(out); }
+        for (; out.length + out.length <= n; ) { out = out.concat(out); }
         return out.concat(emptyIntLists(n - out.length));
     }
 
     fn emptyTexts(n: int) -> string[] {
         if (n <= 0) return [];
         let out: string[] = [""];
-        while (out.length + out.length <= n) { out = out.concat(out); }
+        for (; out.length + out.length <= n; ) { out = out.concat(out); }
         return out.concat(emptyTexts(n - out.length));
     }
 
     fn falses(n: int) -> boolean[] {
         if (n <= 0) return [];
         let out: boolean[] = [false];
-        while (out.length + out.length <= n) { out = out.concat(out); }
+        for (; out.length + out.length <= n; ) { out = out.concat(out); }
         return out.concat(falses(n - out.length));
     }
 
@@ -48795,8 +48796,8 @@ ${
         let out: Diag[] = [];
         let k: int = 0;
         let i: int = 0;
-        while (i <= st.diags.length) {
-            while (k < st.pend.length && st.pend[k].at == i) {
+        for (; i <= st.diags.length; ) {
+            for (; k < st.pend.length && st.pend[k].at == i; ) {
                 out = out.concat(decide(s, st.pend[k].rule));
                 k = k + 1;
             }
@@ -48858,7 +48859,7 @@ ${
     fn reachesFn(s: Summary, from: int, to: int) -> boolean {
         let seen: int[] = [];
         let todo: int[] = [from];
-        while (todo.length > 0) {
+        for (; todo.length > 0; ) {
             const id: int = todo[0];
             todo = todo.slice(1);
             if (seen.indexOf(id) < 0) {
@@ -49128,7 +49129,7 @@ ${
         if (evs < 0) return ps;
         let ids: int[] = [];
         let i: int = before;
-        while (i < ps.plan.at.length) {
+        for (; i < ps.plan.at.length; ) {
             ids = ids.concat([ps.plan.at[i].nid]);
             i = i + 1;
         }
@@ -50432,9 +50433,9 @@ ${
     fn styleOverlapPairs(files: FileAst[], file: string, rules: StyleRuleAt[], els: StyleEl[]) -> Diag[] {
         let out: Diag[] = [];
         let j = 1;
-        while (j < rules.length) {
+        for (; j < rules.length; ) {
             let i = 0;
-            while (i < j) {
+            for (; i < j; ) {
                 const prop: string = sharedProp(rules[i].props, rules[j].props);
                 if (prop != "") {
                     const el: StyleEl | not = sharedElement(rules[i].r, rules[j].r, els);
@@ -50502,7 +50503,7 @@ ${
 
     fn specCompare(a: int[], b: int[]) -> int {
         let i = 0;
-        while (i < 3) {
+        for (; i < 3; ) {
             if (a[i] > b[i]) return 1;
             if (a[i] < b[i]) return -1;
             i = i + 1;
@@ -51055,7 +51056,7 @@ ${
                 after = linMarkupNode(cx, n, sub, mine, true);
             }
             let i: int = sub.vars.length;
-            while (i < after.vars.length) {
+            for (; i < after.vars.length; ) {
                 pages = pages.concat([page]);
                 i = i + 1;
             }
@@ -51771,7 +51772,7 @@ ${
     fn linJump(cx: LinCx, st: AStmt, label: string, what: string, s: LinSt) -> LinR {
         let depth: int = -1;
         let i: int = cx.loops.length - 1;
-        while (i >= 0) {
+        for (; i >= 0; ) {
             if (depth < 0 && (label == "" || cx.loops[i].label == label)) depth = cx.loops[i].depth;
             i = i - 1;
         }
@@ -52089,7 +52090,7 @@ ${
         let ids: int[] = [];
         for (const x of nameExprsIn(body)) { ids = ids.concat([localSymOfName(cx.t, x.nid)]); }
         let i: int = 0;
-        while (i < s.vars.length) {
+        for (; i < s.vars.length; ) {
             const v: LinVar = s.vars[i];
             let n: int = 0;
             for (const id of ids) {
@@ -52620,7 +52621,7 @@ ${
     fn chNameOk(n: string) -> boolean {
         if (n == "") return false;
         let i = 0;
-        while (i < n.length) {
+        for (; i < n.length; ) {
             const c: int = n.charCodeAt(i);
             const ok: boolean = (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 45 || c == 95;
             if (!ok) return false;
@@ -52678,7 +52679,7 @@ ${
         if (raw == "" || raw.length > 7) return -1;
         let n: int = 0;
         let i = 0;
-        while (i < raw.length) {
+        for (; i < raw.length; ) {
             const c: int = raw.charCodeAt(i);
             if (c < 48 || c > 57) return -1;
             n = n * 10 + (c - 48);
@@ -52743,7 +52744,7 @@ ${
         if (raw == "" || raw.length > 9) return -1;
         let n: int = 0;
         let i = 0;
-        while (i < raw.length) {
+        for (; i < raw.length; ) {
             const c: int = raw.charCodeAt(i);
             if (c < 48 || c > 57) return -1;
             n = n * 10 + (c - 48);
@@ -52775,7 +52776,7 @@ ${
         if (raw.length == 2 && raw.charCodeAt(0) == 48) return -1;
         let n: int = 0;
         let i = 0;
-        while (i < raw.length) {
+        for (; i < raw.length; ) {
             const c: int = raw.charCodeAt(i);
             if (c < 48 || c > 57) return -1;
             n = n * 10 + (c - 48);
@@ -53188,7 +53189,7 @@ ${
     fn endpointPathRefusal(p: string) -> string {
         if (p.substring(0, 1) != "/") return "it does not begin with `/`";
         let i = 0;
-        while (i < p.length) {
+        for (; i < p.length; ) {
             const c: int = p.charCodeAt(i);
             const ok: boolean = (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 45 || c == 46 || c == 95 || c == 126 || c == 47;
             if (!ok) return "`" + p.substring(i, i + 1) + "` is not a path character (only unreserved characters and `/` — no query, fragment, percent-escape or path parameter)";
@@ -53675,7 +53676,7 @@ ${
         let out: string = "";
         let i: int = 0;
         let more = true;
-        while (more) {
+        for (; more; ) {
             const j: int = m.indexOf(tok, i);
             if (j < 0) {
                 more = false;
@@ -53704,7 +53705,7 @@ ${
         // longest name first, so `#book` never rewrites inside `#bookings`
         let done: string[] = [];
         let left: int = plans.length;
-        while (left > 0) {
+        for (; left > 0; ) {
             let best: string = "";
             for (const p of plans) {
                 if (done.indexOf(p.name) < 0 && p.name.length >= best.length) best = p.name;

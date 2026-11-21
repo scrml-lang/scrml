@@ -79,7 +79,8 @@ ${
     export fn ifaceInherits(sub: string, sup: string) -> boolean {
         let x: string = sub;
         let guard: int = 0;
-        while (x != "" && guard < 32) {
+        for (;;) {
+            if (!(x != "" && guard < 32)) { break; }
             if (x == sup) return true;
             x = ifaceParent(x);
             guard = guard + 1;
@@ -98,7 +99,8 @@ ${
     export fn findEntry(i: string, m: string, a: string) -> HEntry | not {
         let x: string = i;
         let guard: int = 0;
-        while (x != "" && guard < 32) {
+        for (;;) {
+            if (!(x != "" && guard < 32)) { break; }
             for (const e of surfaceEntries()) {
                 if (e.iface == x && e.member == m && e.access == a) return e;
             }
@@ -126,7 +128,7 @@ ${
         let depth: int = 0;
         let start: int = 0;
         let i: int = 0;
-        while (i < s.length) {
+        for (; i < s.length; ) {
             const c: string = s.charAt(i);
             if (c == "(") depth = depth + 1;
             if (c == ")") depth = depth - 1;
@@ -145,7 +147,7 @@ ${
     fn closeParen(s: string) -> int {
         let depth: int = 0;
         let i: int = 0;
-        while (i < s.length) {
+        for (; i < s.length; ) {
             const c: string = s.charAt(i);
             if (c == "(") depth = depth + 1;
             if (c == ")") {

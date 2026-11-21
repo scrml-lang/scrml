@@ -54,7 +54,7 @@ ${
     export fn atomBefore(a: FxAtom, b: FxAtom) -> boolean {
         if (a.depth != b.depth) return a.depth < b.depth;
         let i = 0;
-        while (i < a.path.length && i < b.path.length) {
+        for (; i < a.path.length && i < b.path.length; ) {
             if (a.path[i] != b.path[i]) return a.path[i] < b.path[i];
             i = i + 1;
         }
@@ -108,7 +108,7 @@ ${
         if (hi - lo <= 8) {
             let out: FxAtom[][] = [];
             let i: int = lo;
-            while (i < hi) {
+            for (; i < hi; ) {
                 out = out.concat([ownSorted(own[i])]);
                 i = i + 1;
             }
@@ -130,7 +130,7 @@ ${
         let fx: FxAtom[][] = ownSortedAll(own, 0, own.length);
         for (const scc of order) {
             let changed = true;
-            while (changed) {
+            for (; changed; ) {
                 changed = false;
                 for (const i of scc) {
                     let mine: FxAtom[] = fx[i];
@@ -175,7 +175,7 @@ ${
     export fn atomChain(fx: FxAtom[][], i: int, a: FxAtom) -> int[] {
         let out: int[] = [i];
         let cur: FxAtom = a;
-        while (cur.via >= 0) {
+        for (; cur.via >= 0; ) {
             out = out.concat([cur.via]);
             const nxt: FxAtom | not = atomKeyed(fx[cur.via], cur.key);
             if (nxt is not) return out;
@@ -208,7 +208,7 @@ ${
         let nc: int = 0;
         let next: int = 0;
         let r: int = 0;
-        while (r < n) {
+        for (; r < n; ) {
             if (index[r] < 0) {
                 index[r] = next;
                 low[r] = next;
@@ -219,7 +219,7 @@ ${
                 cv[0] = r;
                 ce[0] = 0;
                 dp = 1;
-                while (dp > 0) {
+                for (; dp > 0; ) {
                     const v: int = cv[dp - 1];
                     const ei: int = ce[dp - 1];
                     if (ei < edges[v].length) {
@@ -242,9 +242,9 @@ ${
                         if (low[v] == index[v]) {
                             // `v` roots a component: everything above it on the stack
                             let at: int = sp - 1;
-                            while (stk[at] != v) { at = at - 1; }
+                            for (; stk[at] != v; ) { at = at - 1; }
                             let j: int = at;
-                            while (j < sp) {
+                            for (; j < sp; ) {
                                 flat[fp] = stk[j];
                                 fp = fp + 1;
                                 on[stk[j]] = -1;
@@ -272,7 +272,7 @@ ${
         if (hi - lo <= 8) {
             let out: int[][] = [];
             let i: int = lo;
-            while (i < hi) {
+            for (; i < hi; ) {
                 let from: int = 0;
                 if (i > 0) from = ends[i - 1];
                 out = out.concat([flat.slice(from, ends[i])]);
@@ -288,7 +288,7 @@ ${
     fn filledInt(n: int) -> int[] {
         if (n <= 0) return [];
         let out: int[] = [-1];
-        while (out.length + out.length <= n) { out = out.concat(out); }
+        for (; out.length + out.length <= n; ) { out = out.concat(out); }
         return out.concat(filledInt(n - out.length));
     }
 

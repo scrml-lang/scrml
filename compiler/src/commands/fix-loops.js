@@ -52,6 +52,17 @@
  *
  * NOT impl#1-safe: the rules are in S66_RULES (opt-in, `--s66` / `--rules=`), never in
  * IMPL1_SAFE_RULES (the CLI defaults), because their output does not compile under impl#1.
+ *
+ * ═══ INTERIM SPELLING (S481, PA decision) ═══
+ *
+ * `interim: true` (CLI `--loop-interim`) writes the verify's own impl#1-readable spelling instead:
+ * `for (; cond; )` and `for (;;) { body if (!(cond)) { break; } }`. That output DOES compile under impl#1,
+ * so with it the rules need no `--s66` (still opt-in, never a default). It exists for the self-host,
+ * whose bootstrap bundle impl#1 builds; the rename to `for (cond)` follows once the bootstrap builds it.
+ * A `do…while` whose body holds a `continue` is still refused in this mode — INTERIM, not PERMANENT:
+ * the capable form is a flag-variable rewrite (`let again = true; for (; again; ) { … }`, with
+ * `again = !(!(cond))` written at the body's end and before each `continue` of this loop), built in a
+ * later pass (gap g-selfhost-while-migration-blocked-s481). 0 such loops in the self-host.
  */
 
 import { codeRegions, regionTokens, lineStarts, lineAt, UndelimitedMarkup, makeReader, normalizedArtifact } from "./fix-terminators.js";
@@ -65,6 +76,7 @@ const OPEN = { "(": ")", "[": "]", "{": "}" };
 const isKw = (t, w) => !!t && t.kind === "KEYWORD" && t.text === w;
 const isP = (t, p) => !!t && (t.kind === "PUNCT" || t.kind === "OPERATOR") && t.text === p;
 const LOOP_WORD_RE = /\b(?:while\s*\(|do\s*\{)/;
+const LOOP_WORD_G = /\b(?:while\s*\(|do\s*\{)/g;
 
 /** The matching bracket of every bracket token, or null when the region does not balance. */
 function bracketMatches(toks) {
@@ -109,6 +121,16 @@ function scanLoops(source, toks, want, sites, notes, nested) {
       nested.push({ start: t.child.span.start + 2, end: t.child.span.end - 1, children: t.child.children ?? [] });
       continue;
     }
+    // `~{}` / `^{}` blocks: code this rule does not enter (S481 review LOW-1). Say so when one holds a
+    // loop, so a clean report never hides a `while` the bootstrap then flags (E-LOOP-WHILE-RETIRED).
+    if (t.kind === "BLOCK_REF" && (source.startsWith("~{", t.start) || source.startsWith("^{", t.start))) {
+      // One note per loop word (text-level: a word in a string or comment of the block is noted too —
+      // over-reporting, the safe direction for a note).
+      for (const hit of source.slice(t.start, t.end).matchAll(LOOP_WORD_G)) {
+        notes.push({ at: t.start + hit.index, reason: `a \`while\` / \`do\` inside a \`${source.slice(t.start, t.start + 2)} … }\` block — this rule does not enter it; rewrite it by hand (§49.4.1)` });
+      }
+      continue;
+    }
     // Code this rule does not enter: say so when it holds a loop.
     if ((t.kind === "STRING" && source[t.start] === "`") || (t.kind === "BLOCK_REF" && source.startsWith("${", t.start)) || t.kind === "MARKUP") {
       const text = source.slice(t.start, t.end);
@@ -133,11 +155,30 @@ function scanLoops(source, toks, want, sites, notes, nested) {
       const kw = { start: t.start, end: t.end };
       const o = toks[open];
       const c = toks[close];
-      sites.push({
-        rule: WHILE_RULE, at: t.start,
-        out: [{ ...kw, text: "for" }],
-        probe: [{ ...kw, text: "for" }, { start: o.end, end: o.end, text: "; " }, { start: c.start, end: c.start, text: "; " }],
-      });
+      // impl#1 drops the quotes of a string literal (and the delimiters of a template) in ANY C-style
+      // `for` head (measured S481: `for (; s.charAt(i) != "x"; )` emits `… , x)`, `== ""` emits invalid
+      // JS; known gap g-impl1-c-for-head-template-and-string-literals-mangled-s470). A head holding a
+      // literal of that kind is spelled with the test moved to the top of the body instead —
+      // `for (;;) { if (!(cond)) { break; } … }` — the same loop (a `continue` re-enters at the test).
+      const literalHead = toks.slice(open + 1, close).some((x) => x.kind === "STRING" || x.kind === "REGEX" || x.kind === "BLOCK_REF" || x.kind === "MARKUP");
+      let probe = [{ ...kw, text: "for" }, { start: o.end, end: o.end, text: "; " }, { start: c.start, end: c.start, text: "; " }];
+      if (literalHead) {
+        const bo = toks[close + 1];
+        const first = toks[close + 2];
+        const condText = source.slice(o.end, c.start).trim();
+        const check = `if (!(${condText})) { break; }`;
+        const eol = source.indexOf("\n", bo.end);
+        const brOwnLine = eol >= 0 && blank(source, bo.end, eol);
+        let ins;
+        if (brOwnLine) {
+          const bodyIndent = first && !isP(first, "}") && first.line > bo.line ? indentAt(source, first.start) : `${indentAt(source, bo.start)}    `;
+          ins = { start: bo.end, end: bo.end, text: `\n${bodyIndent}${check}` };
+        } else {
+          ins = { start: bo.end, end: bo.end, text: ` ${check}` };
+        }
+        probe = [{ start: t.start, end: c.end, text: "for (;;)" }, ins];
+      }
+      sites.push({ rule: WHILE_RULE, at: t.start, out: [{ ...kw, text: "for" }], probe, topCheck: literalHead });
       continue;
     }
     if (isKw(t, "do")) {
@@ -160,7 +201,7 @@ function scanLoops(source, toks, want, sites, notes, nested) {
         notes.push({ rule: DO_WHILE_RULE, at: t.start, reason: "a `do … while` whose body holds a `continue` — §49.3.6 rewrites it as `for (let first = true; first || cond; first = false) { … }`, whose `||` needs a boolean condition (§42.4) this rule cannot check; rewrite it by hand" });
         continue;
       }
-      const capture = declCapture(body, cond);
+      const capture = declCapture(source, body, cond);
       if (capture) { notes.push({ rule: DO_WHILE_RULE, at: t.start, reason: `a \`do … while\` whose body ${capture} — moved into the body, the condition would read the body's binding; rewrite it by hand (§49.3.6)` }); continue; }
       const condText = source.slice(toks[condOpen].end, toks[condClose].start).trim();
       // The break check goes on its own line before the closing `}` (or inline for a one-line body).
@@ -204,16 +245,62 @@ function headHazard(toks, match, open, close) {
   return null;
 }
 
-/** Does a declaration in the `do` body capture a name the condition reads? A reason, or null. */
-function declCapture(body, cond) {
-  const condNames = new Set(cond.filter((x) => x.kind === "IDENT").map((x) => x.text));
-  for (let k = 0; k < body.length; k++) {
-    const x = body[k];
-    if (!(isKw(x, "let") || isKw(x, "const") || isKw(x, "var") || isKw(x, "function") || isKw(x, "fn"))) continue;
-    const nm = body[k + 1];
-    if (!nm) continue;
+/** The keywords that open a binding in a `do` body (S481 review LOW-2: `lin` and `class` too). */
+const DECL_WORDS = new Set(["let", "const", "var", "lin", "function", "fn", "class"]);
+/** Keywords naming one thing (no declarator list). */
+const ONE_NAME_WORDS = new Set(["function", "fn", "class"]);
+
+/**
+ * Does a declaration in the `do` body capture a name the condition reads? A reason, or null.
+ * EVERY declarator of a declaration is read (S481 review LOW-2: in `let x = n, done = f();` the second
+ * name captures too): a declared name is the token after the keyword, or after a `,` at the
+ * declaration's own bracket depth, up to a `;` at that depth or the end of its enclosing block. Reading
+ * past a `;`-less statement end only finds more names — a refusal, the safe direction. A cell opener
+ * written in code (`<done> = …`, `let <done = …/>`, one MARKUP token) names a cell the same way.
+ */
+function declCapture(source, body, cond) {
+  const condNames = new Set(cond.filter((x) => x.kind === "IDENT" || x.kind === "AT_IDENT").map((x) => x.text.replace(/^@/, "")));
+  const named = (nm) => {
+    if (!nm) return null;
     if (isP(nm, "{") || isP(nm, "[")) return "declares names by destructuring";
     if (nm.kind === "IDENT" && condNames.has(nm.text)) return `declares \`${nm.text}\`, which the condition reads`;
+    return null;
+  };
+  // A statement-leading `<name …` (a cell opener `<done> = …` / `<done = …/>`, read as code tokens or
+  // as one MARKUP token) or a `let` / `const` before one.
+  const cellAt = (k) => {
+    const x = body[k];
+    if (!x) return null;
+    if (x.kind === "MARKUP") {
+      const m = /^<\s*@?([A-Za-z_$][\w$]*)/.exec(source.slice(x.start, x.end));
+      return m && condNames.has(m[1]) ? `declares the cell \`${m[1]}\`, which the condition reads` : null;
+    }
+    if (isP(x, "<") && body[k + 1] && body[k + 1].kind === "IDENT" && condNames.has(body[k + 1].text)) return `declares the cell \`${body[k + 1].text}\`, which the condition reads`;
+    return null;
+  };
+  for (let k = 0; k < body.length; k++) {
+    const x = body[k];
+    const prev = body[k - 1];
+    const lead = !prev || isP(prev, ";") || isP(prev, "{") || isP(prev, "}") || prev.line < x.line;
+    if (lead) { const c = cellAt(k); if (c) return c; }
+    // impl#1's tokenizer reads `var` as an IDENT (it is no scrml keyword); still a binding form here.
+    if (!((x.kind === "KEYWORD" || (x.kind === "IDENT" && x.text === "var")) && DECL_WORDS.has(x.text))) continue;
+    const cell = cellAt(k + 1);
+    if (cell) return cell;
+    const first = named(body[k + 1]);
+    if (first) return first;
+    if (ONE_NAME_WORDS.has(x.text)) continue;
+    let depth = 0;
+    for (let j = k + 1; j < body.length; j++) {
+      const y = body[j];
+      if (isP(y, "(") || isP(y, "[") || isP(y, "{")) depth++;
+      else if (isP(y, ")") || isP(y, "]") || isP(y, "}")) { if (--depth < 0) break; }
+      else if (depth === 0 && isP(y, ";")) break;
+      else if (depth === 0 && isP(y, ",")) {
+        const r = named(body[j + 1]);
+        if (r) return r;
+      }
+    }
   }
   return null;
 }
@@ -266,7 +353,18 @@ function applyEdits(source, edits) {
 // The canonical loop shape (verify)
 // ---------------------------------------------------------------------------
 
-const forNode = (init, test, update, body) => ({ type: "ForStatement", init, test, update, body });
+/**
+ * A canonical `for` node. `for (;;) { if (!(c)) { break; } S }` folds to `for (; c; ) { S }` (the
+ * top-check spelling of a `while` whose head holds a literal): a `continue` in S re-enters at the test
+ * in both. Applied to every `for` the canonical shape builds, so both sides fold alike.
+ */
+function forNode(init, test, update, body) {
+  const s0 = !init && !test && !update && body && body.type === "BlockStatement" ? body.body[0] : null;
+  const brk = s0 && s0.type === "IfStatement" && !s0.alternate && s0.test && s0.test.type === "UnaryExpression" && s0.test.operator === "!"
+    ? (s0.consequent.type === "BlockStatement" && s0.consequent.body.length === 1 ? s0.consequent.body[0] : s0.consequent) : null;
+  if (brk && brk.type === "BreakStatement" && !brk.label) return forNode(null, s0.test.argument, null, { type: "BlockStatement", body: body.body.slice(1) });
+  return { type: "ForStatement", init, test, update, body };
+}
 
 /**
  * Rewrite every loop of an acorn tree into one shape: `while (c) B` → `for (; c; ) B`, and
@@ -307,9 +405,17 @@ const canonicalArtifact = (text) => normalizedArtifact(text, canonicalLoops);
 
 /**
  * Rewrite the retired `while` / `do…while` statements of ONE file to the S469 `for`.
+ *
+ * `interim: true` (INTERIM — PA decision S481, the self-host while impl#1 builds the bootstrap bundle)
+ * writes the impl#1-compilable spelling — the very text the verify compiles: the counted head
+ * `for (; cond; )` for a `while` (§49.2.1 `counted-head ::= for-init? ';' condition? ';' for-step?`),
+ * `for (;;) { S if (!(c)) { break; } }` for a `do…while`. Both are ruled scrml the bootstrap accepts and
+ * impl#1 compiles to the same JS (measured S481, #2043). A later pass renames `for (; c; )` to the
+ * ruled fix-it `for (c)` once the bootstrap builds its own bundle (gap
+ * g-selfhost-while-migration-blocked-s481).
  * @param {string} source
  * @param {{ filePath?: string, auxSources?: Record<string,string>, verify?: boolean, rules?: string[],
- *           inPlaceClean?: boolean, allowNonCompiling?: boolean, maxCompiles?: number }} [opts]
+ *           inPlaceClean?: boolean, allowNonCompiling?: boolean, maxCompiles?: number, interim?: boolean }} [opts]
  * @returns {{ output: string, changed: boolean, edits: Array<{start:number,end:number,text:string,rule:string,detail:string}>,
  *             applied: Array<{rule:string,line:number,detail:string}>, blockers: Array<{rule:string,line:number,reason:string,snippet:string}> }}
  *   `edits` are offsets into `source` (fix-s66 merges them into its own edit list).
@@ -368,8 +474,14 @@ export function fixLoops(source, opts = {}) {
     }
   }
   if (sites.length === 0) return none;
-  const edits = sites.flatMap((s) => s.out.map((e) => ({ ...e, rule: s.rule, detail: s.rule === WHILE_RULE ? "`while` → `for` (condition head)" : "`do … while` → body-first `for { … }`" })));
+  const interim = opts.interim === true;
+  const detail = (s) => s.rule === WHILE_RULE
+    ? (interim ? "`while` → `for` (INTERIM counted head `for (; cond; )`)" : "`while` → `for` (condition head)")
+    : (interim ? "`do … while` → INTERIM body-first `for (;;) { … }`" : "`do … while` → body-first `for { … }`");
+  const edits = sites.flatMap((s) => (interim ? s.probe : s.out).map((e) => ({ ...e, rule: s.rule, detail: detail(s) })));
   const output = applyEdits(source, edits);
-  const applied = sites.map((s) => ({ rule: s.rule, line: s.line, detail: s.rule === WHILE_RULE ? "`while (cond)` → `for (cond)`" : "`do { … } while (cond)` → `for { …; if (!(cond)) { break; } }`" }));
+  const applied = sites.map((s) => ({ rule: s.rule, line: s.line, detail: s.rule === WHILE_RULE
+    ? (interim ? "`while (cond)` → `for (; cond; )` (INTERIM)" : "`while (cond)` → `for (cond)`")
+    : (interim ? "`do { … } while (cond)` → `for (;;) { …; if (!(cond)) { break; } }` (INTERIM)" : "`do { … } while (cond)` → `for { …; if (!(cond)) { break; } }`") }));
   return { output, changed: output !== source, edits, applied, blockers };
 }

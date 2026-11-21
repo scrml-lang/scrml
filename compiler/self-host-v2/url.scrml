@@ -95,16 +95,16 @@ ${
 
     export fn readUrlScheme(text: string) -> UrlScheme {
         let start: int = 0;
-        while (start < text.length && text.charCodeAt(start) <= 32) { start = start + 1; }
+        for (; start < text.length && text.charCodeAt(start) <= 32; ) { start = start + 1; }
         let s: string = "";
         let i: int = start;
-        while (i < text.length) {
+        for (; i < text.length; ) {
             const c: string = text.substring(i, i + 1);
             if (c != "\t" && c != "\n" && c != "\r") s = s + c;
             i = i + 1;
         }
         let k: int = 0;
-        while (k < s.length) {
+        for (; k < s.length; ) {
             const c: string = s.substring(k, k + 1);
             if (c == "/" || c == "?" || c == "#") return { kind: "relative", scheme: "", rest: "" };
             if (c == ":") {
@@ -122,7 +122,7 @@ ${
         if (t.length == 0) return false;
         if (!isAsciiAlpha(t.substring(0, 1))) return false;
         let i: int = 1;
-        while (i < t.length) {
+        for (; i < t.length; ) {
             const c: string = t.substring(i, i + 1);
             if (!isAsciiAlpha(c) && !(c >= "0" && c <= "9") && c != "+" && c != "-" && c != ".") return false;
             i = i + 1;
@@ -138,7 +138,7 @@ ${
     // terminated by `;` or `,`? `_scrml_data_url_is_raster_image`.
     export fn dataUrlIsRasterImage(rest: string) -> boolean {
         let i: int = 0;
-        while (i < rest.length) {
+        for (; i < rest.length; ) {
             const c: string = rest.substring(i, i + 1);
             if (c == ";" || c == ",") return safeDataImageTypes().indexOf(rest.substring(0, i).trim().toLowerCase()) >= 0;
             i = i + 1;
@@ -174,14 +174,14 @@ ${
         let urls: string[] = [];
         const n: int = text.length;
         let i: int = 0;
-        while (i < n) {
-            while (i < n && (isHtmlWs(text.substring(i, i + 1)) || text.substring(i, i + 1) == ",")) { i = i + 1; }
+        for (; i < n; ) {
+            for (;;) { if (!(i < n && (isHtmlWs(text.substring(i, i + 1)) || text.substring(i, i + 1) == ","))) { break; } i = i + 1; }
             if (i < n) {
                 const urlStart: int = i;
-                while (i < n && !isHtmlWs(text.substring(i, i + 1))) { i = i + 1; }
+                for (; i < n && !isHtmlWs(text.substring(i, i + 1)); ) { i = i + 1; }
                 const url: string = text.substring(urlStart, i);
                 let end: int = url.length;
-                while (end > 0 && url.substring(end - 1, end) == ",") { end = end - 1; }
+                for (;;) { if (!(end > 0 && url.substring(end - 1, end) == ",")) { break; } end = end - 1; }
                 if (end < url.length) {
                     // trailing commas: the URL ends there and no descriptors follow
                     urls = urls.concat([url.substring(0, end)]);
@@ -189,7 +189,7 @@ ${
                     urls = urls.concat([url]);
                     let depth: int = 0;
                     let going = true;
-                    while (going && i < n) {
+                    for (; going && i < n; ) {
                         const ch: string = text.substring(i, i + 1);
                         if (ch == "(") {
                             depth = depth + 1;
@@ -212,7 +212,7 @@ ${
         let out: string[] = [];
         let cur: string = "";
         let i: int = 0;
-        while (i < text.length) {
+        for (; i < text.length; ) {
             const c: string = text.substring(i, i + 1);
             if (isHtmlWs(c) || (comma && c == ",")) {
                 if (cur != "") out = out.concat([cur]);
@@ -450,7 +450,7 @@ ${
     export fn isHandlerMember(name: string) -> boolean {
         if (name.length <= 2 || name.substring(0, 2) != "on") return false;
         let i = 2;
-        while (i < name.length) {
+        for (; i < name.length; ) {
             const c: string = name.charAt(i);
             if (c < "a" || c > "z") return false;
             i = i + 1;

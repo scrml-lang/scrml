@@ -43,7 +43,7 @@ ${
         if (hi - lo <= 8) {
             let out: Node[] = [];
             let i: int = lo;
-            while (i < hi) {
+            for (; i < hi; ) {
                 out = out.concat([Node.NExpr(es[i])]);
                 i = i + 1;
             }
@@ -61,7 +61,7 @@ ${
         if (hi - lo <= 8) {
             let out: Node[] = [];
             let i: int = lo;
-            while (i < hi) {
+            for (; i < hi; ) {
                 out = out.concat([Node.NView(vs[i])]);
                 i = i + 1;
             }
@@ -79,7 +79,7 @@ ${
         if (hi - lo <= 8) {
             let out: Node[] = [];
             let i: int = lo;
-            while (i < hi) {
+            for (; i < hi; ) {
                 out = out.concat([Node.NStmt(ss[i])]);
                 i = i + 1;
             }
@@ -166,7 +166,7 @@ ${
         if (hi - lo <= 8) {
             let out: Node[] = [];
             let i: int = lo;
-            while (i < hi) {
+            for (; i < hi; ) {
                 out = out.concat([Node.NDecl(xs[i])]);
                 i = i + 1;
             }
@@ -180,7 +180,7 @@ ${
         if (hi - lo <= 8) {
             let out: Node[] = [];
             let i: int = lo;
-            while (i < hi) {
+            for (; i < hi; ) {
                 out = out.concat([Node.NFn(xs[i])]);
                 i = i + 1;
             }
@@ -194,7 +194,7 @@ ${
         if (hi - lo <= 8) {
             let out: Node[] = [];
             let i: int = lo;
-            while (i < hi) {
+            for (; i < hi; ) {
                 out = out.concat([Node.NServerFn(xs[i])]);
                 i = i + 1;
             }
@@ -208,7 +208,7 @@ ${
         if (hi - lo <= 8) {
             let out: Node[] = [];
             let i: int = lo;
-            while (i < hi) {
+            for (; i < hi; ) {
                 out = out.concat([Node.NExpr(xs[i].init)]);
                 i = i + 1;
             }
@@ -574,7 +574,7 @@ ${
         if (hi - lo <= 8) {
             let out: Sym[] = [];
             let i: int = lo;
-            while (i < hi) {
+            for (; i < hi; ) {
                 out = out.concat(bindsOf(ns[i]));
                 i = i + 1;
             }
