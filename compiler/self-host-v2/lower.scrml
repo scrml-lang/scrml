@@ -2949,10 +2949,13 @@ ${
     // place (an HTML element with no `if=`, a `<db>` block), the place lands among its children
     // (placedNodes), at any depth. Inside a construct whose children do NOT render once in
     // place — an `if=` element or an if-chain member, an `<each>` row, a component's slot
-    // content, a `<match>`, `<pre>` / `<code>` raw content — "in its place" names no single
-    // point of the one run (the content runs conditionally, per row, or where the component
-    // puts its slot), and a file-scope initializer runs ONCE (§7.6): the place is put just
-    // after that construct (INTERIM, g-boot-nested-init-place-in-construct-s481). s482: so is one
+    // content — "in its place" names no single point of the one run (the content runs
+    // conditionally, per row, or where the component puts its slot), and a file-scope
+    // initializer runs ONCE (§7.6). s482 (ruling:user-voice-scrml.md-S481-nested-init-chain-
+    // comments item 1): one that ACTS is refused there (analyze constructInitDiags,
+    // E-FILE-SCOPE-INIT-IN-CONSTRUCT; in a row, E-BOOTSTRAP-UNSUPPORTED), so only one that does
+    // not act reaches here, and it is put just after the construct (unobservable). (`<match>`
+    // arms cannot hold a declaration; `<pre>` / `<code>` content is raw text.) s482: so is one
     // inside an element the HTML parser reads as text (`<textarea>`, `<title>`, `<script>`,
     // `<style>` — isTextOnlyElem): an anchor there is text, not a comment (#2041 r2 review LOW-1).
     fn lowerPlaced(c: LC, n: ANode, ms: ConstMark[]) -> View[] {

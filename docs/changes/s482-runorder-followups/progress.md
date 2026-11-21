@@ -39,6 +39,17 @@ Scratch: ~/.cache/scrml/review/s482-runorder-followups/ (probes p/, harness h/, 
 - SPEC §7.6 (b): the S481 r2 INTERIM struck; ruled behaviour written; `<match>` / `<pre>`/`<code>` explained as
   unable to hold a place; textarea/title clarifying sentence. §40.8 bullet updated. Gaps cite the ruling.
 
+## Final gates (head after A + lowerPlaced comment)
+- pretest exit 0; bootstrap-conformance: PASS 774 / FAIL 3 (same 3 as base: loop-007-separate-while-after-decl-neg,
+  defer/outside-function-when-body-neg, loop/w-assign-001-severity-pos) / CRASH 0; base 770 / 3 / 0; bucket
+  changes = the 4 new cases (PASS); no PASS→FAIL.
+- Byte-compare (dump.ts, printed client/server of every case): 242 printed, 1 differs —
+  hostmethod/substring-match-typed (expected, A). The shared runtime file grows hold/seed/seedAll + Cell.held.
+- Corpus (2964 files incl. the 4 new cases): 0 newly rejected.
+- s34-census --check-new PASS, types-gate OK, snippet-gate 0 failed, claim-gate 0 failed, corpus-compile-floor PASS,
+  gen-md-shim current, severity current, host-global-scan 1/2 + 2/2 exit 0.
+- Chromium (h/pw2.ts): t1 textarea value "" (E), a3-order "acbmz" (A), a1-b3 5/5/5 (A).
+
 ## A — each seed computed at its place
 - runtime.js: Cell.held; `hold` / `seed` / `seedAll`; construct leaves held seeds owed; land() runs a held
   seed before a write.
