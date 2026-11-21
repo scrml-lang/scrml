@@ -110,10 +110,10 @@ let <c:int=(start)/>
     expect(await texts(src, ["c"])).toEqual(["3"]);
   }, 120000);
 
-  test("a component's use-site value, seeded at construction, reads the binding set (not undefined)", async () => {
-    // the instances the body mounts unconditionally are constructed with the program (§66.7.6
-    // L12 (b)), so `o` is set before construction; where a use-site value sits in the sequence is
-    // the open owner question (§66.7.6 rule 5 vs S481) — both instances read 1 today
+  test("a component's use-site value is seeded at the instance's place (S482; was INTERIM: both read 1 at construction)", async () => {
+    // s482 (§7.6 rule (b) / §66.7.6 rule 5 S482, ruling:user-voice-scrml.md-S481-run-order-followups
+    // item 1): "each seed is computed at its place in the sequence; records are still created at
+    // construction" — the first instance's seed runs before the write, the second's after it
     const src = `<card n:int=0>
     let <m:int=(n)/>
 </> renders <span>\${m}</span>
@@ -124,7 +124,7 @@ let <c:int=(start)/>
 <div id="c"><card n=(o[0])/></div>
 </program>
 `;
-    expect(await texts(src, ["a", "c"])).toEqual(["1", "1"]);
+    expect(await texts(src, ["a", "c"])).toEqual(["1", "10"]);
   }, 120000);
 
   // s482 (item B): this was the INTERIM (the binding ran at module initialization, early, and
@@ -340,7 +340,10 @@ describe("§7.6 S481 r1 — what forces a binding early", () => {
     expect(await texts(src, ["c"])).toEqual(["5"]);
   }, 120000);
 
-  test("b3: a component mounted after the place still forces it early (INTERIM — the ⚑ on use-site values; flips when it is ruled)", async () => {
+  // s482: FLIPPED — ruling:user-voice-scrml.md-S481-run-order-followups item 1 ("each seed is
+  // computed at its place in the sequence"): the card's seed runs at its mount, after `k`'s place,
+  // so `k` runs in its place (5), not at module initialization (1, the S481 INTERIM).
+  test("b3: a component mounted after the place no longer forces it early (S482 flip; was INTERIM 1 / 1)", async () => {
     const src = `<card n:int=0>
     let <m:int=(n)/>
 </> renders <span>\${m}</span>
@@ -352,7 +355,7 @@ describe("§7.6 S481 r1 — what forces a binding early", () => {
 <div id="d"><card n=(k)/></div>
 </program>
 `;
-    expect(await texts(src, ["c", "d"])).toEqual(["1", "1"]);
+    expect(await texts(src, ["c", "d"])).toEqual(["5", "5"]);
   }, 120000);
 });
 

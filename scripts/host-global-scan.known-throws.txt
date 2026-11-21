@@ -12,6 +12,7 @@
 [esm] conformance/cases/block-grammar/script-001-interp-body-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved (an expect-reject case: E-SCRIPT-001 / E-STYLE-001, §4.17, S462)
 [esm] conformance/cases/block-grammar/script-001-svg-namespace-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved (an expect-reject case: E-SCRIPT-001 / E-STYLE-001, §4.17, S462)
 [esm] conformance/cases/block-grammar/style-001-interp-body-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved (an expect-reject case: E-SCRIPT-001 / E-STYLE-001, §4.17, S462)
+[esm] conformance/cases/body-top/seed-computed-in-place/case.scrml  # emit-client-esm: The keyword 'let' is reserved (impl#1 refuses the `let <c:…/>` program cell there — the case XFAILs on impl#1, g-impl1-body-run-order-s481; S482)
 [esm] conformance/cases/channel/dup-name-cross-file/case.scrml  # emit-client-esm: Identifier '_scrml_ws_chat' has already been declared
 [esm] conformance/cases/channel/same-source-two-aliases/case.scrml  # emit-client-esm: Identifier '_scrml_ws_chat' has already been declared
 [esm] conformance/cases/components/callback-prop-narrowing-ends-on-assign-reject/case.scrml  # emit-client-esm: Assigning to rvalue (an expect-reject case: E-TYPE-031 + E-COMPONENT-PROP-WRITE; the substituted `onGo = not` is the refused write, S462)

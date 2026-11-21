@@ -149,6 +149,11 @@ ${
         for (const k of p.consts) { ids = ids.concat([k.sym.id]); }
         for (const sf of p.server) { ids = ids.concat([sf.sym.id]); }
         for (const ld of p.loads) { ids = ids.concat([ld.val.id]); }
+        // s482: a program cell's place in the body (a View.Init of the field, lower initView —
+        // §7.6 rule (b) S482) names the cell's Sym; the program declaration binds it
+        for (const pd of p.decls) {
+            if (pd.sym.id == p.program.id) { for (const pf of pd.fields) { ids = ids.concat([pf.sym.id]); } }
+        }
         const bs: Sym[] = boundSyms(Node.NProgram(p));
         let lo: int = 0;
         let hi: int = -1;

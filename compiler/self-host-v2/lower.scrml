@@ -2848,8 +2848,25 @@ ${
             at = at + markupItemNode(k).length;
             const c: AConst | not = constItemOf1(k);
             if (c is given) out = out.concat([{ nid: c.nid, at: at, pos: it.span.start }]);
+            // s482 (§7.6 rule (b) S482, ruling:user-voice-scrml.md-S481-run-order-followups item 1):
+            // a program cell's declaration is the place its seed is computed (initView: a View.Init
+            // of the field; any other declaration — a component — has none)
+            const d: ADecl | not = declItemOf1(k);
+            if (d is given) out = out.concat([{ nid: d.nid, at: at, pos: it.span.start }]);
         }
         return out;
+    }
+
+    fn declItemOf1(k: AItemK) -> ADecl | not {
+        return match k {
+            .DeclItem(d: d) :> d,
+            .ConstItem(c: c) :> not,
+            .MarkupItem(n: n) :> not,
+            .ImportItem(i: i) :> not,
+            .TypeItem(t: t) :> not,
+            .FnItem(f: f) :> not,
+            .ProgramItem(p: p) :> not
+        };
     }
 
     fn constItemOf1(k: AItemK) -> AConst | not {
@@ -3010,7 +3027,62 @@ ${
         for (const k of c.t.consts) {
             if (k.nid == nid && k.ok) return [View.Init(k.sym)];
         }
+        // s482 — a program cell: the place its seed is computed (print.scrml bodyInits decides
+        // whether the seed is held for it). Only a writable cell (`let`: a seed, §66.9) whose
+        // initializer is not a literal has one: a literal seed computes the same value wherever
+        // it runs, and a locked cell is derived — computed when it is read.
+        const pi: DeclInfo | not = declInfo(c.t, c.t.program);
+        if (pi is given) {
+            for (const f of pi.fields) {
+                if (f.nid == nid && f.wcap is given && !literalInit(f.init)) return [View.Init(f.sym)];
+            }
+        }
         return [];
+    }
+
+    fn literalInit(v: AAttrValue) -> boolean {
+        const e: AExpr | not = match v {
+            .Bare(e: x) :> x,
+            .Paren(e: x) :> x,
+            // no-default-arm: no value, a quoted string, a duration are literals; a block is not (below)
+            _ :> not
+        };
+        if (e is not) return !isBracedValue(v);
+        return literalExpr(e);
+    }
+
+    fn isBracedValue(v: AAttrValue) -> boolean {
+        return match v {
+            .Braced(b: x) :> true,
+            // no-default-arm: one question — is it a `{ … }` block
+            _ :> false
+        };
+    }
+
+    fn literalExpr(e: AExpr) -> boolean {
+        const k: AExprK = e.k;
+        return match k {
+            .Num(raw: x) :> true,
+            .Str(v: x) :> true,
+            .Bool(v: x) :> true,
+            .NotLit :> true,
+            .Variant(name: x) :> true,
+            .Unary(op: o, e: x) :> literalExpr(x),
+            .ArrayLit(elems: xs) :> allLiteral(xs),
+            .ObjectLit(props: ps) :> literalProps(ps),
+            // no-default-arm: every other expression may read or call something
+            _ :> false
+        };
+    }
+
+    fn literalProps(ps: AProp[]) -> boolean {
+        for (const p of ps) { if (p.spread || !literalExpr(p.value)) return false; }
+        return true;
+    }
+
+    fn allLiteral(xs: AExpr[]) -> boolean {
+        for (const x of xs) { if (!literalExpr(x)) return false; }
+        return true;
     }
 
     fn lowerDecl(t: Tables, ss: DeclSyntax[], d: DeclInfo) -> Decl {

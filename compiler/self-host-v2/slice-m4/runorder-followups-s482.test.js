@@ -309,3 +309,126 @@ let <f:boolean=false/>
     expect(await texts(src, ["b"])).toEqual(["no"]);
   }, 120000);
 });
+
+// =============================================================================
+// A — ruling:user-voice-scrml.md-S481-run-order-followups item 1: "each seed is computed at its
+// place in the sequence; records are still created at construction, so component identity (L12)
+// is unchanged; a read of a seed before its place computes it early, on demand. Amends §66.7.6
+// rule 5." Runtime `rt.hold` / `rt.seed` / `rt.seedAll` (slice-m1/runtime/runtime.js); print.scrml
+// heldFields / liveSeedDecl / holdJs / seedPlaceJs / reachOf; lower.scrml programMarks (a program
+// cell's declaration is its place). Red on base a27564881 (seeds ran at construction, before the
+// body; a binding a seed read ran at module initialization, before an earlier body-top write).
+// =============================================================================
+describe("A — each seed is computed at its place in the body's run", () => {
+  const P2C = (cell) => `<program>
+\${ let n: int = 1; }
+\${ n = 5; }
+\${ const k: int = n + 0; }
+${cell}
+<p id="e">\${@c}</p>
+</program>
+`;
+  test("the ruling's example: `${ n = 5; } ${ const k = n + 0; } <c:int=(k)/>` shows 5 (a derived cell and a `let` cell)", async () => {
+    expect(await texts(P2C("<c:int=(k)/>"), ["e"])).toEqual(["5"]);
+    expect(await texts(P2C("let <c:int=(k)/>"), ["e"])).toEqual(["5"]);
+  }, 120000);
+
+  test("seeds with effects run in source order among the initializers (cell, then component)", async () => {
+    const src = `<card n:int=0>
+    let <m:int=(note("m") + n)/>
+</> renders <span id="cm">\${m}</span>
+<program>
+\${
+    let log: string = "";
+    function note(s: string) -> int { log = log + s; return 1; }
+    const a: int = note("a");
+}
+let <c:int=(note("c"))/>
+\${ const b: int = note("b"); }
+<div id="d"><card n=(b)/></div>
+\${ const z: int = note("z"); }
+<p id="r">\${log}</p>
+<p id="cv">\${@c}</p>
+</program>
+`;
+    expect(await texts(src, ["r", "cv", "cm"])).toEqual(["acbmz", "1", "2"]);
+  }, 120000);
+
+  test("a seed read early by a sibling seed runs then, once — not again at its place", async () => {
+    const src = `<program>
+${LOG}
+let <a:int=(note("a") + @b)/>
+\${ const x: int = note("x"); }
+let <b:int=(note("b"))/>
+<p id="r">\${log}</p>
+<p id="v">\${@a}</p>
+</program>
+`;
+    expect(await texts(src, ["r", "v"])).toEqual(["abx", "14"]);
+  }, 120000);
+
+  test("a component's seed reads the body's value at its mount (before and after a write)", async () => {
+    const src = `<card n:int=0>
+    let <m:int=(n)/>
+</> renders <span>\${m}</span>
+<program>
+\${ let o: int[free, write] = [1]; }
+<div id="a"><card n=(o[0])/></div>
+\${ o[0] = 10; }
+<div id="c"><card n=(o[0])/></div>
+</program>
+`;
+    expect(await texts(src, ["a", "c"])).toEqual(["1", "10"]);
+  }, 120000);
+
+  test("a write before its place runs the held seed first (every seed runs once)", async () => {
+    const src = `<program>
+${LOG}
+\${ @c = 9; }
+let <c:int=(note("c"))/>
+<p id="r">\${log}</p>
+<p id="v">\${@c}</p>
+</program>
+`;
+    expect(await texts(src, ["r", "v"])).toEqual(["c", "9"]);
+  }, 120000);
+
+  test("seeds in `<each>` rows are computed when the row mounts (unchanged)", async () => {
+    const src = `<item v:int=0>
+    let <w:int=(v * 2)/>
+</> renders <li>\${w}</li>
+<program>
+<xs:int[]=([1, 2, 3])/>
+<ul id="u"><each in=@xs><item v=(@.)/></each></ul>
+</program>
+`;
+    expect(await texts(src, ["u"])).toEqual(["246"]);
+  }, 120000);
+
+  test("a held seed does not bring a server-only value into the client", async () => {
+    const src = `<program db="./app.db">
+${LOG}
+\${
+    const API_KEY: string = "zz-sk-live-123";
+    server function keyed(s: string) -> string { return s + API_KEY; }
+}
+let <c:int=(note("c"))/>
+<p id="r">\${log}</p>
+</program>
+`;
+    const res = await compile(src);
+    expect(res.client.js).not.toContain("zz-sk-live-123");
+    expect(res.client.js).toContain("rt.hold(");
+    expect(await texts(src, ["r"])).toEqual(["c"]);
+  }, 120000);
+
+  test("a literal seed is not held (nothing can observe where it runs): no hold / seed printed", async () => {
+    const res = await compile(`<program>
+let <c:int=0/>
+<p id="v">\${@c}</p>
+</program>
+`);
+    expect(res.client.js).not.toContain("rt.hold(");
+    expect(res.client.js).not.toContain("rt.seed(");
+  }, 120000);
+});

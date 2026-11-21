@@ -39,4 +39,25 @@ Scratch: ~/.cache/scrml/review/s482-runorder-followups/ (probes p/, harness h/, 
 - SPEC §7.6 (b): the S481 r2 INTERIM struck; ruled behaviour written; `<match>` / `<pre>`/`<code>` explained as
   unable to hold a place; textarea/title clarifying sentence. §40.8 bullet updated. Gaps cite the ruling.
 
-## A — next (seeds in place)
+## A — each seed computed at its place
+- runtime.js: Cell.held; `hold` / `seed` / `seedAll`; construct leaves held seeds owed; land() runs a held
+  seed before a write.
+- lower.scrml: programMarks marks program-cell DeclItems; initView → View.Init(field sym) — only for a
+  writable cell whose initializer is not a literal (literalInit), so literal-seeded programs' Core is unchanged.
+  M1 oracle slice-m1/dropdown.core.scrml (earlyRead) gains the Init of `firstCountry` (its seed calls a fn).
+- First hook attempt FAILED (front.test.js indexed renders[0] — an Init for a literal-seeded cell): fixed by
+  literalInit; full ./compiler/self-host-v2 run then: 9379 pass, 2 fail (the M1 oracle — fixed; scrml-boot
+  bundle-cache test — an artifact of editing lower.scrml mid-run, green on rerun).
+- check.scrml C21: program field syms are bound (the place names the cell).
+- print.scrml: heldFields / seedLive / liveSeedDecl / programInstances / reachOf / cellReadOf /
+  constructedElsewhere (replaces constructedDecls) in bodyInits; placeInits keeps held cell Inits; wireHole
+  .Init → seedPlaceJs `rt.seed(cell)`; factoryJs → holdJs (program only); instanceJs → `rt.seedAll(i$)` for a
+  held kid in the program's render.
+- Tests: "A" (4 red on base, 4 pins); b3 flipped (5/5); use-site test flipped (1/10); file-scope-init-s479
+  seed-reads-C assertion flipped. Conformance body-top/seed-computed-in-place (impl#1 xfail under
+  g-impl1-body-run-order-s481; host-global-scan known-throw pinned).
+- Byte-compare (dump.ts, 241 printed cases): 1 diff — hostmethod/substring-match-typed (a seed calling
+  `classify` is held: `rt.hold`, `<!--init-->` anchor, `rt.seed` at its place) — expected.
+- Conformance: base 770 PASS / 3 FAIL; head (before A case) 773 / 3 — same 3 FAILs, CRASH 0.
+- SPEC: §7.6 rule (b) ⚑ resolved + S482 provenance; INTERIM narrowed; §7.6.1, §40.8, §66.7.6 rule 5 + table row.
+- Gaps: P1 / P3 resolved (built by #2041, checked on main); P2 narrowed (residue listed).

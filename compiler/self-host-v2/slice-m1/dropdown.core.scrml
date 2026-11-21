@@ -339,10 +339,16 @@ ${
             }]);
         }
 
+        // s482 (§7.6 rule (b) S482 — "each seed is computed at its place in the sequence"):
+        // `firstCountry`'s seed calls a function, so its declaration is a place in the body's run
+        // (a View.Init of the field, before `<main>`); a literal seed (`lines`, `showColor`) has none.
+        let programViews: View[] = [main];
+        if (earlyRead) programViews = [View.Init(sFirstCountry), main];
+
         const program: Decl = {
             sym: sProgram, key: sProgram.hint, kind: DeclKind.Program, single: true,
             fields: programFields,
-            renders: [main], wiring: [],
+            renders: programViews, wiring: [],
             handles: [hCountry, hColor],                 // top-level as= cells live on the program instance (L10)
         };
 

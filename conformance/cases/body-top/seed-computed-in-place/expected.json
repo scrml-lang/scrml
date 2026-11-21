@@ -1,0 +1,30 @@
+{
+  "id": "body-top-seed-computed-in-place",
+  "description": "§7.6 rule (b) / §66.7.6 rule 5 (S482) — the cell `c`'s seed reads `k`, whose initializer reads `n` after the body-top write `n = 5`: `k` runs in its place (6), the seed at the cell's declaration (7), then `z` — the log is `kcz` and `@c` is 7. Before S482 construction ran the seed before the body, so `k` ran at module initialization (n still 1): `@c` was 3.",
+  "language-version": "1.0",
+  "spec": "§7.6 rule (b) (S482), §66.7.6 rule 5 (S482), §40.8",
+  "source-test": "compiler/self-host-v2/slice-m4/runorder-followups-s482.test.js",
+  "rationale": "§7.6 rule (b) (S482): \"A cell's initializer (its seed) runs at the cell's place in the run — where its declaration stands in the program body\". ruling:user-voice-scrml.md-S481-run-order-followups item 1 — \"each seed is computed at its place in the sequence; records are still created at construction, so component identity (L12) is unchanged; a read of a seed before its place computes it early, on demand. Amends §66.7.6 rule 5.\" (owner: \"yes, adopt your recs on all three\").",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-"],
+    "domAnchored": [
+      { "selector": "#e", "text": "7" },
+      { "selector": "#r", "text": "kcz" }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-body-run-order-s481",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-STATE-UNDECLARED=1",
+          "prefix:E-MARKUP-001 (matches forbidden E-*)",
+          "prefix:E-STATE-UNDECLARED (matches forbidden E-*)"
+        ],
+        "runtime": "sha256:234d50934141e7e5"
+      }
+    }
+  }
+}

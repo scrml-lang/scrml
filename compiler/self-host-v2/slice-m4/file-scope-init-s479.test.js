@@ -164,13 +164,18 @@ describe("§7.6 rule (b) — a non-constant initializer runs once, at module ini
     expect(client.js).toMatch(/^let n = 0;$/m);
     expect(client.js).toMatch(/^let C;$/m);
     expect(client.js).toMatch(/ C = n \+ 1;/);
-    // a binding cell construction reads runs at module initialization: `let` stays `let`, `const` `const`
+    // s482 (§7.6 rule (b) S482 — "each seed is computed at its place in the sequence"): a cell
+    // whose seed reads `C`, declared after it, no longer makes `C` run at module initialization:
+    // `C` runs in its place, the seed is held by the factory and run at the cell's place. (Before
+    // S482 construction read `C`, so `C` was printed `const C = n + 1;` at module level.)
     const { core: core2 } = compile(PROG(`        let n = 0;
         const C = n + 1;
         function both() -> string { return "x"; }`, "", `<p id="c">\${@seed}</p>`).replace(`let <shown:string=""/>`, `let <shown:string=""/>\n    let <seed:int=(C)/>`));
     const { client: c2 } = artifacts(core2);
     expect(c2.js).toMatch(/let n = 0;/);
-    expect(c2.js).toMatch(/const C = n \+ 1;/);
+    expect(c2.js).toMatch(/^let C;$/m);
+    expect(c2.js).toMatch(/rt\.hold\(inst\$\.fields\[\d+ \/\* seed \*\/\]\);/);
+    expect(c2.js.indexOf("C = n + 1;")).toBeLessThan(c2.js.indexOf("rt.seed(inst$.fields["));
   });
 });
 
