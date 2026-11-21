@@ -63,6 +63,15 @@
  * the capable form is a flag-variable rewrite (`let again = true; for (; again; ) { … }`, with
  * `again = !(!(cond))` written at the body's end and before each `continue` of this loop), built in a
  * later pass (gap g-selfhost-while-migration-blocked-s481). 0 such loops in the self-host.
+ *
+ * A `while` whose head holds a string / template / regex literal is spelled top-check —
+ * `for (;;) { if (!(cond)) { break; } … }` — because impl#1 mangles those literals in a `for` head.
+ * That moves the condition INTO the body's block scope, so (S482, review MED-1 of #2046) the loop is
+ * refused when the body declares, at its top level, a name the condition reads (`let` / `const` /
+ * `lin` / `var` / `function` / `fn` / `class`, any declarator, a cell opener; destructuring and a
+ * condition whose names cannot be read fail closed). The verify's canonical fold checks the same thing
+ * on impl#1's emitted JS: it folds a top-check into `for (; c; )` only when the body's top-level
+ * declarations do not meet the names the test reads.
  */
 
 import { codeRegions, regionTokens, lineStarts, lineAt, UndelimitedMarkup, makeReader, normalizedArtifact } from "./fix-terminators.js";
@@ -163,6 +172,16 @@ function scanLoops(source, toks, want, sites, notes, nested) {
       const literalHead = toks.slice(open + 1, close).some((x) => x.kind === "STRING" || x.kind === "REGEX" || x.kind === "BLOCK_REF" || x.kind === "MARKUP");
       let probe = [{ ...kw, text: "for" }, { start: o.end, end: o.end, text: "; " }, { start: c.start, end: c.start, text: "; " }];
       if (literalHead) {
+        // S482 (review MED-1 of #2046): the top-check moves the condition INTO the body's block
+        // scope. A name the body declares at its TOP level would capture it — a TDZ ReferenceError
+        // (`let` / `const` / `class`) or a different value (`function`). Refused, never rewritten.
+        // (The ruled `for (cond)` output keeps the condition in the head; it is refused too, because
+        // its verify compiles this same top-check spelling and could not prove it.)
+        const capture = declCapture(source, toks.slice(close + 2, match.get(close + 1)), toks.slice(open + 1, close), { topOnly: true });
+        if (capture) {
+          notes.push({ rule: WHILE_RULE, at: t.start, reason: `a \`while\` whose head holds a string / template / regex literal is spelled with its test at the top of the body (\`for (;;) { if (!(cond)) { break; } … }\`, impl#1 mangles such a literal in a \`for\` head), and this body ${capture} — moved into the body, the condition would read the body's binding (a TDZ ReferenceError, or a different value); rename the body's binding or rewrite it by hand (§49.4.1)` });
+          continue;
+        }
         const bo = toks[close + 1];
         const first = toks[close + 2];
         const condText = source.slice(o.end, c.start).trim();
@@ -251,19 +270,37 @@ const DECL_WORDS = new Set(["let", "const", "var", "lin", "function", "fn", "cla
 const ONE_NAME_WORDS = new Set(["function", "fn", "class"]);
 
 /**
- * Does a declaration in the `do` body capture a name the condition reads? A reason, or null.
+ * Does a declaration in the loop body capture a name the condition reads? A reason, or null.
  * EVERY declarator of a declaration is read (S481 review LOW-2: in `let x = n, done = f();` the second
  * name captures too): a declared name is the token after the keyword, or after a `,` at the
  * declaration's own bracket depth, up to a `;` at that depth or the end of its enclosing block. Reading
  * past a `;`-less statement end only finds more names — a refusal, the safe direction. A cell opener
  * written in code (`<done> = …`, `let <done = …/>`, one MARKUP token) names a cell the same way.
+ *
+ * The condition's names are its IDENT / `@` tokens, less a property name after `.` / `?.` (not a
+ * binding read). A condition whose names this cannot read — a template holding `${ … }`, a block, or
+ * markup — fails closed: then ANY declaration captures (S482).
+ *
+ * `topOnly` (S482, the `while` top-check): only declarations at the body's own top level count — the
+ * block the condition moves into. One inside a nested block, a function body or a `for` head lives in a
+ * scope of its own. In that mode a `${ }` / `^{ }` / `~{ }` / `!{ }` block at the top level fails
+ * closed too (what it declares is not read here).
  */
-function declCapture(source, body, cond) {
-  const condNames = new Set(cond.filter((x) => x.kind === "IDENT" || x.kind === "AT_IDENT").map((x) => x.text.replace(/^@/, "")));
+function declCapture(source, body, cond, opts = {}) {
+  const topOnly = opts.topOnly === true;
+  const opaque = cond.some((x) => x.kind === "BLOCK_REF" || x.kind === "MARKUP"
+    || (x.kind === "STRING" && source[x.start] === "`" && source.slice(x.start, x.end).includes("${")));
+  const condNames = new Set(cond
+    .filter((x, i) => (x.kind === "IDENT" || x.kind === "AT_IDENT") && !(i > 0 && (isP(cond[i - 1], ".") || isP(cond[i - 1], "?."))))
+    .map((x) => x.text.replace(/^@/, "")));
+  const reads = (nm) => opaque || condNames.has(nm);
+  const why = (what) => (opaque
+    ? `declares ${what}, and the condition holds a template / block / markup whose names this rule cannot read`
+    : `declares ${what}, which the condition reads`);
   const named = (nm) => {
     if (!nm) return null;
     if (isP(nm, "{") || isP(nm, "[")) return "declares names by destructuring";
-    if (nm.kind === "IDENT" && condNames.has(nm.text)) return `declares \`${nm.text}\`, which the condition reads`;
+    if (nm.kind === "IDENT" && reads(nm.text)) return why(`\`${nm.text}\``);
     return null;
   };
   // A statement-leading `<name …` (a cell opener `<done> = …` / `<done = …/>`, read as code tokens or
@@ -273,14 +310,23 @@ function declCapture(source, body, cond) {
     if (!x) return null;
     if (x.kind === "MARKUP") {
       const m = /^<\s*@?([A-Za-z_$][\w$]*)/.exec(source.slice(x.start, x.end));
-      return m && condNames.has(m[1]) ? `declares the cell \`${m[1]}\`, which the condition reads` : null;
+      return m && reads(m[1]) ? why(`the cell \`${m[1]}\``) : null;
     }
-    if (isP(x, "<") && body[k + 1] && body[k + 1].kind === "IDENT" && condNames.has(body[k + 1].text)) return `declares the cell \`${body[k + 1].text}\`, which the condition reads`;
+    if (isP(x, "<") && body[k + 1] && body[k + 1].kind === "IDENT" && reads(body[k + 1].text)) return why(`the cell \`${body[k + 1].text}\``);
     return null;
   };
+  let level = 0; // topOnly: the bracket depth of body[k] inside the body
   for (let k = 0; k < body.length; k++) {
     const x = body[k];
     const prev = body[k - 1];
+    if (topOnly) {
+      if (isP(x, "(") || isP(x, "[") || isP(x, "{")) { level++; continue; }
+      if (isP(x, ")") || isP(x, "]") || isP(x, "}")) { level--; continue; }
+      if (level > 0) continue;
+      if (x.kind === "BLOCK_REF" && /^[$^~!]\{/.test(source.slice(x.start, x.start + 2))) {
+        return `holds a \`${source.slice(x.start, x.start + 2)} … }\` block at its top level, whose declarations this rule does not read`;
+      }
+    }
     const lead = !prev || isP(prev, ";") || isP(prev, "{") || isP(prev, "}") || prev.line < x.line;
     if (lead) { const c = cellAt(k); if (c) return c; }
     // impl#1's tokenizer reads `var` as an IDENT (it is no scrml keyword); still a binding form here.
@@ -362,8 +408,52 @@ function forNode(init, test, update, body) {
   const s0 = !init && !test && !update && body && body.type === "BlockStatement" ? body.body[0] : null;
   const brk = s0 && s0.type === "IfStatement" && !s0.alternate && s0.test && s0.test.type === "UnaryExpression" && s0.test.operator === "!"
     ? (s0.consequent.type === "BlockStatement" && s0.consequent.body.length === 1 ? s0.consequent.body[0] : s0.consequent) : null;
-  if (brk && brk.type === "BreakStatement" && !brk.label) return forNode(null, s0.test.argument, null, { type: "BlockStatement", body: body.body.slice(1) });
+  if (brk && brk.type === "BreakStatement" && !brk.label) {
+    const rest = body.body.slice(1);
+    // S482 (review MED-1 of #2046): the fold holds only when the test reads no name the rest of the
+    // body declares at its top level — there the test sits in the body's scope and would read that
+    // binding (TDZ / a different value), where `for (; c; )` reads the enclosing one. Otherwise the
+    // node stays as written, so the verify reports the two shapes as different loops.
+    const declared = topLevelDeclared(rest);
+    if (declared.size > 0 && [...namesRead(s0.test.argument)].some((nm) => declared.has(nm))) return { type: "ForStatement", init, test, update, body };
+    return forNode(null, s0.test.argument, null, { type: "BlockStatement", body: rest });
+  }
   return { type: "ForStatement", init, test, update, body };
+}
+
+/** The names a binding pattern binds (Identifier / Object / Array / Assignment / Rest patterns). */
+function patternNames(p, out) {
+  if (!p) return out;
+  if (p.type === "Identifier") out.add(p.name);
+  else if (p.type === "ObjectPattern") for (const q of p.properties) patternNames(q.type === "RestElement" ? q.argument : q.value, out);
+  else if (p.type === "ArrayPattern") for (const q of p.elements) patternNames(q, out);
+  else if (p.type === "AssignmentPattern") patternNames(p.left, out);
+  else if (p.type === "RestElement") patternNames(p.argument, out);
+  return out;
+}
+
+/** The names a statement list declares in its own block scope (and `var`s, hoisted — counted, to fail closed). */
+function topLevelDeclared(stmts) {
+  const out = new Set();
+  for (let s of stmts) {
+    while (s && s.type === "LabeledStatement") s = s.body;
+    if (!s) continue;
+    if (s.type === "VariableDeclaration") for (const d of s.declarations) patternNames(d.id, out);
+    else if ((s.type === "FunctionDeclaration" || s.type === "ClassDeclaration") && s.id) out.add(s.id.name);
+  }
+  return out;
+}
+
+/** Every Identifier an expression mentions, less non-computed property names / keys (over-reads nested scopes: fails closed). */
+function namesRead(e, out = new Set()) {
+  if (Array.isArray(e)) { for (const x of e) namesRead(x, out); return out; }
+  if (!e || typeof e !== "object") return out;
+  if (e.type === "Identifier") { out.add(e.name); return out; }
+  for (const k of Object.keys(e)) {
+    if ((e.type === "MemberExpression" && k === "property" && !e.computed) || ((e.type === "Property" || e.type === "MethodDefinition" || e.type === "PropertyDefinition") && k === "key" && !e.computed)) continue;
+    namesRead(e[k], out);
+  }
+  return out;
 }
 
 /**

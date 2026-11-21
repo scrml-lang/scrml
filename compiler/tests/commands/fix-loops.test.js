@@ -291,3 +291,103 @@ describe("S239 review LOW-2 — the capture guard reads every declarator and eve
     expect(fixLoops(doBody("let x = g(n, done), y = [done, n];"), { filePath: F, verify: false }).changed).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// S482 s482-loop-interim-tdz — review MED-1 of #2046: the top-check spelling
+// `for (;;) { if (!(cond)) { break; } body }` moves the condition INTO the body's block scope, so a
+// name the body declares at its top level captures the condition (a TDZ ReferenceError for
+// `let` / `const` / `class`, a different value for a `function`). Refused, never rewritten; the
+// verify's canonical fold no longer equates the two shapes when the body would capture.
+// ---------------------------------------------------------------------------
+
+describe("S482 MED-1 — the top-check spelling refuses a body declaration that captures the condition", () => {
+  const litLoop = (decl, cond = "c != \"x\" && n < 3") => prog(`    function f(s) {\n        let c = "a";\n        let n = 0;\n        while (${cond}) {\n            ${decl}\n            n = n + 1;\n        }\n        return n;\n    }`) + "<p>${f(\"abc\")}</p>\n";
+  const interim = (src, verify = false) => fixLoops(src, { filePath: F, verify, interim: true });
+  const capNote = (r) => r.blockers.map((b) => b.reason).join("\n");
+
+  test("the reviewer's probe: `let c` in the body shadows the condition's `c` — refused, source unchanged (verify on)", () => {
+    const src = litLoop("let c = s.charAt(n);");
+    const r = interim(src, true);
+    expect(r.changed).toBe(false);
+    expect(r.output).toBe(src);
+    expect(capNote(r)).toContain("declares `c`, which the condition reads");
+    expect(r.blockers.map((b) => b.line)).toEqual([6]); // the `while` line
+  });
+
+  test("the reviewer's runtime proof: the top-check spelling of that loop throws where the `while` returned 3", () => {
+    // Plain JS, the shape impl#1 emits for both spellings (probe/tdzrun.js).
+    const before = new Function("s", "let c = \"a\"; let n = 0; while (c != \"x\" && n < 3) { let c = s.charAt(n); n = n + 1; } return n;");
+    const after = new Function("s", "let c = \"a\"; let n = 0; for (;;) { if (!(c != \"x\" && n < 3)) { break; } let c = s.charAt(n); n = n + 1; } return n;");
+    expect(before("abc")).toBe(3);
+    expect(() => after("abc")).toThrow(ReferenceError);
+  });
+
+  test("`const`, a later declarator, `lin`, a nested `function` / `fn`, `class` — all refused", () => {
+    for (const d of ["const c = s.charAt(n);", "let k = 1, c = s.charAt(n);", "lin c = s.charAt(n);", "function c() { return 1; }", "fn c() { return 1; }", "class c { }"]) {
+      const r = interim(litLoop(d));
+      expect(r.changed).toBe(false);
+      expect(capNote(r)).toContain("declares `c`, which the condition reads");
+    }
+  });
+
+  test("a destructuring declaration at the body's top level is refused (its names are not read here)", () => {
+    for (const d of ["let { c } = o;", "const [c, d] = xs;", "let k = 1, { c } = o;"]) {
+      const r = interim(litLoop(d));
+      expect(r.changed).toBe(false);
+      expect(capNote(r)).toContain("destructuring");
+    }
+  });
+
+  test("a member read `c.x` in the condition: `c` shadowed → refused; a declared `x` (the property name) does not capture", () => {
+    expect(interim(litLoop("let c = s;", "c.x != \"q\" && n < 3")).changed).toBe(false);
+    const ok = interim(litLoop("let x = 1;", "c.x != \"q\" && n < 3"));
+    expect(ok.changed).toBe(true);
+    expect(ok.output).toContain("if (!(c.x != \"q\" && n < 3)) { break; }");
+  });
+
+  test("a name declared only in a NESTED block of the body is safe — still rewritten (verify on)", () => {
+    for (const d of ["if (n > 0) { let c = s.charAt(n); n = n + c.length - 1; }", "function g() { let c = 1; return c; }", "for (let c = 0; c < 1; c = c + 1) { n = n + c; }"]) {
+      const src = litLoop(d);
+      const r = interim(src, true);
+      expect(r.blockers).toEqual([]);
+      expect(r.changed).toBe(true);
+      expect(r.output).toContain("for (;;) {\n            if (!(c != \"x\" && n < 3)) { break; }");
+    }
+  });
+
+  test("a body that declares no condition name is still rewritten; a label and a `continue` keep the top test", () => {
+    const src = prog("    function f(s) {\n        let c = \"a\";\n        let n = 0;\n        outer: while (c != \"x\" && n < 5) {\n            n = n + 1;\n            if (n == 2) { continue outer; }\n            if (n == 3) { continue; }\n            c = s.charAt(n);\n        }\n        return n;\n    }") + "<p>${f(\"abxd\")}</p>\n";
+    const r = interim(src, true);
+    expect(r.blockers).toEqual([]);
+    expect(r.output).toContain("outer: for (;;) {\n            if (!(c != \"x\" && n < 5)) { break; }\n            n = n + 1;");
+    // `continue` (labelled or not) re-enters at the test, exactly like the `while`.
+    const w = new Function("s", "let c = \"a\"; let n = 0; outer: while (c != \"x\" && n < 5) { n = n + 1; if (n == 2) { continue outer; } if (n == 3) { continue; } c = s.charAt(n); } return n;");
+    const t = new Function("s", "let c = \"a\"; let n = 0; outer: for (;;) { if (!(c != \"x\" && n < 5)) { break; } n = n + 1; if (n == 2) { continue outer; } if (n == 3) { continue; } c = s.charAt(n); } return n;");
+    for (const s of ["abxd", "aaaaaa", "xxxx"]) expect(t(s)).toBe(w(s));
+  });
+
+  test("a numeric-only head keeps the counted head `for (; cond; )` — the condition stays outside the body, a shadowing body is unaffected", () => {
+    const src = prog("    function f(s) {\n        let c = 0;\n        let n = 0;\n        while (c < 1 && n < 3) {\n            let c = 5;\n            n = n + 1;\n        }\n        return n;\n    }") + "<p>${f(\"abc\")}</p>\n";
+    const r = interim(src, true);
+    expect(r.blockers).toEqual([]);
+    expect(r.output).toContain("for (; c < 1 && n < 3; ) {\n            let c = 5;");
+  });
+
+  test("a condition holding a template whose `${ }` names this rule cannot read fails closed when the body declares anything", () => {
+    const r = interim(litLoop("let k = 1;", "`${c}` != \"x\" && n < 3"));
+    expect(r.changed).toBe(false);
+    expect(capNote(r)).toContain("cannot read");
+    // no top-level declaration at all: nothing to capture, rewritten
+    expect(interim(litLoop("g(n);", "`${c}` != \"x\" && n < 3")).changed).toBe(true);
+  });
+
+  test("verify: the canonical fold no longer equates a capturing top-check with the `while`", () => {
+    const n = (s) => normalizedArtifact(s, canonicalLoops);
+    expect(n("while (c != 1) { let c = 2; f(c); }")).not.toBe(n("for (;;) { if (!(c != 1)) { break; } let c = 2; f(c); }"));
+    expect(n("while (c.x) { function c() {} }")).not.toBe(n("for (;;) { if (!(c.x)) { break; } function c() {} }"));
+    expect(n("while (c) { let { c: d, ...c } = o; }")).not.toBe(n("for (;;) { if (!(c)) { break; } let { c: d, ...c } = o; }"));
+    // no capture (nested block / property name): still folds
+    expect(n("while (c != 1) { { let c = 2; } f(); }")).toBe(n("for (;;) { if (!(c != 1)) { break; } { let c = 2; } f(); }"));
+    expect(n("while (o.c != 1) { let c = 2; }")).toBe(n("for (;;) { if (!(o.c != 1)) { break; } let c = 2; }"));
+  });
+});

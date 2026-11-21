@@ -5707,7 +5707,7 @@ ${
         let seq: int[] = [];
         let left: int = marked.length;
         let i: int = 0;
-        while (i < order.length && left > 0) {
+        for (; i < order.length && left > 0; ) {
             const v: View = order[i];
             const here: int[] = initOf(v);
             if (here.length > 0) {
@@ -5730,7 +5730,7 @@ ${
         }
         // an early binding's initializer runs before the body: what it reaches is early too
         let changed = true;
-        while (changed) {
+        for (; changed; ) {
             changed = false;
             let roots: Node[] = [];
             for (const e of early) {
@@ -5819,7 +5819,7 @@ ${
         for (const s of sread) { if (!hasInt(cread, s)) held = held.concat([s]); }
         let out: int[] = [];
         let changed = true;
-        while (changed) {
+        for (; changed; ) {
             changed = false;
             for (const k of p.consts) {
                 const id: int = k.sym.id;
@@ -5868,7 +5868,7 @@ ${
         for (const s of sharedRefs(Node.NProgram(p))) { if (!hasInt(out, s.id)) out = out.concat([s.id]); }
         for (const f of p.fns) { out = unionInts(out, instancedIn(Node.NFn(f))); }
         let changed = true;
-        while (changed) {
+        for (; changed; ) {
             changed = false;
             for (const d of p.decls) {
                 if (hasInt(out, d.sym.id)) {
