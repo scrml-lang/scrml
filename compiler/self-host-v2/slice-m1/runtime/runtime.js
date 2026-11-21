@@ -247,7 +247,8 @@ export class Cell {
   /** Run an owed seed now (on first demand, or when construction ends). */
   settle() {
     const init = this.pending;
-    if (init === SEEDING) throw new Error("a `let` initializer reads itself while the program is being constructed (a seeding cycle)");
+    // s482 r1 (#2053 review INFO): a seed runs at its place in the body's run, or on an earlier read
+    if (init === SEEDING) throw new Error("a cell's initializer reads itself, directly or through another cell's initializer, while it is being computed — at its place in the program body's run, or on a read before that place (a seeding cycle)");
     this.held = false;
     this.pending = SEEDING;
     try { this.value = untrack(init); } finally { if (this.pending === SEEDING) this.pending = null; }

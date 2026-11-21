@@ -72,3 +72,26 @@ Scratch: ~/.cache/scrml/review/s482-runorder-followups/ (probes p/, harness h/, 
 - Conformance: base 770 PASS / 3 FAIL; head (before A case) 773 / 3 — same 3 FAILs, CRASH 0.
 - SPEC: §7.6 rule (b) ⚑ resolved + S482 provenance; INTERIM narrowed; §7.6.1, §40.8, §66.7.6 rule 5 + table row.
 - Gaps: P1 / P3 resolved (built by #2041, checked on main); P2 narrowed (residue listed).
+
+## r1 (S482 fix round, #2053 review verdict FIX)
+- Step 0: merged origin/main (eca9c5af5) — dd240c4c9 (merge commit, clean). This branch's own new `while`
+  (print.scrml reachOf) → `for (; todo.length > 0; )` by `scrml fix --loop-interim` (31058ae0c); body captures nothing.
+- HIGH-1 (bf4b7e8d9): analyze.scrml constructAt names a `<match>` arm (`the <Idle> arm of <match for=Ph>`); SPEC §7.6 (b)
+  false sentence struck, construct list / §34 row / §40.8 bullet name the arm; gap g-boot-nested-init-place-in-construct-s481
+  corrected. Tests "C r1" 6 red on 758b0577b / 8 green; conformance body-top/acting-init-in-match-arm-neg. Corpus 0.
+- MED-1 (7dc39c1c5): PA reading (prov=pa-ruled, conditional) built after measuring three variants on the 2964 corpus files
+  (A: named function values only; B: + function expressions; C: + the `uses` closure, function values inside reached
+  functions) — each 0 newly rejected, 0 code/output changes. C built (§6.7.4 rule 3's reading of "a function value counts
+  as if it were called"). Over-refusal: a function value handed on and never called while the body runs (`apply(g)` with
+  `apply` ignoring it; stored for later; handed to a host subscription) — the analysis cannot tell; corpus holds none.
+  Tests "B r1" 5 red / 7 green; conformance body-top/fn-value-reaches-later-binding-neg (impl#1 passes it).
+  Found: g-boot-handler-reach-runs-binding-early-s482 (filed, MED, pre-existing) — a handler before a binding's place that
+  reaches it makes print.scrml bodyInits run it before the body (`reachOf(NView)` walks handlers).
+- MED-2: NOT built — owner question. Item 2's sentence is about a display/statement that CALLS a function; a cell read is
+  not a call, and item 1 sanctions the early read ("computes it early, on demand") without saying what happens when the
+  seed itself reaches a later binding. Rec: E-SCOPE-001 for a read of a cell before its place whose seed reaches a binding
+  whose place is after the read (the item-2 rule through the seed), measured before landing.
+- LOW-1: §7.6 rule (b) S482 + §66.7.6 bullet state the persisted-cell carve-out, INTERIM, gap
+  g-boot-persist-seed-at-construction-s482 (capable alternative: restore at construction; on empty storage compute the
+  default at the place).
+- INFO: runtime.js seeding-cycle message updated (seeds run at their place or on an earlier read).

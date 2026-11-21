@@ -5974,7 +5974,8 @@ ${
     // cell (a seeded field) with a written initializer that can be observed running where it
     // runs (seedLive: it acts, or reads a binding or a cell), whose place is in the body's run
     // (`marked`: a View.Init lower put at its declaration). A persisted cell's seed is its stored
-    // value's default — computed at construction, as before. Any other seed computes the same
+    // value's default — computed at construction, as before (INTERIM, stated in §7.6 rule (b) S482 r1:
+    // g-boot-persist-seed-at-construction-s482). Any other seed computes the same
     // value wherever it runs.
     fn heldFields(pd: Decl, marked: int[]) -> int[] {
         let out: int[] = [];
