@@ -6063,7 +6063,7 @@ ${
         let seenF: string[] = [];
         let seenD: int[] = [];
         let seenFn: int[] = [];
-        while (todo.length > 0) {
+        for (; todo.length > 0; ) {
             let walk: Node[] = todo;
             for (const fid of fnClosureThroughConsts(p, todo)) {
                 if (!hasInt(seenFn, fid)) {
