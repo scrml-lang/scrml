@@ -2755,7 +2755,11 @@ ${
 
     // The syntax of every declaration, by nid (user declarations: the ADecl; the
     // program: its body's markup).
-    type DeclSyntax:struct = { nid: int, file: string, renders: ANode[], hasRenders: boolean }
+    // s481 — `marks`: the program's file-scope bindings (§7.6), each with its PLACE among
+    // `renders` — the index of the first markup node after its `${ }` (renders.length: after
+    // the last). lowerRenders puts a View.Init there (§7.6 S481: the body runs in source order).
+    type DeclSyntax:struct = { nid: int, file: string, renders: ANode[], hasRenders: boolean, marks: ConstMark[] }
+    type ConstMark:struct = { nid: int, at: int }
 
     fn declSyntaxes(files: FileAst[]) -> DeclSyntax[] {
         let out: DeclSyntax[] = []
@@ -2769,7 +2773,7 @@ ${
         const k: AItemK = it.k
         return match k {
             .DeclItem(d: d) :> [userSyntax(file, d)]
-            .ProgramItem(p: p) :> [{ nid: p.nid, file: file, renders: programMarkup(p.items), hasRenders: true }].concat(nestedSyntaxes(file, p.items))
+            .ProgramItem(p: p) :> [{ nid: p.nid, file: file, renders: programMarkup(p.items), hasRenders: true, marks: programMarks(p.items) }].concat(nestedSyntaxes(file, p.items))
             .ConstItem(c: c) :> []
             .ImportItem(i: i) :> []
             .TypeItem(t: t) :> []
@@ -2780,9 +2784,9 @@ ${
 
     fn userSyntax(file: string, d: ADecl) -> DeclSyntax {
         const r: AElem | not = d.renders
-        if (r is not) return { nid: d.nid, file: file, renders: [], hasRenders: false }
+        if (r is not) return { nid: d.nid, file: file, renders: [], hasRenders: false, marks: [] }
         const node: ANode = { nid: -1, span: r.span, k: ANodeK.Elem(r) }
-        return { nid: d.nid, file: file, renders: [node], hasRenders: true }
+        return { nid: d.nid, file: file, renders: [node], hasRenders: true, marks: [] }
     }
 
     // s442: the declarations written inside `<program>` (a nested user
@@ -2818,6 +2822,32 @@ ${
         return out
     }
 
+    // s481 — each top-level `const` / `let` of the program body, at its place among the
+    // markup nodes programMarkup keeps (the count of markup items before it).
+    fn programMarks(items: AItem[]) -> ConstMark[] {
+        let out: ConstMark[] = []
+        let at: int = 0
+        for (const it of items) {
+            const k: AItemK = it.k
+            at = at + markupItemNode(k).length
+            const c: AConst | not = constItemOf1(k)
+            if (c is given) out = out.concat([{ nid: c.nid, at: at }])
+        }
+        return out
+    }
+
+    fn constItemOf1(k: AItemK) -> AConst | not {
+        return match k {
+            .ConstItem(c: c) :> c
+            .MarkupItem(n: n) :> not
+            .ImportItem(i: i) :> not
+            .TypeItem(t: t) :> not
+            .FnItem(f: f) :> not
+            .DeclItem(d: d) :> not
+            .ProgramItem(p: p) :> not
+        }
+    }
+
     fn markupItemNode(k: AItemK) -> ANode[] {
         return match k {
             .MarkupItem(n: n) :> [n]
@@ -2841,7 +2871,43 @@ ${
     // with nid -1 (it has no ANode of its own), so its FACT is on the AElem.
     fn lowerRenders(c: LC, s: DeclSyntax) -> View[] | not {
         if (!s.hasRenders) return not
-        return lowerNodes(c, s.renders)
+        if (s.marks.length == 0) return lowerNodes(c, s.renders)
+        return lowerMarked(c, s.renders, s.marks)
+    }
+
+    // s481 — lowerNodes, with a View.Init for each admitted file-scope binding at its place
+    // (§7.6 S481). A place inside an if-chain (§17.1.1) is put after the chain.
+    fn lowerMarked(c: LC, ns: ANode[], marks: ConstMark[]) -> View[] {
+        let out: View[] = []
+        let m: int = 0
+        let i = 0
+        while (i < ns.length) {
+            while (m < marks.length && marks[m].at <= i) {
+                out = out.concat(initView(c, marks[m].nid))
+                m = m + 1
+            }
+            const j: int = chainEnd(ns, i)
+            if (j > i + 1) {
+                out = out.concat([chainView(c, ns, i, j)])
+                i = j
+            } else {
+                out = out.concat(lowerNode(c, ns[i]))
+                i = i + 1
+            }
+        }
+        while (m < marks.length) {
+            out = out.concat(initView(c, marks[m].nid))
+            m = m + 1
+        }
+        return out
+    }
+
+    // The binding the const item `nid` declares, when analyze admitted it (coreConsts holds it).
+    fn initView(c: LC, nid: int) -> View[] {
+        for (const k of c.t.consts) {
+            if (k.nid == nid && k.ok) return [View.Init(k.sym)]
+        }
+        return []
     }
 
     fn lowerDecl(t: Tables, ss: DeclSyntax[], d: DeclInfo) -> Decl {
@@ -2973,6 +3039,7 @@ ${
             .Star(decl: dd) :> v
             .Effect(deps: ds) :> v
             .Run(body: x) :> v
+            .Init(k: x) :> v
             .Request(deps: ds) :> v
             .ResetOn(triggers: ds) :> v
             .Errors(of: o) :> v
@@ -4847,6 +4914,7 @@ ${
             .Star(decl: x) :> v
             .Effect(deps: x) :> v
             .Run(body: x) :> v
+            .Init(k: x) :> v
             .Request(deps: x) :> v
             .ResetOn(triggers: x) :> v
             .Errors(of: x) :> v
@@ -4941,6 +5009,7 @@ ${
             .Slot :> []
             .Effect(deps: x) :> []
             .Run(body: x) :> []
+            .Init(k: x) :> []
             .Request(deps: x) :> []
             .ResetOn(triggers: x) :> []
             .Errors(of: x) :> []
@@ -5005,6 +5074,7 @@ ${
             .Star :> []
             .Effect :> []
             .Run :> []
+            .Init :> []
             .Request :> []
             .ResetOn :> []
             .Errors :> []
@@ -5080,6 +5150,7 @@ ${
             .Star(decl: x) :> []
             .Effect(deps: x) :> []
             .Run(body: x) :> []
+            .Init(k: x) :> []
             .Request(deps: x) :> []
             .ResetOn(triggers: x) :> []
             .Errors(of: x) :> []
@@ -5131,6 +5202,7 @@ ${
             .Star(decl: x) :> 0
             .Effect(deps: x) :> 0
             .Run(body: x) :> 0
+            .Init(k: x) :> 0
             .Request(deps: x) :> 0
             .ResetOn(triggers: x) :> 0
             .Errors(of: x) :> 0

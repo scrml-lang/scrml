@@ -1,0 +1,6 @@
+<program>
+${ let o: int[free, write] = [1]; }
+<p id="a">${o[0]}</p>
+${ o[0] = 10; }
+<p id="c">${o[0]}</p>
+</program>

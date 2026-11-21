@@ -162,6 +162,7 @@ ${
             .Star(decl: x) :> "Star"
             .Effect(deps: x) :> "Effect"
             .Run(body: x) :> "Run"
+            .Init(k: x) :> "Init"
             .Request(deps: x) :> "Request"
             .ResetOn(triggers: x) :> "ResetOn"
             .Errors(of: x) :> "Errors"

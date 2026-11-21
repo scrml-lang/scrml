@@ -1,0 +1,8 @@
+<program>
+${
+    let o: int[free, write] = [1];
+    function bump() -> int { o[0] = o[0] + 10; return o[0]; }
+    const unused: int = bump();
+}
+<p id="c">${o[0]}</p>
+</program>

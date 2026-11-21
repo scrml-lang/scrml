@@ -96,13 +96,20 @@ describe("§7.6 rule (b) — a non-constant initializer runs once, at module ini
     const { client, server } = artifacts(core);
     expect(client.refused).toEqual([]);
     expect(server.refused).toEqual([]);
-    for (const js of [client.js, server.js]) {
-      expect(count(js, "const A = tick();")).toBe(1);
-      expect(count(js, "const B = tick();")).toBe(1);
-      expect(js).toMatch(/let count = 0;/);
+    expect(count(server.js, "const A = tick();")).toBe(1);
+    expect(count(server.js, "const B = tick();")).toBe(1);
+    expect(server.js).toMatch(/let count = 0;/);
+    // S481 (§7.6, ruling:user-voice-scrml.md-S481-body-run-order): in the client the program body
+    // runs in source order — a binding whose initializer does something is declared at module
+    // level and its initializer runs once, in its place in the body (nothing reads one before that
+    // place here); `count = 0` does nothing, so it runs at module initialization (as-if)
+    for (const name of ["A", "B"]) {
+      expect(count(client.js, ` ${name} = tick();`)).toBe(1);
+      expect(client.js).toMatch(new RegExp(`^let ${name};$`, "m"));
     }
+    expect(client.js).toMatch(/^let count = 0;$/m);
     // `log` is read and written only by client code: only the client artifact holds it
-    expect(client.js).toMatch(/let log = \[\];/);
+    expect(client.js).toMatch(/log = \[\];/);
     expect(server.js).not.toMatch(/let log/);
     // the server prints the functions an initializer calls at MODULE level (they run before createServer)
     expect(server.js.indexOf("function tick()")).toBeLessThan(server.js.indexOf("export function createServer"));
@@ -152,8 +159,18 @@ describe("§7.6 rule (b) — a non-constant initializer runs once, at module ini
         const C = n + 1;
         function both() -> string { return "x"; }`, "", `<p id="c">\${C}</p>`));
     const { client } = artifacts(core);
-    expect(client.js).toMatch(/let n = 0;/);
-    expect(client.js).toMatch(/const C = n \+ 1;/);
+    // S481: `n = 0` does nothing — module initialization (as-if); `C` reads a `let` an earlier
+    // body-top statement could write, so it runs in its place in the body (declared `let`)
+    expect(client.js).toMatch(/^let n = 0;$/m);
+    expect(client.js).toMatch(/^let C;$/m);
+    expect(client.js).toMatch(/ C = n \+ 1;/);
+    // a binding cell construction reads runs at module initialization: `let` stays `let`, `const` `const`
+    const { core: core2 } = compile(PROG(`        let n = 0;
+        const C = n + 1;
+        function both() -> string { return "x"; }`, "", `<p id="c">\${@seed}</p>`).replace(`let <shown:string=""/>`, `let <shown:string=""/>\n    let <seed:int=(C)/>`));
+    const { client: c2 } = artifacts(core2);
+    expect(c2.js).toMatch(/let n = 0;/);
+    expect(c2.js).toMatch(/const C = n \+ 1;/);
   });
 });
 
