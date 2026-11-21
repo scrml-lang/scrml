@@ -380,6 +380,9 @@ ${mid}
   test("a `${ }` statement there is E-CTRL-001 (unchanged)", async () => {
     expect(await errCodes(chain('${ note("a"); }'))).toEqual(["E-CTRL-001"]);
   }, 120000);
+  test("a function declared INSIDE a member (hoisted to a program item) does not break the chain", async () => {
+    expect(await errCodes(chain("").replace('<p id="a" if=(@flag)>yes</p>', '<div id="a" if=(@flag)>\n    ${\n        function inner() -> int { return 1; }\n    }\n    <p>yes</p>\n</div>'))).toEqual([]);
+  }, 120000);
   test("the declaration before the chain compiles", async () => {
     expect(await errCodes(chain("").replace('<p id="a"', '${ const a: int = note("a"); }\n<p id="a"'))).toEqual([]);
   }, 120000);

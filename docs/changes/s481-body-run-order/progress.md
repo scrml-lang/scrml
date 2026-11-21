@@ -23,6 +23,6 @@ PA rec adopted (S481)". Cite: `ruling:user-voice-scrml.md-S481-body-run-order`.
   server-only code is server-only — out of the client (bodyInits / clientConsts), run by the server
   (print-server.scrml `serverConsts` / `serverReach`). Tests a7/a1/a5/a6 (client files grepped; server module imported).
 - M2: bodyInits `pre` = only declarations the program constructs (`constructedDecls`). b4 → 5; b3 pinned 1 (⚑).
-- L1: analyze `programChainGaps` — a `${ }` declaration between if-chain members is E-CTRL-001 (§17.1.1 as written; impl#1 agrees).
+- L1: analyze `programChainGaps` — a `${ }` declaration between if-chain members is E-CTRL-001 (§17.1.1 as written; impl#1 agrees). Judged by source span: a function declared inside a member is hoisted to a later program item but does not break the chain (conformance server-fn/branch-declared-server-fn-routes-to-server caught the first, order-based version).
 - L2: analyze.scrml E-BOOTSTRAP-UNSUPPORTED client-only-state message reworded to S481 rule (b).
 - SPEC §7.6 rule (b): the two struck sentences, server-only rule + S481 r1 provenance; INTERIM narrowed; §17.1.1 clarifying sentence.

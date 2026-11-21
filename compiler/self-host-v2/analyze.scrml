@@ -31079,7 +31079,9 @@ ${
     // (which walks the markup) never saw it and accepted `<p if=…/> ${ const a = f(); } <p else/>`
     // — while the same block holding a statement (a markup Run node) was E-CTRL-001, as on impl#1.
     // Judged here, on the program's items: such an item between a member and an `else` /
-    // `else-if=` breaks the chain, the same error.
+    // `else-if=` breaks the chain, the same error. "Between" is by SOURCE SPAN: a function
+    // declared inside a member's own body is hoisted to a program item listed after the member,
+    // but it stands inside it, not between members (conformance server-fn/branch-declared-…).
     fn programChainGaps(file: string, items: AItem[]) -> Diag[] {
         let out: Diag[] = []
         for (const it of items) {
@@ -31101,7 +31103,8 @@ ${
     fn chainGapsIn(file: string, items: AItem[]) -> Diag[] {
         let out: Diag[] = []
         let prev: int = 0               // the preceding member: 1 `if=` / `else-if=`, else 0
-        let gap = false                 // a non-markup item stands after that member
+        let prevEnd: int = 0            // where that member's source ends
+        let gaps: int[] = []            // the starts of the non-markup items listed after it
         for (const it of items) {
             const k: AItemK = it.k
             const n: ANode | not = match k {
@@ -31114,7 +31117,7 @@ ${
                 .ProgramItem(p: x) :> not
             }
             if (n is not) {
-                if (prev == 1) gap = true
+                if (prev == 1) gaps = gaps.concat([it.span.start])
             } else {
                 const nk: ANodeK = n.k
                 const e: AElem | not = match nk {
@@ -31129,7 +31132,9 @@ ${
                     .Request(r: r) :> not
                 }
                 if (e is given) {
-                    if (gap) {
+                    let gap = false
+                    for (const g of gaps) { if (g >= prevEnd && g < e.span.start) gap = true }
+                    if (prev == 1 && gap) {
                         const ea: AAttr | not = attrNamed(e.attrs, "else-if")
                         const la: AAttr | not = attrNamed(e.attrs, "else")
                         const why: string = " — a `${ }` block declaring a binding, a function or a type stands between it and the chain; no other construct may appear between chain members (§17.1.1). Move the declaration before the `if=` element or after the chain"
@@ -31140,10 +31145,11 @@ ${
                     }
                     prev = 0
                     if (attrNamed(e.attrs, "if") is given || attrNamed(e.attrs, "else-if") is given) prev = 1
-                    gap = false
+                    prevEnd = e.span.end
+                    gaps = []
                 } else if (!blankNode(n) && !isCssNode(n)) {
                     prev = 0
-                    gap = false
+                    gaps = []
                 }
             }
         }
