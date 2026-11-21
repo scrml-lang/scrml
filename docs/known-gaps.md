@@ -33926,3 +33926,25 @@ Probe `h02-hoist-nomove.scrml`. §7.6 rule (b) puts every initializer at module 
 Probes `e01-render-model.scrml`, `e02-bodylevel-derived-css.scrml`, `e03-bodylevel-derived-early.scrml`. impl#1 runs all top-level logic, then fills interpolations; the bootstrap interleaves in source order, and its CSS bridge reads a derived cell at boot. Reactive cells show the final value on both (no difference); only a `free` value — by definition not tracked — exposes the order. The SPEC says body-top statements run "at mount in source order" but not where an interpolation's read falls. **Rec:** source order, the bootstrap's model, stated in §40.8 — consistent with the one-sequence rec above: the body runs top to bottom and an interpolation of a `free` value reads it where it stands (that is what `free` means: no later update). impl#1 is not changed (S471). Who pays either way: only programs that write a `free` value between two displays of it.
 
 **Ruled (S481) for the three owner-level items above** — ruling:user-voice-scrml.md-S481-body-run-order: *"one rule. The program body runs once, top to bottom, in source order, and that sequence is the module initialization. Every file-scope initializer runs whether or not anything reads it, so the S480 tool ruling extends to web programs. A display of a `free` value reads it where it stands."* (bryan: *"yes, adopt your rec on P1–P3"*). The bootstrap changes for P1 / P2; P3 is already the bootstrap's model; impl#1 is not changed (S471).
+
+## §S481-trackm2-selfhost — Track M step 2 residue (2026-11-20; change `docs/changes/s481-trackm2-selfhost/`; ruling user-voice-scrml.md S480 "⭐ RULED — bootstrap census build order" item 1. Measured on the migrated self-host sources with `scrml-boot compile` per file. FILED, not fixed: this lane does not touch the bootstrap parser.)
+
+<!-- @gap id=g-selfhost-while-migration-blocked-s481 sev=MED status=open locus=compiler/self-host-v2/*.scrml(457 `while` loops)+compiler/src/commands/fix-loops.js(output head `for (cond)`) prov=lane:s481-trackm2-selfhost;ruling:user-voice-scrml.md-S480-census-recs;spec:§49.4.1("whose fix-it is `for (cond) { … }`") -->
+### g-selfhost-while-migration-blocked-s481 — the self-host sources keep their `while` loops: `scrml fix`'s `loop-while` writes `for (cond)`, which impl#1 (the compiler that builds the bootstrap bundle) refuses — `NEW S481 (s481-trackm2-selfhost); MED; open — owner question`
+
+E-LOOP-WHILE-RETIRED is now the bootstrap's first own error in 18 of 28 self-host files (457 reports). impl#1 reports E-IMPL1-RULED-FORM-UNSUPPORTED on `for (cond) { … }` (§49.8: it "has no condition head"). impl#1 does compile the counted head `for (; cond; )` to the same JS as `while (cond)`, and the bootstrap accepts it, so a rule that wrote `for (; cond; )` would unblock the self-host today. That is not §49.4.1's fix-it spelling; owner question in PR (s481-trackm2-selfhost).
+
+<!-- @gap id=g-boot-keyword-named-member-s481 sev=MED status=open locus=compiler/self-host-v2/parse.scrml(member access after `.`; identifier `server`) prov=lane:s481-trackm2-selfhost;spec:§7.2.2 -->
+### g-boot-keyword-named-member-s481 — the bootstrap parser ends a statement at a keyword-named member (`e.fn.id`, `t.server.plan`, `d.renders`) or the identifier `server`, and reports E-STMT-MISSING-SEMICOLON on a line that already has its `;` — `NEW S481 (s481-trackm2-selfhost); MED; open`
+
+26 reports in the migrated self-host (e.g. `analyze.scrml:577` `if (!t.server.onServer) return s;`, `check.scrml:290` `e.fn.hint`, `lower.scrml:4744` `server = server.concat([sf]);`). A name after `.` is a member name whatever its spelling.
+
+<!-- @gap id=g-boot-from-identifier-s481 sev=MED status=open locus=compiler/self-host-v2/parse.scrml(expression primary — contextual `from`) prov=lane:s481-trackm2-selfhost -->
+### g-boot-from-identifier-s481 — the bootstrap parser does not read `from` as an identifier in an expression (`return from.startsWith("scrml:") || …;`) and reports E-STMT-MISSING-SEMICOLON — `NEW S481 (s481-trackm2-selfhost); MED; open`
+
+9 reports in the migrated self-host, all `analyze.scrml:1443`. `from` is contextual (an `import … from` word), not reserved; impl#1 reads it as a name.
+
+<!-- @gap id=g-boot-multiline-alternation-arm-head-s481 sev=MED status=open locus=compiler/self-host-v2/parse.scrml(arm head `.A | .B |⏎ .C :>`) prov=lane:s481-trackm2-selfhost;spec:§18 -->
+### g-boot-multiline-alternation-arm-head-s481 — the bootstrap parser reports E-MATCH-ARM-SEPARATOR on each line of an alternation arm head that continues on the next line with a trailing `|` — `NEW S481 (s481-trackm2-selfhost); MED; open`
+
+27 reports in the migrated self-host (`lex.scrml:368–374`, `parse.scrml:79–84`, `parse.scrml:115`, `parse.scrml:140` and similar). The arm's `,` is in place after its value; a line ending in `|` continues the head.

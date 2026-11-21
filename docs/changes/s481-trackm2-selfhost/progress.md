@@ -12,4 +12,5 @@ Track M step 2 (user-voice-scrml.md S480 "⭐ RULED — bootstrap census build o
       byte-identical). severity.scrml via its generator (generator emits the ruled `,` / `;`).
 - [x] Item 3: residual census (62 reports: keyword-named members / `server` 26, `from` 9,
       multi-line `|` heads 27) — in the PR body.
-- [ ] Final gates: pretest, bootstrap-conformance, CI checks job, PR.
+- [x] Final gates: pretest OK; bootstrap-conformance identical to base 3f4771cee per case (PASS 760, CRASH 0);
+      CI checks job all pass. Gaps filed (§S481-trackm2-selfhost). PR next.
