@@ -55,3 +55,24 @@ Rulings: user-voice-scrml.md S480 census build order item 2; ruling:user-voice-s
       closok) re-run, same answers as r1.
 - severity.scrml --check exits 4 (byte drift, new E-META-* rows all Error = fail-closed default) — already so at the
   r1 head; bot-owned, regenerated on main after merge; not committed.
+
+## r3 (S482 — re-review ~/.cache/scrml/review/s482-2045-rev/review.md, brief s482-briefs/fix-2045-r3.md)
+- [x] STEP 0: merge origin/main eca9c5af5 (merge commit 290bb0d55, clean); 0 `while` in meta / emit-gate / parse.
+- [x] HIGH-1 per-file emit budget (meta.scrml maxFileChars / maxFileTags / maxFileNodes, MC.used, MBud.room/troom,
+      withOut, countNodes): 1 Mi chars, 64 Ki `<` (checked before parseFragment — it is superlinear: 150k nodes 28 s),
+      32 Ki nodes; emit() text not normalized past the budget (no backslash: no pass). SPEC §22.4 "The emit budget".
+- [x] HIGH-2 evalObject / field write: lists gathered, record made once (madeRec), charged per field
+      (kvMerge by halves; spread into nothing shares the lists); list literals gathered by halves (arrRange).
+- [x] HIGH-3 allocation bound (alloc / allocOf in made / willBuild; split, charsOf, reflect count created elements
+      first): char 1, slot 8, element 128, 256 Mi per block. SPEC §22.4 "Allocation".
+- [x] push loops stay linear (OWNED: MBud.own — a binding whose list `push` made and nothing read since appends in
+      place; any other read, a write, leaving the frame or a call ends it). Without it the allocation bound refused
+      the r1 "ok" probes (10k/20k pushes).
+- [x] MED-1 evalListArgs: only argument 0 is exempt from pins.
+- [x] LOW-1 E-TYPE-063 (fLocalInit, enumNameOf); LOW-2 E-EQ-002 (fEqNot); LOW-3 deep eqFault (hasFnV, eqTypes);
+      LOW-4 E-SCOPE-REDECLARE (redeclares, fBlockP).
+- [x] tests: meta-s481.test.js 88 (s482 r3 blocks: 12 red on the merged pre-r3 head, 2 regression pins).
+- [x] gates: conformance 808/3/628/517/0 = pre-r3, main->head 38 UNSUPPORTED->PASS, 0 PASS->other, meta PASS 39;
+      emitted output 0 diffs vs pre-r3, 68 vs main all meta; corpus 71 / 19 clean, per-program identical to pre-r3;
+      impl#1 meta 68/68; CI checks job green; 145 probes all < 0.5 GB / 2 s.
+- gap filed: g-boot-fragment-reader-superlinear-s482 (pre-existing).

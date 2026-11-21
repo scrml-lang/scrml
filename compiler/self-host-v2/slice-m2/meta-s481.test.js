@@ -201,9 +201,9 @@ describe("s481 r1 — the budget: size and work bounded by the step count (MED-1
     expect(evalErr(D(`let t = [1]; for (let i = 0; i < 100000; i = i + 1) { t = [t]; } emit("<p>" + (t == t) + "</p>");`))).toContain("256 levels of nesting");
   }, 60000);
   test("a built-in's work is charged: a quadratic push loop and a re-read of a long string run out of steps", () => {
-    // S482 r3: each push copies the list, and each `s + i` builds a 10 Mi string — the allocation
-    // bound (never given back) counts them, and is reached before the step bound
-    expect(evalErr(D(`let t = []; for (let i = 0; i < 200000; i = i + 1) { t.push(i); } emit("<p>" + t.length + "</p>");`))).toContain("allocation bound");
+    // S482 r3: a push loop is linear (OWNED), so it runs out of steps; each `s + i` builds a 10 Mi
+    // string — the allocation bound (never given back) counts them, and is reached before the step bound
+    expect(evalErr(D(`let t = []; for (let i = 0; i < 200000; i = i + 1) { t.push(i); } emit("<p>" + t.length + "</p>");`))).toContain("step bound");
     expect(evalErr(D(`const s = "x".repeat(10000000); let n = 0; for (let i = 0; i < 100000; i = i + 1) { if ((s + i).charAt(0) == "x") n = n + 1; } emit("<p>" + n + "</p>");`))).toContain("allocation bound");
     expect(evalErr(D(`let t = [1]; for (let i = 0; i < 20; i = i + 1) { t = t.concat(t); } let n = 0; for (let i = 0; i < 100000; i = i + 1) { if (t.includes(2)) n = n + 1; } emit("<p>" + n + "</p>");`))).toContain("step bound");
   }, 60000);
@@ -211,10 +211,8 @@ describe("s481 r1 — the budget: size and work bounded by the step count (MED-1
     const b = D(`let t = []; for (let i = 0; i < 200000; i = i + 1) { t.push(i); } emit("<p>" + t.length + "</p>");`);
     expect(evalErr(b)).toBe(evalErr(b));
   }, 60000);
-  test("ordinary bodies stay well inside the budget (building 5000 items by push, a 30000-element map, sort, split)", () => {
-    // S482 r3: a push loop copies the list at every push (Σ n slots), counted by the allocation
-    // bound — 5000 pushes stay inside it; a list built whole (`map`, `concat`) costs its length once
-    expect(html(D(`let xs = []; for (const i of 0..5000) { xs.push(i); } emit("<p>" + xs.map((i) => "<li>" + i + "</li>").join("").length + "</p>");`))).toContain("<p>63890</p>");
+  test("ordinary bodies stay well inside the budget (building 20000 items, a 30000-element map, sort, split)", () => {
+    expect(html(D(`let xs = []; for (const i of 0..20000) { xs.push(i); } emit("<p>" + xs.map((i) => "<li>" + i + "</li>").join("").length + "</p>");`))).toContain("<p>268890</p>");
     expect(html(D(`let t = [1]; for (let i = 0; i < 15; i = i + 1) { t = t.concat(t); } const u = t.map((x, i) => i); emit("<p>" + u.length + "," + u.at(-1) + "</p>");`))).toContain("<p>32768,32767</p>");
     expect(html(D(`let s = ""; for (let i = 0; i < 2000; i = i + 1) { s = s + "<i>" + i + "</i>"; } emit("<p>" + s.length + "</p>");`))).toContain("<p>20890</p>");
     expect(html(D(`const p = "ab,".repeat(100000).split(","); let t = [3, 1, 2]; t.sort((a, b) => a - b); emit("<p>" + p.length + t.join("") + "</p>");`))).toContain("<p>100001123</p>");
@@ -502,5 +500,17 @@ describe("s482 r3 — LOW-1..4: the source rules hold in a body", () => {
     expect(errs(run(D(`let n = 1; const g = () => n; let n = 5; emit("<p>g=" + g() + "</p>");`)))).toEqual(["E-SCOPE-REDECLARE"]);
     expect(errs(run(D(`fn f(a) { let a = 2; return a; } emit("<p>" + f(1) + "</p>");`)))).toEqual(["E-SCOPE-REDECLARE"]);
     expect(html(D(`let n = 1; if (n == 1) { let n = 2; emit("<p>" + n + "</p>"); }`))).toContain("<p>2</p>");
+  });
+});
+
+describe("s482 r3 — a push loop is linear (OWNED), and a push never changes a list another value holds", () => {
+  test("40000 pushes with `.length` / `[i]` reads between them run inside the step and allocation bounds", () => {
+    expect(html(D(`let t = []; let i = 0; for (i < 40000) { t.push(i); if (t.length > 0) i = i + 1; } emit("<p>" + t.length + "," + t[39999] + "</p>");`))).toContain("<p>40000,39999</p>");
+  }, 60000);
+  test("an alias taken before a push keeps the old list (§66.10 value semantics)", () => {
+    expect(html(D(`let t = []; t.push(1); t.push(2); const a = t; t.push(3); t.push(4); const b = t; t.push(5); emit("<p>" + a.length + b.length + t.length + "," + a.join("") + "</p>");`))).toContain("<p>245,12</p>");
+    expect(html(D(`let t = []; t.push(1); const k = [t]; t.push(2); emit("<p>" + k[0].length + t.length + "</p>");`))).toContain("<p>12</p>");
+    expect(html(D(`fn add(l, x) { l.push(x); return l; } let t = []; t.push(1); const u = add(t, 2); t.push(3); emit("<p>" + t.join("") + "," + u.join("") + "</p>");`))).toContain("<p>13,12</p>");
+    expect(html(D(`let t = []; t.push(1); for (const v of t) { t.push(v + 1); } emit("<p>" + t.join("") + "</p>");`))).toContain("<p>12</p>");
   });
 });

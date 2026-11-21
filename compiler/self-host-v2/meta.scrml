@@ -958,7 +958,7 @@ ${
         }
         // 4. evaluate
         const u: MUsed = c.used;
-        const s: MS = runBlock(c.env, m.body, { room: maxFileChars() - u.chars, troom: maxFileTags() - u.tags, tags: 0, alloc: 0 });
+        const s: MS = runBlock(c.env, m.body, { room: maxFileChars() - u.chars, troom: maxFileTags() - u.tags, tags: 0, alloc: 0, own: [] });
         if (s.err != "") return { nodes: [], c: withDiag(c, s.code, s.err, m.span) };
         if (s.emits > 0 && attr != "") {
             return { nodes: [], c: withDiag(c, "E-META-EVAL-002", "this compile-time `^{}` is the value of the attribute `" + attr + "=` and emits markup: `emit()` output is inlined where markup sits (§22.4.1 \"Where emitted output lands\"), and an attribute value is no markup position — write the value as an expression (`" + attr + "=" + "$" + "{…}`), or move the `^{}` among the element's children", m.span) };
@@ -1685,8 +1685,9 @@ ${
     fn elemUnit() -> int { return 128; }
 
     // `room` / `troom`: the characters / `<` characters the file's blocks may still
-    // emit; `tags`: the `<` characters this block has emitted; `alloc`: its allocation.
-    type MBud:struct = { room: int, troom: int, tags: int, alloc: number }
+    // emit; `tags`: the `<` characters this block has emitted; `alloc`: its allocation;
+    // `own`: the bindings ("frame:name") whose list is held by nothing else (OWNED below).
+    type MBud:struct = { room: int, troom: int, tags: int, alloc: number, own: string[] }
 
     fn runBlock(env: MEnv, b: ABlock, bud: MBud) -> MS {
         const s0: MS = { frames: [], out: "", emits: 0, steps: 0, depth: 0, err: "", code: "", ctl: 0, label: "", ret: MV.VUndef, cNames: [], cVals: [], busy: [], floor: 0, pinI: [], pinN: [], bud: bud };
@@ -1883,7 +1884,7 @@ ${
         if (b.tags + nt > b.troom) return failS(s0, emitBudgetMsg("`<` characters (markup tags)", b.tags + nt, b.troom, maxFileTags()));
         const s: MS = charge(s0, text.length);
         if (s.err != "") return s;
-        const b2: MBud = { room: b.room, troom: b.troom, tags: b.tags + nt, alloc: b.alloc };
+        const b2: MBud = { room: b.room, troom: b.troom, tags: b.tags + nt, alloc: b.alloc, own: b.own };
         return { frames: s.frames, out: s.out + text, emits: s.emits + 1, steps: s.steps, depth: s.depth, err: s.err, code: s.code, ctl: s.ctl, label: s.label, ret: s.ret, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: s.floor, pinI: s.pinI, pinN: s.pinN, bud: b2 };
     }
 
@@ -1899,7 +1900,7 @@ ${
         const b: MBud = s.bud;
         const n: number = b.alloc + chars + slots * slotUnit() + elems * elemUnit();
         if (n > maxAlloc()) return failS(s, "its built-ins would allocate " + String(n) + " units, past the evaluator's allocation bound (" + String(maxAlloc()) + " units per block, never given back: a character 1, a list slot or record field copied " + String(slotUnit()) + ", an element value created " + String(elemUnit()) + ") — a compile-time body allocates a bounded amount, so it cannot take the compiler's memory; the bound is the same on every machine");
-        return { frames: s.frames, out: s.out, emits: s.emits, steps: s.steps, depth: s.depth, err: s.err, code: s.code, ctl: s.ctl, label: s.label, ret: s.ret, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: s.floor, pinI: s.pinI, pinN: s.pinN, bud: { room: b.room, troom: b.troom, tags: b.tags, alloc: n } };
+        return { frames: s.frames, out: s.out, emits: s.emits, steps: s.steps, depth: s.depth, err: s.err, code: s.code, ctl: s.ctl, label: s.label, ret: s.ret, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: s.floor, pinI: s.pinI, pinN: s.pinN, bud: { room: b.room, troom: b.troom, tags: b.tags, alloc: n, own: b.own } };
     }
 
     fn allocC(s: MS, chars: number) -> MS { return alloc(s, chars, 0, 0); }
@@ -1911,7 +1912,55 @@ ${
     fn popFrame(s: MS) -> MS {
         const top: int = s.frames.length - 1;
         const s1: MS = withFrames(s, s.frames.slice(0, top));
-        return dropPinsFrom(s1, top);
+        return dropOwnFrom(dropPinsFrom(s1, top), top);
+    }
+
+    // OWNED (S482 r3 — a push loop is linear): a binding whose list was made by
+    // `push` and has not been read since — no other value holds that list, so the
+    // next `push` appends to it in place (its slots amortized, as JavaScript's) in
+    // place of copying it. Any read of the binding but `.length`, `[i]` and a
+    // `push` on it ends that (evalName); so do a write and leaving its frame. A
+    // function or lambda that reads it pins it (CLOSURES), so it is never pushed again.
+    fn ownKey(i: int, n: string) -> string { return String(i) + ":" + n; }
+
+    fn withOwn(s: MS, own: string[]) -> MS {
+        const b: MBud = s.bud;
+        return { frames: s.frames, out: s.out, emits: s.emits, steps: s.steps, depth: s.depth, err: s.err, code: s.code, ctl: s.ctl, label: s.label, ret: s.ret, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: s.floor, pinI: s.pinI, pinN: s.pinN, bud: { room: b.room, troom: b.troom, tags: b.tags, alloc: b.alloc, own: own } };
+    }
+
+    fn isOwned(s: MS, n: string) -> boolean {
+        if (s.bud.own.length == 0) return false;
+        return s.bud.own.indexOf(ownKey(frameOf(s, n), n)) >= 0;
+    }
+
+    fn disownAt(s: MS, i: int, n: string) -> MS {
+        if (s.bud.own.length == 0) return s;
+        const k: string = ownKey(i, n);
+        const at: int = s.bud.own.indexOf(k);
+        if (at < 0) return s;
+        return withOwn(s, s.bud.own.slice(0, at).concat(s.bud.own.slice(at + 1, s.bud.own.length)));
+    }
+
+    fn dropOwnFrom(s: MS, at: int) -> MS {
+        if (s.bud.own.length == 0) return s;
+        let keep: string[] = [];
+        for (const k of s.bud.own) {
+            if (Number(k.substring(0, k.indexOf(":"))) < at) keep = keep.concat([k]);
+        }
+        return withOwn(s, keep);
+    }
+
+    // A binding's value read where it is not kept (a `push` receiver, `.length`, `[i]`).
+    fn peekE(env: MEnv, o: AExpr, s: MS) -> MR {
+        match o.k {
+            .Name(name: n) :> {
+                const l: MV | not = lookup(s, n);
+                if (l is given) return vr(l, tick(s));
+            },
+            // no-default-arm: any other expression is evaluated
+            _ :> {}
+        }
+        return evalE(env, o, s);
     }
 
     fn dropPinsFrom(s: MS, at: int) -> MS {
@@ -1935,7 +1984,7 @@ ${
         if (s.frames.length == 0) return withFrames(s, [{ names: [n], vals: [v], muts: [mu] }]);
         const top: MFrame = s.frames[s.frames.length - 1];
         const f: MFrame = { names: top.names.concat([n]), vals: top.vals.concat([v]), muts: top.muts.concat([mu]) };
-        return withFrames(s, s.frames.slice(0, s.frames.length - 1).concat([f]));
+        return disownAt(withFrames(s, s.frames.slice(0, s.frames.length - 1).concat([f])), s.frames.length - 1, n);
     }
 
     fn lookup(s: MS, n: string) -> MV | not {
@@ -2000,7 +2049,7 @@ ${
                 if (why != "") return failS(s, why);
                 const vals: MV[] = f.vals.slice(0, j).concat([v]).concat(f.vals.slice(j + 1, f.vals.length));
                 const g: MFrame = { names: f.names, vals: vals, muts: f.muts };
-                return withFrames(s, s.frames.slice(0, i).concat([g]).concat(s.frames.slice(i + 1, s.frames.length)));
+                return disownAt(withFrames(s, s.frames.slice(0, i).concat([g]).concat(s.frames.slice(i + 1, s.frames.length))), i, n);
             }
             i = i - 1;
         }
@@ -2469,7 +2518,7 @@ ${
 
     fn evalName(env: MEnv, n: string, s: MS) -> MR {
         const l: MV | not = lookup(s, n);
-        if (l is given) return vr(l, s);
+        if (l is given) return vr(l, disownAt(s, frameOf(s, n), n));
         const d: MDecl | not = findDecl(env, n);
         if (d is given) return evalCaptured(env, d, s);
         if (findType(env, n) is given) return bad(s, "`" + n + "` is a type, read here as a value");
@@ -2509,7 +2558,12 @@ ${
     }
 
     fn evalMember(env: MEnv, o: AExpr, n: string, s: MS) -> MR {
-        const r: MR = evalE(env, o, s);
+        let r: MR = vr(MV.VUndef, s);
+        if (n == "length") {
+            r = peekE(env, o, s);
+        } else {
+            r = evalE(env, o, s);
+        }
         if (r.s.err != "") return r;
         return memberOf(r.v, n, r.s);
     }
@@ -2836,7 +2890,7 @@ ${
                 if (why != "") return failS(s, why);
                 const vals: MV[] = f.vals.slice(0, j).concat([v]).concat(f.vals.slice(j + 1, f.vals.length));
                 const g: MFrame = { names: f.names, vals: vals, muts: f.muts };
-                return withFrames(s, s.frames.slice(0, i).concat([g]).concat(s.frames.slice(i + 1, s.frames.length)));
+                return disownAt(withFrames(s, s.frames.slice(0, i).concat([g]).concat(s.frames.slice(i + 1, s.frames.length))), i, n);
             }
             i = i - 1;
         }
@@ -3021,7 +3075,7 @@ ${
     }
 
     fn evalIndex(env: MEnv, o: AExpr, i: AExpr, s: MS) -> MR {
-        const ro: MR = evalE(env, o, s);
+        const ro: MR = peekE(env, o, s);
         if (ro.s.err != "") return ro;
         const ri: MR = evalE(env, i, ro.s);
         if (ri.s.err != "") return ri;
@@ -3267,7 +3321,7 @@ ${
         }
         const frame: MFrame = { names: names, vals: vals, muts: muts };
         // `floor`: the captured frames are below it (CLOSURES — a write to them is refused)
-        const inner: MS = { frames: f.env.concat([frame]), out: s.out, emits: s.emits, steps: s.steps, depth: s.depth + 1, err: "", code: "", ctl: 0, label: "", ret: MV.VUndef, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: f.env.length, pinI: [], pinN: [], bud: s.bud };
+        const inner: MS = { frames: f.env.concat([frame]), out: s.out, emits: s.emits, steps: s.steps, depth: s.depth + 1, err: "", code: "", ctl: 0, label: "", ret: MV.VUndef, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: f.env.length, pinI: [], pinN: [], bud: { room: s.bud.room, troom: s.bud.troom, tags: s.bud.tags, alloc: s.bud.alloc, own: [] } };
         let v: MV = MV.VUndef;
         let after: MS = inner;
         const ex1: AExpr | not = f.expr;
@@ -3294,7 +3348,7 @@ ${
             }
             j = j + 1;
         }
-        const back: MS = { frames: s.frames, out: after.out, emits: after.emits, steps: after.steps, depth: s.depth, err: after.err, code: after.code, ctl: 0, label: "", ret: MV.VUndef, cNames: after.cNames, cVals: after.cVals, busy: s.busy, floor: s.floor, pinI: pi, pinN: pn, bud: after.bud };
+        const back: MS = { frames: s.frames, out: after.out, emits: after.emits, steps: after.steps, depth: s.depth, err: after.err, code: after.code, ctl: 0, label: "", ret: MV.VUndef, cNames: after.cNames, cVals: after.cVals, busy: s.busy, floor: s.floor, pinI: pi, pinN: pn, bud: { room: after.bud.room, troom: after.bud.troom, tags: after.bud.tags, alloc: after.bud.alloc, own: s.bud.own } };
         if (back.err != "") return vr(MV.VUndef, back);
         return vr(v, back);
     }
@@ -3419,7 +3473,12 @@ ${
     // changes the list in JavaScript (`push`, `pop`, `sort`, `reverse`) is
     // evaluated on a binding only, which is rebound to the changed list.
     fn callMethodOn(env: MEnv, o: AExpr, m: string, xs: AExpr[], s: MS) -> MR {
-        const ro: MR = evalE(env, o, s);
+        let ro: MR = vr(MV.VUndef, s);
+        if (m == "push") {
+            ro = peekE(env, o, s);
+        } else {
+            ro = evalE(env, o, s);
+        }
         if (ro.s.err != "") return ro;
         let ra: MArgs = { vs: [], s: ro.s };
         if (isTapeV(ro.v) && callbackMethod(m)) {
@@ -3792,9 +3851,23 @@ ${
                 w = w + wOf(a);
                 if (dOf(a) + 1 > d) d = dOf(a) + 1;
             }
+            if (isOwned(s0, root)) {
+                // OWNED: no other value holds `xs` — appended in place, the new slots
+                // counted and the size checked first
+                const why: string = tapeFault(xs.length + args.length, w, d);
+                if (why != "") return bad(s0, why);
+                const s1: MS = allocS(charge(s0, args.length), args.length);
+                if (s1.err != "") return vr(MV.VUndef, s1);
+                let k: int = xs.length;
+                for (const a of args) {
+                    xs[k] = a;
+                    k = k + 1;
+                }
+                return vr(MV.VNum(xs.length), ownAgain(assignAny(s1, root, MV.VTape(xs, w, d)), root));
+            }
             const r: MR = madeWD(xs.concat(args), w, d, s0);
             if (r.s.err != "") return r;
-            return vr(MV.VNum(xs.length + args.length), assignAny(r.s, root, r.v));
+            return vr(MV.VNum(xs.length + args.length), ownAgain(assignAny(r.s, root, r.v), root));
         }
         if (m == "pop") {
             if (xs.length == 0) return vr(MV.VUndef, s0);
@@ -3819,6 +3892,14 @@ ${
         const r: MR = madeWD(sl.xs, tw, td, sl.s);
         if (r.s.err != "") return r;
         return vr(r.v, assignAny(r.s, root, r.v));
+    }
+
+    // After a `push`, the binding holds a list nothing else holds (OWNED).
+    fn ownAgain(s: MS, n: string) -> MS {
+        if (s.err != "") return s;
+        const k: string = ownKey(frameOf(s, n), n);
+        if (s.bud.own.indexOf(k) >= 0) return s;
+        return withOwn(s, s.bud.own.concat([k]));
     }
 
     type SortL:struct = { xs: MV[], s: MS }

@@ -27864,15 +27864,31 @@ bound covers work and size as well as statements, so a short body cannot take th
   produces or reads, or list elements it copies (`+` and templates by the length of the text they
   build, `repeat`, `padStart` / `padEnd`, `concat`, `slice`, `split`, `join`, `push`, `sort`,
   `emit`), and one step per 16 elements of a list or record it walks (`==` on lists and records, a
-  list turned to text, `includes`, `map` / `filter`).
+  list turned to text, `includes`, `map` / `filter`, and — S482 — a record literal, an object spread
+  `{ ...r }` and a field write `r.k = v`, each by the fields it copies; a spread into a record that
+  already has fields also by the pairs of keys it compares).
 - **Size.** No single value may exceed 16 Mi (16,777,216): the characters of a string, or a list or
   record counted with everything it holds (a list holding the same list twice counts it twice). No
   list may hold more than 1 Mi (1,048,576) elements, and values nest at most 256 levels deep. The
   output of `emit()` / `emit.raw()` in one block is a string under the same bound. Each size is
   checked before the value is built.
+- **Allocation (S482).** What a block's built-ins allocate is counted as it is made and never given
+  back, at most 256 Mi (268,435,456) units per block: a character of a string a built-in builds
+  counts 1, a list slot or record field it copies 8, an element value it creates 128 (`split`, a
+  string's characters in a spread or a `for … of`, `reflect`). A body past it is refused with
+  `E-META-EVAL-001` naming the bound; element values are counted before they are made.
+- **The emit budget (S482).** All the `^{}` blocks of ONE FILE together may emit at most 1 Mi
+  (1,048,576) characters and 64 Ki (65,536) `<` characters, and the markup they splice may hold at
+  most 32 Ki (32,768) nodes (elements and text, counted once read). The block that would pass one is
+  refused with `E-META-EVAL-001` naming the file's budget. The `<` count is checked before the
+  emitted text is read as markup, and `emit()` text past the budget is refused before its escapes are
+  read (§22.4.1).
 
 Building a long string by repeated `+` costs its length at each step; `.map(…).join("")` or one
-`emit()` per piece builds it at the cost of its length once.
+`emit()` per piece builds it at the cost of its length once. A list built by `push` in a loop costs its
+length once: a `push` to a binding whose list no other value holds appends in place (a list read in
+any other way since — kept in another binding, a container or a call — is copied first, so the value
+taken earlier is unchanged, §66.10).
 
 > **Provenance:** ruling:user-voice-scrml.md S481 "⭐ RULED — `^{}` meta in the bootstrap: four design
 > questions" item 4 (*"a scrml interpreter over the bootstrap's own syntax tree, as the permanent design,
@@ -27881,8 +27897,13 @@ Building a long string by repeated `+` costs its length at each step; `.map(…)
 > the S481 PA default (PR #2045 r1, review MED-1: a three-line body doubling a list reached 24 GB RSS,
 > and a doubled string ended in a host `RangeError`). Emitted by the bootstrap at
 > `compiler/self-host-v2/meta.scrml` (`tick`, `charge`, `made`, `maxSize` / `maxElems` / `maxNest`).
+> The allocation bound and the emit budget are the S482 PA default (PR #2045 r3, re-review HIGH-1..3:
+> forty 60-byte blocks of `emit("…".repeat(1000000))` passed 6 GB; `<i></i>` emitted 262,144 times ran
+> past 60 seconds in the markup reader; fourteen `s.split("")` of a 1 Mi string reached 2 GB inside the
+> step bound; a 1,000-field `{ ...r }` in a loop was charged no steps and ran 37 minutes of CPU per block).
 > **impl#1 status:** impl#1 bounds a compile-time body by a 5-second `node:vm` timeout (a clock) and
-> does not bound a single allocation; a host `RangeError` there is reported as `E-META-EVAL-001`.
+> does not bound a single allocation or a file's emitted output; a host `RangeError` there is reported
+> as `E-META-EVAL-001`.
 > **Direction of change: newly-rejecting** only for bodies past the bound (none in the corpus or the
 > conformance cases); newly-accepting for `repeat` counts past 100,000 (an S481 bootstrap cap, removed).
 
@@ -27892,7 +27913,9 @@ Building a long string by repeated `+` costs its length at each step; `.map(…)
 > itself: a write from inside a function or lambda to a binding outside it, and a write to a binding
 > after a function or lambda that reads it was made (a lambda written directly as the argument of a
 > list method that calls it — `map`, `filter`, `forEach`, `some`, `every`, `find`, `findIndex`,
-> `reduce`, `sort` — is kept by nobody and is exempt). Aliasing is not one of them: a binding taken
+> `reduce`, `sort` — is kept by nobody and is exempt; the exemption is the callback argument alone,
+> argument 0: a lambda in any other argument, such as `reduce`'s initial value, which `reduce` returns,
+> is pinned like any other — S482 r3). Aliasing is not one of them: a binding taken
 > from another is a snapshot (§66.10 item 1), so `const b = a; b.push(2)` leaves `a` unchanged. The
 > capable alternative is a binding store threaded through the evaluator, closures holding binding ids.
 
