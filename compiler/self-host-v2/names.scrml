@@ -47,7 +47,7 @@ ${
         let ck: string[] = [k];
         let cv: int[] = [v];
         let n: int = ix.ks.length;
-        while (n > 0 && ix.ks[n - 1].length == ck.length) {
+        for (; n > 0 && ix.ks[n - 1].length == ck.length; ) {
             const m: SIdx = sixMerge(ix.ks[n - 1], ix.vs[n - 1], ck, cv);
             ck = m.ks[0];
             cv = m.vs[0];
@@ -65,7 +65,7 @@ ${
         let i: int = 0;
         let j: int = 0;
         let o: int = 0;
-        while (o < n) {
+        for (; o < n; ) {
             if (j >= bk.length || (i < ak.length && ak[i] < bk[j])) {
                 mk[o] = ak[i];
                 mv[o] = av[i];
@@ -83,11 +83,11 @@ ${
     // The value of `k` in `ix`, else -1.
     fn sixFind(ix: SIdx, k: string) -> int {
         let l: int = 0;
-        while (l < ix.ks.length) {
+        for (; l < ix.ks.length; ) {
             const ks: string[] = ix.ks[l];
             let lo: int = 0;
             let hi: int = ks.length;
-            while (lo < hi) {
+            for (; lo < hi; ) {
                 const mid: int = Math.floor((lo + hi) / 2);
                 const x: string = ks[mid];
                 if (x == k) return ix.vs[l][mid];
@@ -106,14 +106,14 @@ ${
     fn blanks(n: int) -> string[] {
         if (n <= 0) return [];
         let out: string[] = [""];
-        while (out.length + out.length <= n) { out = out.concat(out); }
+        for (; out.length + out.length <= n; ) { out = out.concat(out); }
         return out.concat(blanks(n - out.length));
     }
 
     fn minusOnes(n: int) -> int[] {
         if (n <= 0) return [];
         let out: int[] = [-1];
-        while (out.length + out.length <= n) { out = out.concat(out); }
+        for (; out.length + out.length <= n; ) { out = out.concat(out); }
         return out.concat(minusOnes(n - out.length));
     }
 
@@ -230,7 +230,7 @@ ${
             cand = base + "_" + n;
             n = n + 1;
         }
-        while (isReserved(cand) || taken(t, cand)) {
+        for (; isReserved(cand) || taken(t, cand); ) {
             cand = base + "_" + n;
             n = n + 1;
         }

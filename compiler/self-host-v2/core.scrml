@@ -1492,8 +1492,8 @@ ${
     // The hash never sees an absolute path.
     export fn normalPath(path: string) -> string {
         let p: string = path.replaceAll("\\", "/");
-        while (p.indexOf("//") >= 0) { p = p.replaceAll("//", "/"); }
-        while (p.startsWith("./")) { p = p.slice(2); }
+        for (;;) { if (!(p.indexOf("//") >= 0)) { break; } p = p.replaceAll("//", "/"); }
+        for (;;) { if (!(p.startsWith("./"))) { break; } p = p.slice(2); }
         return p;
     }
 
@@ -1512,7 +1512,7 @@ ${
         let h: int = v;
         let out = "";
         let k = 0;
-        while (k < 8) {
+        for (; k < 8; ) {
             out = hexDigit(h % 16) + out;
             h = (h - h % 16) / 16;
             k = k + 1;
@@ -1527,7 +1527,7 @@ ${
         let r = 0;
         let bit = 1;
         let k = 0;
-        while (k < 8) {
+        for (; k < 8; ) {
             const xa: int = x % 2;
             const ya: int = y % 2;
             if (xa != ya) r = r + bit;
@@ -1562,7 +1562,7 @@ ${
         let a = 2166136261;
         let m = 7;
         let i = 0;
-        while (i < p.length) {
+        for (; i < p.length; ) {
             const u: int = p.charCodeAt(i);
             const lo: int = u % 256;
             const hi: int = (u - lo) / 256;

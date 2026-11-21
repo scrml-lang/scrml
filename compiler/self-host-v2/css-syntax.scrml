@@ -77,7 +77,7 @@ ${
         let j = i;
         if (j < s.length && isNameStart(charAt(s, j))) {
             j = j + 1;
-            while (j < s.length && isNameChar(charAt(s, j))) { j = j + 1; }
+            for (; j < s.length && isNameChar(charAt(s, j)); ) { j = j + 1; }
         }
         return s.substring(i, j);
     }
@@ -94,14 +94,14 @@ ${
     fn readIdent(s: string, i: int) -> Ident {
         let j = i;
         let going = true;
-        while (going && j < s.length) {
+        for (; going && j < s.length; ) {
             const c: string = charAt(s, j);
             if (c == "\\") {
                 const n: string = charAt(s, j + 1);
                 if (n.length == 0 || n == "\n" || n == "\r" || n == "\f") return { text: s.substring(i, j), bad: true };
                 if (isHex(n)) {
                     let k: int = j + 1;
-                    while (k < s.length && k < j + 7 && isHex(charAt(s, k))) { k = k + 1; }
+                    for (; k < s.length && k < j + 7 && isHex(charAt(s, k)); ) { k = k + 1; }
                     if (k < s.length && isSpace(charAt(s, k))) k = k + 1;
                     j = k;
                 } else {
@@ -120,7 +120,7 @@ ${
 
     fn nameCharsFrom(s: string, i: int) -> string {
         let j = i;
-        while (j < s.length && isNameChar(charAt(s, j))) { j = j + 1; }
+        for (; j < s.length && isNameChar(charAt(s, j)); ) { j = j + 1; }
         return s.substring(i, j);
     }
 
@@ -128,10 +128,10 @@ ${
         let j = i;
         if (j < s.length && isRefStart(charAt(s, j))) {
             j = j + 1;
-            while (j < s.length && isRefChar(charAt(s, j))) { j = j + 1; }
+            for (; j < s.length && isRefChar(charAt(s, j)); ) { j = j + 1; }
         }
         // a trailing `-` is punctuation, not part of the name (`@gap-` → `@gap` then `-`)
-        while (j > i + 1 && charAt(s, j - 1) == "-") { j = j - 1; }
+        for (;;) { if (!(j > i + 1 && charAt(s, j - 1) == "-")) { break; } j = j - 1; }
         return s.substring(i, j);
     }
 
@@ -141,7 +141,7 @@ ${
         if (p.substring(0, 2) == "--") {
             if (p.length == 2) return false;
             let j = 2;
-            while (j < p.length) {
+            for (; j < p.length; ) {
                 if (!isNameChar(charAt(p, j))) return false;
                 j = j + 1;
             }
@@ -155,7 +155,7 @@ ${
     fn skipString(s: string, i: int, stop: int) -> int {
         const q: string = charAt(s, i);
         let j = i + 1;
-        while (j < stop) {
+        for (; j < stop; ) {
             const c: string = charAt(s, j);
             if (c == "\\") {
                 j = j + 2;
@@ -215,7 +215,7 @@ ${
     fn maskLineComments(s: string, from: int, to: int) -> string {
         let out: string = s.substring(0, from);
         let j: int = from;
-        while (j < to) {
+        for (; j < to; ) {
             const c: string = charAt(s, j);
             if (isQuote(c)) {
                 const k: int = skipString(s, j, to);
@@ -252,7 +252,7 @@ ${
     fn blockEnd(s: string, open: int) -> int {
         let depth = 1;
         let j: int = open + 2;
-        while (j < s.length) {
+        for (; j < s.length; ) {
             const c: string = charAt(s, j);
             if (isQuote(c)) {
                 const k: int = skipString(s, j, s.length);
@@ -292,7 +292,7 @@ ${
     // there — else the end of the source.
     fn blockStop(s: string, open: int) -> int {
         let j: int = open + 2;
-        while (j < s.length) {
+        for (; j < s.length; ) {
             const c: string = charAt(s, j);
             if (isQuote(c)) {
                 const k: int = skipString(s, j, s.length);
@@ -329,7 +329,7 @@ ${
     fn skipInterp(s: string, j: int, stop: int) -> int {
         let depth = 0;
         let k: int = j + 1;
-        while (k < stop) {
+        for (; k < stop; ) {
             const c: string = charAt(s, k);
             if (c == "{") depth = depth + 1;
             if (c == "}") {
@@ -357,7 +357,7 @@ ${
         let j = i;
         let c: CS = cs;
         let going = true;
-        while (going && j < stop) {
+        for (; going && j < stop; ) {
             if (isSpace(charAt(cs.src, j))) {
                 j = j + 1;
             } else if (atComment(cs.src, j)) {
@@ -382,7 +382,7 @@ ${
     fn nextStop(s: string, i: int, stop: int) -> Stop {
         let depth = 0;
         let j = i;
-        while (j < stop) {
+        for (; j < stop; ) {
             const c: string = charAt(s, j);
             if (isQuote(c)) {
                 const k: int = skipString(s, j, stop);
@@ -415,7 +415,7 @@ ${
     fn closeBrace(s: string, open: int, stop: int) -> int {
         let depth = 0;
         let j = open;
-        while (j < stop) {
+        for (; j < stop; ) {
             const c: string = charAt(s, j);
             if (isQuote(c)) {
                 const k: int = skipString(s, j, stop);
@@ -448,7 +448,7 @@ ${
     fn stripComments(s: string) -> string {
         let out = "";
         let j = 0;
-        while (j < s.length) {
+        for (; j < s.length; ) {
             const c: string = charAt(s, j);
             if (isQuote(c)) {
                 const k: int = skipString(s, j, s.length);
@@ -495,7 +495,7 @@ ${
     fn closeOf(s: string, i: int, open: string, close: string) -> int {
         let depth = 0;
         let j = i;
-        while (j < s.length) {
+        for (; j < s.length; ) {
             const c: string = charAt(s, j);
             if (isQuote(c)) {
                 const k: int = skipString(s, j, s.length);
@@ -518,7 +518,7 @@ ${
         let depth = 0;
         let start = 0;
         let j = 0;
-        while (j < s.length) {
+        for (; j < s.length; ) {
             const c: string = charAt(s, j);
             if (isQuote(c)) {
                 const k: int = skipString(s, j, s.length);
@@ -597,7 +597,7 @@ ${
         let parts: SimpleSel[] = [];
         let j = i;
         let going = true;
-        while (going && j < s.length) {
+        for (; going && j < s.length; ) {
             const c: string = charAt(s, j);
             if (c == "*") {
                 parts = parts.concat([SimpleSel.Universal]);
@@ -683,9 +683,9 @@ ${
         if (head.parts.length == 0) return complexErr("unexpected `" + charAt(t, 0) + "`");
         let links: SelLink[] = [];
         let j: int = head.next;
-        while (j < t.length) {
+        for (; j < t.length; ) {
             let sawSpace = false;
-            while (j < t.length && isSpace(charAt(t, j))) {
+            for (; j < t.length && isSpace(charAt(t, j)); ) {
                 j = j + 1;
                 sawSpace = true;
             }
@@ -695,7 +695,7 @@ ${
                 if (explicit is given) {
                     comb = explicit;
                     j = j + 1;
-                    while (j < t.length && isSpace(charAt(t, j))) { j = j + 1; }
+                    for (; j < t.length && isSpace(charAt(t, j)); ) { j = j + 1; }
                 } else if (!sawSpace) {
                     return complexErr("unexpected `" + charAt(t, j) + "`");
                 }
@@ -745,7 +745,7 @@ ${
         let depth = 0;
         let j = i;
         let any = false;
-        while (j < stop) {
+        for (; j < stop; ) {
             const c: string = charAt(s, j);
             if (isQuote(c)) {
                 const k: int = skipString(s, j, stop);
@@ -786,12 +786,12 @@ ${
             } else if (c == ":" && depth == 0) {
                 // a second `:` at the top level: the previous declaration lost its `;`
                 let w: int = j;
-                while (w > i && isSpace(charAt(s, w - 1))) { w = w - 1; }
+                for (; w > i && isSpace(charAt(s, w - 1)); ) { w = w - 1; }
                 let n: int = w;
-                while (n > i && isNameChar(charAt(s, n - 1))) { n = n - 1; }
+                for (; n > i && isNameChar(charAt(s, n - 1)); ) { n = n - 1; }
                 const name: string = s.substring(n, w);
                 let ins: int = n;
-                while (ins > i && isSpace(charAt(s, ins - 1))) { ins = ins - 1; }
+                for (; ins > i && isSpace(charAt(s, ins - 1)); ) { ins = ins - 1; }
                 if (name.length > 0) return { parts: [], cs: withErr(cs, syntax("a `;` is missing before `" + name + "` — each declaration ends with `;` (insert it here)", ins, ins)), ok: false };
                 return { parts: [], cs: withErr(cs, syntax("an unexpected `:` in the value of `" + prop + "`", j, j + 1)), ok: false };
             } else {
@@ -850,7 +850,7 @@ ${
     fn sepAt(s: string, i: int, stop: int, sep: string) -> int {
         let depth = 0;
         let j = i;
-        while (j < stop) {
+        for (; j < stop; ) {
             const c: string = charAt(s, j);
             if (isQuote(c)) {
                 const k: int = skipString(s, j, stop);
@@ -911,7 +911,7 @@ ${
         cs = pv.cs;
         if (!pv.ok) return { d: not, cs: cs };
         let end: int = stop;
-        while (end > i && isSpace(charAt(s, end - 1))) { end = end - 1; }
+        for (; end > i && isSpace(charAt(s, end - 1)); ) { end = end - 1; }
         const d: ACssDecl = { nid: cs.nid, span: mkSpan(i, end), prop: prop, value: pv.parts };
         return { d: d, cs: bump(cs) };
     }
@@ -928,7 +928,7 @@ ${
         let arms: ComplexSel[] = [];
         const prelude: string = stripComments(s.substring(start, open));
         let pEnd: int = open;
-        while (pEnd > start && isSpace(charAt(s, pEnd - 1))) { pEnd = pEnd - 1; }
+        for (; pEnd > start && isSpace(charAt(s, pEnd - 1)); ) { pEnd = pEnd - 1; }
         if (prelude.indexOf("&") >= 0) {
             cs = withErr(cs, unsupported("`&` (CSS nesting) is not in the bootstrap — write the full selector", start, pEnd));
             ok = false;
@@ -950,7 +950,7 @@ ${
         let decls: ACssDecl[] = [];
         let j: int = open + 1;
         let going = true;
-        while (going) {
+        for (; going; ) {
             const t: At = skipTrivia(cs, j, close);
             cs = t.cs;
             j = t.pos;
@@ -978,7 +978,7 @@ ${
                 if (st.ch == "{") {
                     const k: int = closeBrace(s, st.pos, close);
                     let pe: int = st.pos;
-                    while (pe > j && isSpace(charAt(s, pe - 1))) { pe = pe - 1; }
+                    for (; pe > j && isSpace(charAt(s, pe - 1)); ) { pe = pe - 1; }
                     cs = withErr(cs, unsupported("a rule nested inside a rule (CSS nesting) is not in the bootstrap — write it as its own rule with the full selector", j, pe));
                     ok = false;
                     j = k < 0 ? close : k + 1;
@@ -1081,7 +1081,7 @@ ${
             cs = withErr(cs, ltErr(lt));
             going = false;
         }
-        while (going) {
+        for (; going; ) {
             const t: At = skipTrivia(cs, j, close);
             cs = t.cs;
             j = t.pos;
@@ -1135,7 +1135,7 @@ ${
         // text — malformed CSS (ruled S469: any malformed `#{}` is E-CSS-SYNTAX); consumed
         if (close0 >= 0) {
             let k: int = end;
-            while (k < src0.length && isSpace(charAt(src0, k))) { k = k + 1; }
+            for (; k < src0.length && isSpace(charAt(src0, k)); ) { k = k + 1; }
             if (charAt(src0, k) == "}") {
                 cs = withErr(cs, syntax("an extra `}` after this CSS block — it would be shown as page text; remove it (or close a rule inside the block)", k, k + 1));
                 end = k + 1;

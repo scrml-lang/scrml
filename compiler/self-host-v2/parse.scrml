@@ -176,7 +176,7 @@ ${
         if (hi - lo <= 8) {
             let out: PTok[] = [];
             let i: int = lo;
-            while (i < hi) {
+            for (; i < hi; ) {
                 out = out.concat([toPTok(ts[i])]);
                 i = i + 1;
             }
@@ -254,7 +254,7 @@ ${
         if (ns.at.length == 0) return ts;
         let out: PTok[] = [];
         let i: int = 0;
-        while (i < ts.length) {
+        for (; i < ts.length; ) {
             const t: PTok = ts[i];
             let merged = false;
             if (t.cls == TC.Ident && ns.at.indexOf(t.start) >= 0 && ns.names.indexOf(t.v) >= 0 && i + 2 < ts.length) {
@@ -407,7 +407,7 @@ ${
     fn endLine(x: PTok) -> int {
         let n: int = x.line;
         let i: int = x.text.indexOf("\n");
-        while (i >= 0) {
+        for (; i >= 0; ) {
             n = n + 1;
             i = x.text.indexOf("\n", i + 1);
         }
@@ -647,7 +647,7 @@ ${
         let left: RExpr = parseUnary(tp);
         let last: string = "";
         let going = true;
-        while (going) {
+        for (; going; ) {
             const prec: int = binPrec(left.tp);
             if (prec == 0 || prec < minPrec) {
                 going = false;
@@ -708,7 +708,7 @@ ${
         // s478 (s478-boot-syntax-batch, landed s478-boot-optional-chain) — optional chaining (§42.3.6): the receivers of this
         // chain's `?.` hops, in order (see optHop / closeOpt)
         let opts: AExpr[] = [];
-        while (going) {
+        for (; going; ) {
             const t: PTok = cur(r.tp);
             const prev: PTok = peekAt(r.tp, -1);
             if (t.cls == TC.Punct && tk(t, "?.")) {
@@ -950,7 +950,7 @@ ${
         let t: TP = r.tp;
         let inner: AExpr = r.e;
         let i: int = opts.length - 1;
-        while (i >= 0) {
+        for (; i >= 0; ) {
             const rc: RExpr = cloneRecv(t, opts[i]);
             t = rc.tp;
             const test: AExpr = { nid: t.nid, span: opts[i].span, k: AExprK.Unary(UnOp.IsGiven, rc.e) };
@@ -1200,7 +1200,7 @@ ${
     fn tupleArmHeadAt(ts: PTok[], i: int) -> boolean {
         let j: int = i;
         let depth: int = 0;
-        while (j < ts.length && ts[j].cls != TC.End) {
+        for (; j < ts.length && ts[j].cls != TC.End; ) {
             if (ts[j].cls == TC.Punct && tk(ts[j], "(")) depth = depth + 1;
             if (ts[j].cls == TC.Punct && tk(ts[j], ")")) {
                 depth = depth - 1;
@@ -1294,7 +1294,8 @@ ${
         let lastComma = false;
         let prevEnd: int = 0;
         let gheads: GHead[] = [];
-        while (!isP(t, "}") && !atEnd(t)) {
+        for (;;) {
+            if (!(!isP(t, "}") && !atEnd(t))) { break; }
             if (isP(t, ",")) {
                 // a `,` with no arm before it (`{ , .A :> 1 }`, `.A :> 1,, .B …`):
                 // one report, then the list goes on
@@ -1348,14 +1349,14 @@ ${
                     // something that is not a pattern (`.Admin | p.active :> …`): that is the
                     // same guard, spelled with a pipe."
                     t = diagAt(t, "E-SYNTAX-011", "a match arm has no guard clause in v1 (§18.10): `| " + cur(adv(t)).text + "…` after the arm's pattern is a guard, not a second pattern — match the variant, then branch inside the arm body", c);
-                    while (!atEnd(t) && !isP(t, "}") && !sepAt(t, 0) && cur(t).line == c.line) { t = adv(t); }
+                    for (;;) { if (!(!atEnd(t) && !isP(t, "}") && !sepAt(t, 0) && cur(t).line == c.line)) { break; } t = adv(t); }
                     if (sepAt(t, 0)) t = adv(t);
                     if (isP(t, ">")) t = adv(t);
                 } else if (c.cls == TC.Punct && tk(c, "|")) {
                     // s452 r3 (LOW-D): `.A | .B :>` — §18.2's arm-pattern alternation
                     t = diagAt(t, "E-PARSE-ARM", "alternation `|` between patterns (`.A | .B :> …`, §18.2) is not yet supported in the bootstrap — write one arm per pattern", c);
                     // s452 r4: skip the rest of the alternation through its separator (one report, no follow-on E-PARSE-EXPR)
-                    while (!atEnd(t) && !isP(t, "}") && !sepAt(t, 0) && cur(t).line == c.line) { t = adv(t); }
+                    for (;;) { if (!(!atEnd(t) && !isP(t, "}") && !sepAt(t, 0) && cur(t).line == c.line)) { break; } t = adv(t); }
                     if (sepAt(t, 0)) t = adv(t);
                     if (isP(t, ">")) t = adv(t);
                 } else if (!isGiven || !gh.bad) {
@@ -1438,7 +1439,7 @@ ${
         let names: string[] = [];
         let written: string = "";
         let going: boolean = true;
-        while (going) {
+        for (; going; ) {
             const n: PTok = cur(t);
             const n2: PTok = peekAt(t, 1);
             let w: string = "";
@@ -1481,7 +1482,7 @@ ${
             t = diagAt(t, "E-SYNTAX-044", "a `given` head is a list of names followed by `:>` (`given x, y :> { … }`, §42.2.3); found " + found + " instead. To show markup when a condition holds, write `if (<cond>) { … }`; when a value is present, `if (x is given) { … }`.", c);
         }
         let skipping: boolean = true;
-        while (skipping) {
+        for (; skipping; ) {
             const x: PTok = cur(t);
             if (x.cls == TC.End || x.line != gtok.line || sepAt(t, 0) || isP(t, "{") || isP(t, "}") || isP(t, ",")) {
                 skipping = false;
@@ -1513,7 +1514,7 @@ ${
         for (const g of gheads) {
             let sawNot: boolean = false;
             let j: int = 0;
-            while (j < g.idx) {
+            for (; j < g.idx; ) {
                 if (patIsNot(arms[j].pat)) sawNot = true;
                 j = j + 1;
             }
@@ -1611,7 +1612,7 @@ ${
     fn tokText(tp: TP, from: int, to: int) -> string {
         let s: string = "";
         let i: int = from;
-        while (i < to) {
+        for (; i < to; ) {
             const x: PTok = tp.toks[i];
             if (i > from && !touching(tp.toks[i - 1], x)) s = s + " ";
             s = s + x.text;
@@ -1765,7 +1766,7 @@ ${
         if (a.cls == TC.Ident && (tk(b, ".") || tk(b, ":")) && touching(a, b)) {
             // `E.V` / `E::V` — a qualified pattern
             let t: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", "a qualified arm pattern (`" + a.v + b.text + "…`) is not in the bootstrap — write the bare variant (`.V`), which resolves against the subject's error type", a);
-            while (!atEnd(t) && !isP(t, "}") && !(isP(t, ":") && tk(peekAt(t, 1), ">")) && !isP(t, "=>")) { t = adv(t); }
+            for (;;) { if (!(!atEnd(t) && !isP(t, "}") && !(isP(t, ":") && tk(peekAt(t, 1), ">")) && !isP(t, "=>"))) { break; } t = adv(t); }
             return { pat: APat.PWild, tp: t };
         }
         return { pat: APat.PWild, tp: diagAt(tp, "E-PARSE-ARM", "expected an arm pattern (`.Variant`, `.Variant(a, b)`, `not`, a literal, `_` or `else`), found `" + a.text + "`", a) };
@@ -1779,7 +1780,8 @@ ${
         if (o.cls == TC.Punct && tk(o, "(") && touching(nameTok, o)) {
             let t: TP = adv(tp);
             let binds: ABind[] = [];
-            while (!isP(t, ")") && !atEnd(t)) {
+            for (;;) {
+                if (!(!isP(t, ")") && !atEnd(t))) { break; }
                 const b: PTok = cur(t);
                 if (b.cls != TC.Ident) {
                     t = adv(diagAt(t, "E-PARSE-ARM", "expected a binder name (or `_`) in the pattern's `(…)`, found `" + b.text + "`", b));
@@ -1928,7 +1930,8 @@ ${
         let lifted = false;
         let sawSemi = false;
         let bare = false;
-        while (!isP(t, "}") && !atEnd(t)) {
+        for (;;) {
+            if (!(!isP(t, "}") && !atEnd(t))) { break; }
             const before: int = t.i;
             let done = false;
             if (isWord(t, "lift") && !isRowTok(peekAt(t, 1))) {
@@ -2046,7 +2049,7 @@ ${
     // the block's `}` or the end of the input, follow)?
     fn armBlockLastAt(tp: TP) -> boolean {
         let t: TP = tp;
-        while (isP(t, ";")) { t = adv(t); }
+        for (;;) { if (!(isP(t, ";"))) { break; } t = adv(t); }
         return atEnd(t) || isP(t, "}");
     }
 
@@ -2067,7 +2070,7 @@ ${
         let ai: int = i;
         let bi: int = i;
         let ci: int = i;
-        while (i < tp.toks.length) {
+        for (; i < tp.toks.length; ) {
             const x: PTok = tp.toks[i];
             if (x.cls == TC.End) return false;
             const opener: boolean = x.cls == TC.Punct && (tk(x, "{") || tk(x, "(") || tk(x, "["));
@@ -2200,7 +2203,7 @@ ${
     fn armEnd(tp: TP) -> int {
         let i: int = tp.i;
         let depth: int = 0;
-        while (i < tp.toks.length) {
+        for (; i < tp.toks.length; ) {
             const x: PTok = tp.toks[i];
             if (x.cls == TC.End) return i;
             if (depth == 0 && i > tp.i) {
@@ -2235,7 +2238,7 @@ ${
     fn tmplEnd(ts: PTok[], i: int) -> int {
         let j: int = i;
         let slots: int = 0;
-        while (j < ts.length) {
+        for (; j < ts.length; ) {
             const x: PTok = ts[j];
             if (x.cls == TC.End) return j - 1;
             if (x.cls == TC.TIStart) slots = slots + 1;
@@ -2282,7 +2285,7 @@ ${
         if (ts[j].cls == TC.Punct && tk(ts[j], "(")) {
             let depth: int = 0;
             let going = true;
-            while (going && j < ts.length) {
+            for (; going && j < ts.length; ) {
                 if (ts[j].cls == TC.End) return false;
                 if (ts[j].cls == TC.Punct && tk(ts[j], "(")) depth = depth + 1;
                 if (ts[j].cls == TC.Punct && tk(ts[j], ")")) depth = depth - 1;
@@ -2350,7 +2353,7 @@ ${
         if (!isP(tp, "{")) return tp;
         let t: TP = adv(tp);
         let depth: int = 1;
-        while (depth > 0 && !atEnd(t)) {
+        for (; depth > 0 && !atEnd(t); ) {
             const x: PTok = cur(t);
             if (x.cls == TC.Punct && tk(x, "{")) depth = depth + 1;
             if (x.cls == TC.Punct && tk(x, "}")) depth = depth - 1;
@@ -2399,7 +2402,8 @@ ${
         if (raw.length == 0 || raw.substring(raw.length - 1, raw.length) != "`") return false;
         let k: int = raw.length - 2;
         let slashes: int = 0;
-        while (k >= 0 && raw.substring(k, k + 1) == "\\") {
+        for (;;) {
+            if (!(k >= 0 && raw.substring(k, k + 1) == "\\")) { break; }
             slashes = slashes + 1;
             k = k - 1;
         }
@@ -2419,7 +2423,7 @@ ${
         let params: AExpr[] = [];
         let closed: boolean = chunkClosed(cur(t0).text);
         let t: TP = adv(t0);
-        while (!closed) {
+        for (; !closed; ) {
             if (cur(t).cls != TC.TIStart) return mkE(sql008(t, open), start, AExprK.Recovered);
             const pe: RExpr = parseAssign(adv(t));
             params = params.concat([pe.e]);
@@ -2522,7 +2526,7 @@ ${
     fn skipToSqlClose(tp: TP, open: PTok) -> RSkip {
         let t: TP = tp;
         let depth: int = 1;
-        while (depth > 0) {
+        for (; depth > 0; ) {
             if (atEnd(t)) return { tp: sql008(t, open), closed: false };
             const x: PTok = cur(t);
             if (x.cls == TC.Punct && tk(x, "{")) depth = depth + 1;
@@ -2546,7 +2550,7 @@ ${
         let t: TP = tp;
         let c: SqlChain = c0;
         let going = true;
-        while (going) {
+        for (; going; ) {
             const dot: PTok = cur(t);
             const name: PTok = peekAt(t, 1);
             const paren: PTok = peekAt(t, 2);
@@ -2581,7 +2585,7 @@ ${
         let t: TP = tp;
         let out: AExpr[] = [];
         let going = !isP(t, close) && !atEnd(t);
-        while (going) {
+        for (; going; ) {
             const r: RExpr = parseAssign(t);
             out = out.concat([r.e]);
             t = r.tp;
@@ -2618,7 +2622,7 @@ ${
     // `${"${"}` is the SPEC's own spelling of a literal `${` in markup (§4.18.1b).
     fn liveInterpRaw(raw: string) -> boolean {
         let i: int = 1;
-        while (i < raw.length - 1) {
+        for (; i < raw.length - 1; ) {
             if (raw.substring(i, i + 1) == "\\") {
                 i = i + 2;
             } else if (raw.substring(i, i + 2) == interpOpen()) {
@@ -2761,7 +2765,7 @@ ${
         let crossings: AExpr[] = [];
         let i: int = 0;
         let tpn: TP = tp1;
-        while (i < h.names.length) {
+        for (; i < h.names.length; ) {
             const at: int = bodyAt + h.starts[i];
             const x: AExpr = { nid: tpn.nid, span: mkSpan(at, at + h.names[i].length), k: AExprK.Name(h.names[i]) };
             crossings = crossings.concat([x]);
@@ -2869,7 +2873,7 @@ ${
             let drop = false;
             if (d.code == "E-BOOTSTRAP-UNSUPPORTED" && d.message == markupValueRefusal()) {
                 let k: int = 0;
-                while (k < from.length) {
+                for (; k < from.length; ) {
                     if (d.span.start >= from[k] && d.span.start <= to[k]) drop = true;
                     k = k + 1;
                 }
@@ -2918,7 +2922,7 @@ ${
     // The opener's `=` run, as written.
     fn foreignEq(text: string) -> string {
         let k: int = 1;
-        while (text.substring(k, k + 1) == "=") { k = k + 1; }
+        for (;;) { if (!(text.substring(k, k + 1) == "=")) { break; } k = k + 1; }
         return text.substring(1, k);
     }
 
@@ -2962,12 +2966,12 @@ ${
         let starts: int[] = [];
         let ok: boolean = true;
         let done: boolean = body.substring(j, j + 1) == "}";
-        while (ok && !done) {
+        for (; ok && !done; ) {
             const n0: int = j;
             if (!isIdentStartCh(body.substring(j, j + 1))) {
                 ok = false;
             } else {
-                while (isIdentCh(body.substring(j, j + 1))) { j = j + 1; }
+                for (; isIdentCh(body.substring(j, j + 1)); ) { j = j + 1; }
                 names = names.concat([body.substring(n0, j)]);
                 starts = starts.concat([n0]);
                 j = skipBlankAndComments(body, j);
@@ -2984,7 +2988,7 @@ ${
         }
         if (!ok) return bad;
         let k: int = 0;
-        while (k < names.length) {
+        for (; k < names.length; ) {
             const n: string = names[k];
             if (names.indexOf(n) < k) return { names: [], starts: [], bodyAt: 0, ok: false, why: "this foreign block crosses `" + n + "` twice in its `in:` header — a crossing is a parameter of the sealed slice (§23.2.4a), and a strict-mode function cannot take two parameters of one name, so the slice cannot be built (E-FOREIGN-007). Name each crossing once" };
             if (isSliceReservedName(n)) return { names: [], starts: [], bodyAt: 0, ok: false, why: "this foreign block crosses `" + n + "` in its `in:` header — a crossing is a parameter of the sealed slice, a strict-mode async function (§23.2.4a), and `" + n + "` cannot name one there, so the slice cannot be built (E-FOREIGN-007). Bind the value to a local of another name, then cross the local" };
@@ -3004,7 +3008,7 @@ ${
     fn skipBlankAndComments(s: string, from: int) -> int {
         let i: int = skipBlankChars(s, from);
         let going = true;
-        while (going) {
+        for (; going; ) {
             if (s.substring(i, i + 2) == "//") {
                 const nl: int = s.indexOf("\n", i);
                 i = skipBlankChars(s, nl < 0 ? s.length : nl);
@@ -3031,7 +3035,7 @@ ${
 
     fn skipBlankChars(s: string, from: int) -> int {
         let i: int = from;
-        while (i < s.length && s.substring(i, i + 1).trim() == "") { i = i + 1; }
+        for (;;) { if (!(i < s.length && s.substring(i, i + 1).trim() == "")) { break; } i = i + 1; }
         return i;
     }
 
@@ -3069,7 +3073,7 @@ ${
         let closed: boolean = chunkClosed(first.text);
         let going: boolean = !closed;
         t = adv(t);
-        while (going) {
+        for (; going; ) {
             if (cur(t).cls != TC.TIStart) {
                 t = tmplUnclosed(t, first);
                 going = false;
@@ -3163,7 +3167,7 @@ ${
         let t: TP = tp;
         let depth: int = 0;
         let going: boolean = true;
-        while (going && !atEnd(t)) {
+        for (; going && !atEnd(t); ) {
             const x: PTok = cur(t);
             if (x.cls == TC.TIEnd && depth == 0) {
                 going = false;
@@ -3181,7 +3185,7 @@ ${
         let t: TP = tp;
         let out: AExpr[] = [];
         let going = !isP(t, "]") && !atEnd(t);
-        while (going) {
+        for (; going; ) {
             if (isSpread(t)) {
                 const sstart: int = cur(t).start;
                 const sv: RExpr = parseSpreadValue(t);
@@ -3209,7 +3213,7 @@ ${
         let k: int = 1;
         let names: string[] = [];
         let going = true;
-        while (going) {
+        for (; going; ) {
             const x: PTok = peekAt(tp, k);
             if (x.cls == TC.Ident) {
                 names = names.concat([x.v]);
@@ -3262,7 +3266,7 @@ ${
     // Past a lambda's `( … )` (lambdaParams said it is one), at its `=>`.
     fn skipParams(tp: TP) -> TP {
         let t: TP = adv(tp);
-        while (!isP(t, ")") && !atEnd(t)) { t = adv(t); }
+        for (;;) { if (!(!isP(t, ")") && !atEnd(t))) { break; } t = adv(t); }
         return adv(t);
     }
 
@@ -3316,7 +3320,7 @@ ${
         const a: PTok = cur(t);
         if (!isP(t, "{")) {
             t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a function expression with a return-type annotation or a `!` (`function (…) -> T { … }`) is not in the bootstrap (INTERIM) — the value its `return`s give is inferred; drop the annotation", a);
-            while (!isP(t, "{") && !atEnd(t)) { t = adv(t); }
+            for (;;) { if (!(!isP(t, "{") && !atEnd(t))) { break; } t = adv(t); }
         }
         const b: RBlock = parseBlock(withInFn(t, 2));   // §19.16.3 rule 4: a function-expression body is a lowered body
         return mkE(withInFn(b.tp, tp.inFn), start, AExprK.BlockLambda(rp.ps, b.b, true));
@@ -3439,7 +3443,7 @@ ${
         let props: AProp[] = [];
         let going = !isP(t, "}") && !atEnd(t);
         let keyRefused = false;          // s475: a computed or number key — the literal is reported once, then Recovered
-        while (going) {
+        for (; going; ) {
             const nameTok: PTok = cur(t);
             const pstart: int = nameTok.start;
             if (isSpread(t)) {
@@ -3513,7 +3517,8 @@ ${
         const b0: int = hardErrors(tp.diags);
         let t: TP = expectP(tp, "{");
         let stmts: AStmt[] = [];
-        while (!isP(t, "}") && !atEnd(t)) {
+        for (;;) {
+            if (!(!isP(t, "}") && !atEnd(t))) { break; }
             const before: int = t.i;
             if (isP(t, ";")) {
                 // an empty statement (a `;` after a block-like statement, `;;`)
@@ -3608,7 +3613,7 @@ ${
         if (i0 >= 0) {
             let i1: int = i0;
             let plain = true;
-            while (i1 < tp.toks.length && tp.toks[i1].cls != TC.End && tp.toks[i1].end <= s.span.end) {
+            for (; i1 < tp.toks.length && tp.toks[i1].cls != TC.End && tp.toks[i1].end <= s.span.end; ) {
                 const c: TC = tp.toks[i1].cls;
                 if (c == TC.TChunk || c == TC.TIStart || c == TC.TIEnd) plain = false;
                 i1 = i1 + 1;
@@ -3797,7 +3802,7 @@ ${
     fn bareArmSemi(tp: TP, s: AStmt) -> TP {
         let i: int = tp.i;
         if (i >= tp.toks.length) i = tp.toks.length - 1;
-        while (i > 0 && tp.toks[i - 1].end > s.span.end) { i = i - 1; }
+        for (; i > 0 && tp.toks[i - 1].end > s.span.end; ) { i = i - 1; }
         if (i > 0 && tp.toks[i - 1].end == s.span.end) {
             const r: TP = missingSemi({ toks: tp.toks, i: i, nid: tp.nid, diags: tp.diags, file: tp.file, ns: tp.ns, inFn: tp.inFn });
             return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: r.diags, file: tp.file, ns: tp.ns, inFn: tp.inFn };
@@ -3941,7 +3946,7 @@ ${
     // starts at `to` only `;`s?
     fn onlySemisBetween(tp: TP, from: int, to: int) -> boolean {
         let i: int = tokIndexAt(tp, to) - 1;
-        while (i >= 0 && tp.toks[i].cls == TC.Punct && tk(tp.toks[i], ";")) { i = i - 1; }
+        for (;;) { if (!(i >= 0 && tp.toks[i].cls == TC.Punct && tk(tp.toks[i], ";"))) { break; } i = i - 1; }
         return i >= 0 && tp.toks[i].end == from;
     }
 
@@ -3949,7 +3954,7 @@ ${
     fn tokIndexAt(tp: TP, pos: int) -> int {
         let i: int = tp.i;
         if (i >= tp.toks.length) i = tp.toks.length - 1;
-        while (i >= 0) {
+        for (; i >= 0; ) {
             if (tp.toks[i].start == pos) return i;
             if (tp.toks[i].start < pos) return -1;
             i = i - 1;
@@ -3961,7 +3966,7 @@ ${
     fn lineAt(tp: TP, pos: int) -> int {
         let i: int = tp.i;
         if (i >= tp.toks.length) i = tp.toks.length - 1;
-        while (i >= 0) {
+        for (; i >= 0; ) {
             if (tp.toks[i].start <= pos) return tp.toks[i].line;
             i = i - 1;
         }
@@ -4421,7 +4426,7 @@ ${
         if (!tk(nx, "(") || nx.cls == TC.Str) return false;
         let k: int = 2;
         let depth: int = 1;
-        while (depth > 0) {
+        for (; depth > 0; ) {
             const t: PTok = peekAt(tp, k);
             if (t.cls == TC.End) return false;
             if (t.cls != TC.Str && tk(t, "(")) depth = depth + 1;
@@ -4467,7 +4472,7 @@ ${
         }
         let es: AExpr[] = [];
         let going = true;
-        while (going) {
+        for (; going; ) {
             const r: RExpr = parseDepItem(t);
             es = es.concat([r.e]);
             t = r.tp;
@@ -4616,7 +4621,7 @@ ${
     fn advN(tp: TP, n: int) -> TP {
         let t: TP = tp;
         let i: int = 0;
-        while (i < n) {
+        for (; i < n; ) {
             t = adv(t);
             i = i + 1;
         }
@@ -4629,7 +4634,7 @@ ${
         let k: int = 1;
         let depth: int = 1;
         let semis: int = 0;
-        while (depth > 0) {
+        for (; depth > 0; ) {
             const x: PTok = peekAt(tp, k);
             if (x.cls == TC.End) return { semis: semis, close: k };
             if (x.cls == TC.Punct) {
@@ -4671,7 +4676,7 @@ ${
         if (o.cls != TC.Punct || (!tk(o, "{") && !tk(o, "["))) return false;
         let depth: int = 0;
         let going = true;
-        while (going) {
+        for (; going; ) {
             const x: PTok = peekAt(tp, k);
             if (x.cls == TC.End) return false;
             if (x.cls == TC.Punct && (tk(x, "{") || tk(x, "["))) depth = depth + 1;
@@ -4923,7 +4928,7 @@ ${
         let t: TP = tp;
         let depth: int = 0;
         let going = true;
-        while (going && !atEnd(t)) {
+        for (; going && !atEnd(t); ) {
             const x: PTok = cur(t);
             if (depth == 0 && (tk(x, ";") || tk(x, "}"))) {
                 going = false;
@@ -4998,7 +5003,7 @@ ${
 
     fn refusalSince(ds: Diag[], from: int) -> boolean {
         let i: int = from;
-        while (i < ds.length) {
+        for (; i < ds.length; ) {
             if (ds[i].code == "E-SCRIPT-001" || ds[i].code == "E-STYLE-001") return true;
             i = i + 1;
         }
@@ -5017,7 +5022,7 @@ ${
         let toks: PTok[] = [];
         let m: MP = mp;
         let going = true;
-        while (going) {
+        for (; going; ) {
             const p: LexPause = lexTier0X(mp.src, pos, depth, true);
             const pt: PTok[] = nsToks(mp.ns, toPToks(p.tokens));
             toks = toks.concat(pt.slice(0, pt.length - 1));
@@ -5136,7 +5141,7 @@ ${
             if ((pv.cls == TC.Ident || pv.cls == TC.Keyword) && pv.v == "renders") return false;
         }
         let i: int = end;
-        while (i < src.length && (src.substring(i, i + 1) == " " || src.substring(i, i + 1) == "\t" || src.substring(i, i + 1) == "\n" || src.substring(i, i + 1) == "\r")) { i = i + 1; }
+        for (;;) { if (!(i < src.length && (src.substring(i, i + 1) == " " || src.substring(i, i + 1) == "\t" || src.substring(i, i + 1) == "\n" || src.substring(i, i + 1) == "\r"))) { break; } i = i + 1; }
         if (src.substring(i, i + 1) == "=" && src.substring(i + 1, i + 2) != "=") return false;
         return true;
     }
@@ -5385,7 +5390,7 @@ ${
         let m: MP = mp;
         let bad = false;
         let going = true;
-        while (going) {
+        for (; going; ) {
             const p: LexPause = lexTier0X(mp.src, pos, depth, true);
             const pt: PTok[] = nsToks(mp.ns, toPToks(p.tokens));
             toks = toks.concat(pt.slice(0, pt.length - 1));
@@ -5436,7 +5441,7 @@ ${
     // second report (E-LOOP-007) for the same root cause.
     fn unrenderedSince(ds: Diag[], from: int) -> boolean {
         let i: int = from;
-        while (i < ds.length) {
+        for (; i < ds.length; ) {
             if (ds[i].code == "E-MARKUP-STATEMENT-NOT-RENDERED") return true;
             i = i + 1;
         }
@@ -5463,7 +5468,7 @@ ${
         if (isP(t, ";")) t = adv(t);
         if (!isP(t, "}") && !atEnd(t)) {
             t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a `" + interpOpen() + " for … }` in markup holds the loop and nothing else (§49.4.4: the loop is \"the sole content of a markup `" + interpOpen() + " }` interpolation\") — compute the rest in a function, or give it its own block", cur(t));
-            while (!atEnd(t) && !(isP(t, "}") && atEnd(adv(t)))) { t = adv(t); }
+            for (;;) { if (!(!atEnd(t) && !(isP(t, "}") && atEnd(adv(t))))) { break; } t = adv(t); }
         }
         t = expectRegionEnd(expectP(t, "}"));
         // s472: from `m`, not `mp` — the rows read above may carry `<db>`-body
@@ -5533,7 +5538,8 @@ ${
         const rr: RT0Region = tier0Region(mp);
         let t: TP = expectP(rr.tp, "{");
         const b0: int = hardErrors(t.diags);
-        while (!isP(t, "}") && !atEnd(t)) {
+        for (;;) {
+            if (!(!isP(t, "}") && !atEnd(t))) { break; }
             const before: int = t.i;
             if (isP(t, ";")) {
                 t = adv(t);
@@ -5570,7 +5576,7 @@ ${
         if (isP(t, ";")) t = adv(t);
         if (!isP(t, "}") && !atEnd(t)) {
             t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a `" + interpOpen() + " if … }` in markup holds the `if` and nothing else (§17.6.10: the control-flow statement is \"the sole content of a markup `" + interpOpen() + "…}` interpolation\") — compute the rest in a function, or give it its own block", cur(t));
-            while (!atEnd(t) && !(isP(t, "}") && atEnd(adv(t)))) { t = adv(t); }
+            for (;;) { if (!(!atEnd(t) && !(isP(t, "}") && atEnd(adv(t))))) { break; } t = adv(t); }
         }
         t = expectRegionEnd(expectP(t, "}"));
         if (rr.bad || unrenderedSince(t.diags, d0)) return recoveredInterp(backToMarkup(rr.mp, t), start);
@@ -5864,7 +5870,7 @@ ${
         let k: int = 0;
         let depth: int = 0;
         let going = true;
-        while (going) {
+        for (; going; ) {
             const x: PTok = peekAt(tp, k);
             if (x.cls == TC.End) return false;
             if (x.cls == TC.Punct) {
@@ -5886,7 +5892,7 @@ ${
     fn toHeadClose(tp: TP) -> TP {
         let t: TP = tp;
         let depth: int = 0;
-        while (!atEnd(t)) {
+        for (; !atEnd(t); ) {
             const x: PTok = cur(t);
             if (x.cls == TC.Punct) {
                 if (depth == 0 && tk(x, "{")) return t;
@@ -5906,7 +5912,7 @@ ${
     fn toBodyOpen(tp: TP) -> TP {
         let t: TP = tp;
         let depth: int = 0;
-        while (!atEnd(t)) {
+        for (; !atEnd(t); ) {
             const x: PTok = cur(t);
             if (x.cls == TC.Punct) {
                 if (depth == 0 && (tk(x, "{") || tk(x, "}") || tk(x, ";"))) return t;
@@ -5947,7 +5953,7 @@ ${
         t = expectP(t, ";");
         let step: AExpr[] = [];
         let going = !isP(t, ")") && !atEnd(t);
-        while (going) {
+        for (; going; ) {
             const r: RExpr = parseAssign(t);
             step = step.concat([r.e]);
             t = r.tp;
@@ -5967,7 +5973,7 @@ ${
         let t: TP = adv(tp);
         let out: AStmt[] = [];
         let going = true;
-        while (going) {
+        for (; going; ) {
             const r: RStmt = parseDeclarator(t, mutable);
             out = out.concat([r.s]);
             t = r.tp;
@@ -6003,7 +6009,7 @@ ${
         let t: TP = tp;
         let out: AStmt[] = [];
         let going = true;
-        while (going) {
+        for (; going; ) {
             const start: int = cur(t).start;
             const r: RExpr = parseAssign(t);
             const s: RStmt = mkS(r.tp, start, AStmtK.Eval(r.e));
@@ -6255,7 +6261,7 @@ ${
         let depth: int = 0;
         let steps: DStep[] = [];
         let going = true;
-        while (going) {
+        for (; going; ) {
             const x: PTok = cur(t);
             if (x.cls == TC.End) {
                 going = false;
@@ -6294,7 +6300,7 @@ ${
 
     fn hasCodeFrom(tp: TP, from: int, code: string) -> boolean {
         let i: int = from;
-        while (i < tp.diags.length) {
+        for (; i < tp.diags.length; ) {
             if (tp.diags[i].code == code) return true;
             i = i + 1;
         }
@@ -6307,7 +6313,7 @@ ${
         let t: TP = tp;
         let depth: int = 0;
         let going = true;
-        while (going) {
+        for (; going; ) {
             const x: PTok = cur(t);
             if (x.cls == TC.End) {
                 going = false;
@@ -6346,7 +6352,7 @@ ${
         let steps: DStep[] = [];
         let bad = false;
         let going = !isP(t, "}") && !atEnd(t);
-        while (going) {
+        for (; going; ) {
             const k: PTok = cur(t);
             if (isSpread(t)) {
                 const dr: TP = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a rest element `...name` in a destructuring pattern is not in the bootstrap yet — it would bind a struct of the remaining fields, which has no declared type; read the fields you need", k);
@@ -6755,7 +6761,7 @@ ${
     // is the designating one): E-LIFT-002's second `lift` on one path.
     fn directLiftBefore(ss: AStmt[]) -> AStmt | not {
         let i: int = 0;
-        while (i < ss.length - 1) {
+        for (; i < ss.length - 1; ) {
             const k: AStmtK = ss[i].k;
             if (k is .Lift) return ss[i];
             i = i + 1;
@@ -7004,7 +7010,7 @@ ${
         let bad: boolean = false;
         const headLine: int = cur(tp).line;
         let going: boolean = true;
-        while (going) {
+        for (; going; ) {
             const nameTok: PTok = cur(t);
             let n: RExpr | not = not;
             let written: string = nameTok.v;
@@ -7053,7 +7059,7 @@ ${
             if (c.line == headLine && c.cls != TC.End) found = "`" + c.text + "`";
             t = diagAt(t, "E-SYNTAX-044", "a `given` head is a list of names followed by `:>` (`given x, y :> { … }`, §42.2.3); found " + found + " instead. To run code when a condition holds, write `if (<cond>) { … }`; to run it when a value is present, write `if (x is given) { … }`.", c);
             let skipping: boolean = true;
-            while (skipping) {
+            for (; skipping; ) {
                 c = cur(t);
                 g = peekAt(t, 1);
                 sepFound = (tk(c, ":") && tk(g, ">") && touching(c, g)) || tk(c, "=>");
@@ -7144,7 +7150,8 @@ ${
         if (nh.n == 0 && refinableBase(nameTok.v) && isP(r.tp, "(") && touching(nameTok, cur(r.tp))) {
             r = parseRefine(r.tp, start, r.t);
         }
-        while (isP(r.tp, "[")) {
+        for (;;) {
+            if (!(isP(r.tp, "["))) { break; }
             let g: TP = adv(r.tp);
             let grants: string[] = [];
             // s475 r1 (#1812 review F3): a bounded length (`1..=3`, §66.12.2) — a run of tokens that
@@ -7153,7 +7160,8 @@ ${
             // not read as fixed. Other tokens are skipped as before (a refinement's `[.A, .B]` list
             // is read by its own form).
             let odd: string = "";
-            while (!isP(g, "]") && !atEnd(g)) {
+            for (;;) {
+                if (!(!isP(g, "]") && !atEnd(g))) { break; }
                 const w: PTok = cur(g);
                 if (w.cls == TC.Ident || w.cls == TC.Keyword) {
                     if (odd != "") grants = grants.concat([odd]);
@@ -7232,7 +7240,7 @@ ${
     fn refToks(src: string) -> RefTok[] {
         let out: RefTok[] = [];
         let i: int = 0;
-        while (i < src.length) {
+        for (; i < src.length; ) {
             const c: string = src.charAt(i);
             const c2: string = src.substring(i, i + 2);
             if (c == " " || c == "\t" || c == "\n" || c == "\r") {
@@ -7277,7 +7285,7 @@ ${
                 i = j;
             } else if (c == "\"" || c == "'") {
                 let j: int = i + 1;
-                while (j < src.length && src.charAt(j) != c) {
+                for (; j < src.length && src.charAt(j) != c; ) {
                     if (src.charAt(j) == "\\") j = j + 1;
                     j = j + 1;
                 }
@@ -7309,7 +7317,8 @@ ${
 
     fn refOr(ts: RefTok[], i: int) -> RRef {
         let l: RRef = refAnd(ts, i);
-        while (l.code == "" && refAt(ts, l.i).k == "or") {
+        for (;;) {
+            if (!(l.code == "" && refAt(ts, l.i).k == "or")) { break; }
             const r: RRef = refAnd(ts, l.i + 1);
             if (r.code != "") return r;
             l = refOk(RefPred.POr(l.p, r.p), r.i);
@@ -7319,7 +7328,8 @@ ${
 
     fn refAnd(ts: RefTok[], i: int) -> RRef {
         let l: RRef = refUnary(ts, i);
-        while (l.code == "" && refAt(ts, l.i).k == "and") {
+        for (;;) {
+            if (!(l.code == "" && refAt(ts, l.i).k == "and")) { break; }
             const r: RRef = refUnary(ts, l.i + 1);
             if (r.code != "") return r;
             l = refOk(RefPred.PAnd(l.p, r.p), r.i);
@@ -7523,7 +7533,7 @@ ${
     fn codePointCount(s: string) -> int {
         let n: int = 0;
         let i: int = 0;
-        while (i < s.length) {
+        for (; i < s.length; ) {
             const u: int = s.charCodeAt(i);
             if (u >= 55296 && u <= 56319 && i + 1 < s.length) {
                 const w: int = s.charCodeAt(i + 1);
@@ -7595,7 +7605,7 @@ ${
         let at: int = -1;
         let ats: int = 0;
         let i: int = 0;
-        while (i < s.length) {
+        for (; i < s.length; ) {
             const c: string = s.charAt(i);
             if (isRegexSpace(c)) return false;
             if (c == "@") {
@@ -7607,7 +7617,7 @@ ${
         if (ats != 1 || at < 1) return false;
         const dom: string = s.substring(at + 1);
         let j: int = 1;
-        while (j <= dom.length - 2) {
+        for (; j <= dom.length - 2; ) {
             if (dom.charAt(j) == ".") return true;
             j = j + 1;
         }
@@ -7618,7 +7628,7 @@ ${
     fn shapeUuid(s: string) -> boolean {
         if (s.length != 36) return false;
         let i: int = 0;
-        while (i < 36) {
+        for (; i < 36; ) {
             const c: string = s.charAt(i);
             if (i == 8 || i == 13 || i == 18 || i == 23) {
                 if (c != "-") return false;
@@ -7636,7 +7646,7 @@ ${
         if (s.substring(0, 1) == "+") body = s.substring(1);
         if (body.length < 7 || body.length > 15) return false;
         let i: int = 0;
-        while (i < body.length) {
+        for (; i < body.length; ) {
             const c: string = body.charAt(i);
             if (!(isDigitStr(c) || isRegexSpace(c) || c == "-" || c == "(" || c == ")" || c == ".")) return false;
             i = i + 1;
@@ -7648,7 +7658,7 @@ ${
     fn shapeDigits(s: string, form: string) -> boolean {
         if (s.length != form.length) return false;
         let i: int = 0;
-        while (i < s.length) {
+        for (; i < s.length; ) {
             const f: string = form.charAt(i);
             const c: string = s.charAt(i);
             if (f == "d") {
@@ -7665,7 +7675,7 @@ ${
     fn shapeColor(s: string) -> boolean {
         if (s.length == 7 && s.charAt(0) == "#") {
             let i: int = 1;
-            while (i < 7) {
+            for (; i < 7; ) {
                 if (!isHexCh(s.charAt(i))) return false;
                 i = i + 1;
             }
@@ -7673,7 +7683,7 @@ ${
         }
         if (s.length == 0) return false;
         let j: int = 0;
-        while (j < s.length) {
+        for (; j < s.length; ) {
             const c: string = s.charAt(j);
             if (!(c >= "a" && c <= "z")) return false;
             j = j + 1;
@@ -7876,7 +7886,7 @@ ${
         const from: int = t.i;
         let depth: int = 1;
         let closed = false;
-        while (!closed && !atEnd(t)) {
+        for (; !closed && !atEnd(t); ) {
             if (isP(t, "(")) depth = depth + 1;
             if (isP(t, ")")) {
                 depth = depth - 1;
@@ -7916,7 +7926,8 @@ ${
         if (tail.cls == TC.Ident && tail.line == close.line && !isValidatorWord(tail.v)) {
             let last: PTok = tail;
             const tailFrom: int = t.i;
-            while (!atEnd(t) && cur(t).line == close.line && !isP(t, "=") && !isP(t, ",") && !isP(t, ")") && !isP(t, ";") && !isP(t, "{") && !isP(t, "}")) {
+            for (;;) {
+                if (!(!atEnd(t) && cur(t).line == close.line && !isP(t, "=") && !isP(t, ",") && !isP(t, ")") && !isP(t, ";") && !isP(t, "{") && !isP(t, "}"))) { break; }
                 last = cur(t);
                 t = adv(t);
             }
@@ -7939,7 +7950,7 @@ ${
     fn isLabelText(w: string) -> boolean {
         if (w == "" || !isIdentStartCh(w.charAt(0))) return false;
         let i: int = 1;
-        while (i < w.length) {
+        for (; i < w.length; ) {
             if (!isIdentCh(w.charAt(i))) return false;
             i = i + 1;
         }
@@ -8038,7 +8049,7 @@ ${
     fn parenClose(tp: TP) -> int {
         let k: int = 1;
         let depth: int = 1;
-        while (k < 4096) {
+        for (; k < 4096; ) {
             const x: PTok = peekAt(tp, k);
             if (x.cls == TC.End) return -1;
             if (tk(x, "{") || tk(x, "}") || tk(x, ";")) return -1;
@@ -8074,7 +8085,8 @@ ${
     fn parseFnTypeAt(tp: TP, start: int, pure: boolean, thin: boolean, bare: boolean) -> RType {
         let t: TP = adv(tp);
         let ps: AType[] = [];
-        while (!isP(t, ")") && !atEnd(t)) {
+        for (;;) {
+            if (!(!isP(t, ")") && !atEnd(t))) { break; }
             const lt: PTok = cur(t);
             if (lt.cls == TC.Keyword && lt.v == "lin") {
                 t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a `lin` parameter in a function type is not in the bootstrap (INTERIM — §35.2.1 builds `lin` on a declaration's own parameters; a function TYPE does not carry it). Drop `lin` here, or call the function by its name", lt);
@@ -8088,7 +8100,7 @@ ${
                 t = adv(t);
             } else if (!isP(t, ")")) {
                 t = diagAt(t, "E-PARSE-TYPE", "expected `,` or `)` in a function type's parameter list, found `" + cur(t).text + "`", cur(t));
-                while (!isP(t, ")") && !atEnd(t)) { t = adv(t); }
+                for (;;) { if (!(!isP(t, ")") && !atEnd(t))) { break; } t = adv(t); }
             }
         }
         t = expectP(t, ")");
@@ -8220,7 +8232,7 @@ ${
         let t: TP = tp;
         let depth: int = 1;
         let sq: int = 0;
-        while (!atEnd(t)) {
+        for (; !atEnd(t); ) {
             if (brackets && isP(t, "[")) sq = sq + 1;
             if (brackets && isP(t, "]") && sq > 0) sq = sq - 1;
             if (sq == 0 && isP(t, "(")) depth = depth + 1;
@@ -8327,7 +8339,7 @@ ${
         let t: TP = tp;
         let out: AItem[] = [];
         let going = true;
-        while (going) {
+        for (; going; ) {
             if (atEnd(t)) {
                 going = false;
             } else if (close != "" && isP(t, close)) {
@@ -8447,7 +8459,7 @@ ${
         let t: TP = adv(adv(d));
         let depth: int = 0;
         let going = true;
-        while (going && !atEnd(t)) {
+        for (; going && !atEnd(t); ) {
             const k: PTok = cur(t);
             if (k.line != line && depth == 0) {
                 going = false;
@@ -8469,7 +8481,7 @@ ${
         let t: TP = tp;
         let stmts: AStmt[] = [];
         let going = true;
-        while (going) {
+        for (; going; ) {
             if (atEnd(t) || (close != "" && isP(t, close)) || logicItemAhead(t)) {
                 going = false;
             } else if (isP(t, ";")) {
@@ -8634,7 +8646,7 @@ ${
     fn skipToLineEnd(tp: TP) -> TP {
         const line: int = cur(tp).line;
         let t: TP = adv(tp);
-        while (!atEnd(t) && cur(t).line == line) { t = adv(t); }
+        for (; !atEnd(t) && cur(t).line == line; ) { t = adv(t); }
         return t;
     }
 
@@ -8683,7 +8695,7 @@ ${
                 let depth = 0;
                 let from0: string = "";
                 let done = false;
-                while (!done && !atEnd(rt)) {
+                for (; !done && !atEnd(rt); ) {
                     if (depth == 0 && isWord(rt, "from") && cur(adv(rt)).cls == TC.Str) {
                         from0 = cur(adv(rt)).v;
                         rt = adv(adv(rt));
@@ -8734,7 +8746,8 @@ ${
         // is E-PARSE-IMPORT (was: read as separate names).
         let names: AImportName[] = [];
         let needComma = false;
-        while (!isP(t, "}") && !atEnd(t)) {
+        for (;;) {
+            if (!(!isP(t, "}") && !atEnd(t))) { break; }
             const n: PTok = cur(t);
             if (tk(n, ",")) {
                 if (!needComma) t = diagAt(t, "E-PARSE-IMPORT", "expected an imported name before `,`", n);
@@ -8742,7 +8755,7 @@ ${
                 t = adv(t);
             } else if (needComma) {
                 t = diagAt(t, "E-PARSE-IMPORT", "expected `,` or `}` after an import specifier, found `" + n.text + "` — specifiers are separated by commas (`import { a, b as c } from \"…\"`, §21.3)", n);
-                while (!atEnd(t) && !isP(t, ",") && !isP(t, "}")) { t = adv(t); }
+                for (;;) { if (!(!atEnd(t) && !isP(t, ",") && !isP(t, "}"))) { break; } t = adv(t); }
             } else if (n.cls == TC.Ident || n.cls == TC.Keyword) {
                 let bound: PTok = n;
                 let bind = true;
@@ -8824,7 +8837,8 @@ ${
         } else {
             t = adv(t);
             let needComma = false;
-            while (!isP(t, "}") && !atEnd(t)) {
+            for (;;) {
+                if (!(!isP(t, "}") && !atEnd(t))) { break; }
                 const n: PTok = cur(t);
                 if (tk(n, ",")) {
                     if (!needComma) t = diagAt(t, "E-PARSE-EXPORT", "expected an exported name before `,`", n);
@@ -8832,7 +8846,7 @@ ${
                     t = adv(t);
                 } else if (needComma) {
                     t = diagAt(t, "E-PARSE-EXPORT", "expected `,` or `}` after an export specifier, found `" + n.text + "` — specifiers are separated by commas (`export { a, b as c } from \"…\"`, §21.4)", n);
-                    while (!atEnd(t) && !isP(t, ",") && !isP(t, "}")) { t = adv(t); }
+                    for (;;) { if (!(!atEnd(t) && !isP(t, ",") && !isP(t, "}"))) { break; } t = adv(t); }
                 } else if (n.cls == TC.Ident) {
                     let bound: PTok = n;
                     let bind = true;
@@ -8904,7 +8918,8 @@ ${
             // bootstrap's type system has `T | not` only. Before, the reader stopped at the
             // `|` and reported a `;` owed after `A` — a wrong code on a valid alias.
             if (isP(at, "|")) {
-                while (isP(at, "|")) {
+                for (;;) {
+                    if (!(isP(at, "|"))) { break; }
                     const rm: RType = parseType(adv(at));
                     at = rm.tp;
                 }
@@ -9016,7 +9031,7 @@ ${
     fn skippedDecls(tp: TP, from: int, to: int) -> string {
         let out: string = "";
         let i: int = from;
-        while (i + 1 < to) {
+        for (; i + 1 < to; ) {
             const k: PTok = tp.toks[i];
             const n: PTok = tp.toks[i + 1];
             if ((k.cls == TC.Keyword || k.cls == TC.Ident) && ["const", "let", "function", "fn", "type"].indexOf(k.text) >= 0 && n.cls == TC.Ident) {
@@ -9040,7 +9055,7 @@ ${
         let t: TP = tp;
         let opens: string[] = [];
         let going = true;
-        while (going && !atEnd(t) && (opens.length > 0 || cur(t).line == line)) {
+        for (; going && !atEnd(t) && (opens.length > 0 || cur(t).line == line); ) {
             const c: PTok = cur(t);
             if (opens.length == 0 && (isP(t, ";") || closerAt(t) || aliasStopAt(t))) {
                 going = false;
@@ -9074,7 +9089,7 @@ ${
     fn openGroupOnLine(tp: TP, from: int, to: int) -> string {
         let opens: string[] = [];
         let i: int = from;
-        while (i < to) {
+        for (; i < to; ) {
             const x: PTok = tp.toks[i];
             if (x.cls == TC.Punct && (x.text == "(" || x.text == "[" || x.text == "{")) opens = opens.concat([x.text]);
             if (x.cls == TC.Punct && (x.text == ")" || x.text == "]" || x.text == "}") && opens.length > 0 && opens[opens.length - 1] == openerOf(x.text)) opens = opens.slice(0, opens.length - 1);
@@ -9123,7 +9138,7 @@ ${
         let t: TP = tp;
         let depth: int = 0;
         let going = true;
-        while (going && !atEnd(t) && (depth > 0 || cur(t).line == line)) {
+        for (; going && !atEnd(t) && (depth > 0 || cur(t).line == line); ) {
             if (depth == 0 && isP(t, ";")) {
                 t = adv(t);
                 going = false;
@@ -9146,7 +9161,7 @@ ${
         const open: PTok = cur(tp);
         let t: TP = adv(tp);
         let depth: int = 1;
-        while (depth > 0 && !atEnd(t)) {
+        for (; depth > 0 && !atEnd(t); ) {
             const x: PTok = cur(t);
             if (x.cls == TC.Punct && tk(x, "{")) {
                 depth = depth + 1;
@@ -9167,7 +9182,8 @@ ${
     fn parseVariants(tp: TP) -> RVariants {
         let t: TP = expectP(tp, "{");
         let vs: AVariant[] = [];
-        while (!isP(t, "}") && !atEnd(t)) {
+        for (;;) {
+            if (!(!isP(t, "}") && !atEnd(t))) { break; }
             const n: PTok = cur(t);
             if (n.cls == TC.Ident || n.cls == TC.Keyword) {
                 t = adv(t);
@@ -9188,7 +9204,8 @@ ${
                 // report (E-ENUM-VARIANT-CASE "rename it `Toile`") is made on the leftover.
                 if (!tk(n, ",")) {
                     let last: PTok = n;
-                    while (!atEnd(t) && !isP(t, "}") && !isP(t, ",") && !isP(t, "(") && cur(t).start == last.end) {
+                    for (;;) {
+                        if (!(!atEnd(t) && !isP(t, "}") && !isP(t, ",") && !isP(t, "(") && cur(t).start == last.end)) { break; }
                         last = cur(t);
                         t = adv(t);
                     }
@@ -9207,7 +9224,7 @@ ${
     fn parseTypeFields(tp: TP, close: string) -> RFields {
         let t: TP = tp;
         let fs: ATypeField[] = [];
-        while (!isP(t, close) && !atEnd(t)) {
+        for (; !isP(t, close) && !atEnd(t); ) {
             const fstart: int = cur(t).start;
             let isLet = false;
             if (isWord(t, "let")) {
@@ -9229,7 +9246,8 @@ ${
                 // the next field's NAME (`{ a: int\n min: int }`, `{ a: int max: int }`
                 // — §14.3.2 lets a newline separate fields), never a validator.
                 let vals: string[] = [];
-                while ((cur(t).cls == TC.Ident || cur(t).cls == TC.Keyword) && isValidatorWord(cur(t).v) && !tk(peekAt(t, 1), ":")) {
+                for (;;) {
+                    if (!((cur(t).cls == TC.Ident || cur(t).cls == TC.Keyword) && isValidatorWord(cur(t).v) && !tk(peekAt(t, 1), ":"))) { break; }
                     vals = vals.concat([cur(t).v]);
                     t = adv(t);
                     if (isP(t, "(")) t = skipParens(t);
@@ -9256,7 +9274,8 @@ ${
     fn parseParamList(tp: TP, own: boolean) -> RParams {
         let t: TP = tp;
         let params: AParam[] = [];
-        while (!isP(t, ")") && !atEnd(t)) {
+        for (;;) {
+            if (!(!isP(t, ")") && !atEnd(t))) { break; }
             // s471 — `lin name: T` (§35.2.1: "parameter ::= ['lin'] identifier ':' type-annotation")
             const lt: PTok = cur(t);
             let isLin = false;
@@ -9459,7 +9478,7 @@ ${
     fn skipTrivia(mp: MP) -> MP {
         let m: MP = mp;
         let going = true;
-        while (going && !mEof(m)) {
+        for (; going && !mEof(m); ) {
             if (isSpaceCh(chAt(m, 0))) {
                 m = mAdv(m, 1);
             } else if (mLooking(m, "//")) {
@@ -9477,7 +9496,7 @@ ${
     // `\n` or `\r\n`"; S444: in free text the terminator is content, §4.18.5).
     fn skipLineComment(mp: MP) -> MP {
         let m: MP = mp;
-        while (!mEof(m) && chAt(m, 0) != "\n" && chAt(m, 0) != "\r") { m = mAdv(m, 1); }
+        for (;;) { if (!(!mEof(m) && chAt(m, 0) != "\n" && chAt(m, 0) != "\r")) { break; } m = mAdv(m, 1); }
         return m;
     }
 
@@ -9492,14 +9511,14 @@ ${
 
     fn readName(mp: MP) -> RWord {
         let m: MP = mp;
-        while (!mEof(m) && isNameCh(chAt(m, 0))) { m = mAdv(m, 1); }
+        for (; !mEof(m) && isNameCh(chAt(m, 0)); ) { m = mAdv(m, 1); }
         return { w: mp.src.substring(mp.pos, m.pos), mp: m };
     }
 
     // Skip spaces/tabs/newlines only (inside an opener).
     fn skipSpace(mp: MP) -> MP {
         let m: MP = mp;
-        while (!mEof(m) && isSpaceCh(chAt(m, 0))) { m = mAdv(m, 1); }
+        for (; !mEof(m) && isSpaceCh(chAt(m, 0)); ) { m = mAdv(m, 1); }
         return m;
     }
 
@@ -9624,7 +9643,7 @@ ${
         if (c == "$" && chAt(mp, 1) == "{") {
             const rv: RValue = parseDollarValue(mp, false, name, false);
             let k: int = 0;
-            while (isIdentStartCh(chAt(rv.mp, k)) || isDigitStr(chAt(rv.mp, k))) { k = k + 1; }
+            for (; isIdentStartCh(chAt(rv.mp, k)) || isDigitStr(chAt(rv.mp, k)); ) { k = k + 1; }
             if (k == 0) return not;
             const m: MP = mAdv(rv.mp, k);
             return { v: AAttrValue.Dur(mp.src.substring(mp.pos, m.pos)), mp: m };
@@ -9632,9 +9651,9 @@ ${
         let i: int = 0;
         if (c == "-" || c == "+") i = 1;
         if (!isDigitStr(chAt(mp, i)) && !(chAt(mp, i) == "." && isDigitStr(chAt(mp, i + 1)))) return not;
-        while (isDigitStr(chAt(mp, i)) || chAt(mp, i) == ".") { i = i + 1; }
+        for (;;) { if (!(isDigitStr(chAt(mp, i)) || chAt(mp, i) == ".")) { break; } i = i + 1; }
         let j: int = i;
-        while (isIdentStartCh(chAt(mp, j)) || isDigitStr(chAt(mp, j))) { j = j + 1; }
+        for (; isIdentStartCh(chAt(mp, j)) || isDigitStr(chAt(mp, j)); ) { j = j + 1; }
         // a bare number with no unit keeps its number reading (the analyzer:
         // "The unit suffix is required", §51.12.3)
         if (j == i) return not;
@@ -9727,7 +9746,7 @@ ${
         let depth: int = 0;
         let semi = false;
         let i: int = 0;
-        while (i < tp.toks.length - 1) {
+        for (; i < tp.toks.length - 1; ) {
             const t: PTok = tp.toks[i];
             const opens: boolean = tk(t, "(") || tk(t, "[") || tk(t, "{") || t.cls == TC.TIStart;
             const closes: boolean = tk(t, ")") || tk(t, "]") || tk(t, "}") || t.cls == TC.TIEnd;
@@ -10119,7 +10138,7 @@ ${
         let k: int = from;
         if (k < 0) k = 0;
         let i: int = k;
-        while (i < tp.diags.length) {
+        for (; i < tp.diags.length; ) {
             const d: Diag = tp.diags[i];
             if (d.code != "E-STMT-NO-EFFECT" || d.span.end != last.span.end) ds = ds.concat([d]);
             i = i + 1;
@@ -10134,7 +10153,7 @@ ${
         let k: int = from;
         if (k < 0) k = 0;
         let i: int = k;
-        while (i < tp.diags.length) {
+        for (; i < tp.diags.length; ) {
             const d: Diag = tp.diags[i];
             if (d.code != "E-STMT-NO-EFFECT") ds = ds.concat([d]);
             i = i + 1;
@@ -10145,7 +10164,7 @@ ${
     fn parseQuoted(mp: MP, q: string) -> RValue {
         let m: MP = mAdv(mp, 1);
         let text: string = "";
-        while (!mEof(m) && chAt(m, 0) != q) {
+        for (; !mEof(m) && chAt(m, 0) != q; ) {
             if (chAt(m, 0) == "\\" && !mEof(mAdv(m, 1))) {
                 text = text + chAt(m, 1);
                 m = mAdv(m, 2);
@@ -10195,7 +10214,7 @@ ${
         let refined: boolean = standingRefine(first.t);
         let untested: string = "";
         let going = true;
-        while (going) {
+        for (; going; ) {
             const after: MP = skipSpace(m);
             if (chAt(after, 0) == "|" && chAt(after, 1) != "|" && chAt(skipSpace(mAdv(after, 1)), 0) == "[") {
                 // a map / set member: read to its `]`; judged below
@@ -10384,7 +10403,7 @@ ${
         let depth: int = 0;
         let q: string = "";
         let i: int = open;
-        while (i < src.length) {
+        for (; i < src.length; ) {
             const c: string = src.substring(i, i + 1);
             if (q != "") {
                 if (c == "\\") {
@@ -10418,7 +10437,7 @@ ${
         let sq: int = 0;
         let q: string = "";
         let i: int = open;
-        while (i < src.length) {
+        for (; i < src.length; ) {
             const c: string = src.substring(i, i + 1);
             if (q != "") {
                 if (c == "\\") {
@@ -10538,7 +10557,8 @@ ${
             }
             m = mBump(m);
         }
-        while (chAt(m, 0) == "[") {
+        for (;;) {
+            if (!(chAt(m, 0) == "[")) { break; }
             const close: int = mp.src.indexOf("]", m.pos);
             let inner: string = "";
             if (close < 0) {
@@ -10558,7 +10578,7 @@ ${
     // whitespace, `=`, `/`, `>`, or the end of the source.
     fn typeTextEnd(src: string, pos: int) -> int {
         let i: int = pos;
-        while (i < src.length) {
+        for (; i < src.length; ) {
             const c: string = src.substring(i, i + 1);
             if (isSpaceCh(c) || c == "=" || c == "/" || c == ">") return i;
             i = i + 1;
@@ -10723,7 +10743,7 @@ ${
         let vals: AValidator[] = [];
         let rend: ASpan[] = [];
         let going = true;
-        while (going) {
+        for (; going; ) {
             m = skipSpace(m);
             if (mEof(m)) {
                 m = mDiag(m, "E-PARSE-TAG", "unterminated tag `<" + nm.w + "`", start, m.pos);
@@ -10789,7 +10809,7 @@ ${
         let m: MP = mAdv(mp, 1);
         let out: ABind[] = [];
         let going = true;
-        while (going) {
+        for (; going; ) {
             m = skipSpace(m);
             const c: string = chAt(m, 0);
             if (mEof(m) || c == ">") {
@@ -10828,7 +10848,7 @@ ${
     // The `)` that closes an arm's binder list, or the opener's `>` (not consumed).
     fn armBindsEnd(mp: MP) -> int {
         let m: MP = mp;
-        while (!mEof(m) && chAt(m, 0) != ")" && chAt(m, 0) != ">") { m = mAdv(m, 1); }
+        for (;;) { if (!(!mEof(m) && chAt(m, 0) != ")" && chAt(m, 0) != ">")) { break; } m = mAdv(m, 1); }
         return m.pos;
     }
 
@@ -11106,7 +11126,7 @@ ${
         let out: ANode[] = [];
         let text: string = "";
         let textStart: int = m.pos;
-        while (m.pos < end - 1) {
+        for (; m.pos < end - 1; ) {
             const esc: int = displayEscLen(m.src, m.pos);
             if (esc > 0) {
                 if (text == "") textStart = m.pos;
@@ -11169,7 +11189,7 @@ ${
         for (const t of toks) {
             if (t.cls == TC.Str && t.text.substring(0, 1) == "\"") {
                 let i: int = t.start + 1;
-                while (i < t.end) {
+                for (; i < t.end; ) {
                     const c: string = m.src.substring(i, i + 1);
                     if (c == "\\") {
                         const esc: int = displayEscLen(m.src, i);
@@ -11209,7 +11229,7 @@ ${
         let m: MP = mp;
         let out: string = "";
         let i: int = from;
-        while (i < to) {
+        for (; i < to; ) {
             const c: string = m.src.substring(i, i + 1);
             const esc: int = displayEscLen(m.src, i);
             if (esc > 0 && i + esc <= to) {
@@ -11232,7 +11252,7 @@ ${
     // interpolation — a `${` that is not the `\${` escape.
     fn hasLiveInterp(src: string, start: int, end: int) -> boolean {
         let i: int = start + 1;
-        while (i < end) {
+        for (; i < end; ) {
             const esc: int = displayEscLen(src, i);
             if (esc > 0) {
                 i = i + esc;
@@ -11250,7 +11270,7 @@ ${
     fn comparisonTail(mp: MP, start: int) -> MP {
         let i: int = mp.pos;
         let content = false;
-        while (i < mp.src.length) {
+        for (; i < mp.src.length; ) {
             const c: string = mp.src.substring(i, i + 1);
             if (c == "\n" || c == "<") return mp;
             // a `>` right after this one (only spaces between) ends an OUTER
@@ -11269,7 +11289,7 @@ ${
     // nit: `<p : x></>` / `<p : x></p>` written right after the opener.
     fn closerAfterShorthand(mp: MP, tag: string) -> MP {
         let m: MP = mp;
-        while (chAt(m, 0) == " " || chAt(m, 0) == "\t") { m = mAdv(m, 1); }
+        for (;;) { if (!(chAt(m, 0) == " " || chAt(m, 0) == "\t")) { break; } m = mAdv(m, 1); }
         let n: int = 0;
         if (mLooking(m, "</>")) n = 3;
         if (tag != "" && mLooking(m, "</" + tag + ">")) n = tag.length + 3;
@@ -11292,7 +11312,7 @@ ${
         let m: MP = mp;
         let out: ANode[] = [];
         let going = true;
-        while (going) {
+        for (; going; ) {
             m = skipTrivia(m);
             if (mEof(m)) {
                 m = mDiag(m, "E-PARSE-UNCLOSED", "`<" + tag + ">` is never closed", mp.pos, m.pos);
@@ -11481,7 +11501,7 @@ ${
     // in a nested string, does not close the literal).
     fn displayCloseAt(src: string, pos: int) -> int {
         let i: int = pos + 1;
-        while (i < src.length) {
+        for (; i < src.length; ) {
             const c: string = src.substring(i, i + 1);
             const esc: int = displayEscLen(src, i);
             if (esc > 0) {
@@ -11503,7 +11523,7 @@ ${
     // closed, so there is no structure left to respect), else end of file.
     fn firstBodyCloser(src: string, from: int, tag: string) -> int {
         let i: int = from;
-        while (i < src.length) {
+        for (; i < src.length; ) {
             if (src.substring(i, i + 3) == "</>") return i;
             if (src.substring(i, i + tag.length + 3) == "</" + tag + ">") return i;
             i = i + 1;
@@ -11670,7 +11690,8 @@ ${
             const d0: Diag[] = mp.diags;
             let m: MP = mp;
             let going = true;
-            while (going && chAt(m, 0) == ";") {
+            for (;;) {
+                if (!(going && chAt(m, 0) == ";")) { break; }
                 m = skipSpace(mAdv(m, 1));
                 if (mEof(m) || chAt(m, 0) == ">" || mLooking(m, "/>") || nameEqAt(m)) {
                     going = false;
@@ -11743,7 +11764,7 @@ ${
     // Spaces and tabs only (not a line break).
     fn skipInlineSpace(mp: MP) -> MP {
         let m: MP = mp;
-        while (!mEof(m) && (chAt(m, 0) == " " || chAt(m, 0) == "\t")) { m = mAdv(m, 1); }
+        for (;;) { if (!(!mEof(m) && (chAt(m, 0) == " " || chAt(m, 0) == "\t"))) { break; } m = mAdv(m, 1); }
         return m;
     }
 
@@ -11923,10 +11944,10 @@ ${
     fn bySource(vs: AValidator[]) -> AValidator[] {
         let out: AValidator[] = [];
         let rest: AValidator[] = vs;
-        while (rest.length > 0) {
+        for (; rest.length > 0; ) {
             let k = 0;
             let j = 1;
-            while (j < rest.length) {
+            for (; j < rest.length; ) {
                 if (rest[j].span.start < rest[k].span.start) k = j;
                 j = j + 1;
             }
@@ -12038,7 +12059,7 @@ ${
         let m: MP = mp;
         let arms: ANode[] = [];
         let going = true;
-        while (going) {
+        for (; going; ) {
             m = skipTrivia(m);
             if (mEof(m)) {
                 m = mDiag(m, "E-PARSE-UNCLOSED", "`<match>` is never closed", o.start, m.pos);
@@ -12158,7 +12179,7 @@ ${
     fn rawRefusedTags(body: string) -> RawHit[] {
         let out: RawHit[] = [];
         let i: int = body.indexOf("<");
-        while (i >= 0) {
+        for (; i >= 0; ) {
             const w6: string = body.substring(i + 1, i + 7).toLowerCase();
             const w5: string = body.substring(i + 1, i + 6).toLowerCase();
             if (w6 == "script" && rawNameEnds(body, i + 7)) {
@@ -12195,7 +12216,7 @@ ${
     fn rawPairTags(body: string) -> RawTag[] {
         let toks: RawTag[] = [];
         let i: int = body.indexOf("<");
-        while (i >= 0) {
+        for (; i >= 0; ) {
             const t: RawTag | not = rawTagAt(body, i);
             if (t is given) toks = toks.concat([t]);
             i = body.indexOf("<", i + 1);
@@ -12203,7 +12224,7 @@ ${
         let kept: int[] = [];
         let open: int[] = [];
         let k: int = 0;
-        while (k < toks.length) {
+        for (; k < toks.length; ) {
             if (!toks[k].close) {
                 open = open.concat([k]);
             } else if (open.length > 0 && toks[open[open.length - 1]].name == toks[k].name) {
@@ -12214,7 +12235,7 @@ ${
         }
         let out: RawTag[] = [];
         k = 0;
-        while (k < toks.length) {
+        for (; k < toks.length; ) {
             if (kept.indexOf(k) >= 0) out = out.concat([toks[k]]);
             k = k + 1;
         }
@@ -12236,7 +12257,7 @@ ${
         }
         if (name == "") return not;
         p = p + name.length;
-        while (p < body.length && rawWs(body.substring(p, p + 1))) { p = p + 1; }
+        for (; p < body.length && rawWs(body.substring(p, p + 1)); ) { p = p + 1; }
         if (body.substring(p, p + 1) != ">") return not;
         return { start: i, end: p + 1, name: name, close: close };
     }
@@ -12258,7 +12279,7 @@ ${
         let ti: int = ti0;
         let pos: int = pos0;
         let going = true;
-        while (going && ti < toks.length) {
+        for (; going && ti < toks.length; ) {
             const t: RawTag = toks[ti];
             if (t.close) {
                 going = false;
@@ -12300,7 +12321,7 @@ ${
         let text: string = "";
         let textStart: int = m.pos;
         let going = true;
-        while (going) {
+        for (; going; ) {
             if (mEof(m)) {
                 m = mDiag(m, "E-PARSE-UNCLOSED", "`<" + tag + ">` is never closed", mp.pos, m.pos);
                 going = false;
@@ -12713,7 +12734,7 @@ ${
         let proseStart: int = -1;
         let proseEnd: int = -1;
         let going = true;
-        while (going) {
+        for (; going; ) {
             m = skipTrivia(m);
             const at: int = m.pos;
             const nd: int = m.diags.length;
@@ -12867,7 +12888,7 @@ ${
         const blockTypes: string[] = hostBlockTypes(m.src, m.pos);
         let items: AItem[] = [];
         let going = true;
-        while (going) {
+        for (; going; ) {
             m = skipHostBlank(m);
             if (mEof(m)) {
                 m = mDiag(m, "E-PARSE-UNCLOSED", "`<host>` is never closed", o.start, m.pos);
@@ -12971,7 +12992,7 @@ ${
     fn skipHostBlank(mp: MP) -> MP {
         let m: MP = mp;
         let going = true;
-        while (going && !mEof(m)) {
+        for (; going && !mEof(m); ) {
             if (isSpaceCh(chAt(m, 0))) {
                 m = mAdv(m, 1);
             } else if (mLooking(m, "//")) {
@@ -12994,7 +13015,7 @@ ${
     fn hostContAt(src: string, end: int) -> int {
         if (end >= src.length) return -1;
         let i: int = end + 1;
-        while (i < src.length && (src.charAt(i) == " " || src.charAt(i) == "\t" || src.charAt(i) == "\r")) { i = i + 1; }
+        for (;;) { if (!(i < src.length && (src.charAt(i) == " " || src.charAt(i) == "\t" || src.charAt(i) == "\r"))) { break; } i = i + 1; }
         if (src.charAt(i) == "=" && src.charAt(i + 1) != "=") return i;
         return -1;
     }
@@ -13018,7 +13039,7 @@ ${
     // refused, never read as a shorter line.
     fn hostLineTermIn(src: string, start: int, end: int) -> boolean {
         let i: int = start;
-        while (i < end) {
+        for (; i < end; ) {
             const c: string = src.charAt(i);
             if (c == " " || c == " ") return true;
             if (c == "\r" && src.charAt(i + 1) != "\n") return true;
@@ -13040,7 +13061,7 @@ ${
         let lexed: PTok[] = hostLineToks(mp.src, at, end);
         let toks: PTok[] = withoutLast(lexed);
         let going = true;
-        while (going) {
+        for (; going; ) {
             const nx: int = hostContAt(mp.src, end);
             if (nx < 0) {
                 going = false;
@@ -13357,7 +13378,7 @@ ${
         const w: RWord = readName(mp);
         if (w.w != "lift") return false;
         let m: MP = w.mp;
-        while (chAt(m, 0) == " " || chAt(m, 0) == "\t") { m = mAdv(m, 1); }
+        for (;;) { if (!(chAt(m, 0) == " " || chAt(m, 0) == "\t")) { break; } m = mAdv(m, 1); }
         return chAt(m, 0) == "<" && opensTag(chAt(m, 1)) && m.pos > w.mp.pos;
     }
 
@@ -13524,7 +13545,7 @@ ${
             t = rw.tp;
             if (!isP(t, "}")) {
                 t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a `" + interpOpen() + "…}` logic block in markup holds exactly one `when` in the bootstrap — give each statement its own block, or write `<effect deps=[…]>" + interpOpen() + " … }</>`", cur(t));
-                while (!atEnd(t) && !(isP(t, "}") && atEnd(adv(t)))) { t = adv(t); }
+                for (;;) { if (!(!atEnd(t) && !(isP(t, "}") && atEnd(adv(t))))) { break; } t = adv(t); }
             }
             t = expectRegionEnd(expectP(t, "}"));
             const mw: MP = backToMarkup(mp, t);
@@ -13603,11 +13624,11 @@ ${
         const src: string = mp.src;
         let k: int = start + 2;
         let depth: int = 1;
-        while (k < src.length && depth > 0) {
+        for (; k < src.length && depth > 0; ) {
             const ch: string = src.substring(k, k + 1);
             if (ch == "\"") {
                 k = k + 1;
-                while (k < src.length && src.substring(k, k + 1) != "\"") { k = k + 1; }
+                for (;;) { if (!(k < src.length && src.substring(k, k + 1) != "\"")) { break; } k = k + 1; }
             } else if (ch == "{") {
                 depth = depth + 1;
             } else if (ch == "}") {
@@ -13715,7 +13736,7 @@ ${
     fn scriptStyleAt(mp: MP) -> string {
         if (chAt(mp, 0) != "<") return "";
         let k: int = 1;
-        while (isSplitterIdentCh(chAt(mp, k))) { k = k + 1; }
+        for (; isSplitterIdentCh(chAt(mp, k)); ) { k = k + 1; }
         const w: string = mp.src.substring(mp.pos + 1, mp.pos + k).toLowerCase();
         if (w == "script" || w == "style") return w;
         return "";
@@ -13746,7 +13767,7 @@ ${
 
     fn rawCloseAt(src: string, from: int, name: string) -> int {
         let i: int = src.indexOf("</", from);
-        while (i >= 0) {
+        for (; i >= 0; ) {
             const after: int = i + 2 + name.length;
             if (src.substring(i + 2, after).toLowerCase() == name && src.substring(after, after + 1) == ">") return i;
             i = src.indexOf("</", i + 1);
@@ -14149,7 +14170,7 @@ ${
         let m: MP = mp;
         let out: ADeclChild[] = [];
         let going = true;
-        while (going) {
+        for (; going; ) {
             m = skipTrivia(m);
             if (mEof(m)) {
                 m = mDiag(m, "E-PARSE-UNCLOSED", "`<" + tag + ">` is never closed", mp.pos, m.pos);
@@ -14231,7 +14252,7 @@ ${
         let m: MP = mp;
         let out: AItem[] = [];
         let going = true;
-        while (going) {
+        for (; going; ) {
             m = skipTrivia(m);
             if (mEof(m)) {
                 if (tag != "") m = mDiag(m, "E-PARSE-UNCLOSED", "`<" + tag + ">` is never closed", mp.pos, m.pos);
@@ -14431,7 +14452,7 @@ ${
         let badEnd: int = -1;
         let resume: int = -1;
         let going = true;
-        while (going) {
+        for (; going; ) {
             const tok: PTok = cur(t);
             if (atEnd(t) || bodyTopItemAhead(t)) {
                 going = false;
@@ -14487,7 +14508,7 @@ ${
                     if (stmts.length == 0) runStart = -1;
                     t = chain;
                     let last: int = from;
-                    while (!atEnd(t) && cur(t).line <= tok.line) {
+                    for (; !atEnd(t) && cur(t).line <= tok.line; ) {
                         last = cur(t).end;
                         t = adv(t);
                     }
@@ -14539,7 +14560,7 @@ ${
     fn bodyTopNoEffect(tp: TP, from: int, ctx: string) -> TP {
         let ds: Diag[] = tp.diags.slice(0, from);
         let i: int = from;
-        while (i < tp.diags.length) {
+        for (; i < tp.diags.length; ) {
             const d: Diag = tp.diags[i];
             if (d.code == "E-STMT-NO-EFFECT" && d.message.indexOf(bodyTopForms()) < 0) {
                 ds = ds.concat([newDiag(d.code, d.message + bodyTopForms(), d.file, d.span)]);
@@ -14557,7 +14578,7 @@ ${
         if (r.tp.i <= before.i) return false;
         if (!tk(r.tp.toks[r.tp.i - 1], ";")) return false;
         let i: int = before.diags.length;
-        while (i < r.tp.diags.length) {
+        for (; i < r.tp.diags.length; ) {
             if (r.tp.diags[i].code.startsWith("E-PARSE-")) return false;
             i = i + 1;
         }
@@ -14593,7 +14614,7 @@ ${
         let generic = false;
         let i: int = before.diags.length;
         const lead: PTok = before.toks[before.i];
-        while (i < r.tp.diags.length) {
+        for (; i < r.tp.diags.length; ) {
             const d: Diag = r.tp.diags[i];
             if (d.severity == Severity.Error) {
                 if (d.code.startsWith("E-PARSE-")) {
@@ -14609,7 +14630,7 @@ ${
         if (generic) return true;
         // a token the lexer could not read (`©`, `★`)
         let k: int = before.i;
-        while (k < r.tp.i) {
+        for (; k < r.tp.i; ) {
             if (before.toks[k].cls == TC.Other && before.toks[k].text.substring(0, 1) != "/") return true;
             k = k + 1;
         }
@@ -14713,7 +14734,7 @@ ${
     // Only spaces / tabs between the line's start (or the source's) and `pos`.
     fn opensLine(src: string, pos: int) -> boolean {
         let i: int = pos - 1;
-        while (i >= 0) {
+        for (; i >= 0; ) {
             const c: string = src.substring(i, i + 1);
             if (c == "\n" || c == "\r") return true;
             if (c != " " && c != "\t") return false;
@@ -14762,7 +14783,7 @@ ${
             // body-top reader, which reads it as what it is
             const r1: RItems = parseLogicItem(tp, top);
             let t: TP = r1.tp;
-            while (isP(t, ";")) { t = adv(t); }
+            for (;;) { if (!(isP(t, ";"))) { break; } t = adv(t); }
             const back: MP = backToMarkup(mp, t);
             if (atEnd(t)) return { items: r1.items, mp: back };
             return { items: r1.items, mp: mAt(back, cur(t).start) };
@@ -15061,7 +15082,7 @@ ${
         let m: MP = mp;
         let out: AEpArm[] = [];
         let going = true;
-        while (going) {
+        for (; going; ) {
             m = skipTrivia(m);
             if (mEof(m)) {
                 m = mDiag(m, "E-PARSE-UNCLOSED", "`<onchange>` is never closed", mp.pos, m.pos);
@@ -15095,7 +15116,7 @@ ${
             parens = true;
             m = mAdv(m, 1);
             let more = true;
-            while (more) {
+            for (; more; ) {
                 m = skipSpace(m);
                 if (chAt(m, 0) == ")") {
                     m = mAdv(m, 1);
@@ -15360,7 +15381,7 @@ ${
     fn epDroppedAt(src: string, from: int, to: int) -> int[] {
         let out: int[] = [];
         let i: int = from;
-        while (i < to) {
+        for (; i < to; ) {
             const c: string = src.substring(i, i + 1);
             if (isSpaceCh(c)) {
                 i = i + 1;
@@ -15376,7 +15397,7 @@ ${
             } else {
                 // a name (or a character the opener reader reports itself): read to the next delimiter
                 let j: int = i + 1;
-                while (j < to && !epNameStops(src, j)) { j = j + 1; }
+                for (; j < to && !epNameStops(src, j); ) { j = j + 1; }
                 i = j;
             }
         }
@@ -15423,7 +15444,7 @@ ${
     fn epQuoteEnd(src: string, i: int, to: int) -> int {
         const q: string = src.substring(i, i + 1);
         let j: int = i + 1;
-        while (j < to && src.substring(j, j + 1) != q) {
+        for (; j < to && src.substring(j, j + 1) != q; ) {
             if (src.substring(j, j + 1) == "\\") j = j + 1;
             j = j + 1;
         }
@@ -15435,7 +15456,7 @@ ${
     fn epBalancedEnd(src: string, i: int, to: int) -> int {
         let depth = 0;
         let j: int = i;
-        while (j < to) {
+        for (; j < to; ) {
             const c: string = src.substring(j, j + 1);
             if (c == "\"" || c == "'" || c == "`") {
                 j = epQuoteEnd(src, j, to);
@@ -15451,7 +15472,7 @@ ${
 
     fn epSkipSpace(src: string, i: int, to: int) -> int {
         let j: int = i;
-        while (j < to && isSpaceCh(src.substring(j, j + 1))) { j = j + 1; }
+        for (; j < to && isSpaceCh(src.substring(j, j + 1)); ) { j = j + 1; }
         return j;
     }
 
@@ -15465,7 +15486,7 @@ ${
         if (src.substring(i, i + 2) == dollarOpen()) return epBalancedEnd(src, i + 1, to);
         if (c == "'" || c == "`" || epDropStarts(src, i)) return i;
         let j: int = i;
-        while (j < to && !epNameStops(src, j)) {
+        for (; j < to && !epNameStops(src, j); ) {
             if (src.substring(j, j + 1) == "(") {
                 j = epBalancedEnd(src, j, to);
             } else {
@@ -15539,7 +15560,7 @@ ${
         let m: MP = mp;
         let out: AEpArm[] = [];
         let going = true;
-        while (going) {
+        for (; going; ) {
             m = skipTrivia(m);
             if (mEof(m)) {
                 m = mDiag(m, "E-PARSE-UNCLOSED", "`<endpoint>` is never closed", mp.pos, m.pos);
@@ -15575,7 +15596,7 @@ ${
             parens = true;
             m = mAdv(m, 1);
             let more = true;
-            while (more) {
+            for (; more; ) {
                 m = skipSpace(m);
                 if (chAt(m, 0) == ")") {
                     m = mAdv(m, 1);
@@ -15653,7 +15674,7 @@ ${
             const tp0: TP = codeRegionTP(at, LexStop.CodeBody);
             const one: RExpr = parseAssign(tp0);
             let t1: TP = one.tp;
-            while (isP(t1, ";")) { t1 = adv(t1); }
+            for (;;) { if (!(isP(t1, ";"))) { break; } t1 = adv(t1); }
             if (atEnd(t1) && t1.diags.length == tp0.diags.length) {
                 body = one.e;
                 m = backToMarkup(at, t1);
@@ -15661,11 +15682,11 @@ ${
                 // count the statements (on a scratch read)
                 let t: TP = tp0;
                 let n: int = 0;
-                while (!atEnd(t) && n < 64) {
+                for (; !atEnd(t) && n < 64; ) {
                     const i0: int = t.i;
                     const rs: RStmt = parseStmt(t);
                     t = rs.tp;
-                    while (isP(t, ";")) { t = adv(t); }
+                    for (;;) { if (!(isP(t, ";"))) { break; } t = adv(t); }
                     if (t.i == i0) t = adv(t);
                     n = n + 1;
                 }

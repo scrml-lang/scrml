@@ -186,7 +186,7 @@ ${
     fn minusOnesC(n: int) -> int[] {
         if (n <= 0) return [];
         let out: int[] = [-1];
-        while (out.length + out.length <= n) { out = out.concat(out); }
+        for (; out.length + out.length <= n; ) { out = out.concat(out); }
         return out.concat(minusOnesC(n - out.length));
     }
 
@@ -683,7 +683,7 @@ ${
             if (r.why != "") out = out.concat(["C-HB3: the binding " + who + " " + r.why]);
         }
         let i: int = 0;
-        while (i < f.params.length) {
+        for (; i < f.params.length; ) {
             let n: int = 0;
             for (const u of uses) {
                 if (u == i) n = n + 1;
@@ -739,7 +739,7 @@ ${
     fn hostIdent(s: string) -> boolean {
         if (s == "") return false;
         let i: int = 0;
-        while (i < s.length) {
+        for (; i < s.length; ) {
             const c: string = s.charAt(i);
             const letter: boolean = (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || c == "_" || c == "$";
             const digit: boolean = c >= "0" && c <= "9";
@@ -792,7 +792,7 @@ ${
         let work: Type[] = [t0];
         let depths: int[] = [0];
         let seen: int[] = [];
-        while (work.length > 0) {
+        for (; work.length > 0; ) {
             const n: int = work.length - 1;
             const t: Type = work[n];
             const depth: int = depths[n];
@@ -1181,7 +1181,7 @@ ${
         }
         if (!wild) {
             let i: int = 0;
-            while (i < vs.length) {
+            for (; i < vs.length; ) {
                 if (covered.indexOf(i) < 0) out = out.concat(["C-E2: an Attempt's arms do not cover variant #" + i + " of `" + err.hint + "` (they are total by construction — E-TYPE-080 / E-TYPE-020)"]);
                 i = i + 1;
             }
@@ -1251,7 +1251,7 @@ ${
         if (f2 != "") want = want.concat([f2]);
         if (v.fields.length != want.length) return false;
         let i: int = 0;
-        while (i < want.length) {
+        for (; i < want.length; ) {
             if (v.fields[i].sym.hint != want[i] || !isStrType(v.fields[i].ty)) return false;
             i = i + 1;
         }
@@ -1372,7 +1372,7 @@ ${
             }
         }
         let i: int = 0;
-        while (i < q.params.length) {
+        for (; i < q.params.length; ) {
             if (used.indexOf(i) < 0) out = out.concat(["C-SQL1: a query's parameter #" + i + " is bound by no slot"]);
             i = i + 1;
         }
@@ -1459,7 +1459,7 @@ ${
             if (direct) out = out.concat([f.sym.id]);
         }
         let changed = true;
-        while (changed) {
+        for (; changed; ) {
             changed = false;
             for (const f of p.fns) {
                 if (out.indexOf(f.sym.id) < 0) {
@@ -2464,7 +2464,7 @@ ${
         let ctodo: Sym[] = [cf];
         let roots: Sym[] = [];
         let j = 0;
-        while (j < ctodo.length) {
+        for (; j < ctodo.length; ) {
             const s0: Sym = ctodo[j];
             j = j + 1;
             // a server function named by an Attempt's call is the ServerCall's own (counted there)
@@ -2499,11 +2499,11 @@ ${
         // call saturates at 2. Monotone and capped, so it terminates.
         let tot: int[] = dir;
         let changed = true;
-        while (changed) {
+        for (; changed; ) {
             changed = false;
             let nt: int[] = [];
             let i = 0;
-            while (i < cseen.length) {
+            for (; i < cseen.length; ) {
                 let t: int = dir[i];
                 for (const c of outs[i]) {
                     const ci: int = cseen.indexOf(c);
@@ -2574,7 +2574,7 @@ ${
         let seen: int[] = [];
         let todo: Sym[] = [sf];
         let k = 0;
-        while (k < todo.length) {
+        for (; k < todo.length; ) {
             const s: Sym = todo[k];
             k = k + 1;
             if (seen.indexOf(s.id) < 0) {
@@ -3276,7 +3276,7 @@ ${
         let seen: int[] = [];
         let work: Block[] = roots;
         let i: int = 0;
-        while (i < work.length) {
+        for (; i < work.length; ) {
             for (const n of allNodes(Node.NBlock(work[i]))) {
                 const cap: Sym | not = nodeWriteCap(n);
                 if (cap is given) caps = caps.concat([cap.id]);
@@ -3866,7 +3866,7 @@ ${
         }
         if (vs.length != own.length + 1) return ["C-E2: the client failure set of " + sf.sym.hint + "() has " + vs.length + " variant(s); the declared ones plus ONE Transport make " + (own.length + 1)];
         let i: int = 0;
-        while (i < own.length) {
+        for (; i < own.length; ) {
             if (vs[i].sym.hint != own[i].sym.hint || vs[i].fields.length != own[i].fields.length) return ["C-E2: variant #" + i + " of " + sf.sym.hint + "()'s client failure set is not its declared `" + own[i].sym.hint + "`"];
             i = i + 1;
         }
@@ -4153,7 +4153,7 @@ ${
             }
         }
         let changed = true;
-        while (changed) {
+        for (; changed; ) {
             changed = false;
             for (const f of p.fns) {
                 if (out.indexOf(f.sym.id) >= 0) {
@@ -5942,7 +5942,7 @@ ${
     fn sortedHas(xs: string[], k: string) -> boolean {
         let lo = 0;
         let hi: int = xs.length;
-        while (lo < hi) {
+        for (; lo < hi; ) {
             const mid: int = Math.floor((lo + hi) / 2);
             const x: string = xs[mid];
             if (x == k) return true;
@@ -5964,7 +5964,7 @@ ${
             if (!r.startsWith("<")) return [];
             let out: string[] = [];
             let j: int = r.indexOf(".");
-            while (j >= 0) {
+            for (; j >= 0; ) {
                 out = out.concat([r.substring(0, j)]);
                 j = r.indexOf(".", j + 1);
             }
@@ -6685,7 +6685,7 @@ ${
     // Every state either IS `to` (a self-write no-op) or has an edge to `to`.
     fn reachableFromEveryState(g: TransitionGraph, n: int, to: int) -> boolean {
         let v = 0;
-        while (v < n) {
+        for (; v < n; ) {
             if (v != to && !hasInt(targetsOf(g, v), to)) return false;
             v = v + 1;
         }
