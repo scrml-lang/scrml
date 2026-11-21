@@ -136,9 +136,11 @@ import { frontEndStdlib as sharedFrontEnd } from "../compiler/self-host-v2/slice
  * excluded too: the S469 terminator and arm separator are checks the bootstrap ENFORCES
  * (E-STMT-MISSING-SEMICOLON, E-MATCH-ARM-SEPARATOR are graded by error cases), so a case is graded
  * on its `;` / `,` as written; the corpus is migrated by committing the rewrite (Track M step 2),
- * never silently at grading time.
+ * never silently at grading time. `loop-while` / `loop-do-while` (S469 loops, S481 Track M step 2) are
+ * excluded for the same reason: E-LOOP-WHILE-RETIRED / E-LOOP-DO-WHILE-RETIRED are graded on the loop
+ * as written.
  */
-const TWIN_RULES = S66_RULES.filter((r) => r !== "arm-pipe" && r !== "is-some" && r !== "given-presence" && r !== "client-server-call" && r !== "sql-failable" && r !== "stmt-semi" && r !== "arm-comma");
+const TWIN_RULES = S66_RULES.filter((r) => r !== "arm-pipe" && r !== "is-some" && r !== "given-presence" && r !== "client-server-call" && r !== "sql-failable" && r !== "stmt-semi" && r !== "arm-comma" && r !== "loop-while" && r !== "loop-do-while");
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SELF_HOST_V2 = join(REPO_ROOT, "compiler", "self-host-v2");

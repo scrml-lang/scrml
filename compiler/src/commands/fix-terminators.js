@@ -133,12 +133,12 @@ const STMT_LEAD_WORDS = new Set(["const", "let", "function", "fn", "import", "ex
 // Positions
 // ---------------------------------------------------------------------------
 
-function lineStarts(src) {
+export function lineStarts(src) {
   const ls = [0];
   for (let i = 0; i < src.length; i++) if (src.charCodeAt(i) === 10) ls.push(i + 1);
   return ls;
 }
-function lineAt(ls, off) {
+export function lineAt(ls, off) {
   let lo = 0;
   let hi = ls.length - 1;
   while (lo < hi) {
@@ -264,7 +264,7 @@ function handlerRegions(block) {
  * impl#1's logic tokens of `source[start, end)`, comments dropped, with markup children collapsed to
  * one MARKUP token each and `->` joined. Every token carries `start`, `end`, `line`, `endLine`.
  */
-function regionTokens(source, start, end, children, ls, notes = []) {
+export function regionTokens(source, start, end, children, ls, notes = []) {
   // Markup is masked to identifier characters before the code is tokenized: markup text is not code
   // (`don't` would open a string), and the whole element is one value token. The splitter names some
   // markup inside code as child blocks; markup it leaves inline (`lift <li>…</li>`, `return <p/>`,
@@ -361,7 +361,7 @@ function holdsMultilineCode(source, s, e) {
   return false;
 }
 
-class UndelimitedMarkup extends Error {
+export class UndelimitedMarkup extends Error {
   constructor(at) { super("markup inside code whose end cannot be found"); this.at = at; }
 }
 
@@ -858,7 +858,7 @@ function applyEdits(source, edits) {
  * `return x }` → `return x ; }`) is the same JS, as the S469 F5 route asks ("identical JS"). Anything
  * else (HTML, CSS, a JS chunk acorn does not parse) is compared byte for byte.
  */
-export function normalizedArtifact(text) {
+export function normalizedArtifact(text, transformAst = null) {
   const folded = foldBuildIdentity(text);
   let ast;
   try {
@@ -866,6 +866,8 @@ export function normalizedArtifact(text) {
   } catch {
     return folded;
   }
+  // `transformAst` (fix-loops.js): a canonical rewrite of the tree, applied before it is compared.
+  if (transformAst) ast = transformAst(ast);
   return "js-ast:" + JSON.stringify(ast, (k, v) => {
     if (k === "start" || k === "end" || k === "loc" || k === "range") return undefined;
     if (Array.isArray(v)) return v.filter((x) => !(x && typeof x === "object" && x.type === "EmptyStatement"));
@@ -874,7 +876,7 @@ export function normalizedArtifact(text) {
 }
 
 /** impl#1's reading of `text` compiled as `filePath` in a scratch copy of its project. */
-function makeReader(filePath, auxSources) {
+export function makeReader(filePath, auxSources, normalize = normalizedArtifact) {
   const dir = mkdtempSync(join(tmpdir(), "scrml-fix-terminators-"));
   let target = null;
   const read = (text) => {
@@ -894,7 +896,7 @@ function makeReader(filePath, auxSources) {
     const outputs = [];
     for (const [k, v] of r.outputs ?? new Map()) {
       const fields = {};
-      for (const f of Object.keys(v ?? {}).sort()) if (!/Map$/.test(f) && typeof v[f] === "string") fields[f] = normalizedArtifact(v[f]);
+      for (const f of Object.keys(v ?? {}).sort()) if (!/Map$/.test(f) && typeof v[f] === "string") fields[f] = normalize(v[f]);
       outputs.push([relative(dir, k), fields]);
     }
     outputs.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
