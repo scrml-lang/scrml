@@ -1,0 +1,18 @@
+{
+  "id": "parse-syntax-from-server-names-rt",
+  "description": "`from` and `server` as names: a parameter (`isModule(from)`, `bump(server)`), a `let` (`let from = server; from = from + 1`), destructuring (`const { from, server } = e`), a field (`e.server`) and a member receiver (`from.startsWith(…)`). After the click @out is \"scrml:data|mod|no\" and @n is bump(4) + 4 = 9.",
+  "language-version": "1.0",
+  "spec": "§54.3, §52.10, §7.2",
+  "provenance": "lane:s482-boot-parse-gaps (g-boot-from-identifier-s481, g-boot-keyword-named-member-s481)",
+  "rationale": "§54.3: \"`from` SHALL NOT be a reserved word outside this position. Existing code that uses `from` as a parameter name, local binding, or field name (e.g., `function foo(from: number) { return from + 1 }`) SHALL continue to compile without change.\" `server` is a function modifier before `function` / `fn` only (§52.10); no SPEC sentence reserves it, and §7.2 admits the JavaScript name. The bootstrap lexed `.startsWith` after `from` as a bare variant (E-STMT-MISSING-SEMICOLON) and refused `let from` (E-PARSE-LOCAL) and `{ from, server }` (E-STMT-BINDING-NAME).",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-"],
+    "input": [{ "click": "#go" }],
+    "state": { "out": "scrml:data|mod|no", "n": 9 },
+    "domAnchored": [
+      { "selector": "#out", "text": "scrml:data|mod|no" },
+      { "selector": "#n", "text": "9" }
+    ]
+  }
+}

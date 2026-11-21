@@ -1,0 +1,28 @@
+// §7.2 / §7.2.1 — a reserved word after `.` / `?.` is a member name whatever its spelling.
+<program>
+<total>: int = 0
+<flag> = "init"
+${
+    type In:struct = { id: int, on: boolean }
+    type T:struct = { server: In, fn: In, if: int, for: int, of: int }
+    function sum(t: T) -> int {
+        return t.server.id + t.fn.id + t.if + t.for + t.of;
+    }
+    function pick(t: T | not) -> int {
+        const v: int | not = t?.server.id;
+        return v ?? 0;
+    }
+    function go() {
+        const a: In = { id: 10, on: true };
+        const b: In = { id: 20, on: false };
+        const t: T = { server: a, fn: b, if: 1, for: 2, of: 3 };
+        @total = sum(t) + pick(t) + pick(not);
+        if (t.server.on && !t.fn.on) {
+            @flag = "on";
+        }
+    }
+}
+<button id="go" onclick=go()>go</button>
+<p id="tot">${@total}</p>
+<p id="flag">${@flag}</p>
+</program>

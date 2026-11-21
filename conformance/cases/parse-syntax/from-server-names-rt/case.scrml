@@ -1,0 +1,28 @@
+// §54.3 — `from` is a contextual keyword: a parameter name, local binding or field name outside a
+// transition body. `server` modifies a function only before `function` / `fn` (§52.10).
+<program>
+<out> = "init"
+<n>: int = 0
+${
+    type Edge:struct = { from: string, server: int }
+    function isModule(from: string) -> boolean {
+        return from.startsWith("scrml:") || from.endsWith(".js");
+    }
+    function bump(server: int) -> int {
+        let from: int = server;
+        from = from + 1;
+        return from;
+    }
+    function go() {
+        const e: Edge = { from: "scrml:data", server: 4 };
+        const { from, server } = e;
+        let total: int = bump(server);
+        total = total + e.server;
+        @n = total;
+        @out = from + "|" + (isModule(from) ? "mod" : "no") + "|" + (isModule("x.css") ? "mod" : "no");
+    }
+}
+<button id="go" onclick=go()>go</button>
+<p id="out">${@out}</p>
+<p id="n">${@n}</p>
+</program>
