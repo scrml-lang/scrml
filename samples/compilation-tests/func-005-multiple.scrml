@@ -1,3 +1,4 @@
+<program reset="none">
 // func-005-multiple.scrml
 // Multiple function declarations. Tests: several functions in one block.
 
@@ -5,16 +6,17 @@
     ${
         <count> = 0
         function increment() {
-            @count = @count + 1
+            @count = @count + 1;
         }
         function decrement() {
-            @count = @count - 1
+            @count = @count - 1;
         }
         function clearCount() {
-            @count = 0
+            @count = 0;
         }
     }
     <button onclick=increment()>+</>
     <button onclick=decrement()>-</>
     <button onclick=clearCount()>Reset</>
 </div>
+</program>

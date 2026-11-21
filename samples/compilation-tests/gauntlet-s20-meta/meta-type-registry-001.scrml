@@ -9,11 +9,9 @@ type User:struct = {
 
 type Role:enum = { Admin, Editor, Viewer }
 
-type Permission:union = Admin | Editor | Viewer
+type Permission:union = Admin | Editor | Viewer;
 
-${
   <selectedType> = "User"
-}
 
 <div>
   ^{

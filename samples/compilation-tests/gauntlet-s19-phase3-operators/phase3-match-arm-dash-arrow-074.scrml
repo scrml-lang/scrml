@@ -1,14 +1,14 @@
+<program>
 // canonical match with `->`
 ${
     type Status:enum = { Active, Banned }
-    let s:Status = .Active
+    let s:Status = .Active;
     match s {
-        .Active -> handleActive()
+        .Active -> handleActive(),
         .Banned -> handleBanned()
     }
-    function handleActive() { let _ = 1 }
-    function handleBanned() { let _ = 1 }
+    function handleActive() { let _ = 1; }
+    function handleBanned() { let _ = 1; }
 }
-<program>
     <p>ok</>
 </>

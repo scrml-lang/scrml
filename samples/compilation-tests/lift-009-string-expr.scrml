@@ -1,11 +1,13 @@
+<program reset="none">
 // lift-009-string-expr.scrml
 // Lift with string expression. Tests: lift with non-markup expression.
 
 <div>
     ${
-        let names = ["Alice", "Bob"]
+        let names = ["Alice", "Bob"];
         for (let name of names) {
-            lift name
+            lift name;
         }
     }
 </div>
+</program>

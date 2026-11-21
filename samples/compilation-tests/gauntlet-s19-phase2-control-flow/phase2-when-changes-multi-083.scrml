@@ -6,7 +6,7 @@
         <maxPrice>: number = 100
         <page>: number = 1
         when (@query, @minPrice, @maxPrice) changes {
-            @page = 1
+            @page = 1;
         }
     }
     <p>ok</>

@@ -1,3 +1,4 @@
+<program reset="none">
 // Flat #{...} inside constructor scope compiles to inline style (donut).
 <div>
     #{
@@ -6,3 +7,4 @@
     }
     content
 </div>
+</program>

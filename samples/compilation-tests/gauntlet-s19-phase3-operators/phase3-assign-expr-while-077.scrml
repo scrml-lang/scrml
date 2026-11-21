@@ -1,12 +1,12 @@
+<program>
 // canonical assign-expr motivation: while ((m = re.exec(s)) is not) { ... }
 ${
-    let s = "a1b2c3"
-    let re = /\d/g
-    let m: asIs = not
+    let s = "a1b2c3";
+    let re = /\d/g;
+    let m: asIs = not;
     while ((m = re.exec(s)) is given) {
-        let _hit = 1
+        let _hit = 1;
     }
 }
-<program>
     <p>ok</>
 </>

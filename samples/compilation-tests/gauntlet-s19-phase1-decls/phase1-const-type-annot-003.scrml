@@ -1,6 +1,8 @@
+<program reset="none">
 // const with type annotation per §7.5
 ${
-    const count: number = 7
-    const label: string = "items"
+    const count: number = 7;
+    const label: string = "items";
 }
 <p>${label}: ${count}</>
+</program>

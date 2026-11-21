@@ -1,3 +1,4 @@
+<program reset="none">
 // basic-008-semantic-html.scrml
 // HTML5 semantic elements. Tests: header, nav, main, section, article, footer.
 
@@ -18,3 +19,4 @@
 <footer>
     <p>Copyright 2026</>
 </footer>
+</program>

@@ -2,8 +2,6 @@
 // Should compile with mount-hydration.
 
 <program db="./test.db">
-${
-  server @userCount = ?{`SELECT COUNT(*) as count FROM users`}.get()
-}
+  server @userCount = ?{`SELECT COUNT(*) as count FROM users`}.get();
 <p>Users: ${@userCount.count}</>
 </>

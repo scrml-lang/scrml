@@ -43,28 +43,28 @@
       return ?{`
         INSERT INTO contacts (name, email, phone) VALUES (${name}, ${email}, ${phone})
         RETURNING id, name, email, phone
-      `}.get()
+      `}.get();
     }
 
     function loadContacts() {
-      return ?{`SELECT id, name, email, phone FROM contacts ORDER BY name`}.all() !{ _ :> [] }
+      return ?{`SELECT id, name, email, phone FROM contacts ORDER BY name`}.all() !{ _ :> [] };
     }
 
     function removeContact(id) {
-      ?{`DELETE FROM contacts WHERE id = ${id}`}.run()
+      ?{`DELETE FROM contacts WHERE id = ${id}`}.run();
     }
 
     function addContact() {
-      const row = persistContact(@name, @email, @phone) !{ .Transport(_) :> return }
-      @contacts = [...@contacts, row]
-      reset(@name)
-      reset(@email)
-      reset(@phone)
+      const row = persistContact(@name, @email, @phone) !{ .Transport(_) :> return };
+      @contacts = [...@contacts, row];
+      reset(@name);
+      reset(@email);
+      reset(@phone);
     }
 
     function deleteContact(id) {
-      removeContact(id) !{ .Transport(_) :> return }
-      @contacts = @contacts.filter(c => c.id != id)
+      removeContact(id) !{ .Transport(_) :> return };
+      @contacts = @contacts.filter(c => c.id != id);
     }
 
   }

@@ -1,14 +1,14 @@
+<program>
 // continue inside for-of
 ${
-    let xs = [1, 2, 3, 4]
-    let sum = 0
+    let xs = [1, 2, 3, 4];
+    let sum = 0;
     for (let x of xs) {
-        if (x == 2) continue
-        sum = sum + x
+        if (x == 2) continue;
+        sum = sum + x;
     }
-    log(sum)
-    function log(n: number) { let _ = n }
+    log(sum);
+    function log(n: number) { let _ = n; }
 }
-<program>
     <p>ok</>
 </>

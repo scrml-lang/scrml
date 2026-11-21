@@ -1,3 +1,4 @@
+<program reset="none">
 // gauntlet-r14: svelte dev — reactive filter with enums
 // Tests R13 fixes: Enum::Variant compilation, if= parenthesized expressions
 // New: ~ tilde-decl, enum in conditionals, bind:value on select
@@ -6,33 +7,33 @@
     ${
         type FilterMode:enum = { All, Active, Completed }
 
-        @filter = FilterMode::All
-        @searchTerm = ""
+        @filter = FilterMode::All;
+        @searchTerm = "";
         @items = [
             { text: "Build compiler", done: true },
             { text: "Write tests", done: false },
             { text: "Ship it", done: false },
             { text: "Deploy app", done: false }
-        ]
+        ];
 
-        appTitle = "Task Filter v2"
+        appTitle = "Task Filter v2";
 
         function visibleItems() {
-            return @items
+            return @items;
         }
 
         function toggleItem(idx) {
-            @items = [...@items]
+            @items = [...@items];
         }
 
         function setFilter(mode) {
-            @filter = mode
+            @filter = mode;
         }
 
         function addItem() {
             if (@searchTerm.length > 0) {
-                @items = [...@items, { text: @searchTerm, done: false }]
-                @searchTerm = ""
+                @items = [...@items, { text: @searchTerm, done: false }];
+                @searchTerm = "";
             }
         }
     }
@@ -53,3 +54,4 @@
         }
     </ul>
 </div>
+</program>

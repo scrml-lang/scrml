@@ -42,67 +42,67 @@
   <h1>Contact Form</h1>
 
   ${
-    @name = ""
-    @email = ""
-    @subject = "general"
-    @message = ""
-    @priority = "medium"
-    @subscribe = false
-    @submissions = []
-    @filter = "all"
-    @nameErr = ""
-    @emailErr = ""
-    @messageErr = ""
+    @name = "";
+    @email = "";
+    @subject = "general";
+    @message = "";
+    @priority = "medium";
+    @subscribe = false;
+    @submissions = [];
+    @filter = "all";
+    @nameErr = "";
+    @emailErr = "";
+    @messageErr = "";
 
     function validate() {
-      let valid = true
+      let valid = true;
       if (@name.trim().length < 2) {
-        @nameErr = "Name must be at least 2 characters"
-        valid = false
+        @nameErr = "Name must be at least 2 characters";
+        valid = false;
       } else {
-        @nameErr = ""
+        @nameErr = "";
       }
       if (!@email.includes("@") || @email.trim().length < 3) {
-        @emailErr = "Invalid email address"
-        valid = false
+        @emailErr = "Invalid email address";
+        valid = false;
       } else {
-        @emailErr = ""
+        @emailErr = "";
       }
       if (@message.trim().length < 10) {
-        @messageErr = "Message must be at least 10 characters"
-        valid = false
+        @messageErr = "Message must be at least 10 characters";
+        valid = false;
       } else if (@message.length > 500) {
-        @messageErr = "Message too long"
-        valid = false
+        @messageErr = "Message too long";
+        valid = false;
       } else {
-        @messageErr = ""
+        @messageErr = "";
       }
-      return valid
+      return valid;
     }
 
     function handleSubmit() {
       if (validate()) {
-        @submissions = [...@submissions, { name: @name, email: @email, subject: @subject, message: @message, priority: @priority, subscribe: @subscribe }]
-        @name = ""
-        @email = ""
-        @subject = "general"
-        @message = ""
-        @priority = "medium"
-        @subscribe = false
+        @submissions = [...@submissions, { name: @name, email: @email, subject: @subject, message: @message, priority: @priority, subscribe: @subscribe }];
+        @name = "";
+        @email = "";
+        @subject = "general";
+        @message = "";
+        @priority = "medium";
+        @subscribe = false;
       }
     }
 
     fn activeCount() {
-      return @submissions.filter(fn (s) { return s.priority == "high" }).length
+      return @submissions.filter(fn (s) { return s.priority == "high"; }).length;
     }
 
     fn subscribedCount() {
-      return @submissions.filter(fn (s) { return s.subscribe }).length
+      return @submissions.filter(fn (s) { return s.subscribe; }).length;
     }
 
     fn filteredSubmissions() {
-      if (@filter == "all") { return @submissions }
-      return @submissions.filter(fn (s) { return s.priority == @filter })
+      if (@filter == "all") { return @submissions; }
+      return @submissions.filter(fn (s) { return s.priority == @filter; });
     }
   }
 

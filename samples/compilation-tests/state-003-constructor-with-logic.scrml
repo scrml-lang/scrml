@@ -5,7 +5,7 @@
     ${
         <count> = initial
         function increment() {
-            @count = @count + 1
+            @count = @count + 1;
         }
     }
     <div class="counter">

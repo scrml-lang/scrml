@@ -1,7 +1,5 @@
 // server @var with `not` placeholder — §52.4.3
 <program db="./test.db">
-    ${
-        server @userProfile = not
-    }
+        server @userProfile = not;
     <p>${@userProfile}</>
 </>

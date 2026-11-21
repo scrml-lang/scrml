@@ -1,14 +1,14 @@
+<program>
 // do-while executes body at least once
 ${
-    let i = 0
-    let count = 0
+    let i = 0;
+    let count = 0;
     do {
-        count = count + 1
-        i = i + 1
-    } while (i < 0)
-    log(count)
-    function log(n: number) { let _ = n }
+        count = count + 1;
+        i = i + 1;
+    } while (i < 0);
+    log(count);
+    function log(n: number) { let _ = n; }
 }
-<program>
     <p>ok</>
 </>

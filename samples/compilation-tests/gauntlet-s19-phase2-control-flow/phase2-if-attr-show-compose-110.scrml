@@ -1,8 +1,6 @@
+<program>
 // if= and show= compose on same element (§17.1.1 interaction note)
-${
     <present>: bool = true
     <visible>: bool = false
-}
-<program>
     <div if=@present show=@visible>hybrid</>
 </>

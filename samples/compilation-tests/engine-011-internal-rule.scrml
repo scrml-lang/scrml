@@ -40,10 +40,8 @@
 // This sample is the canonical internal:rule= surface adopters reach for.
 
 <program>
-${
     type AppMode:enum  = { Title, Playing }
     type PlayMode:enum = { Exploring, Battle }
-}
 
 <engine for=AppMode initial=.Title>
     <Title rule=.Playing></>

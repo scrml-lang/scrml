@@ -4,9 +4,7 @@
 
 <program>
 
-${
     type PostStatus:enum = { Draft, Published, Archived }
-}
 
 <div>
     <h1>Post Status Variants</>

@@ -5,10 +5,8 @@
 
 <program>
 
-${
-    import { verifyHash } from 'scrml:crypto'
-    import { navigate } from 'scrml:router'
-}
+    import { verifyHash } from 'scrml:crypto';
+    import { navigate } from 'scrml:router';
 
 <db src="auth.db" protect="password_hash" tables="users">
     ${
@@ -26,28 +24,28 @@ ${
                 FROM users
                 WHERE email = ${email}
                 LIMIT 1
-            `}.first()
+            `}.first();
 
             if (user is not) {
-                return "No account found for that email."
+                return "No account found for that email.";
             }
 
             // scrml:crypto verifyHash(algorithm, input, storedHash); the point is
             // that password_hash is in scope here (server side) and never on the client.
             if (!verifyHash("argon2", password, user.password_hash)) {
-                return "Incorrect password."
+                return "Incorrect password.";
             }
 
-            return ""
+            return "";
         }
 
         function handleSubmit() {
-            @error = ""
-            let result = authenticate(@email, @password) !{ .Transport(_) :> return }
+            @error = "";
+            let result = authenticate(@email, @password) !{ .Transport(_) :> return };
             if (result == "") {
-                navigate("/dashboard")
+                navigate("/dashboard");
             } else {
-                @error = result
+                @error = result;
             }
         }
     }

@@ -1,7 +1,7 @@
 // export fn per §48.2 fn-prefix
 ${
     export fn double(x) {
-        return x * 2
+        return x * 2;
     }
 }
 <p>${double(7)}</>

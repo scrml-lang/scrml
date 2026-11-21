@@ -1,10 +1,10 @@
+<program>
 // expressions as function-call arguments
 ${
     function sum(a: number, b: number) -> number {
-        return a + b
+        return a + b;
     }
-    const x = sum(1 + 2, 3 * 4)
+    const x = sum(1 + 2, 3 * 4);
 }
-<program>
     <p>${x}</>
 </>

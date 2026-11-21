@@ -3,7 +3,7 @@
 
 < db src="./test.db" tables="users">
 ${
-  let users = ?{`SELECT id, name FROM users`}.all()
+  let users = ?{`SELECT id, name FROM users`}.all();
 }
 <ul>
   <each in=users as user>

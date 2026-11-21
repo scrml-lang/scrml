@@ -1,11 +1,11 @@
+<program>
 // spread as function call argument
 ${
     function sum3(a: number, b: number, c: number) -> number {
-        return a + b + c
+        return a + b + c;
     }
-    const args = [1, 2, 3]
-    const s = sum3(...args)
+    const args = [1, 2, 3];
+    const s = sum3(...args);
 }
-<program>
     <p>${s}</>
 </>

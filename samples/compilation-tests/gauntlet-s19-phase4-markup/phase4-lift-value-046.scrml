@@ -1,7 +1,9 @@
+<program reset="none">
 // Lift a plain value (non-markup).
 <ul>${
-    let names = ["Alice","Bob"]
+    let names = ["Alice","Bob"];
     for (let n of names) {
-        lift <li>${n}</>
+        lift <li>${n}</>;
     }
 }</ul>
+</program>

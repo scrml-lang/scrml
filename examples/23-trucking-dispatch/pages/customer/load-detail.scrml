@@ -18,13 +18,13 @@
 
 <page db="../../dispatch.db" auth="required">
 
-  import { formatRate, formatPickupAt } from '../../components/load-card.scrml'
-  import { statusBadgeClasses, statusBadgeClassesOf, statusLabel } from '../../components/load-status-badge.scrml'
-  import { LoadStatus } from '../../schema.scrml'
-  import { createSessionStore } from 'scrml:store'
-  import { SESSION_DB_PATH } from '../../models/auth.scrml'
+  import { formatRate, formatPickupAt } from '../../components/load-card.scrml';
+  import { statusBadgeClasses, statusBadgeClassesOf, statusLabel } from '../../components/load-status-badge.scrml';
+  import { LoadStatus } from '../../schema.scrml';
+  import { createSessionStore } from 'scrml:store';
+  import { SESSION_DB_PATH } from '../../models/auth.scrml';
   // M5: centralized real-time channel — see SPEC §38.12.6.
-  import { "load-events" as loadEvents } from '../../channels/load-events.scrml'
+  import { "load-events" as loadEvents } from '../../channels/load-events.scrml';
 
   <db src="../../dispatch.db" protect="password_hash" tables="users, customers, loads, assignments, drivers, tractors, trailers, log_entries, invoices, lin_tokens">
 
@@ -36,13 +36,13 @@
             // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
             // compiles to its own public route, and one taking a userId would let any caller
             // look up any user (S443 post-merge review of #1180).
-            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get();
             if (user is not || user.role != "customer") {
-                return { unauthorized: true }
+                return { unauthorized: true };
             }
 
-            const customer = ?{`SELECT id, name FROM customers WHERE user_id = ${user.id}`}.get()
-            if (customer is not) return { error: "No customer record." }
+            const customer = ?{`SELECT id, name FROM customers WHERE user_id = ${user.id}`}.get();
+            if (customer is not) return { error: "No customer record." };
 
             const load = ?{`
                 SELECT
@@ -52,12 +52,12 @@
                     rate_dollars, status, created_at, updated_at
                 FROM loads
                 WHERE id = ${loadId}
-            `}.get()
-            if (load is not) return { notFound: true }
+            `}.get();
+            if (load is not) return { notFound: true };
 
             // Cross-customer guard.
             if (load.customer_id != customer.id) {
-                return { unauthorized: true }
+                return { unauthorized: true };
             }
 
             // Active assignment (most recent unassigned_at IS NULL).
@@ -76,7 +76,7 @@
                   AND a.unassigned_at IS NULL
                 ORDER BY a.assigned_at DESC
                 LIMIT 1
-            `}.get()
+            `}.get();
 
             // Full log timeline for this load (most recent first).
             const logEntryRows = ?{`
@@ -87,7 +87,7 @@
                 LEFT JOIN drivers d ON d.id = le.driver_id
                 WHERE le.load_id = ${loadId}
                 ORDER BY le.at DESC
-            `}.all()
+            `}.all();
 
             // Invoice for this load (if any) — used for "View invoice" link.
             const invoiceRow = ?{`
@@ -95,7 +95,7 @@
                 FROM invoices
                 WHERE load_id = ${loadId}
                 LIMIT 1
-            `}.get()
+            `}.get();
 
             // M6: lin token #1 — most recent unconsumed acceptance token
             // for this load. When present + load.status == 'Booked', the
@@ -108,7 +108,7 @@
                   AND consumed_at IS NULL
                 ORDER BY issued_at DESC
                 LIMIT 1
-            `}.get()
+            `}.get();
 
             return {
                 user: user, customer: customer, load: load,
@@ -116,7 +116,7 @@
                 logEntries: logEntryRows,
                 invoice: invoiceRow,
                 acceptanceToken: acceptance ? acceptance.token : ""
-            }
+            };
         }
 
         // M6: lin token #1 consumption — customer signs the rate confirmation.
@@ -132,18 +132,18 @@
             // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
             // compiles to its own public route, and one taking a userId would let any caller
             // look up any user (S443 post-merge review of #1180).
-            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get();
             if (user is not || user.role != "customer") {
-                return { unauthorized: true }
+                return { unauthorized: true };
             }
-            const customer = ?{`SELECT id FROM customers WHERE user_id = ${user.id}`}.get()
-            if (customer is not) return { error: "No customer record." }
+            const customer = ?{`SELECT id FROM customers WHERE user_id = ${user.id}`}.get();
+            if (customer is not) return { error: "No customer record." };
 
             // Cross-customer guard.
-            const load = ?{`SELECT id, customer_id, status FROM loads WHERE id = ${loadId}`}.get()
-            if (load is not) return { error: "Load not found." }
-            if (load.customer_id != customer.id) return { unauthorized: true }
-            if (load.status != "Booked") return { error: "Load is not awaiting acceptance." }
+            const load = ?{`SELECT id, customer_id, status FROM loads WHERE id = ${loadId}`}.get();
+            if (load is not) return { error: "Load not found." };
+            if (load.customer_id != customer.id) return { unauthorized: true };
+            if (load.status != "Booked") return { error: "Load is not awaiting acceptance." };
 
             // The lin_tokens UPDATE-with-WHERE-NULL is the durable single-use
             // guard. If consumed_at is already non-null (or the token was never
@@ -157,7 +157,7 @@
             // does in example 19. Workaround: copy the lin var into a
             // template literal first to satisfy §35.3 rule 1, then use
             // the copy in the SQL.
-            const consumeMarker = `consume:${token}`
+            const consumeMarker = `consume:${token}`;
             const consumed = ?{`
                 UPDATE lin_tokens
                 SET consumed_at = CURRENT_TIMESTAMP, consumed_by = ${user.id}
@@ -166,14 +166,14 @@
                   AND load_id = ${loadId}
                   AND consumed_at IS NULL
                 RETURNING token
-            `}.get()
+            `}.get();
             if (consumed is not) {
-                return { error: "Acceptance token already used or invalid." }
+                return { error: "Acceptance token already used or invalid." };
             }
 
             // Advance the load: Booked → Dispatched.
-            ?{`UPDATE loads SET status = 'Dispatched', updated_at = CURRENT_TIMESTAMP WHERE id = ${loadId}`}.run()
-            return { ok: true }
+            ?{`UPDATE loads SET status = 'Dispatched', updated_at = CURRENT_TIMESTAMP WHERE id = ${loadId}`}.run();
+            return { ok: true };
         }
 
         <currentUser> = not
@@ -189,49 +189,49 @@
         <acceptanceToken> = ""
 
         function getSessionToken() {
-            const c = document.cookie ? document.cookie : ""
-            const idx = c.indexOf("scrml_session=")
-            if (idx < 0) return ""
-            const tail = c.substring(idx + "scrml_session=".length)
-            const semi = tail.indexOf(";")
-            return semi < 0 ? tail : tail.substring(0, semi)
+            const c = document.cookie ? document.cookie : "";
+            const idx = c.indexOf("scrml_session=");
+            if (idx < 0) return "";
+            const tail = c.substring(idx + "scrml_session=".length);
+            const semi = tail.indexOf(";");
+            return semi < 0 ? tail : tail.substring(0, semi);
         }
 
         function getLoadId() {
             // route.params.id is string. parseInt to bind to numeric column.
-            const path = window.location.pathname
-            const parts = path.split("/")
-            const last = parts[parts.length - 1]
-            const n = parseInt(last, 10)
-            return isNaN(n) ? 0 : n
+            const path = window.location.pathname;
+            const parts = path.split("/");
+            const last = parts[parts.length - 1];
+            const n = parseInt(last, 10);
+            return isNaN(n) ? 0 : n;
         }
 
         function refresh() {
-            const tok = getSessionToken()
-            const loadId = getLoadId()
-            const data = fetchLoadDetail(tok, loadId)
+            const tok = getSessionToken();
+            const loadId = getLoadId();
+            const data = fetchLoadDetail(tok, loadId);
             if (data.unauthorized) {
-                window.location.href = "/auth/login?reason=unauthorized"
-                return
+                window.location.href = "/auth/login?reason=unauthorized";
+                return;
             }
             if (data.notFound) {
-                @notFound = true
-                @loaded = true
-                return
+                @notFound = true;
+                @loaded = true;
+                return;
             }
             if (data.error) {
-                @errorMessage = data.error
-                @loaded = true
-                return
+                @errorMessage = data.error;
+                @loaded = true;
+                return;
             }
-            @currentUser = data.user
-            @currentCustomer = data.customer
-            @currentLoad = data.load
-            @assignment = data.assignment
-            @logEntries = data.logEntries
-            @invoice = data.invoice
-            @acceptanceToken = data.acceptanceToken ? data.acceptanceToken : ""
-            @loaded = true
+            @currentUser = data.user;
+            @currentCustomer = data.customer;
+            @currentLoad = data.load;
+            @assignment = data.assignment;
+            @logEntries = data.logEntries;
+            @invoice = data.invoice;
+            @acceptanceToken = data.acceptanceToken ? data.acceptanceToken : "";
+            @loaded = true;
         }
 
         // M6: customer signs the rate confirmation (lin token consume).
@@ -239,90 +239,90 @@
         // is no longer needed — RI capture-taint correctly excludes
         // string-literal contents from closure captures.
         function signRateConfirmation() {
-            const tok = getSessionToken()
-            const acceptance = @acceptanceToken
+            const tok = getSessionToken();
+            const acceptance = @acceptanceToken;
             if (acceptance == "") {
-                @errorMessage = "No acceptance token available."
-                return
+                @errorMessage = "No acceptance token available.";
+                return;
             }
-            const result = signRateConfirmationServer(tok, @currentLoad.id, acceptance)
+            const result = signRateConfirmationServer(tok, @currentLoad.id, acceptance);
             if (result.unauthorized) {
-                window.location.href = "/auth/login?reason=unauthorized"
-                return
+                window.location.href = "/auth/login?reason=unauthorized";
+                return;
             }
             if (result.error) {
-                @errorMessage = result.error
-                return
+                @errorMessage = result.error;
+                return;
             }
-            publishLoadEvent("rate-confirmed", @currentLoad.id, "Dispatched", "")
-            refresh()
+            publishLoadEvent("rate-confirmed", @currentLoad.id, "Dispatched", "");
+            refresh();
         }
 
         function setError(msg) {
-            @errorMessage = msg
+            @errorMessage = msg;
         }
 
         function logout() {
-            document.cookie = "scrml_session=; Path=/; Max-Age=0"
-            window.location.href = "/auth/login?logout=1"
+            document.cookie = "scrml_session=; Path=/; Max-Age=0";
+            window.location.href = "/auth/login?logout=1";
         }
 
         // Pretty label for log entry types.
         fn logTypeLabel(t: string) -> string {
-            if (t == "pre_trip")     return "Pre-trip inspection"
-            if (t == "post_trip")    return "Post-trip inspection"
-            if (t == "bol_received") return "BOL received"
-            if (t == "pod_signed")   return "POD signed"
-            if (t == "fuel_stop")    return "Fuel stop"
-            if (t == "breakdown")    return "Breakdown reported"
-            if (t == "hos_change")   return "Status change"
-            return t
+            if (t == "pre_trip")     return "Pre-trip inspection";
+            if (t == "post_trip")    return "Post-trip inspection";
+            if (t == "bol_received") return "BOL received";
+            if (t == "pod_signed")   return "POD signed";
+            if (t == "fuel_stop")    return "Fuel stop";
+            if (t == "breakdown")    return "Breakdown reported";
+            if (t == "hos_change")   return "Status change";
+            return t;
         }
 
         // Color class for log entry icons / badges.
         fn logTypeIconClass(t: string) -> string {
-            if (t == "breakdown") return "bg-red-100 text-red-700 border-red-200"
-            if (t == "pod_signed")   return "bg-emerald-100 text-emerald-700 border-emerald-200"
-            if (t == "bol_received") return "bg-blue-100 text-blue-700 border-blue-200"
-            return "bg-slate-100 text-slate-700 border-slate-200"
+            if (t == "breakdown") return "bg-red-100 text-red-700 border-red-200";
+            if (t == "pod_signed")   return "bg-emerald-100 text-emerald-700 border-emerald-200";
+            if (t == "bol_received") return "bg-blue-100 text-blue-700 border-blue-200";
+            return "bg-slate-100 text-slate-700 border-slate-200";
         }
 
         // Whether the load is "in flight" — driver location is meaningful only
         // while in transit.
         fn showDriverLocation(loadStatus: string) -> boolean {
-            return loadStatus == "InTransit"
+            return loadStatus == "InTransit";
         }
 
         // Whether to show the invoice link. Exhaustive `match` over LoadStatus.
         fn hasInvoice(loadStatus: LoadStatus) -> boolean {
             return match loadStatus {
-                .Invoiced   :> true
-                .Paid       :> true
-                .Tendered   :> false
-                .Booked     :> false
-                .Dispatched :> false
-                .Loaded     :> false
-                .InTransit  :> false
-                .Delivered  :> false
+                .Invoiced   :> true,
+                .Paid       :> true,
+                .Tendered   :> false,
+                .Booked     :> false,
+                .Dispatched :> false,
+                .Loaded     :> false,
+                .InTransit  :> false,
+                .Delivered  :> false,
                 .Cancelled  :> false
-            }
+            };
         }
 
         <lastSeenLoadEventCount> = 0
         function ackLoadEvents() {
-            @lastSeenLoadEventCount = @loadEvents.length
-            refresh()
+            @lastSeenLoadEventCount = @loadEvents.length;
+            refresh();
         }
 
         // Per F-CHANNEL-001 filter — events arrive as one broadcast,
         // payload.loadId tells us if it's relevant to this page.
         fn isForThisLoad(eventLoadId, ourLoadId) -> boolean {
-            return eventLoadId == ourLoadId
+            return eventLoadId == ourLoadId;
         }
 
         on mount {
             refresh()
-        }
+        };
     }
 
     <!-- M5: load-events channel — see channels/load-events.scrml.

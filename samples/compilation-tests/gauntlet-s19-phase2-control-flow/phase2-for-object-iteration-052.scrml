@@ -1,9 +1,7 @@
+<program>
 // for/lift over objects with no key — W-KEY-001
-${
     type Card:struct = { id: number, title: string }
     <cards>: Card[] = [{id:1, title:"a"}]
-}
-<program>
     <div>
         ${ for (let card of @cards) {
             lift <div>${card.title}/

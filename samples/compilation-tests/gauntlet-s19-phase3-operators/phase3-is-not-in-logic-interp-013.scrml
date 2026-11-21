@@ -1,7 +1,7 @@
+<program>
 // `is not` inside ${} logic interpolation in markup
 ${
-    let name: string | not = "bob"
+    let name: string | not = "bob";
 }
-<program>
     <p>${name is not ? "absent" : "present"}</>
 </>

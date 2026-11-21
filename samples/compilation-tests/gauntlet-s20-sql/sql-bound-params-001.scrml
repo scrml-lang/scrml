@@ -3,9 +3,9 @@
 
 < db src="./test.db" tables="posts">
 ${
-  let userId = 42
-  let category = "tech"
-  let posts = ?{`SELECT * FROM posts WHERE user_id = ${userId} AND category = ${category}`}.all()
+  let userId = 42;
+  let category = "tech";
+  let posts = ?{`SELECT * FROM posts WHERE user_id = ${userId} AND category = ${category}`}.all();
 }
 <p>Posts loaded</>
 </>

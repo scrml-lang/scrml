@@ -69,8 +69,8 @@
     // / query failure surfaces as a ContactsError that the call-site `!{}`
     // must handle).
     function fetchContacts() ! ContactsError {
-      const rows = ?{`SELECT id, name, email FROM contacts ORDER BY name`}.all()
-      return rows
+      const rows = ?{`SELECT id, name, email FROM contacts ORDER BY name`}.all();
+      return rows;
     }
 
     // load() writes bare `.Variant`s through @phase. The `!{}` handler is
@@ -78,11 +78,11 @@
     // .Failed phase variant (advancing pedagogical gap G2 — the failure
     // path is LIVE, not a dead branch).
     function load() {
-      @phase = .Loading
+      @phase = .Loading;
       const rows = fetchContacts() !{
-        _ err :> { @phase = .Failed("Couldn't load contacts."); return }
-      }
-      @phase = .Loaded(rows)
+        _ err :> { @phase = .Failed("Couldn't load contacts."); return; }
+      };
+      @phase = .Loaded(rows);
     }
   }
 

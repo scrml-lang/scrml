@@ -1,10 +1,10 @@
+<program>
 // if-as-expression without else — result is T | not (§17.6.4)
 ${
-    let x = 5
-    let label: string | not = if (x > 0) { lift "pos" }
-    log(label)
-    function log(s: string | not) { let _ = s }
+    let x = 5;
+    let label: string | not = if (x > 0) { lift "pos"; };
+    log(label);
+    function log(s: string | not) { let _ = s; }
 }
-<program>
     <p>ok</>
 </>

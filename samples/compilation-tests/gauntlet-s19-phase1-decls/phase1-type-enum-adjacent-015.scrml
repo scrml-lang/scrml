@@ -1,7 +1,7 @@
+<program reset="none">
 // Three adjacent type decls — ASI/boundary stress
-${
     type A:enum = { X, Y }
     type B:enum = { P, Q }
     type C:struct = { a: A, b: B }
-}
 <p>x</>
+</program>

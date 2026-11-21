@@ -1,3 +1,4 @@
+<program reset="none">
 // meta-005-nested.scrml
 // Meta block nested inside markup. Tests: ^{} in context.
 
@@ -11,3 +12,4 @@
         <p>Main content</>
     </main>
 </div>
+</program>

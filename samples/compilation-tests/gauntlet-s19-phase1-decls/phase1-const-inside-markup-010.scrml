@@ -1,7 +1,9 @@
+<program reset="none">
 // const in ${} that lives inside markup body
 <div>
     ${
-        const inner = "from-inside-markup"
+        const inner = "from-inside-markup";
     }
     <p>${inner}</>
 </div>
+</program>

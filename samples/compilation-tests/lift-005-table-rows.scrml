@@ -1,3 +1,4 @@
+<program reset="none">
 // lift-005-table-rows.scrml
 // Lift generating table rows. Tests: lift with tr/td markup.
 
@@ -10,13 +11,14 @@
     </thead>
     <tbody>
         ${
-            let students = ["Alice", "Bob", "Charlie"]
+            let students = ["Alice", "Bob", "Charlie"];
             for (let s of students) {
                 lift <tr>
                     <td>${s}</>
                     <td>100</>
-                </tr>
+                </tr>;
             }
         }
     </tbody>
 </table>
+</program>

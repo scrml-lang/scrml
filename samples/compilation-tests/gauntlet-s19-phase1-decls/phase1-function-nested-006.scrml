@@ -1,13 +1,13 @@
+<program reset="none">
 // nested function declaration — §7.3.1
-${
     function tokenize(input) {
-        let pos = 0
-        function advance() { pos = pos + 1 }
-        function peek() { return input[pos] }
+        let pos = 0;
+        function advance() { pos = pos + 1; }
+        function peek() { return input[pos]; }
         while (pos < input.length) {
-            advance()
+            advance();
         }
-        return pos
+        return pos;
     }
-}
 <p>${tokenize("hello")}</>
+</program>

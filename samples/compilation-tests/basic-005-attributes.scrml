@@ -1,3 +1,4 @@
+<program reset="none">
 // basic-005-attributes.scrml
 // Tags with various attribute types. Tests: quoted strings, identifiers, boolean attrs.
 
@@ -5,3 +6,4 @@
     <input type="text" placeholder="Enter name" required/>
     <button disabled>Submit</>
 </div>
+</program>

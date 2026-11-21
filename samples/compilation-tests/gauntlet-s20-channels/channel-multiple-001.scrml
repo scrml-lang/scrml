@@ -4,10 +4,8 @@
 // Should compile clean — each channel gets its own route.
 
 <program>
-${
   <chatMessages> = []
   <notifications> = []
-}
 
 <div>
   <channel name="chat"

@@ -1,11 +1,11 @@
+<program reset="none">
 // let inside function body
-${
     function tally(items) {
-        let total = 0
+        let total = 0;
         for (const item of items) {
-            total = total + item
+            total = total + item;
         }
-        return total
+        return total;
     }
-}
 <p>${tally([1,2,3,4])}</>
+</program>

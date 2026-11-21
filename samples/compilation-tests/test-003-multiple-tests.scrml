@@ -2,8 +2,8 @@
 // Several tests in one ~{} block. Tests: multiple test declarations.
 
 ${
-    function add(a, b) { return a + b }
-    function mul(a, b) { return a * b }
+    function add(a, b) { return a + b; }
+    function mul(a, b) { return a * b; }
 }
 
 ~{ "math functions"

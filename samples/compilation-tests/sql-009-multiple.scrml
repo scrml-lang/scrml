@@ -1,11 +1,13 @@
+<program reset="none">
 // sql-009-multiple.scrml
 // Multiple SQL queries in one document. Tests: several ?{} blocks.
 
 <div>
     ${
-        let users = ?{`SELECT id, name FROM users`}
-        let posts = ?{`SELECT id, title FROM posts`}
-        let comments = ?{`SELECT id, body FROM comments LIMIT 5`}
+        let users = ?{`SELECT id, name FROM users`};
+        let posts = ?{`SELECT id, title FROM posts`};
+        let comments = ?{`SELECT id, body FROM comments LIMIT 5`};
     }
     <p>Multiple queries</>
 </div>
+</program>

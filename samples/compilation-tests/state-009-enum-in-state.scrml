@@ -6,8 +6,8 @@ type Status:enum = { Active, Inactive, Pending }
 < statusBadge status(Status)>
     <span class="status">
         ${ match status {
-            .Active :> "Active"
-            .Inactive :> "Inactive"
+            .Active :> "Active",
+            .Inactive :> "Inactive",
             .Pending :> "Pending"
         } }
     </>

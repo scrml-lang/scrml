@@ -1,8 +1,6 @@
-// if-as-expr inside ${} in markup parent (§17.6.9 ex 7)
-${
-    <count>: number = 3
-}
 <program>
+// if-as-expr inside ${} in markup parent (§17.6.9 ex 7)
+    <count>: number = 3
     <div>
         ${
             let label = if (@count > 0) {

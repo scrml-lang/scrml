@@ -1,3 +1,4 @@
+<program reset="none">
 // gauntlet-r13: odin dev — game-like state management
 // Tests: enums, state transitions, nested functions, reactive updates
 // R13 focus: Enum::Variant, BPP nested functions
@@ -7,31 +8,31 @@
         type Direction:enum = { North, South, East, West }
         type GameState:enum = { Menu, Playing, Paused, GameOver }
 
-        @state = GameState::Menu
-        @isMenu = true
-        @isPlaying = false
-        @x = 0
-        @y = 0
-        @score = 0
+        @state = GameState::Menu;
+        @isMenu = true;
+        @isPlaying = false;
+        @x = 0;
+        @y = 0;
+        @score = 0;
 
         function move(dir) {
             function applyDelta(pos, delta) {
-                return pos + delta
+                return pos + delta;
             }
-            if (dir == Direction::North) { @y = applyDelta(@y, -1) }
-            if (dir == Direction::South) { @y = applyDelta(@y, 1) }
-            if (dir == Direction::East)  { @x = applyDelta(@x, 1) }
-            if (dir == Direction::West)  { @x = applyDelta(@x, -1) }
-            @score = @score + 1
+            if (dir == Direction::North) { @y = applyDelta(@y, -1); }
+            if (dir == Direction::South) { @y = applyDelta(@y, 1); }
+            if (dir == Direction::East)  { @x = applyDelta(@x, 1); }
+            if (dir == Direction::West)  { @x = applyDelta(@x, -1); }
+            @score = @score + 1;
         }
 
         function startGame() {
-            @state = GameState::Playing
-            @isMenu = false
-            @isPlaying = true
-            @x = 0
-            @y = 0
-            @score = 0
+            @state = GameState::Playing;
+            @isMenu = false;
+            @isPlaying = true;
+            @x = 0;
+            @y = 0;
+            @score = 0;
         }
     }
     <h1>Explorer</>
@@ -48,3 +49,4 @@
         </div>
     </div>
 </div>
+</program>

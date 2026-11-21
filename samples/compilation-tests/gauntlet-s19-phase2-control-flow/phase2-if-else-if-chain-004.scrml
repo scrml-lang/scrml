@@ -1,17 +1,17 @@
+<program>
 // if / else if / else chain (statement form) — canonical 3-way
 ${
-    let n = 5
-    let label = ""
+    let n = 5;
+    let label = "";
     if (n > 10) {
-        label = "high"
+        label = "high";
     } else if (n > 0) {
-        label = "mid"
+        label = "mid";
     } else {
-        label = "low"
+        label = "low";
     }
-    log(label)
-    function log(s: string) { let _ = s }
+    log(label);
+    function log(s: string) { let _ = s; }
 }
-<program>
     <p>ok</>
 </>

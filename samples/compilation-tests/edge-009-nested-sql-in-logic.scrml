@@ -1,10 +1,12 @@
+<program reset="none">
 // edge-009-nested-sql-in-logic.scrml
 // SQL block nested inside logic. Tests: ?{} inside ${}.
 
 <div>
     ${
-        let count = ?{`SELECT COUNT(*) as c FROM users`}
-        let latest = ?{`SELECT name FROM users ORDER BY id DESC LIMIT 1`}
+        let count = ?{`SELECT COUNT(*) as c FROM users`};
+        let latest = ?{`SELECT name FROM users ORDER BY id DESC LIMIT 1`};
     }
     <p>SQL in logic</>
 </div>
+</program>

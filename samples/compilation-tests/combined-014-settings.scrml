@@ -1,3 +1,4 @@
+<program reset="none">
 // combined-014-settings.scrml
 // Settings page with tabs and form. Tests: state + events + types.
 
@@ -13,13 +14,13 @@
         <darkMode> = false
 
         function switchTab(tab) {
-            @activeTab = tab
+            @activeTab = tab;
         }
         function toggleNotifications() {
-            @notifications = !@notifications
+            @notifications = !@notifications;
         }
         function toggleDarkMode() {
-            @darkMode = !@darkMode
+            @darkMode = !@darkMode;
         }
     }
     <h1>Settings</>
@@ -39,3 +40,4 @@
         </div>
     </div>
 </div>
+</program>

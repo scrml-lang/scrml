@@ -1,15 +1,15 @@
+<program>
 // All variants covered plus else — W-MATCH-001 (§18.6)
 ${
     type Status:enum = { Active, Banned }
-    let s:Status = .Active
+    let s:Status = .Active;
     let x = match s {
-        .Active => 1
-        .Banned => 2
+        .Active => 1,
+        .Banned => 2,
         else    => 0
-    }
-    log(x)
-    function log(n: number) { let _ = n }
+    };
+    log(x);
+    function log(n: number) { let _ = n; }
 }
-<program>
     <p>ok</>
 </>

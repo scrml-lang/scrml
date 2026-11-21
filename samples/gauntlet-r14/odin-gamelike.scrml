@@ -1,3 +1,4 @@
+<program reset="none">
 // gauntlet-r14: odin dev — game-like state management with enums
 // Tests R13 fixes: Enum::Variant, nested functions, function name mangling
 // New: ~ tilde-decl, enum as onclick arguments, multiple enum types
@@ -7,56 +8,56 @@
         type Direction:enum = { North, South, East, West }
         type GameState:enum = { Menu, Playing, Paused, GameOver }
 
-        @state = GameState::Menu
-        @isMenu = true
-        @isPlaying = false
-        @isPaused = false
-        @x = 0
-        @y = 0
-        @score = 0
-        @moveLog = []
+        @state = GameState::Menu;
+        @isMenu = true;
+        @isPlaying = false;
+        @isPaused = false;
+        @x = 0;
+        @y = 0;
+        @score = 0;
+        @moveLog = [];
 
-        gameName = "Explorer v2"
+        gameName = "Explorer v2";
 
         function move(dir) {
             function applyDelta(pos, delta) {
-                return pos + delta
+                return pos + delta;
             }
-            if (dir == Direction::North) { @y = applyDelta(@y, -1) }
-            if (dir == Direction::South) { @y = applyDelta(@y, 1) }
-            if (dir == Direction::East)  { @x = applyDelta(@x, 1) }
-            if (dir == Direction::West)  { @x = applyDelta(@x, -1) }
-            @score = @score + 1
-            @moveLog = [...@moveLog, dir]
+            if (dir == Direction::North) { @y = applyDelta(@y, -1); }
+            if (dir == Direction::South) { @y = applyDelta(@y, 1); }
+            if (dir == Direction::East)  { @x = applyDelta(@x, 1); }
+            if (dir == Direction::West)  { @x = applyDelta(@x, -1); }
+            @score = @score + 1;
+            @moveLog = [...@moveLog, dir];
         }
 
         function startGame() {
-            @state = GameState::Playing
-            @isMenu = false
-            @isPlaying = true
-            @isPaused = false
-            @x = 0
-            @y = 0
-            @score = 0
-            @moveLog = []
+            @state = GameState::Playing;
+            @isMenu = false;
+            @isPlaying = true;
+            @isPaused = false;
+            @x = 0;
+            @y = 0;
+            @score = 0;
+            @moveLog = [];
         }
 
         function pauseGame() {
-            @state = GameState::Paused
-            @isPlaying = false
-            @isPaused = true
+            @state = GameState::Paused;
+            @isPlaying = false;
+            @isPaused = true;
         }
 
         function resumeGame() {
-            @state = GameState::Playing
-            @isPaused = false
-            @isPlaying = true
+            @state = GameState::Playing;
+            @isPaused = false;
+            @isPlaying = true;
         }
 
         function endGame() {
-            @state = GameState::GameOver
-            @isPlaying = false
-            @isPaused = false
+            @state = GameState::GameOver;
+            @isPlaying = false;
+            @isPaused = false;
         }
     }
     <h1>${gameName}</>
@@ -88,3 +89,4 @@
         }
     </ul>
 </div>
+</program>

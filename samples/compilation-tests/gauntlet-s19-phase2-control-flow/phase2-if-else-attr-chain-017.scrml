@@ -1,8 +1,6 @@
-// if= / else-if= / else chain on markup (§17.1.1)
-${
-    <step>: number = 2
-}
 <program>
+// if= / else-if= / else chain on markup (§17.1.1)
+    <step>: number = 2
     <div class="wizard">
         <span if=(@step == 1)>one</>
         <span else-if=(@step == 2)>two</>

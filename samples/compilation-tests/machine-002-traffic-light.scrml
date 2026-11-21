@@ -1,3 +1,4 @@
+<program reset="none">
 // traffic-light.scrml — §51 modern <engine> gauntlet (state-as-primary).
 //
 // v0.2.0 canonical: `<engine for=TrafficLight initial=.Red>` with state-children
@@ -8,19 +9,17 @@
 // Engine auto-declares `@trafficLight` from `for=TrafficLight` (§51.0.C).
 // `class:active=(@x == .Variant)` toggles per-state styling.
 
-${
     type TrafficLight:enum = { Red, Yellow, Green }
 
     // cycle() advances through Red → Green → Yellow → Red
     // match arms use => (canonical per §51, not :>)
     function cycle() {
         @trafficLight = match @trafficLight {
-            .Red    => .Green
-            .Green  => .Yellow
+            .Red    => .Green,
+            .Green  => .Yellow,
             .Yellow => .Red
-        }
+        };
     }
-}
 
 <engine for=TrafficLight initial=.Red>
     <Red    rule=.Green></>
@@ -147,3 +146,4 @@ ${
         background: #2563eb;
     }
 }
+</program>

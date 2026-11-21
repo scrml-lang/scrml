@@ -1,7 +1,7 @@
+<program reset="none">
 // function declaration, bare
-${
     function greet() {
-        return "hi"
+        return "hi";
     }
-}
 <p>${greet()}</>
+</program>

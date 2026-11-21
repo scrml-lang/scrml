@@ -1,3 +1,4 @@
+<program reset="none">
 // integration-001-stripe-mini.scrml
 // Minimal Stripe-like dashboard exercising all 5 fixed codegen bugs:
 //   Bug 1: Event handler arguments (onclick=fn("arg"))
@@ -16,22 +17,22 @@
         <statusMessage> = ""
 
         function selectPayment(paymentId) {
-            @selectedPayment = paymentId
+            @selectedPayment = paymentId;
         }
 
         function openRefundModal() {
-            @showRefundModal = true
+            @showRefundModal = true;
         }
 
         function closeRefundModal() {
-            @showRefundModal = false
-            @refundAmount = ""
+            @showRefundModal = false;
+            @refundAmount = "";
         }
 
         function handleRefund() {
-            @statusMessage = "Refund processed for " + @refundAmount
-            @showRefundModal = false
-            @refundAmount = ""
+            @statusMessage = "Refund processed for " + @refundAmount;
+            @showRefundModal = false;
+            @refundAmount = "";
         }
     }
 
@@ -53,7 +54,7 @@
         <tbody>
             ${
                 for (let payment of @payments) {
-                    lift <tr>${payment.id} ${payment.customer} ${payment.amount}</>
+                    lift <tr>${payment.id} ${payment.customer} ${payment.amount}</>;
                 }
             }
         </tbody>
@@ -80,3 +81,4 @@
         <p>${@statusMessage}</>
     </div>
 </div>
+</program>

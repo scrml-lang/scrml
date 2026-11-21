@@ -1,3 +1,4 @@
+<program reset="none">
 // sql-006-update.scrml
 // SQL UPDATE. Tests: ?{} with update operation.
 
@@ -7,3 +8,4 @@
     }
     <p>Update done</>
 </div>
+</program>

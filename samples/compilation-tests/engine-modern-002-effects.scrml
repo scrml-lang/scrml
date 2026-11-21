@@ -1,3 +1,4 @@
+<program>
 // engine-modern-002-effects — modern §51.0 engine with `<onTransition>` body
 // hooks (§51.0.H, B17 family).
 //
@@ -12,12 +13,10 @@
 // Per §51.0.C the engine auto-declares its reactive variable from `for=`
 // (FetchPhase → @fetchPhase); per §51.0.K the user does NOT separately declare it.
 
-${
     type FetchPhase:enum = { Idle, Loading, Success, Error }
 
     function logSuccess() {}
     function logError() {}
-}
 
 <engine for=FetchPhase initial=.Idle>
     <Idle rule=.Loading></>
@@ -28,8 +27,6 @@ ${
     <Success rule=.Idle></>
     <Error rule=.Idle></>
 </>
-
-<program>
 <div class="fetch-app">
     <h1>Status: ${@fetchPhase.variant}</>
     <button onclick=${@fetchPhase = FetchPhase.Loading}>Begin</>

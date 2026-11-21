@@ -1,17 +1,17 @@
+<program>
 // arm body with intermediate computation before lift (§17.6.9 ex 4)
 ${
     type Role:enum = { Admin, User }
-    let role:Role = .Admin
-    let name = "bob"
+    let role:Role = .Admin;
+    let name = "bob";
     let label = if (role is .Admin) {
-        let prefix = "super-"
-        lift prefix + name
+        let prefix = "super-";
+        lift prefix + name;
     } else {
-        lift name
-    }
-    log(label)
-    function log(s: string) { let _ = s }
+        lift name;
+    };
+    log(label);
+    function log(s: string) { let _ = s; }
 }
-<program>
     <p>ok</>
 </>

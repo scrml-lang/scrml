@@ -1,8 +1,8 @@
+<program>
 ${
     type Point:struct = { x: number, y: number }
-    const p:Point = { x: 1, y: 2 }
-    const p2:Point = { ...p, y: 5 }
+    const p:Point = { x: 1, y: 2 };
+    const p2:Point = { ...p, y: 5 };
 }
-<program>
     <p>${p2.y}</>
 </>

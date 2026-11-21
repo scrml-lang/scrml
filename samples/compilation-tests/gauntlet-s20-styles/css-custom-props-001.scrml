@@ -1,3 +1,4 @@
+<program reset="none">
 // Phase 8: CSS custom properties in #{} block
 // Should compile clean.
 
@@ -21,3 +22,4 @@
   <button class="btn">Primary</>
   <button class="btn btn-secondary">Secondary</>
 </div>
+</program>

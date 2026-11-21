@@ -1,3 +1,4 @@
+<program reset="none">
 <div
   ${
     type SearchFilter = enum { All | Posts | Comments | Media | People }
@@ -14,3 +15,4 @@
     }
   </div>
 </div>
+</program>

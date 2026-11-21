@@ -1,2 +1,4 @@
+<program reset="none">
 // Inferred close tag `</>` closes innermost tag.
 <div>hello</>
+</program>

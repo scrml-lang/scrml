@@ -1,3 +1,4 @@
+<program reset="none">
 // combined-018-timer.scrml
 // Timer display. Tests: reactive + function + display.
 
@@ -7,14 +8,14 @@
         <running> = false
 
         function start() {
-            @running = true
+            @running = true;
         }
         function stop() {
-            @running = false
+            @running = false;
         }
         function clearTimer() {
-            @seconds = 0
-            @running = false
+            @seconds = 0;
+            @running = false;
         }
     }
     <h1>Timer</>
@@ -27,3 +28,4 @@
         <button onclick=clearTimer()>Reset</>
     </div>
 </div>
+</program>

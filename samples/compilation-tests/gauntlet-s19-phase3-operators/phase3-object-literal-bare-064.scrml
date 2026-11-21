@@ -1,7 +1,7 @@
+<program>
 ${
     type Point:struct = { x: number, y: number }
-    const p:Point = { x: 1, y: 2 }
+    const p:Point = { x: 1, y: 2 };
 }
-<program>
     <p>${p.x}, ${p.y}</>
 </>

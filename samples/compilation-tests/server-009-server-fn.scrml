@@ -1,11 +1,13 @@
+<program reset="none">
 // server-009-server-fn.scrml
 // Server fn shorthand. Tests: server fn keyword combo.
 
 <div>
     ${
         server fn getData {
-            return "server result"
+            return "server result";
         }
     }
     <p>Server fn shorthand</>
 </div>
+</program>

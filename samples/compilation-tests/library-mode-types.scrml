@@ -10,7 +10,6 @@
 
 <program>
 
-${
     // Enum type declaration — pipe-separated variants
     type HttpMethod:enum = { GET | POST | PUT | DELETE | PATCH }
 
@@ -31,15 +30,14 @@ ${
 
     // Exported function using the types above (types are compile-time only)
     export function buildRequest(path, method) {
-        return { path, method, body: "", authenticated: false }
+        return { path, method, body: "", authenticated: false };
     }
 
     export function isSuccess(response) {
-        return response.status >= 200 && response.status < 300
+        return response.status >= 200 && response.status < 300;
     }
 
-    export const DEFAULT_METHOD = "GET"
-}
+    export const DEFAULT_METHOD = "GET";
 
 <div>
     <p>Library mode type test — check compiled JS output, not this markup.</>

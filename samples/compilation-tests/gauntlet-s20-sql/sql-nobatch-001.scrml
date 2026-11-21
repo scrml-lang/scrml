@@ -3,7 +3,7 @@
 
 < db src="./test.db" tables="sessions">
 ${
-  let stale = ?{`SELECT * FROM sessions WHERE id = 'main'`}.nobatch().get()
+  let stale = ?{`SELECT * FROM sessions WHERE id = 'main'`}.nobatch().get();
 }
 <p>Session checked</>
 </>

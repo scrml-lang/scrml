@@ -4,12 +4,12 @@
 <program>
 
 ${
-    function fetchToken() -> string { return "tok_abc123" }
+    function fetchToken() -> string { return "tok_abc123"; }
     function useToken(t: string) { /* send to server */ }
 
     // Straight-line consumption — trivially valid (§35, 34.4.1).
-    lin token = fetchToken()
-    useToken(token)   // consumed exactly once
+    lin token = fetchToken();
+    useToken(token);   // consumed exactly once
 }
 
 <p>Token consumed.</>

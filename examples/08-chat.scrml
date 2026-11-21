@@ -35,16 +35,16 @@
     // Local time formatter — `function` (not `fn`): `new Date(...)` is treated
     // as non-deterministic host construction, so it is not `fn`-pure (E-FN-004).
     function formatTime(iso) {
-      const d = new Date(iso)
-      const hh = String(d.getHours()).padStart(2, "0")
-      const mm = String(d.getMinutes()).padStart(2, "0")
-      return `${hh}:${mm}`
+      const d = new Date(iso);
+      const hh = String(d.getHours()).padStart(2, "0");
+      const mm = String(d.getMinutes()).padStart(2, "0");
+      return `${hh}:${mm}`;
     }
 
     // Pure predicate — is this row one the current author sent? Lives in a
     // `fn` so the per-item `class:mine=` attribute stays a single expression.
     fn isMine(authorId: string, currentId: string) -> boolean {
-      return authorId == currentId
+      return authorId == currentId;
     }
 
     function loadMessages() {
@@ -53,7 +53,7 @@
         FROM messages
         ORDER BY sent_at ASC
         LIMIT 200
-      `}.all() !{ _ :> [] }
+      `}.all() !{ _ :> [] };
     }
 
     // Server function only persists — no @state assignments (E-RI-002).
@@ -62,11 +62,11 @@
       ?{`
         INSERT INTO messages (id, author_id, body, sent_at)
         VALUES (${id}, ${authorId}, ${body}, ${sentAt})
-      `}.run()
+      `}.run();
     }
 
     function sendMessage() {
-      if (@draft.trim() == "") return
+      if (@draft.trim() == "") return;
 
       // Optimistic update — build msg and push to local list immediately.
       const msg = {
@@ -74,24 +74,24 @@
         author_id: @authorId,
         body:      @draft,
         sent_at:   new Date().toISOString(),
-      }
-      @messages = [...@messages, msg]
-      reset(@draft)
+      };
+      @messages = [...@messages, msg];
+      reset(@draft);
 
       // Persist to DB — server owns the write, client owns the state.
-      persistMessage(msg.id, msg.author_id, msg.body, msg.sent_at) !{ .Transport(_) :> return }
+      persistMessage(msg.id, msg.author_id, msg.body, msg.sent_at) !{ .Transport(_) :> return };
     }
 
     function handleKey(e) {
       if (e.key == "Enter" && !e.shiftKey) {
-        e.preventDefault()
-        sendMessage()
+        e.preventDefault();
+        sendMessage();
       }
     }
 
     // Seed on first render if list is empty.
     if (@messages.length == 0) {
-      @messages = loadMessages()
+      @messages = loadMessages();
     }
   }
 

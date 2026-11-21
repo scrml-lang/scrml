@@ -1,5 +1,5 @@
 // export let — does spec permit? §21.2 lists let/const value decls under export.
 ${
-    export let mutableConfig = { dark: false }
+    export let mutableConfig = { dark: false };
 }
 <p>x</>

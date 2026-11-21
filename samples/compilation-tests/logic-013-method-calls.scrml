@@ -1,11 +1,13 @@
+<program reset="none">
 // logic-013-method-calls.scrml
 // Method calls on values. Tests: method chaining expressions.
 
 <div>
     ${
-        let text = "Hello World"
-        let lower = text.toLowerCase()
-        let words = text.split(" ")
+        let text = "Hello World";
+        let lower = text.toLowerCase();
+        let words = text.split(" ");
     }
     <p>Methods called</>
 </div>
+</program>

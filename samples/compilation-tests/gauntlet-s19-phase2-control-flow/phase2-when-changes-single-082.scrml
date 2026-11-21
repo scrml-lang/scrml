@@ -4,7 +4,7 @@
         <query>: string = ""
         <page>: number = 1
         when @query changes {
-            @page = 1
+            @page = 1;
         }
     }
     <p>ok</>

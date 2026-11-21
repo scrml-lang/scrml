@@ -19,8 +19,8 @@
   // parses in default-logic mode, so these imports + the `const team`
   // decl auto-lift as bare top-level declarations — no `${...}`
   // wrapper needed (SPEC §40.8).
-  import { UserRole } from './types.scrml'
-  import { UserBadge } from './components.scrml'
+  import { UserRole } from './types.scrml';
+  import { UserBadge } from './components.scrml';
 
   // Static seed data — in production this would come from a server
   // fn. The variant qualifier `UserRole::Admin` is the canonical
@@ -33,7 +33,7 @@
     { name: "Alan Turing",     role: UserRole::Member },
     { name: "Linus Torvalds",  role: UserRole::Member },
     { name: "Anonymous",       role: UserRole::Guest },
-  ]
+  ];
 
   // Team-shell + hint styles — co-located with the team markup below.
   #{
@@ -97,7 +97,7 @@
       ${ for (let m of team) {
         lift <li>
           <UserBadge name=m.name role=m.role/>
-        </li>
+        </li>;
       } }
     </ul>
   </div>

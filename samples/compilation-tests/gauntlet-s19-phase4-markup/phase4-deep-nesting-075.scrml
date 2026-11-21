@@ -1,3 +1,4 @@
+<program reset="none">
 // Deep nesting stress test — 6 levels.
 <section>
     <article>
@@ -10,3 +11,4 @@
         </header>
     </article>
 </section>
+</program>

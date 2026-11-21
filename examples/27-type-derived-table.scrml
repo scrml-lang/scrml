@@ -1,3 +1,4 @@
+<program>
 // Example 27: Type-derived table — `<tableFor for=T rows=@cell>` (§41.16).
 //
 // Demonstrates v0.4 L22-family type-as-argument primitive #4 (after
@@ -76,8 +77,7 @@
 //   SPEC §53.14.3    — type-as-argument family roster (L22 member #4)
 //   examples/26-type-derived-schema.scrml — symmetric SQL DDL surface (schemaFor)
 
-${
-    import { tableFor } from 'scrml:data'
+    import { tableFor } from 'scrml:data';
 
     type UserRole:enum = { Admin, Editor, Viewer }
 
@@ -87,9 +87,6 @@ ${
         name:  string req
         role:  string req
     }
-}
-
-<program>
     <users> = [
         { id: 1, email: "alice@example.com",  name: "Alice Anderson", role: "Admin"  },
         { id: 2, email: "bob@example.com",    name: "Bob Brown",      role: "Editor" },

@@ -1,8 +1,9 @@
+<program reset="none">
 // state-005-const-binding.scrml
 // Const binding to state. Tests: const x = < thing> pattern.
 
 ${
-    const Widget = "widget"
+    const Widget = "widget";
 }
 
 < panel title(string)>
@@ -15,3 +16,4 @@ ${
 <panel title="Dashboard">
     <p>Content here</>
 </>
+</program>

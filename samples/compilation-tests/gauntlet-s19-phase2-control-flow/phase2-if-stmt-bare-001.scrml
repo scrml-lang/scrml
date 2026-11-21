@@ -1,12 +1,12 @@
+<program>
 // if statement, bare, single-stmt body. Read x after to avoid E-MU-001 masking.
 ${
-    let x = 0
+    let x = 0;
     if (x == 0) {
-        x = 1
+        x = 1;
     }
-    log(x)
-    function log(n: number) { let _ = n }
+    log(x);
+    function log(n: number) { let _ = n; }
 }
-<program>
     <p>ok</>
 </>

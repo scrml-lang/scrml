@@ -1,14 +1,14 @@
+<program>
 // match with -> alias arrow
 ${
     type Dir:enum = { North, South }
-    let d:Dir = .North
+    let d:Dir = .North;
     let s = match d {
-        .North -> "up"
+        .North -> "up",
         .South -> "down"
-    }
-    log(s)
-    function log(s: string) { let _ = s }
+    };
+    log(s);
+    function log(s: string) { let _ = s; }
 }
-<program>
     <p>ok</>
 </>

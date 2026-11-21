@@ -20,9 +20,9 @@
   // and rendering the row markup directly. Same shape, no component.
   import {
       driverStatusClasses, driverStatusLabel, cdlExpiresClass
-  } from '../../components/driver-card.scrml'
-  import { createSessionStore } from 'scrml:store'
-  import { SESSION_DB_PATH } from '../../models/auth.scrml'
+  } from '../../components/driver-card.scrml';
+  import { createSessionStore } from 'scrml:store';
+  import { SESSION_DB_PATH } from '../../models/auth.scrml';
 
   <db src="../../dispatch.db" protect="password_hash" tables="users, drivers, assignments, loads">
 
@@ -32,9 +32,9 @@
             // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
             // compiles to its own public route, and one taking a userId would let any caller
             // look up any user (S443 post-merge review of #1180).
-            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get();
             if (user is not || user.role != "dispatcher") {
-                return { unauthorized: true }
+                return { unauthorized: true };
             }
 
             // Drivers + their current active assignment + that load's
@@ -52,9 +52,9 @@
                     ON a.driver_id = d.id AND a.unassigned_at IS NULL
                 LEFT JOIN loads l ON l.id = a.load_id
                 ORDER BY d.name ASC
-            `}.all()
+            `}.all();
 
-            return { user: user, drivers: drivers }
+            return { user: user, drivers: drivers };
         }
 
         <currentUser> = not
@@ -63,35 +63,35 @@
         <statusFilter> = "all"
 
         function getSessionToken() {
-            const c = document.cookie ? document.cookie : ""
-            const idx = c.indexOf("scrml_session=")
-            if (idx < 0) return ""
-            const tail = c.substring(idx + "scrml_session=".length)
-            const semi = tail.indexOf(";")
-            return semi < 0 ? tail : tail.substring(0, semi)
+            const c = document.cookie ? document.cookie : "";
+            const idx = c.indexOf("scrml_session=");
+            if (idx < 0) return "";
+            const tail = c.substring(idx + "scrml_session=".length);
+            const semi = tail.indexOf(";");
+            return semi < 0 ? tail : tail.substring(0, semi);
         }
 
         function refresh() {
-            const tok = getSessionToken()
-            const data = fetchDriversServer(tok)
+            const tok = getSessionToken();
+            const data = fetchDriversServer(tok);
             if (data.unauthorized) {
-                window.location.href = "/auth/login?reason=unauthorized"
-                return
+                window.location.href = "/auth/login?reason=unauthorized";
+                return;
             }
-            @currentUser = data.user
-            @driverRows = data.drivers
-            @loaded = true
+            @currentUser = data.user;
+            @driverRows = data.drivers;
+            @loaded = true;
         }
 
         // Pure helper — keep "all" alongside enum strings.
         fn matchesFilter(driverStatus: string, filter: string) -> boolean {
-            if (filter == "all") return true
-            return driverStatus == filter
+            if (filter == "all") return true;
+            return driverStatus == filter;
         }
 
         on mount {
             refresh()
-        }
+        };
     }
 
     <div class="min-h-screen bg-slate-50 text-slate-900 font-sans">

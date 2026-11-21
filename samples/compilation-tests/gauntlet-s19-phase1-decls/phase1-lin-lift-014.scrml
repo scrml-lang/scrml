@@ -1,11 +1,11 @@
+<program reset="none">
 // lift consumes lin (§35.3 rule 4)
-${
-    fn fetchToken() { return "tok" }
+    fn fetchToken() { return "tok"; }
 
     fn run() {
-        lin token = fetchToken()
-        lift token
-        return ~
+        lin token = fetchToken();
+        lift token;
+        return ~;
     }
-}
 <p>${run().length}</>
+</program>

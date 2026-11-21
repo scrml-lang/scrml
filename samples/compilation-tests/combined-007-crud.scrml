@@ -9,20 +9,20 @@
         <newEmail> = ""
 
         function createUser() {
-            ?{`INSERT INTO users (name, email) VALUES ('New', 'new@example.com')`}
-            @users = ?{`SELECT id, name, email FROM users`}
+            ?{`INSERT INTO users (name, email) VALUES ('New', 'new@example.com')`};
+            @users = ?{`SELECT id, name, email FROM users`};
         }
 
         function deleteUser(id) {
-            @editingId = id
+            @editingId = id;
         }
 
         function refreshList() {
-            @users = ?{`SELECT id, name, email FROM users`}
+            @users = ?{`SELECT id, name, email FROM users`};
         }
     }
     <h1>User Management</>
-    <button onclick={ createUser() !{ .Transport(_) :> return } }>Add User</>
+    <button onclick={ createUser() !{ .Transport(_) :> return }; }>Add User</>
     <table>
         <thead>
             <tr>
@@ -40,7 +40,7 @@
                         <td>
                             <button onclick=deleteUser(user.id)>Delete</>
                         </td>
-                    </tr>
+                    </tr>;
                 }
             }
         </tbody>

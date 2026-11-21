@@ -1,3 +1,4 @@
+<program reset="none">
 // calculator.scrml
 // Odin dev test: retro calculator
 // Tests: @var reactive state, string concat, parseInt, if conditionals,
@@ -109,7 +110,6 @@
 }
 
 // --- state and logic ---
-${
     <display> = "0"
     <current> = 0
     <previous> = 0
@@ -117,37 +117,36 @@ ${
 
     function pressDigit(d) {
         if (@display == "0") {
-            @display = d
+            @display = d;
         } else {
-            @display = @display + d
+            @display = @display + d;
         }
     }
 
     function pressOperator(op) {
-        @previous = parseInt(@display)
-        @operator = op
-        @display = "0"
+        @previous = parseInt(@display);
+        @operator = op;
+        @display = "0";
     }
 
     function calculate() {
-        let b = parseInt(@display)
-        let result = 0
-        if (@operator == "+") { result = @previous + b }
-        if (@operator == "-") { result = @previous - b }
-        if (@operator == "*") { result = @previous * b }
+        let b = parseInt(@display);
+        let result = 0;
+        if (@operator == "+") { result = @previous + b; }
+        if (@operator == "-") { result = @previous - b; }
+        if (@operator == "*") { result = @previous * b; }
         // division: guarding zero separately — if the spec has no division op,
         // this is intentional; / is a closer in scrml. Left out.
-        @display = "" + result
-        @operator = ""
+        @display = "" + result;
+        @operator = "";
     }
 
     function clearAll() {
-        @display = "0"
-        @current = 0
-        @previous = 0
-        @operator = ""
+        @display = "0";
+        @current = 0;
+        @previous = 0;
+        @operator = "";
     }
-}
 
 // --- markup ---
 <div class="calc">
@@ -180,3 +179,4 @@ ${
         <button class="btn btn-equals" onclick=calculate()>=</>
     </div>
 </div>
+</program>

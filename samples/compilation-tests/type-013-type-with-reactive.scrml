@@ -1,3 +1,4 @@
+<program reset="none">
 // type-013-type-with-reactive.scrml
 // Types alongside reactive state. Tests: type + @reactive with enum variant.
 
@@ -13,3 +14,4 @@
     }
     <p>View settings</>
 </div>
+</program>

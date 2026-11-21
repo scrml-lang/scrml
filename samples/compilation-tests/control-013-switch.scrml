@@ -1,15 +1,17 @@
+<program reset="none">
 // control-013-switch.scrml
 // Multi-way dispatch via `match` — scrml does not use JS-style `switch` /
 // `case` / `break`. Each arm returns an expression; no fall-through.
 
 <div>
     ${
-        let day = "Monday"
+        let day = "Monday";
         let kind = match day {
-            "Monday" => "start"
-            "Friday" => "end"
+            "Monday" => "start",
+            "Friday" => "end",
             else     => "mid"
-        }
+        };
     }
     <p>Day categorized: ${kind}</>
 </div>
+</program>

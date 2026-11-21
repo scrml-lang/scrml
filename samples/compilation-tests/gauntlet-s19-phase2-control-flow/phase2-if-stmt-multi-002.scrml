@@ -1,14 +1,14 @@
+<program>
 // if with multi-stmt body
 ${
-    let x = 0
+    let x = 0;
     if (x == 0) {
-        let a = 1
-        let b = 2
-        x = a + b
+        let a = 1;
+        let b = 2;
+        x = a + b;
     }
-    log(x)
-    function log(n: number) { let _ = n }
+    log(x);
+    function log(n: number) { let _ = n; }
 }
-<program>
     <p>ok</>
 </>

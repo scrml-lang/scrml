@@ -1,3 +1,4 @@
+<program reset="none">
 // reactive-002-multiple.scrml
 // Multiple reactive variables. Tests: several @ declarations.
 
@@ -9,3 +10,4 @@
     }
     <p>State initialized</>
 </div>
+</program>

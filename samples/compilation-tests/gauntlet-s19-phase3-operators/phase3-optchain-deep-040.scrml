@@ -1,10 +1,10 @@
+<program>
 // deep optional chain
 ${
     type Profile:struct = { city: string | not }
     type User:struct = { profile: Profile | not }
-    let u: User | not = not
-    const city = u?.profile?.city
+    let u: User | not = not;
+    const city = u?.profile?.city;
 }
-<program>
     <p>${city ?? "unknown"}</>
 </>

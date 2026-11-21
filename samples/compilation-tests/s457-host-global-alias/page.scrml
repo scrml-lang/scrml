@@ -5,22 +5,20 @@
 <program>
   <v> = 0
   <w> = 0
-  ${
-    import { SAME_SHAPE } from './models.scrml'
-  }
-  const location = "user-location"
-  function fetch(x) { return x }
-  function document(x) { return x }
-  server function Response(x) { return x + 1 }
-  server function JSON(x) { return x * 2 }
-  server function check() { return SAME_SHAPE ? Response(JSON(5)) : 0 }
-  function go() { @v = check() + fetch(0) + document(0) }
+    import { SAME_SHAPE } from './models.scrml';
+  const location = "user-location";
+  function fetch(x) { return x; }
+  function document(x) { return x; }
+  server function Response(x) { return x + 1; }
+  server function JSON(x) { return x * 2; }
+  server function check() { return SAME_SHAPE ? Response(JSON(5)) : 0; }
+  function go() { @v = check() + fetch(0) + document(0); }
 
   <program name="echo">
-    function postMessage(x) { return x }
-    function self(x) { return x }
+    function postMessage(x) { return x; }
+    function self(x) { return x; }
     when message(n) {
-      send(postMessage(n) + self(0))
+      send(postMessage(n) + self(0));
     }
   </program>
 

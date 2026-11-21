@@ -1,6 +1,8 @@
+<program reset="none">
 // const after a // comment line
 ${
     // this is a leading comment
-    const greeting = "hi"
+    const greeting = "hi";
 }
 <p>${greeting}</>
+</program>

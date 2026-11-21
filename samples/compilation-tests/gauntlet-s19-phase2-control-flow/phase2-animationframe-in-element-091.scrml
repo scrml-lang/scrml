@@ -3,10 +3,10 @@
     <canvas ref=@canvasEl width="800" height="600">
         ${
             function draw() {
-                let _ = @canvasEl
-                animationFrame(draw)
+                let _ = @canvasEl;
+                animationFrame(draw);
             }
-            animationFrame(draw)
+            animationFrame(draw);
         }
     </>
 </>

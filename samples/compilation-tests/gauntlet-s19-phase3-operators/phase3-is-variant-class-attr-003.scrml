@@ -1,8 +1,6 @@
+<program>
 // `is` inside a class:name= dynamic class attribute
-${
     type Tab:enum = { Overview, Activity, Settings }
     <tab>:Tab = .Overview
-}
-<program>
     <a class:active=(@tab is .Overview)>Overview</>
 </>

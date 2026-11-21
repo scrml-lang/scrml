@@ -3,15 +3,15 @@ ${
   // Each of these patterns uses a temp var to evaluate the expression exactly once.
 
   // while-loop + regex.exec: common pattern from scrml §42.2.4 example.
-  let pattern = /hello (\w+)/g
-  let text = "hello world hello scrml"
+  let pattern = /hello (\w+)/g;
+  let text = "hello world hello scrml";
   while ((pattern.exec(text)) is some) {
     // match found — handle it
   }
 
   // if + array method
-  let users = []
-  let id = 42
+  let users = [];
+  let id = 42;
   if ((users.find(u => u.id == id)) is not) {
     // user not found
   }
@@ -22,26 +22,26 @@ ${
   }
 
   // nested function calls
-  let data = ""
+  let data = "";
   if ((JSON.parse(data)) is not) {
     // parse returned nothing
   }
 
   // is not not (presence)
-  let input = ""
+  let input = "";
   if ((input.trim()) is not not) {
     // input has content
   }
 
   // array access
-  let items = []
+  let items = [];
   if ((items[0]) is not) {
     // first item absent
   }
 
   // binary expression
-  let x = 0
-  let y = 0
+  let x = 0;
+  let y = 0;
   if ((x + y) is some) {
     // sum is present (not null — note: 0 is not null, so this is true)
   }

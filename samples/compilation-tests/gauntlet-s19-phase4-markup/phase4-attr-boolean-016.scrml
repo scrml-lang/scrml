@@ -1,2 +1,4 @@
+<program reset="none">
 // Bare boolean attr.
 <input type="checkbox" disabled/>
+</program>

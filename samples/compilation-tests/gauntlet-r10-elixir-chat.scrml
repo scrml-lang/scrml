@@ -94,8 +94,8 @@ ${
     // There is no unified "receive" with pattern matching across all events.
     ${
         server function loadRooms() {
-            let rows = ?{`SELECT id, name, description FROM rooms ORDER BY name ASC`}.all() !{ _ :> [] }
-            return rows
+            let rows = ?{`SELECT id, name, description FROM rooms ORDER BY name ASC`}.all() !{ _ :> [] };
+            return rows;
         }
 
         server function loadMessages(roomId) {
@@ -110,8 +110,8 @@ ${
                 WHERE m.room_id = ${roomId}
                 ORDER BY m.inserted_at ASC
                 LIMIT 100
-            `}.all() !{ _ :> [] }
-            return rows
+            `}.all() !{ _ :> [] };
+            return rows;
         }
 
         server function sendMessage(roomId, username, content) {
@@ -120,17 +120,17 @@ ${
             // In scrml: raw SQL with manual validation logic.
             // No changeset equivalent. No Ecto associations. No Repo pattern.
             if (content.trim().length == 0) {
-                return { ok: false, error: "Message cannot be empty" }
+                return { ok: false, error: "Message cannot be empty" };
             }
-            let user = ?{`SELECT id FROM users WHERE username = ${username}`}.first()
+            let user = ?{`SELECT id FROM users WHERE username = ${username}`}.first();
             if (!user) {
-                return { ok: false, error: "User not found" }
+                return { ok: false, error: "User not found" };
             }
             ?{`
                 INSERT INTO messages (room_id, user_id, content, inserted_at)
                 VALUES (${roomId}, ${user.id}, ${content}, datetime('now'))
-            `}.run()
-            return { ok: true }
+            `}.run();
+            return { ok: true };
         }
 
         server function setTypingStatus(roomId, username, isTyping) {
@@ -143,12 +143,12 @@ ${
                 INSERT INTO typing_status (room_id, username, last_typed)
                 VALUES (${roomId}, ${username}, datetime('now'))
                 ON CONFLICT (room_id, username) DO UPDATE SET last_typed = datetime('now')
-            `}.run()
+            `}.run();
             if (!isTyping) {
                 ?{`
                     DELETE FROM typing_status
                     WHERE room_id = ${roomId} AND username = ${username}
-                `}.run()
+                `}.run();
             }
         }
 
@@ -158,8 +158,8 @@ ${
                 SELECT username FROM typing_status
                 WHERE room_id = ${roomId}
                 AND last_typed > datetime('now', '-5 seconds')
-            `}.all() !{ _ :> [] }
-            return rows
+            `}.all() !{ _ :> [] };
+            return rows;
         }
 
         server function joinRoom(roomId, username) {
@@ -167,16 +167,16 @@ ${
             // handle_info receives broadcasts and socket.assigns gets updated, pushing DOM diff.
             // In scrml: "joining" a room just means setting client state.
             // There is no subscribe mechanism. No handle_info equivalent.
-            let user = ?{`SELECT id FROM users WHERE username = ${username}`}.first()
+            let user = ?{`SELECT id FROM users WHERE username = ${username}`}.first();
             if (!user) {
-                ?{`INSERT INTO users (username) VALUES (${username})`}.run()
+                ?{`INSERT INTO users (username) VALUES (${username})`}.run();
             }
-            return { ok: true }
+            return { ok: true };
         }
 
         server function switchRoom(roomId) {
-            let room = ?{`SELECT id, name FROM rooms WHERE id = ${roomId}`}.first()
-            return room
+            let room = ?{`SELECT id, name FROM rooms WHERE id = ${roomId}`}.first();
+            return room;
         }
     }
 
@@ -184,32 +184,32 @@ ${
     ${
         function handleJoin() {
             if (@userName.trim().length == 0) {
-                return
+                return;
             }
-            let result = joinRoom(@currentRoomId, @userName) !{ .Transport(_) :> return }
+            let result = joinRoom(@currentRoomId, @userName) !{ .Transport(_) :> return };
             if (result.ok) {
-                @hasJoined = true
+                @hasJoined = true;
             }
         }
 
         function handleSend() {
             if (@messageText.trim().length == 0) {
-                return
+                return;
             }
-            @isSending = true
+            @isSending = true;
             // Clear typing status when sending
-            setTypingStatus(@currentRoomId, @userName, false) !{ .Transport(_) :> return }
-            @isTyping = false
+            setTypingStatus(@currentRoomId, @userName, false) !{ .Transport(_) :> return };
+            @isTyping = false;
 
-            let result = sendMessage(@currentRoomId, @userName, @messageText) !{ .Transport(_) :> return }
+            let result = sendMessage(@currentRoomId, @userName, @messageText) !{ .Transport(_) :> return };
             if (result.ok) {
-                @messageText = ""
+                @messageText = "";
                 // Immediately refresh messages after send.
                 // In LiveView, the server pushes the update. No polling lag.
                 // Here we manually trigger a reload.
-                @messages = loadMessages(@currentRoomId) !{ .Transport(_) :> return }
+                @messages = loadMessages(@currentRoomId) !{ .Transport(_) :> return };
             }
-            @isSending = false
+            @isSending = false;
         }
 
         function handleRoomSwitch(roomId, roomName) {
@@ -217,10 +217,10 @@ ${
             // Updates socket.assigns.current_room_id, reloads messages, re-subscribes to PubSub topic.
             // All happens server-side. New DOM diff pushed to client.
             // In scrml: update client state, manually reload messages.
-            setTypingStatus(@currentRoomId, @userName, false) !{ .Transport(_) :> return }
-            @currentRoomId = roomId
-            @currentRoomName = roomName
-            @messages = loadMessages(roomId) !{ .Transport(_) :> return }
+            setTypingStatus(@currentRoomId, @userName, false) !{ .Transport(_) :> return };
+            @currentRoomId = roomId;
+            @currentRoomName = roomName;
+            @messages = loadMessages(roomId) !{ .Transport(_) :> return };
         }
 
         function handleTyping() {
@@ -229,16 +229,16 @@ ${
             // This means an HTTP round-trip per keypress. Expensive. LiveView handles this more elegantly
             // with debouncing built into phx-debounce attribute.
             if (!@isTyping) {
-                @isTyping = true
-                setTypingStatus(@currentRoomId, @userName, true) !{ .Transport(_) :> return }
+                @isTyping = true;
+                setTypingStatus(@currentRoomId, @userName, true) !{ .Transport(_) :> return };
             }
         }
 
         function handleInputClear() {
             // When input is cleared/blurred, remove typing indicator
             if (@isTyping) {
-                @isTyping = false
-                setTypingStatus(@currentRoomId, @userName, false) !{ .Transport(_) :> return }
+                @isTyping = false;
+                setTypingStatus(@currentRoomId, @userName, false) !{ .Transport(_) :> return };
             }
         }
 
@@ -246,15 +246,15 @@ ${
             // In Elixir: NaiveDateTime.to_string() or Timex for formatting.
             // In scrml: raw JavaScript. No stdlib for date formatting.
             // This feels like falling back to vanilla JS inside a typed language.
-            let d = new Date(ts)
-            return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+            let d = new Date(ts);
+            return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
         }
 
         function messageClass(msg) {
             if (msg.username == @userName) {
-                return "message message--own"
+                return "message message--own";
             }
-            return "message message--other"
+            return "message message--other";
         }
 
         function typingText() {
@@ -266,17 +266,17 @@ ${
             // In scrml: no function head pattern matching. Must use if/else or ternary.
             // This is the most painful loss from Elixir. Multi-clause functions by pattern
             // are the idiomatic Elixir way to express this. scrml offers no equivalent.
-            let others = @typingUsers.filter(u => u.username != @userName)
+            let others = @typingUsers.filter(u => u.username != @userName);
             if (others.length == 0) {
-                return ""
+                return "";
             }
             if (others.length == 1) {
-                return others[0].username + " is typing..."
+                return others[0].username + " is typing...";
             }
             if (others.length == 2) {
-                return others[0].username + " and " + others[1].username + " are typing..."
+                return others[0].username + " and " + others[1].username + " are typing...";
             }
-            return "Several people are typing..."
+            return "Several people are typing...";
         }
     }
 
@@ -312,7 +312,7 @@ ${
                             class=${ room.id == @currentRoomId ? "room-item room-item--active" : "room-item" }
                             onclick=handleRoomSwitch(room.id, room.name)>
                             <span class="room-name">${room.name}</>
-                        </li>
+                        </li>;
                     }
                 }
             </ul>
@@ -341,7 +341,7 @@ ${
                                 <span class="message-time">${formatTimestamp(msg.inserted_at)}</>
                             </div>
                             <div class="message-content">${msg.content}</>
-                        </div>
+                        </div>;
                     }
                 }
             </div>
@@ -365,8 +365,8 @@ ${
                     placeholder="Type a message..."
                     value=@messageText
                     oninput=${(e) => {
-                        @messageText = e.target.value
-                        handleTyping()
+                        @messageText = e.target.value;
+                        handleTyping();
                     }}
                     onblur=handleInputClear()
                 />

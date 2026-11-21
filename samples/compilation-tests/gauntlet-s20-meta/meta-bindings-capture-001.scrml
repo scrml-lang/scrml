@@ -3,8 +3,8 @@
 
 <program>
 ${
-  const appName = "MyApp"
-  let version = "2.0"
+  const appName = "MyApp";
+  let version = "2.0";
   <userCount> = 42
 }
 

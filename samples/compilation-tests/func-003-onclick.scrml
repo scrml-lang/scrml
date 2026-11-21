@@ -1,11 +1,13 @@
+<program reset="none">
 // func-003-onclick.scrml
 // Event handler on button. Tests: onclick= attribute with function call.
 
 <div>
     ${
         function handleClick() {
-            let clicked = true
+            let clicked = true;
         }
     }
     <button onclick=handleClick()>Click Me</>
 </div>
+</program>

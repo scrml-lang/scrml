@@ -1,10 +1,10 @@
+<program>
 // if/else stmt, both branches assign
 ${
-    let x = 0
-    if (x == 0) { x = 1 } else { x = 2 }
-    log(x)
-    function log(n: number) { let _ = n }
+    let x = 0;
+    if (x == 0) { x = 1; } else { x = 2; }
+    log(x);
+    function log(n: number) { let _ = n; }
 }
-<program>
     <p>ok</>
 </>

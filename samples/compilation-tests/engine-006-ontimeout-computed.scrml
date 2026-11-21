@@ -14,11 +14,9 @@
 // computed value, so adopters don't need to defensively coerce.
 
 <program>
-${
     type SessionPhase:enum = { Active, Warning, Expired }
     <warningDelayMs> = 5000
     <expiredDelayMs> = 3000
-}
 
 <engine for=SessionPhase initial=.Active>
     <Active rule=.Warning>

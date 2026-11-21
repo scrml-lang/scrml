@@ -1,3 +1,4 @@
+<program reset="none">
 // reactive-007-object.scrml
 // Reactive object variable. Tests: @ with object values.
 
@@ -5,3 +6,4 @@
     ${ <user> = { name: "Alice", email: "alice@example.com" } }
     <p>User loaded</>
 </div>
+</program>

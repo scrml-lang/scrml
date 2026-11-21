@@ -7,10 +7,8 @@
 // any unrelated source issues in this fixture's expression body).
 
 <program>
-${
   <messages> = []
   <status> = "disconnected"
-}
 
 <div>
   <channel name="updates"

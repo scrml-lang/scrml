@@ -1,7 +1,6 @@
+<program reset="none">
 // const inside ~{} test block
-${
-    function add(a, b) { return a + b }
-}
+    function add(a, b) { return a + b; }
 
 ~{ "addition tests"
     test "1 + 2 = 3" {
@@ -10,3 +9,4 @@ ${
     }
 }
 <p>x</>
+</program>

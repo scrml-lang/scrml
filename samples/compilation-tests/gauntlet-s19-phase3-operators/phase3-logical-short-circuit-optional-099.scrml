@@ -1,9 +1,9 @@
+<program>
 // using && with is some to gate a property access
 ${
     type User:struct = { name: string }
-    let u: User | not = not
-    const out = u is given && u.name
+    let u: User | not = not;
+    const out = u is given && u.name;
 }
-<program>
     <p>out</>
 </>

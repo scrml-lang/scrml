@@ -1,7 +1,9 @@
+<program reset="none">
 // sql-002-where.scrml
 // SQL with WHERE clause. Tests: ?{} with filtering.
 
 <div>
-    ${ let active = ?{`SELECT name FROM users WHERE active = 1`} }
+    ${ let active = ?{`SELECT name FROM users WHERE active = 1`}; }
     <p>Filtered query</>
 </div>
+</program>

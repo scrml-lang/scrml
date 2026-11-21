@@ -1,3 +1,4 @@
+<program reset="none">
 // comp-013-tooltip.scrml
 // Tooltip pattern. Tests: hover state management.
 
@@ -12,3 +13,4 @@
         </div>
     </div>
 </div>
+</program>

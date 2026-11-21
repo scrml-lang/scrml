@@ -1,2 +1,4 @@
+<program reset="none">
 // HTML entities in text content.
 <p>Tom &amp; Jerry, &lt;3 &copy; 2026</p>
+</program>

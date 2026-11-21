@@ -21,13 +21,13 @@
 
 <page db="../../dispatch.db" auth="required">
 
-  import { driverStatusClasses, driverStatusClassesOf, driverStatusLabel, isValidHosTransition } from '../../components/driver-card.scrml'
-  import { formatRate, formatPickupAt } from '../../components/load-card.scrml'
-  import { statusBadgeClasses, statusBadgeClassesOf, statusLabel } from '../../components/load-status-badge.scrml'
-  import { createSessionStore } from 'scrml:store'
-  import { SESSION_DB_PATH } from '../../models/auth.scrml'
+  import { driverStatusClasses, driverStatusClassesOf, driverStatusLabel, isValidHosTransition } from '../../components/driver-card.scrml';
+  import { formatRate, formatPickupAt } from '../../components/load-card.scrml';
+  import { statusBadgeClasses, statusBadgeClassesOf, statusLabel } from '../../components/load-status-badge.scrml';
+  import { createSessionStore } from 'scrml:store';
+  import { SESSION_DB_PATH } from '../../models/auth.scrml';
   // M5: centralized real-time channel — see SPEC §38.12.6.
-  import { "driver-events" as driverEvents } from '../../channels/driver-events.scrml'
+  import { "driver-events" as driverEvents } from '../../channels/driver-events.scrml';
 
   <db src="../../dispatch.db" protect="password_hash" tables="users, drivers, loads, customers, assignments, log_entries">
 
@@ -39,9 +39,9 @@
             // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
             // compiles to its own public route, and one taking a userId would let any caller
             // look up any user (S443 post-merge review of #1180).
-            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get();
             if (user is not || user.role != "driver") {
-                return { unauthorized: true }
+                return { unauthorized: true };
             }
 
             const driver = ?{`
@@ -49,8 +49,8 @@
                        current_status, current_location
                 FROM drivers
                 WHERE user_id = ${user.id}
-            `}.get()
-            if (driver is not) return { error: "No driver record found for this account." }
+            `}.get();
+            if (driver is not) return { error: "No driver record found for this account." };
 
             // Active assignment + load join. Driver is "active" when they have
             // an open assignment AND the load is not yet delivered/closed.
@@ -70,7 +70,7 @@
                   AND l.status IN ('Dispatched', 'Loaded', 'InTransit')
                 ORDER BY a.assigned_at DESC
                 LIMIT 1
-            `}.get()
+            `}.get();
 
             const recentEntryRows = ?{`
                 SELECT id, type, at, payload, load_id
@@ -78,13 +78,13 @@
                 WHERE driver_id = ${driver.id}
                 ORDER BY at DESC
                 LIMIT 5
-            `}.all()
+            `}.all();
 
             return {
                 user: user, driver: driver,
                 currentLoad: currentLoadRow,
                 recentEntries: recentEntryRows
-            }
+            };
         }
 
         // Update HOS status: writes drivers.current_status + emits a
@@ -93,31 +93,31 @@
             // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
             // compiles to its own public route, and one taking a userId would let any caller
             // look up any user (S443 post-merge review of #1180).
-            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get();
             if (user is not || user.role != "driver") {
-                return { unauthorized: true }
+                return { unauthorized: true };
             }
-            const driver = ?{`SELECT id, current_status FROM drivers WHERE user_id = ${user.id}`}.get()
-            if (driver is not) return { error: "No driver record." }
+            const driver = ?{`SELECT id, current_status FROM drivers WHERE user_id = ${user.id}`}.get();
+            if (driver is not) return { error: "No driver record." };
 
             // Validate transition via the shared `match`-based validator
             // (components/driver-card.scrml — single source of truth for the
             // HOS transition table, also used by hos.scrml). `cur` and
             // `newStatus` are the stored DriverStatus variant names.
-            const cur = driver.current_status
+            const cur = driver.current_status;
             if (!isValidHosTransition(cur, newStatus)) {
-                return { error: `Cannot transition from ${cur} to ${newStatus}.` }
+                return { error: `Cannot transition from ${cur} to ${newStatus}.` };
             }
 
-            ?{`UPDATE drivers SET current_status = ${newStatus} WHERE id = ${driver.id}`}.run()
+            ?{`UPDATE drivers SET current_status = ${newStatus} WHERE id = ${driver.id}`}.run();
 
-            const payload = `{"from":"${cur}","to":"${newStatus}"}`
+            const payload = `{"from":"${cur}","to":"${newStatus}"}`;
             ?{`
                 INSERT INTO log_entries (driver_id, load_id, type, payload)
                 VALUES (${driver.id}, NULL, 'hos_change', ${payload})
-            `}.run()
+            `}.run();
 
-            return { ok: true }
+            return { ok: true };
         }
 
         <currentUser> = not
@@ -133,54 +133,54 @@
         <errorMessage> = ""
 
         function getSessionToken() {
-            const c = document.cookie ? document.cookie : ""
-            const idx = c.indexOf("scrml_session=")
-            if (idx < 0) return ""
-            const tail = c.substring(idx + "scrml_session=".length)
-            const semi = tail.indexOf(";")
-            return semi < 0 ? tail : tail.substring(0, semi)
+            const c = document.cookie ? document.cookie : "";
+            const idx = c.indexOf("scrml_session=");
+            if (idx < 0) return "";
+            const tail = c.substring(idx + "scrml_session=".length);
+            const semi = tail.indexOf(";");
+            return semi < 0 ? tail : tail.substring(0, semi);
         }
 
         function refresh() {
-            const tok = getSessionToken()
-            const data = fetchHomeData(tok)
+            const tok = getSessionToken();
+            const data = fetchHomeData(tok);
             if (data.unauthorized) {
-                window.location.href = "/auth/login?reason=unauthorized"
-                return
+                window.location.href = "/auth/login?reason=unauthorized";
+                return;
             }
             if (data.error) {
-                @errorMessage = data.error
-                @loaded = true
-                return
+                @errorMessage = data.error;
+                @loaded = true;
+                return;
             }
-            @currentUser = data.user
-            @currentDriver = data.driver
-            @currentLoad = data.currentLoad
-            @recentEntries = data.recentEntries
-            @loaded = true
+            @currentUser = data.user;
+            @currentDriver = data.driver;
+            @currentLoad = data.currentLoad;
+            @recentEntries = data.recentEntries;
+            @loaded = true;
         }
 
         function setStatus(target) {
-            const tok = getSessionToken()
-            const result = changeHosServer(tok, target)
+            const tok = getSessionToken();
+            const result = changeHosServer(tok, target);
             if (result.unauthorized) {
-                window.location.href = "/auth/login?reason=unauthorized"
-                return
+                window.location.href = "/auth/login?reason=unauthorized";
+                return;
             }
             if (result.error) {
-                @errorMessage = result.error
-                return
+                @errorMessage = result.error;
+                return;
             }
-            refresh()
+            refresh();
         }
 
         function setError(msg) {
-            @errorMessage = msg
+            @errorMessage = msg;
         }
 
         function logout() {
-            document.cookie = "scrml_session=; Path=/; Max-Age=0"
-            window.location.href = "/auth/login?logout=1"
+            document.cookie = "scrml_session=; Path=/; Max-Age=0";
+            window.location.href = "/auth/login?logout=1";
         }
 
         // Pretty label for log entry types — same shape as M2 dispatch
@@ -188,19 +188,19 @@
         // F-AUTH-002 (cross-file fns coming through server-context have
         // their own escalation issues).
         fn logTypeLabel(t: string) -> string {
-            if (t == "pre_trip")     return "Pre-trip inspection"
-            if (t == "post_trip")    return "Post-trip inspection"
-            if (t == "bol_received") return "BOL received"
-            if (t == "pod_signed")   return "POD signed"
-            if (t == "fuel_stop")    return "Fuel stop"
-            if (t == "breakdown")    return "Breakdown"
-            if (t == "hos_change")   return "HOS status change"
-            return t
+            if (t == "pre_trip")     return "Pre-trip inspection";
+            if (t == "post_trip")    return "Post-trip inspection";
+            if (t == "bol_received") return "BOL received";
+            if (t == "pod_signed")   return "POD signed";
+            if (t == "fuel_stop")    return "Fuel stop";
+            if (t == "breakdown")    return "Breakdown";
+            if (t == "hos_change")   return "HOS status change";
+            return t;
         }
 
         on mount {
             refresh()
-        }
+        };
     }
 
     <!-- M5: driver-events channel — see channels/driver-events.scrml.

@@ -1,8 +1,6 @@
+<program>
 // attribute value as quoted string containing `is` — should NOT be parsed as expr
-${
     type F:enum = { A, B }
     <f>:F = .A
-}
-<program>
     <p data-note="f is .A">literal</>
 </>

@@ -3,7 +3,7 @@
 
 < db src="./test.db" tables="users">
 ${
-  let user = ?{`SELECT id, name FROM users WHERE id = 1`}.get()
+  let user = ?{`SELECT id, name FROM users WHERE id = 1`}.get();
 }
 <p>User loaded</>
 </>

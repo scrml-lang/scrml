@@ -1,15 +1,15 @@
+<program>
 // arithmetic-only expression as a match literal arm (numbers)
 ${
-    let n = 3
+    let n = 3;
     match n {
-        0 -> handleZero()
-        1 -> handleOne()
+        0 -> handleZero(),
+        1 -> handleOne(),
         _ -> handleOther()
     }
-    function handleZero()  { let _ = 1 }
-    function handleOne()   { let _ = 1 }
-    function handleOther() { let _ = 1 }
+    function handleZero()  { let _ = 1; }
+    function handleOne()   { let _ = 1; }
+    function handleOther() { let _ = 1; }
 }
-<program>
     <p>ok</>
 </>

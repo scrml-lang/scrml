@@ -1,7 +1,7 @@
+<program reset="none">
 // navigate(path, .Hard) — §20.2
-${
     function logout() {
-        navigate("/login", .Hard)
+        navigate("/login", .Hard);
     }
-}
 <button onclick=logout()>Logout</>
+</program>

@@ -1,13 +1,13 @@
+<program>
 // match with literal string arms, no wildcard — W-MATCH-002
 ${
-    let role = "admin"
+    let role = "admin";
     match role {
-        "admin"  -> handleAdmin()
+        "admin"  -> handleAdmin(),
         "editor" -> handleEditor()
     }
-    function handleAdmin()  { let _ = 1 }
-    function handleEditor() { let _ = 1 }
+    function handleAdmin()  { let _ = 1; }
+    function handleEditor() { let _ = 1; }
 }
-<program>
     <p>warn</>
 </>

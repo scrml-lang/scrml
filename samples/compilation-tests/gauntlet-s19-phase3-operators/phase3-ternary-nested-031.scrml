@@ -1,8 +1,8 @@
+<program>
 // nested ternary
 ${
-    let x = 5
-    const label = x > 10 ? "big" : x > 5 ? "mid" : "small"
+    let x = 5;
+    const label = x > 10 ? "big" : x > 5 ? "mid" : "small";
 }
-<program>
     <p>${label}</>
 </>

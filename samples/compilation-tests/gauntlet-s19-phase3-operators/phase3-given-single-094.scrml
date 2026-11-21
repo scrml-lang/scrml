@@ -1,10 +1,10 @@
+<program>
 // `if (x is given)` narrows T | not to T (was the S462-deprecated `given x =>`; migrated by `scrml fix`)
 ${
-    let name: string | not = "alice"
+    let name: string | not = "alice";
     if (name is given) {
-        let _upper = name.toUpperCase()
+        let _upper = name.toUpperCase();
     }
 }
-<program>
     <p>ok</>
 </>

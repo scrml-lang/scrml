@@ -1,9 +1,9 @@
+<program>
 // method call on ?{} result: .all(), .get(), .run()
 ${
-    const rows = ?{ SELECT id FROM users WHERE active = 1 }.all()
-    const one = ?{ SELECT id FROM users WHERE id = ${1} }.get()
-    ?{ UPDATE users SET active = 0 WHERE id = ${2} }.run()
+    const rows = ?{ SELECT id FROM users WHERE active = 1 }.all();
+    const one = ?{ SELECT id FROM users WHERE id = ${1} }.get();
+    ?{ UPDATE users SET active = 0 WHERE id = ${2} }.run();
 }
-<program>
     <p>${rows.length}</>
 </>

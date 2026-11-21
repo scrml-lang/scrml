@@ -1,7 +1,9 @@
+<program reset="none">
 // sql-001-basic-select.scrml
 // Basic SQL SELECT query. Tests: ?{} syntax.
 
 <div>
-    ${ let users = ?{`SELECT id, name FROM users`} }
+    ${ let users = ?{`SELECT id, name FROM users`}; }
     <p>Query executed</>
 </div>
+</program>

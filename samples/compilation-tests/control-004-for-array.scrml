@@ -1,12 +1,14 @@
+<program reset="none">
 // control-004-for-array.scrml
 // For loop over an array. Tests: for...of in logic.
 
 <div>
     ${
-        let colors = ["red", "green", "blue"]
+        let colors = ["red", "green", "blue"];
         for (let c of colors) {
-            let upper = c.toUpperCase()
+            let upper = c.toUpperCase();
         }
     }
     <p>Colors processed</>
 </div>
+</program>

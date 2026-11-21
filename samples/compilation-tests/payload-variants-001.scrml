@@ -1,15 +1,15 @@
+<program>
 // §1a (S22) — enum payload variant construction: Shape.Circle(10) should produce
 // { variant: "Circle", data: { r: 10 } }. Match destructuring lands in §1a-slice-2.
 ${
     type Shape:enum = { Circle(r: number), Rect(w: number, h: number), Unit }
-    let a:Shape = Shape.Circle(10)
-    let b:Shape = Shape.Rect(3, 4)
-    let c:Shape = Shape.Unit
-    function log(s: string) { let _ = s }
-    log("a built")
-    log("b built")
-    log("c built")
+    let a:Shape = Shape.Circle(10);
+    let b:Shape = Shape.Rect(3, 4);
+    let c:Shape = Shape.Unit;
+    function log(s: string) { let _ = s; }
+    log("a built");
+    log("b built");
+    log("c built");
 }
-<program>
     <p>ok</>
 </>

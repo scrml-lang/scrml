@@ -1,3 +1,4 @@
+<program reset="none">
 // edge-005-deep-logic.scrml
 // Logic block with deeply nested braces. Tests: brace tracking depth.
 
@@ -9,7 +10,8 @@
                     value: "deep"
                 }
             }
-        }
+        };
     }
     <p>Deep nesting</>
 </div>
+</program>

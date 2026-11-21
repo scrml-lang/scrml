@@ -1,18 +1,18 @@
+<program reset="none">
 // lin consumed in all match arms — valid (§35.4.3)
-${
     type Role:enum = { Admin, User, Guest }
-    function fetchToken() { return "tok" }
-    function adminAuth(t) { return t }
-    function userAuth(t) { return t }
-    function guestAuth(t) { return t }
+    function fetchToken() { return "tok"; }
+    function adminAuth(t) { return t; }
+    function userAuth(t) { return t; }
+    function guestAuth(t) { return t; }
 
     function run(role: Role) {
-        lin token = fetchToken()
+        lin token = fetchToken();
         return match role {
-            .Admin :> adminAuth(token)
-            .User  :> userAuth(token)
+            .Admin :> adminAuth(token),
+            .User  :> userAuth(token),
             .Guest :> guestAuth(token)
-        }
+        };
     }
-}
 <p>${run(.Admin)}</>
+</program>

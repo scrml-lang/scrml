@@ -1,6 +1,6 @@
 // if= markup attribute with static bool.
 <program>
-    ${ <show> = true }
+     <show> = true 
     <div>
         <span if=@show>conditional</span>
     </div>

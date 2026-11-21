@@ -1,3 +1,4 @@
+<program reset="none">
 // type-015-combined.scrml
 // Multiple types, functions, and reactive state together. Tests: full type scenario.
 
@@ -15,8 +16,9 @@
         }
         <currentUser> = not
         function setRole(role) {
-            let updated = role
+            let updated = role;
         }
     }
     <p>Full type system usage</>
 </div>
+</program>

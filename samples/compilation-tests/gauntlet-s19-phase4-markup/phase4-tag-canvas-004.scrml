@@ -1,2 +1,4 @@
+<program reset="none">
 // Less-common HTML element — <canvas>.
 <canvas id="c" width="100" height="50"></canvas>
+</program>

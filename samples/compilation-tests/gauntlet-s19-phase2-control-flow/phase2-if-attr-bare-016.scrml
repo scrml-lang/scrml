@@ -1,7 +1,5 @@
-// if= attribute on markup element (§17.1)
-${
-    <show>: bool = true
-}
 <program>
+// if= attribute on markup element (§17.1)
+    <show>: bool = true
     <div if=@show>visible</>
 </>

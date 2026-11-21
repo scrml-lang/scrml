@@ -1,11 +1,11 @@
+<program>
 // comparison on strings — JS allows lexical; scrml may restrict
 ${
-    let a = "alpha"
-    let b = "beta"
+    let a = "alpha";
+    let b = "beta";
     if (a < b) {
-        let _ok = 1
+        let _ok = 1;
     }
 }
-<program>
     <p>trap</>
 </>

@@ -22,7 +22,7 @@
 
 <program>
 
-  type Status:enum = .Todo | .InProgress | .Done
+  type Status:enum = .Todo | .InProgress | .Done;
 
   type Card:struct = { id: number, title: string, status: Status }
 
@@ -48,19 +48,19 @@
   // call-arg), which is both the cleaner idiom and the sidestep for the open
   // g-each-body-bare-variant-arg gap.
   fn withStatus(cards: Card[], id: number, status: Status) -> Card[] {
-    return cards.map(c => c.id == id ? { ...c, status: status } : c)
+    return cards.map(c => c.id == id ? { ...c, status: status } : c);
   }
 
   function moveToTodo(id: number) {
-    @cards = withStatus(@cards, id, Status.Todo)
+    @cards = withStatus(@cards, id, Status.Todo);
   }
 
   function moveToInProgress(id: number) {
-    @cards = withStatus(@cards, id, Status.InProgress)
+    @cards = withStatus(@cards, id, Status.InProgress);
   }
 
   function moveToDone(id: number) {
-    @cards = withStatus(@cards, id, Status.Done)
+    @cards = withStatus(@cards, id, Status.Done);
   }
 
   // Board-chrome styles — co-located with the outer board wrapper.

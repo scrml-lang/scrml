@@ -1,3 +1,4 @@
+<program reset="none">
 // basic-015-heading-levels.scrml
 // All heading levels. Tests: h1 through h6.
 
@@ -9,3 +10,4 @@
     <h5>Heading Level 5</>
     <h6>Heading Level 6</>
 </div>
+</program>

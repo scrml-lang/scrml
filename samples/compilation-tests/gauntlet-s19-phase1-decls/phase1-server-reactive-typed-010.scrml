@@ -1,8 +1,6 @@
 // server @var with type annotation
 <program db="./test.db">
-    ${
-        server @count: number = 0
-        server @label: string = "loading..."
-    }
+        server @count: number = 0;
+        server @label: string = "loading...";
     <p>${@label}: ${@count}</>
 </>

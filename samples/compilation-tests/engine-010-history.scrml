@@ -56,10 +56,8 @@
 // dispatcher's composite-arm postMountJs path.
 
 <program>
-${
     type AppMode:enum  = { Title, Playing, Paused }
     type PlayMode:enum = { Exploring, Battle, Inventory }
-}
 
 <engine for=AppMode initial=.Title>
     <Title rule=.Playing></>

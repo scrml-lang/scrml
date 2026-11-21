@@ -41,7 +41,7 @@
       <notes>       = []
 
       function lookupUser(email) {
-        return ?{`SELECT id, display_name FROM users WHERE email = ${email}`}.get() !{ _ :> not }
+        return ?{`SELECT id, display_name FROM users WHERE email = ${email}`}.get() !{ _ :> not };
       }
 
       // postNote is server-side (writes to DB). Returns nothing —
@@ -49,12 +49,12 @@
       // client function below. 'server' modifier is omitted
       // (body-content inference promotes via ?{}).
       function postNote(authorEmail, title, body) {
-        const user = lookupUser(authorEmail)
-        if (!user) return
+        const user = lookupUser(authorEmail);
+        if (!user) return;
         ?{`
           INSERT INTO notes (user_id, title, body, published)
           VALUES (${user.id}, ${title}, ${body}, 1)
-        `}.run()
+        `}.run();
       }
 
       function listNotes() {
@@ -64,17 +64,17 @@
           JOIN users u ON u.id = n.user_id
           WHERE n.published = 1
           ORDER BY n.created_at DESC
-        `}.all()
+        `}.all();
       }
 
       // publish() is the CLIENT function — it triggers the server-fn
       // write and then owns the reactive-state reset locally
       // (E-RI-002 separation).
       function publish() {
-        if (@authorEmail == "" || @noteTitle == "" || @noteBody == "") return
-        postNote(@authorEmail, @noteTitle, @noteBody) !{ .Transport(_) :> return }
-        reset(@noteTitle)
-        reset(@noteBody)
+        if (@authorEmail == "" || @noteTitle == "" || @noteBody == "") return;
+        postNote(@authorEmail, @noteTitle, @noteBody) !{ .Transport(_) :> return };
+        reset(@noteTitle);
+        reset(@noteBody);
       }
     }
 
@@ -146,14 +146,14 @@
       }
       // The feed loads into @notes through a <request> (§6.7.7); the loop renders the cell.
       // (A server call in the loop head is a render position: E-VALUE-SERVER-CALL, §13.7.)
-      <request id="notesLoad" deps=[]>${ @notes = listNotes() }</>
+      <request id="notesLoad" deps=[]>${ @notes = listNotes(); }</>
       <ul class="feed">
         ${ for (let n of @notes) {
           lift <li class="note">
             <h3>${n.title}</>
             <p class="meta">by ${n.author}</p>
             <p class="body">${n.body}</p>
-          </li>
+          </li>;
         } }
       </ul>
     </div>

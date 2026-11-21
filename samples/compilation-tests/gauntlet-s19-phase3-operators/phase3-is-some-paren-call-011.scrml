@@ -1,12 +1,12 @@
+<program>
 // Parenthesized compound: function call then `is some`
 ${
     function getUser(id: number) -> string | not {
-        return "alice"
+        return "alice";
     }
     if ((getUser(1)) is some) {
-        let _ok = 1
+        let _ok = 1;
     }
 }
-<program>
     <p>ok</>
 </>

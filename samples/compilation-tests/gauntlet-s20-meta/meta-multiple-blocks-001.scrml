@@ -2,10 +2,8 @@
 // Should compile clean with _scrml_meta_1, _scrml_meta_2, etc.
 
 <program>
-${
   <count> = 0
   <label> = "Hello"
-}
 
 <div>
   ^{
