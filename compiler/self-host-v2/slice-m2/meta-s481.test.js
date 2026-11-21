@@ -427,10 +427,10 @@ const codeMsg = (src, code) => {
   return r.diags.find((d) => d.code === code).message;
 };
 
-describe("s482 r3 — HIGH-1: a file's `^{}` blocks share one emit budget (§22.4)", () => {
-  test("characters: two blocks of 600000 characters each — the second is refused, naming the file's budget", () => {
+describe("s482 r3 — HIGH-1: a compile's `^{}` blocks share one emit budget (one per compile since r4) (§22.4)", () => {
+  test("characters: two blocks of 600000 characters each — the second is refused, naming the compile's budget", () => {
     const b = `<p>^{ emit("abcdef".repeat(100000)); }</p>`;
-    expect(codeMsg(P(`<div>${b}${b}</div>`), "E-META-EVAL-001")).toContain("file's emit budget (1048576 characters");
+    expect(codeMsg(P(`<div>${b}${b}</div>`), "E-META-EVAL-001")).toContain("past the emit budget (1048576 characters");
     expect(errs(run(P(`<div>${b}</div>`)))).toEqual([]);
   }, 60000);
   test("tags: `<` characters are bounded before the markup reader reads them", () => {
@@ -442,7 +442,7 @@ describe("s482 r3 — HIGH-1: a file's `^{}` blocks share one emit budget (§22.
     expect(codeMsg(P(`<div>${b}${b}</div>`), "E-META-EVAL-001")).toContain("32768 nodes");
   }, 60000);
   test("emit() text past the budget is refused before it is normalized", () => {
-    expect(evalErr(D(`emit("a\\\\b".repeat(1000000));`))).toContain("file's emit budget");
+    expect(evalErr(D(`emit("a\\\\b".repeat(1000000));`))).toContain("past the emit budget");
   }, 60000);
 });
 
@@ -513,4 +513,121 @@ describe("s482 r3 — a push loop is linear (OWNED), and a push never changes a 
     expect(html(D(`fn add(l, x) { l.push(x); return l; } let t = []; t.push(1); const u = add(t, 2); t.push(3); emit("<p>" + t.join("") + "," + u.join("") + "</p>");`))).toContain("<p>13,12</p>");
     expect(html(D(`let t = []; t.push(1); for (const v of t) { t.push(v + 1); } emit("<p>" + t.join("") + "</p>");`))).toContain("<p>12</p>");
   });
+});
+
+// ---------------------------------------------------------------------------
+// S482 r4 — the third re-review of #2045 (~/.cache/scrml/review/s482-2045-r3rev/review.md):
+// close the cost CLASS (~/.cache/scrml/review/s482-boot-meta-r4/model.md)
+// ---------------------------------------------------------------------------
+const timed = (f) => { const t = performance.now(); const v = f(); return { v, secs: (performance.now() - t) / 1000 }; };
+
+describe("s482 r4 — HIGH-1: OWNED is sound — a callback's reads end ownership; no list holds itself (§66.10)", () => {
+  test("a list a callback returned is not changed by a later push (o_map_min / o_map_two / o_reduce)", () => {
+    expect(html(D(`let a = []; a.push(1); const c = [0].map((x) => a); a.push(2); emit("<p>" + c[0].length + "</p>");`))).toContain("<p>1</p>");
+    expect(html(D(`let a = []; a.push(1); const c = [0].map((x) => a); a.push(2); a.push(3); emit("<p>" + c[0].length + "/" + a.length + "</p>");`))).toContain("<p>1/3</p>");
+    expect(html(D(`let a = []; a.push(1); a.push(2); const c = [0].reduce((acc, x) => a, 0); a.push(3); emit("<p>" + c.length + "</p>");`))).toContain("<p>2</p>");
+    expect(html(D(`let a = []; a.push(1); a.push(2); const c = [0].find((x) => a.length > 0 ? a : []); const d = [0].map((x) => ({ v: a })); a.push(3); emit("<p>" + d[0].v.length + "</p>");`))).toContain("<p>2</p>");
+  });
+  test("a list cannot come to hold itself — no RangeError (o_cyc1 / o_cyc2 / o_cyc3)", () => {
+    expect(html(D(`let a = []; a.push(1); a.push([0].map((x) => a)[0]); emit("<p>" + a[1].length + "</p>");`))).toContain("<p>1</p>");
+    expect(html(D(`let a = []; a.push(1); a.push([0].map((x) => a)[0]); emit("<p>" + a + "</p>");`))).toContain("<p>1,1</p>");
+    expect(html(D(`let a = []; a.push(1); a.push([0].map((x) => a)[0]); emit("<p>" + (a == a) + "</p>");`))).toContain("<p>true</p>");
+  });
+  test("push loops stay linear: 20000 pushes of a function's result, then a sort", () => {
+    const r = timed(() => html(D(`fn sq(i) { return 20000 - i; } let t = []; let i = 0; for (i < 20000) { t.push(sq(i)); i = i + 1; } t.sort((a, b) => a - b); emit("<p>" + t[0] + "," + t[19999] + "</p>");`)));
+    expect(r.v).toContain("<p>1,20000</p>");
+    expect(r.secs).toBeLessThan(30);
+  }, 60000);
+  test("20000 pushes each beside a callback that reads another list", () => {
+    expect(html(D(`let t = []; const k = [1, 2]; let i = 0; for (i < 20000) { t.push(k.map((x) => x + i)[0]); i = i + 1; } emit("<p>" + t.length + "," + t[19999] + "</p>");`))).toContain("<p>20000,20000</p>");
+  }, 60000);
+});
+
+describe("s482 r4 — HIGH-2: a substring search is linear (KMP), and agrees with JavaScript", () => {
+  test("100 worst-case indexOf calls on a 1 Mi-character string finish in seconds (idx100)", () => {
+    const r = timed(() => html(D(`const x = "a".repeat(1048576); const p = "a".repeat(2048) + "b" + "a".repeat(2048); let n = 0; for (let i = 0; i < 100; i = i + 1) { n = n + x.indexOf(p); } emit("<p>" + n + "</p>");`)));
+    expect(r.v).toContain("<p>-100</p>");
+    expect(r.secs).toBeLessThan(30);
+  }, 60000);
+  test("indexOf / includes / split / replace / replaceAll give JavaScript's answers", () => {
+    const cases = [["abcabcab", "cab"], ["aaaa", "aa"], ["a,b,,c,", ","], ["xyz", ""], ["", "q"], ["ababab", "abab"]];
+    for (const [x, p] of cases) {
+      const want = `${x.indexOf(p)}|${x.includes(p)}|${x.split(p).join("/")}|${x.replace(p, "-")}|${x.replaceAll(p, "-")}`;
+      expect(html(D(`const x = ${JSON.stringify(x)}; const p = ${JSON.stringify(p)}; emit("<p>" + x.indexOf(p) + "|" + x.includes(p) + "|" + x.split(p).join("/") + "|" + x.replace(p, "-") + "|" + x.replaceAll(p, "-") + "</p>");`))).toContain(`<p>${want}</p>`);
+    }
+  }, 60000);
+});
+
+describe("s482 r4 — HIGH-3: ONE emit budget per compile, imported files included", () => {
+  test("two files each emitting 600000 characters: the second is refused", () => {
+    const blk = `<div>^{ emit("abcdef".repeat(100000)); }</div>`;
+    const files = [
+      { path: "app.scrml", src: `<program>\nimport { h1 } from './c1.scrml';\n${blk}\n</program>\n` },
+      { path: "c1.scrml", src: `\${ export function h1() { return 1; } }\n${blk}\n` },
+    ];
+    const r = frontEndStdlib(mods, files, "app.scrml");
+    const d = r.diags.find((x) => x.code === "E-META-EVAL-001");
+    expect(d?.message ?? "").toContain("past the emit budget (1048576 characters");
+  }, 60000);
+});
+
+describe("s482 r4 — HIGH-4 / MED-1: the fragment reader counts and stops (attributes, nesting, plain markup)", () => {
+  test("an element of more than 1024 attributes is refused before the reader's quadratic range (uattrs150000)", () => {
+    const r = timed(() => evalErr(D(`emit("<i" + " a".repeat(150000) + "></i>");`)));
+    expect(r.v).toContain("more than 1024 attributes");
+    expect(r.secs).toBeLessThan(10);
+    expect(errs(run(D(`let e = "<i"; for (let i = 0; i < 1024; i = i + 1) { e = e + " data-a" + i; } emit(e + "></i>");`)))).toEqual([]);
+  }, 60000);
+  test("the attributes of all emitted elements are bounded (32768)", () => {
+    expect(evalErr(D(`let e = "<i"; for (let i = 0; i < 1000; i = i + 1) { e = e + " data-a" + i; } emit((e + "></i>").repeat(40));`))).toContain("32768 attributes");
+  }, 60000);
+  test("nesting past 256 levels is refused — no RangeError (deep7000, pre/code pairs)", () => {
+    expect(evalErr(D(`emit("<b>".repeat(7000) + "x" + "</b>".repeat(7000));`))).toContain("deeper than 256 levels");
+    expect(evalErr(D(`emit("<pre>" + "<code>".repeat(20000) + "</code>".repeat(20000) + "</pre>");`))).toContain("deeper than 256 levels");
+    expect(errs(run(D(`emit("<b>".repeat(200) + "x" + "</b>".repeat(200));`)))).toEqual([]);
+  }, 60000);
+  test("output that is not plain markup stops the reader before a logic / CSS reader runs (paren10000, interp3000)", () => {
+    const one = (body) => { const r = run(D(body)); expect(errs(r)).toEqual(["E-META-EVAL-002"]); return r.diags.find((d) => d.code === "E-META-EVAL-002").message; };
+    const r = timed(() => one(`emit("$" + "{" + "(".repeat(10000) + "1" + ")".repeat(10000) + "}");`));
+    expect(r.v).toContain("logic block");
+    expect(one(`emit("<b>$" + "{1}</b>");`)).toContain("logic block");
+    expect(one(`emit(("<b>$" + "{").repeat(3000) + "1" + "}</b>".repeat(3000));`)).toContain("logic block");
+    expect(one(`emit("<i a={" + "{".repeat(10000) + "}".repeat(10000) + "}></i>");`)).toContain("not quoted");
+    expect(one(`emit("#" + "{ p { color: red; } }");`)).toContain("CSS");
+    expect(r.secs).toBeLessThan(10);
+  }, 60000);
+  test("a namespaced attribute is still named for what it is (r1 LOW-4)", () => {
+    const r = run(D(`emit("<a xlink:href=\\"x\\">x</a>");`));
+    expect(errs(r)).toEqual(["E-META-EVAL-002"]);
+    expect(r.diags.find((d) => d.code === "E-META-EVAL-002").message).toContain("namespaced attribute");
+  });
+  test("the gate reports at most 32 distinct faults, then one line", () => {
+    const r = run(D(`let s = ""; for (let i = 0; i < 100; i = i + 1) { s = s + "<i bad" + i + "=\\"1\\"></i>"; } emit(s);`));
+    const n = r.diags.filter((d) => d.code === "E-META-EVAL-002").length;
+    expect(n).toBe(33);
+  }, 60000);
+});
+
+describe("s482 r4 — LOW-1: a bare variant in every typed position is E-TYPE-063 (§14.10)", () => {
+  const T = (body) => P(`    type C:enum = { A, B }\n<div id="m">^{ ${body} }</div>`);
+  test("assignment, typed parameter, typed return, comparison", () => {
+    expect(errs(run(T(`let x: C = .A; x = .Zzz; emit("<p>" + x + "</p>");`)))).toEqual(["E-TYPE-063"]);
+    expect(errs(run(T(`fn f(c: C) { return c; } emit("<p>" + f(.Zzz) + "</p>");`)))).toEqual(["E-TYPE-063"]);
+    expect(errs(run(T(`fn f() -> C { return .Zzz; } emit("<p>" + f() + "</p>");`)))).toEqual(["E-TYPE-063"]);
+    expect(errs(run(T(`let x: C = .A; emit("<p>" + (x == .Zzz) + "</p>");`)))).toEqual(["E-TYPE-063"]);
+  });
+  test("the declared variants stay legal in every one of those positions", () => {
+    expect(html(T(`let x: C = .A; x = .B; fn f(c: C) -> C { return .A; } emit("<p>" + x + f(.B) + (x == .B) + "</p>");`))).toContain("<p>BAtrue</p>");
+  });
+});
+
+describe("s482 r4 — LOW-2: a binding scan is charged (frame size × reads)", () => {
+  test("20000 bindings and a write loop stop at the step bound quickly (frame20000)", () => {
+    let body = "";
+    for (let i = 0; i < 20000; i++) body += `let v${i} = ${i}; `;
+    body += `let k = 0; for (let i = 0; i < 1000000; i = i + 1) { v0 = v0 + 1; k = k + 1; } emit("<p>" + k + "</p>");`;
+    const r = timed(() => evalErr(D(body)));
+    expect(r.v).toContain("step bound");
+    expect(r.secs).toBeLessThan(15);
+  }, 120000);
 });

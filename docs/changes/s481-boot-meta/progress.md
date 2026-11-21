@@ -76,3 +76,17 @@ Rulings: user-voice-scrml.md S480 census build order item 2; ruling:user-voice-s
       emitted output 0 diffs vs pre-r3, 68 vs main all meta; corpus 71 / 19 clean, per-program identical to pre-r3;
       impl#1 meta 68/68; CI checks job green; 145 probes all < 0.5 GB / 2 s.
 - gap filed: g-boot-fragment-reader-superlinear-s482 (pre-existing).
+
+## r4 (S482 — re-review ~/.cache/scrml/review/s482-2045-r3rev/review.md, brief s482-briefs/fix-2045-r4.md)
+- [x] merge origin/main 2eba1eb75 (merge commit 79fa24d34, clean; 0 `while` in meta / emit-gate)
+- [x] cost model first: ~/.cache/scrml/review/s482-boot-meta-r4/model.md (invariant + every host op; BUG rows fixed)
+- [x] HIGH-1 OWNED sound: callback made after the other args (env = caller frames), runs on the caller's own set;
+      kept fns pinned; evalCaptured isolated; in-place push checks the write rules first
+- [x] HIGH-2 KMP findStr / splitStr (indexOf, includes, split, replace, replaceAll); replaceAll("") = JS
+- [x] HIGH-3 one emit budget per compile (metaFiles carries MUsed)
+- [x] HIGH-4 + MED-1 parse.scrml FRAGMENT MODE (reader counts: nodes, attrs, attrs/element, depth, diags; plain only)
+- [x] LOW-1 E-TYPE-063 in assignment / typed param / typed return / comparison (FX.tys, FX.ret)
+- [x] LOW-2 + class: binding scans/copies charged (findB, declare, rebind, pins, owned keys, records, args, keepFn work)
+- [x] gate reasons capped (32 + summary), respan by halves, nsAttrTag linear, url.scrml srcset/runs linear
+- [x] tests: meta-s481.test.js "s482 r4" (16 tests)
+- [ ] SPEC §22.4 text, gates, PR body
