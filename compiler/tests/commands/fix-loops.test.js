@@ -391,3 +391,170 @@ describe("S482 MED-1 — the top-check spelling refuses a body declaration that 
     expect(n("while (o.c != 1) { let c = 2; }")).toBe(n("for (;;) { if (!(o.c != 1)) { break; } let c = 2; }"));
   });
 });
+
+// ---------------------------------------------------------------------------
+// S482 review MED-1 of #2051 — a name impl#1's tokenizer reads as KEYWORD (`from`, `get`, `type`, …)
+// is still a binding name. The token check itself catches the capture, independent of the verify.
+// ---------------------------------------------------------------------------
+
+describe("S482 #2051 MED-1 — a contextual keyword used as a variable name is a name to the capture check", () => {
+  // Measured (impl#1, S482): of impl#1's KEYWORDS, exactly these compile as a `let` name read in a
+  // `while` head and shadowed in its body (0 errors). The other 40 are refused by impl#1 there.
+  const BINDABLE = ["animationFrame", "as", "async", "broadcast", "changes", "cleanup", "disconnect", "env",
+    "fail", "fn", "from", "get", "given", "is", "lift", "lin", "match", "navigate", "of", "partial", "reset",
+    "server", "set", "transaction", "type", "upload", "use", "using", "when"];
+  const NOT_BINDABLE = ["await", "break", "case", "catch", "class", "const", "continue", "default", "delete",
+    "do", "else", "export", "extends", "false", "finally", "for", "function", "if", "import", "in",
+    "instanceof", "let", "new", "not", "null", "public", "return", "static", "super", "switch", "this",
+    "throw", "true", "try", "typeof", "undefined", "void", "while", "with", "yield"];
+  const fnSrc = (pre, loop) => prog(`    function f(s) {\n        let n = 0;\n        let o = { from: "a" };\n        ${pre}\n        ${loop}\n        return n;\n    }`) + "<p>${f(\"abc\")}</p>\n";
+  const whileOf = (w, decl = `let ${w} = s.charAt(n);`, cond = `${w} != "x" && n < 3`) =>
+    fnSrc(`let ${w} = "a";`, `while (${cond}) {\n            ${decl}\n            n = n + 1;\n        }`);
+  const doOf = (w) => fnSrc(`let ${w} = "a";`, `do {\n            let ${w} = s.charAt(n);\n            n = n + 1;\n        } while (${w} != "x" && n < 3);`);
+  /** Run the `function f(s)` of a source as JS (the shape impl#1 emits for this plain-JS subset). */
+  const run = (src) => {
+    const a = src.indexOf("function f(s)");
+    const b = src.indexOf("\n}\n</program>");
+    try { return new Function(`${src.slice(a, b)}\nreturn f("abc");`)(); } catch (e) { return `THROWS ${e.constructor.name}`; }
+  };
+
+  test("the measured list is impl#1's whole KEYWORDS table (a keyword added there must be measured here)", async () => {
+    const { KEYWORDS } = await import("../../src/tokenizer.ts");
+    expect([...BINDABLE, ...NOT_BINDABLE].sort()).toEqual([...KEYWORDS].sort());
+  });
+
+  test("every bindable keyword compiles as a variable name with impl#1 (the cases below are real programs)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "fix-loops-kw-"));
+    try {
+      for (const w of BINDABLE) {
+        const p = join(dir, `kw_${w}.scrml`);
+        writeFileSync(p, whileOf(w));
+        const r = compileScrml({ inputFiles: [p], write: false, log: () => {} });
+        expect([w, (r.errors ?? []).filter((e) => e.severity !== "warning").map((e) => e.code)]).toEqual([w, []]);
+      }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  test("top-check `while`: `let <kw>` in the body shadowing the condition's `<kw>` is refused by the token check (verify:false)", () => {
+    for (const w of BINDABLE) {
+      if (w === "of") continue; // a head holding `of` at its top level is refused before the capture check
+      const src = whileOf(w);
+      expect([w, run(src)]).toEqual([w, 3]);
+      const r = fixLoops(src, { filePath: F, verify: false, interim: true });
+      expect([w, r.changed]).toEqual([w, false]);
+      expect(r.blockers.map((b) => b.reason).join("\n")).toContain(`declares \`${w}\`, which the condition reads`);
+    }
+    expect(fixLoops(whileOf("of"), { filePath: F, verify: false, interim: true }).changed).toBe(false);
+  });
+
+  test("the hazard is real: the top-check spelling of the keyword-named loop throws where the `while` returned 3", () => {
+    const before = new Function("s", "let from = \"a\"; let n = 0; while (from != \"x\" && n < 3) { let from = s.charAt(n); n = n + 1; } return n;");
+    const after = new Function("s", "let from = \"a\"; let n = 0; for (;;) { if (!(from != \"x\" && n < 3)) { break; } let from = s.charAt(n); n = n + 1; } return n;");
+    expect(before("abc")).toBe(3);
+    expect(() => after("abc")).toThrow(ReferenceError);
+  });
+
+  test("`function` / `fn` / a later declarator / `const` named by a keyword capture too", () => {
+    for (const d of ["function from() { return 1; }", "fn from() { return 1; }", "let k = 1, from = s.charAt(n);", "const from = s.charAt(n);"]) {
+      const r = fixLoops(whileOf("from", d), { filePath: F, verify: false, interim: true });
+      expect([d, r.changed]).toEqual([d, false]);
+      expect(r.blockers.map((b) => b.reason).join("\n")).toContain("declares `from`, which the condition reads");
+    }
+  });
+
+  test("`do … while`: a keyword-named body declaration the condition reads is refused (verify:false)", () => {
+    for (const w of BINDABLE) {
+      const r = fixLoops(doOf(w), { filePath: F, verify: false, interim: true });
+      expect([w, r.changed]).toEqual([w, false]);
+      expect(r.blockers.map((b) => b.reason).join("\n")).toContain(`declares \`${w}\``);
+    }
+  });
+
+  test("runtime proof: the safe siblings are still rewritten (verify on), and the rewrite returns what the `while` did", () => {
+    const cases = [
+      whileOf("from", "let k = s.charAt(n);"), // the body declares another name
+      whileOf("from", "let from = s.charAt(n);", `o.from != "x" && n < 3`), // the keyword only as a property name
+      whileOf("type", "if (n > 0) { let type = s.charAt(n); n = n + type.length - 1; }"), // a nested block
+    ];
+    for (const src of cases) {
+      const before = run(src);
+      expect(before).toBe(3);
+      const r = fixLoops(src, { filePath: F, verify: true, interim: true });
+      expect(r.blockers).toEqual([]);
+      expect(r.changed).toBe(true);
+      expect(r.output).toContain("for (;;) {");
+      expect(run(r.output)).toBe(before);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S482 review LOW-1 of #2051 — two harmless shapes the capture check refused: an arrow parameter in the
+// condition, and the name of a named function / class expression in the body.
+// ---------------------------------------------------------------------------
+
+describe("S482 #2051 LOW-1 — an arrow parameter is no read; a named function expression is no declaration", () => {
+  const litLoop = (decl, cond) => prog(`    function f(s) {\n        let c = "a";\n        let n = 0;\n        let xs = ["a", "b"];\n        while (${cond}) {\n            ${decl}\n            n = n + 1;\n        }\n        return n;\n    }`) + "<p>${f(\"abc\")}</p>\n";
+  const run = (src) => {
+    const a = src.indexOf("function f(s)");
+    const b = src.indexOf("\n}\n</program>");
+    try { return new Function(`${src.slice(a, b)}\nreturn f("abc");`)(); } catch (e) { return `THROWS ${e.constructor.name}`; }
+  };
+  const plan = (src, verify = false) => fixLoops(src, { filePath: F, verify, interim: true });
+
+  test("rewritten now, and the rewrite returns what the `while` did", () => {
+    const cases = [
+      ["let c = s.charAt(n);", "((c) => c)(\"a\") != \"x\" && n < 3"],
+      ["let c = s.charAt(n);", "xs.map(c => c.length).length != 9 && s != \"q\" && n < 3"],
+      ["let c = s.charAt(n);", "xs.some((c, d) => c) && s != \"q\" && n < 3"],
+      ["let c = s.charAt(n);", "xs.some(c => { return c == \"z\"; }) != true && n < 3"],
+      ["xs.map(function c(d) { return d; });", "c != \"x\" && n < 3"],
+      ["xs.map(d => d, function c() { return 1; });", "c != \"x\" && n < 3"],
+      // not scrml (E-VALUE-FUNCTION-STORED / E-CLASS-NOT-IN-SCRML), so checked without the verify:
+      ["let h = function c() { return 1; };", "c != \"x\" && n < 3", false],
+      ["let h = [function c() { return 1; }];", "c != \"x\" && n < 3", false],
+      ["let k = class c { };", "c != \"x\" && n < 3", false],
+    ];
+    for (const [decl, cond, verify = true] of cases) {
+      const src = litLoop(decl, cond);
+      const before = run(src);
+      expect([cond, before]).toEqual([cond, 3]);
+      const r = plan(src, verify);
+      expect([decl, cond, r.blockers]).toEqual([decl, cond, []]);
+      expect(r.output).toContain("for (;;) {");
+      expect([decl, cond, run(r.output)]).toEqual([decl, cond, before]);
+    }
+  });
+
+  test("still refused: a real read beside the parameter, a default / destructured / rest parameter, a body past its leading chain, a function declaration", () => {
+    const cases = [
+      ["let c = s.charAt(n);", "xs.some(d => d == c) && s != \"q\" && n < 3"], // `c` is no parameter here
+      ["let c = s.charAt(n);", "((d = c) => d)() != \"x\" && n < 3"], // a default reads the outer `c`
+      ["let c = s.charAt(n);", "(({ c }) => c)(o) != \"x\" && n < 3"],
+      ["let c = s.charAt(n);", "((...c) => c)(1) != \"x\" && n < 3"],
+      ["let c = s.charAt(n);", "xs.some(c => c == \"a\" && c != \"q\") && n < 3"], // read past the chain: refused (safe)
+      ["let c = s.charAt(n);", "((c) => c)(c) != \"x\" && n < 3"], // the argument reads the outer `c`
+      ["let c = s.charAt(n);", "((c) => c)(\"a\") != \"x\" && c != \"q\""],
+      ["function c() { return 1; }", "c != \"x\" && n < 3"],
+      ["if (n > 9) { break; }\n            function c() { return 1; }", "c != \"x\" && n < 3"],
+      ["class c { }", "c != \"x\" && n < 3"],
+    ];
+    for (const [decl, cond] of cases) {
+      const r = plan(litLoop(decl, cond));
+      expect([decl, cond, r.changed]).toEqual([decl, cond, false]);
+      expect(r.blockers.map((b) => b.reason).join("\n")).toContain("declares `c`, which the condition reads");
+    }
+  });
+
+  test("verify: the canonical fold reads a nested function's own parameters / name as its own, its defaults and body as reads", () => {
+    const n = (s) => normalizedArtifact(s, canonicalLoops);
+    const same = (cond) => expect(n(`while (${cond}) { let c = 2; f(c); }`)).toBe(n(`for (;;) { if (!(${cond})) { break; } let c = 2; f(c); }`));
+    const differ = (cond) => expect(n(`while (${cond}) { let c = 2; f(c); }`)).not.toBe(n(`for (;;) { if (!(${cond})) { break; } let c = 2; f(c); }`));
+    same("((c) => c)(1) != 1");
+    same("xs.some(({ c }) => c)");
+    same("(function c(d) { return d; })(1)");
+    differ("xs.some((d = c) => d)"); // a default reads the enclosing `c`
+    differ("xs.some((d) => d == c)");
+    differ("((c) => c)(c)");
+  });
+});
