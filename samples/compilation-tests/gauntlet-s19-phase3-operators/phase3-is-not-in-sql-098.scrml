@@ -1,7 +1,7 @@
+<program>
 // `is not` in a ?{} predicate — SQL has its own NULL semantics (IS NULL)
 ${
-    let rows = ?{ SELECT id, name FROM users WHERE deleted_at IS NULL }.all()
+    let rows = ?{ SELECT id, name FROM users WHERE deleted_at IS NULL }.all();
 }
-<program>
     <p>${rows.length}</>
 </>

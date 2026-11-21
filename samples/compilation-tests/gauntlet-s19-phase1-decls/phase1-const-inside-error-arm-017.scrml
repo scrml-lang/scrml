@@ -1,27 +1,27 @@
+<program reset="none">
 // const inside an error handler arm body
-${
     type PaymentError:enum = {
         InvalidAmount(reason: string)
         Declined(code: number)
     }
 
     function pay(amount) ! PaymentError {
-        if (amount < 0) { fail .InvalidAmount("negative") }
-        return amount
+        if (amount < 0) { fail .InvalidAmount("negative"); }
+        return amount;
     }
 
     function safePay(a) {
         let result = pay(a) !{
             .InvalidAmount(reason) => {
-                const fallback = 0
-                return fallback
-            }
+                const fallback = 0;
+                return fallback;
+            },
             .Declined(code) => {
-                const errCode = code
-                return errCode
+                const errCode = code;
+                return errCode;
             }
-        }
-        return result
+        };
+        return result;
     }
-}
 <p>${safePay(-1)}</>
+</program>

@@ -3,10 +3,10 @@
     ${
         server function checkAuth() {
             if (!session.isAuth) {
-                navigate("/login")
+                navigate("/login");
             }
         }
-        checkAuth()
+        checkAuth();
     }
     <p>protected</>
 </>

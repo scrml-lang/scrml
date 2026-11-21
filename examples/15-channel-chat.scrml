@@ -40,7 +40,7 @@
       <messages> = []
 
       function postMessage(author, body) {
-        @messages = [...@messages, { author, body, ts: Date.now() }]
+        @messages = [...@messages, { author, body, ts: Date.now() }];
       }
     }
   </>
@@ -52,16 +52,16 @@
   // this is a `function` (not `fn` — pure-fn category forbids
   // non-deterministic calls per §48 / E-FN-004).
   function formatTime(ms) {
-    const d = new Date(ms)
-    const hh = String(d.getHours()).padStart(2, "0")
-    const mm = String(d.getMinutes()).padStart(2, "0")
-    return `${hh}:${mm}`
+    const d = new Date(ms);
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    return `${hh}:${mm}`;
   }
 
   function send() {
-    if (@draft.trim() == "" || @username.trim() == "") return
-    postMessage(@username, @draft)
-    reset(@draft)
+    if (@draft.trim() == "" || @username.trim() == "") return;
+    postMessage(@username, @draft);
+    reset(@draft);
   }
 
   // Chat-shell + header styles — co-located with the outer chat wrapper.
@@ -123,7 +123,7 @@
           <span class="author">${m.author}</span>
           <span class="body">${m.body}</span>
           <time class="ts">${formatTime(m.ts)}</time>
-        </li>
+        </li>;
       } }
     </ul>
 

@@ -1,8 +1,6 @@
 // Dynamic class via template-literal attr + class: directive combined.
 <program>
-    ${
         <themeMode> = "dark"
         <active> = false
-    }
     <div class="btn btn-${@themeMode}" class:active=@active>label</div>
 </program>

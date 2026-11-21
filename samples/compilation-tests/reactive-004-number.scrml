@@ -1,3 +1,4 @@
+<program reset="none">
 // reactive-004-number.scrml
 // Reactive number variable. Tests: @ with numeric values.
 
@@ -5,3 +6,4 @@
     ${ <temperature> = 72.5 }
     <p>Temperature set</>
 </div>
+</program>

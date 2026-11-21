@@ -83,8 +83,8 @@
 
     <timer interval=1000 running=@running>
         ${
-            @count = @count + 1
-            @history = [@count]
+            @count = @count + 1;
+            @history = [@count];
         }
     </>
 
@@ -101,18 +101,17 @@
     // FUNCTIONS
     // -------------------------------------------------------------------------
 
-    ${
         function resetDashboard() {
-            @count = 0
-            @history = []
+            @count = 0;
+            @history = [];
         }
 
         function toggleTimer() {
-            @running = !@running
+            @running = !@running;
         }
 
         function toggleTheme() {
-            @darkTheme = !@darkTheme
+            @darkTheme = !@darkTheme;
         }
 
         // FRICTION: I want a computed "average" over @history.
@@ -130,39 +129,39 @@
 
         function getAverage() {
             if (@history.length == 0) {
-                return 0
+                return 0;
             }
-            let sum = 0
+            let sum = 0;
             for (let i = 0; i < @history.length; i++) {
-                sum = sum + @history[i]
+                sum = sum + @history[i];
             }
-            return sum / @history.length
+            return sum / @history.length;
         }
 
         function getMin() {
             if (@history.length == 0) {
-                return 0
+                return 0;
             }
-            let min = @history[0]
+            let min = @history[0];
             for (let i = 1; i < @history.length; i++) {
                 if (@history[i] < min) {
-                    min = @history[i]
+                    min = @history[i];
                 }
             }
-            return min
+            return min;
         }
 
         function getMax() {
             if (@history.length == 0) {
-                return 0
+                return 0;
             }
-            let max = @history[0]
+            let max = @history[0];
             for (let i = 1; i < @history.length; i++) {
                 if (@history[i] > max) {
-                    max = @history[i]
+                    max = @history[i];
                 }
             }
-            return max
+            return max;
         }
 
         // Bar chart height: normalize a value against the current max.
@@ -172,13 +171,12 @@
         // that returns a mapping function, or use a plain function. Here we use
         // a plain function. No surprise -- same in Svelte for parametric derived.
         function barHeight(value) {
-            let maxVal = getMax()
+            let maxVal = getMax();
             if (maxVal == 0) {
-                return 0
+                return 0;
             }
-            return (value / maxVal) * 100
+            return (value / maxVal) * 100;
         }
-    }
 
     // -------------------------------------------------------------------------
     // MARKUP
@@ -281,16 +279,16 @@
 
             <div class="chart-bars">
                 ${
-                    let barIndex = 0
+                    let barIndex = 0;
                     for (let val of @history) {
-                        let h = barHeight(val)
-                        let idx = barIndex
-                        barIndex = barIndex + 1
+                        let h = barHeight(val);
+                        let idx = barIndex;
+                        barIndex = barIndex + 1;
                         lift <div class="bar-wrapper">
                             <div class="bar" style="height: ${h}%">
                             </>
                             <span class="bar-label">${idx}</>
-                        </>
+                        </>;
                     }
                 }
             </>
@@ -311,7 +309,7 @@
                 // FRICTION: No DOM refs, so "scroll to bottom" is impossible here.
                 // In Svelte: bind:this={el} then el.scrollIntoView().
                 // scrml has no bind:this / ref system. Can't access DOM nodes.
-                let _ = @count
+                let _ = @count;
             }
         }
 

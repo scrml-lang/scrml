@@ -1,9 +1,9 @@
 // Keyed reconciliation via key= on lifted element.
 <program>
-    ${ <todos> = [{id:1,text:"a"},{id:2,text:"b"}] }
+     <todos> = [{id:1,text:"a"},{id:2,text:"b"}] 
     <ul>${
         for (let t of @todos) {
-            lift <li key=t.id>${t.text}</>
+            lift <li key=t.id>${t.text}</>;
         }
     }</>
 </program>

@@ -1,7 +1,7 @@
+<program reset="none">
 // fn with -> return type annotation
-${
     fn add(a: number, b: number) -> number {
-        return a + b
+        return a + b;
     }
-}
 <p>${add(1, 2)}</>
+</program>

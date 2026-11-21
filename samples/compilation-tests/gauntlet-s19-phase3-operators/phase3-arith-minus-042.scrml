@@ -1,6 +1,6 @@
-${
-    const diff = 10 - 3
-}
 <program>
+${
+    const diff = 10 - 3;
+}
     <p>${diff}</>
 </>

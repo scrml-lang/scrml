@@ -1,8 +1,8 @@
+<program>
 // `??` — nullish coalescing with `not`
 ${
-    let x: string | not = not
-    const name = x ?? "default"
+    let x: string | not = not;
+    const name = x ?? "default";
 }
-<program>
     <p>${name}</>
 </>

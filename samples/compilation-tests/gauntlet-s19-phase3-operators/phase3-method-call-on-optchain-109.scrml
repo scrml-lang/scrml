@@ -1,9 +1,9 @@
+<program>
 // method call after optional chain
 ${
     type User:struct = { name: string }
-    let u: User | not = not
-    const upper = u?.name.toUpperCase() ?? ""
+    let u: User | not = not;
+    const upper = u?.name.toUpperCase() ?? "";
 }
-<program>
     <p>${upper}</>
 </>

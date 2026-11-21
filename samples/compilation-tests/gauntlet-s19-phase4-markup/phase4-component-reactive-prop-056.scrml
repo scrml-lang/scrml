@@ -1,12 +1,10 @@
 // Reactive prop passed to component (bare @var, no braces).
 <program>
-    ${
         <title> = "Hello"
         const Card = <div class="card" props={
             label: string,
         }>
             <h2>${label}</>
-        </>
-    }
+        </>;
     <Card label=@title/>
 </program>

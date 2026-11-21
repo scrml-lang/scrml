@@ -1,6 +1,6 @@
-${
-    const empty = []
-}
 <program>
+${
+    const empty = [];
+}
     <p>${empty.length}</>
 </>

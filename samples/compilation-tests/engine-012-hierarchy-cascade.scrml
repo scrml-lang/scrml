@@ -44,10 +44,8 @@
 //     body is Bug #2 (Wave 4 codegen follow-on).
 
 <program>
-${
     type AppMode:enum  = { Title, Playing, Paused }
     type PlayMode:enum = { Exploring, Battle, Inventory }
-}
 
 <engine for=AppMode initial=.Title>
     <Title rule=.Playing></>

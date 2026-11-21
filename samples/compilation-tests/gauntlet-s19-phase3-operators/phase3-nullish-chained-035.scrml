@@ -1,9 +1,9 @@
+<program>
 // chained `??`
 ${
-    let a: string | not = not
-    let b: string | not = not
-    const pick = a ?? b ?? "fallback"
+    let a: string | not = not;
+    let b: string | not = not;
+    const pick = a ?? b ?? "fallback";
 }
-<program>
     <p>${pick}</>
 </>

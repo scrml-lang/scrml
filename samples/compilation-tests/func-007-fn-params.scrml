@@ -1,11 +1,13 @@
+<program reset="none">
 // func-007-fn-params.scrml
 // fn shorthand with parameters. Tests: fn with param list.
 
 <div>
     ${
         fn multiply(x, y) {
-            return x * y
+            return x * y;
         }
     }
     <p>fn with params</>
 </div>
+</program>

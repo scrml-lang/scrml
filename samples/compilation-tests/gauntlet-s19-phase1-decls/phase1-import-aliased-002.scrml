@@ -1,5 +1,5 @@
+<program reset="none">
 // Aliased named import — uses ES `as` syntax. Spec doesn't explicitly cover `as`.
-${
-    import { formatStatus as fmt } from './_helper-types.scrml'
-}
+    import { formatStatus as fmt } from './_helper-types.scrml';
 <p>${fmt(.Active)}</>
+</program>

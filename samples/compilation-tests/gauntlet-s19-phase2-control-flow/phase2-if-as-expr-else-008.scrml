@@ -1,10 +1,10 @@
+<program>
 // if-as-expression with else — all arms lift same type (§17.6)
 ${
-    let x = 5
-    let label = if (x > 0) { lift "pos" } else { lift "neg" }
-    log(label)
-    function log(s: string) { let _ = s }
+    let x = 5;
+    let label = if (x > 0) { lift "pos"; } else { lift "neg"; };
+    log(label);
+    function log(s: string) { let _ = s; }
 }
-<program>
     <p>ok</>
 </>

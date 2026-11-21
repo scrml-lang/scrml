@@ -1,19 +1,19 @@
+<program>
 // `is` used in match arm body (as ordinary boolean expr)
 ${
     type Role:enum = { Admin, User, Guest }
     type Status:enum = { Active, Banned }
-    let r:Role = .Admin
-    let s:Status = .Active
+    let r:Role = .Admin;
+    let s:Status = .Active;
     match r {
         .Admin -> {
             if (s is .Active) {
-                let _privileged = 1
+                let _privileged = 1;
             }
-        }
-        .User  -> { let _ = 1 }
-        .Guest -> { let _ = 1 }
+        },
+        .User  -> { let _ = 1; },
+        .Guest -> { let _ = 1; }
     }
 }
-<program>
     <p>ok</>
 </>

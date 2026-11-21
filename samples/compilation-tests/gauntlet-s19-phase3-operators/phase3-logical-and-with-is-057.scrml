@@ -1,12 +1,12 @@
+<program>
 // short-circuit with is and is not in compound condition
 ${
     type Status:enum = { Active, Banned }
-    let s:Status = .Active
-    let name: string | not = "alice"
+    let s:Status = .Active;
+    let name: string | not = "alice";
     if (s is .Active && name is given) {
-        let _both = 1
+        let _both = 1;
     }
 }
-<program>
     <p>ok</>
 </>

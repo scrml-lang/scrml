@@ -2,8 +2,8 @@
 // Test assert with equality. Tests: assert a == b pattern.
 
 ${
-    let name = "scrml"
-    let version = 1
+    let name = "scrml";
+    let version = 1;
 }
 
 ~{ "equality assertions"

@@ -7,7 +7,6 @@
 
 // ---- Type Declarations ----
 
-${
     type Status:enum = {
         Todo
         InProgress
@@ -19,197 +18,188 @@ ${
         Medium
         High
     }
-}
 
 // ---- Reactive State ----
 
-${
     // Task list — source of truth (like useState([]))
-    @tasks = []
+    @tasks = [];
 
     // Filter state
-    @statusFilter = "All"
-    @searchText = ""
+    @statusFilter = "All";
+    @searchText = "";
 
     // Form state — add/edit task
-    @formTitle = ""
-    @formPriority = "Medium"
-    @formStatus = "Todo"
-    @editingId = not
-    @showForm = false
+    @formTitle = "";
+    @formPriority = "Medium";
+    @formStatus = "Todo";
+    @editingId = not;
+    @showForm = false;
 
     // Validation and save errors
-    @formError = not
-    @saveError = not
-}
+    @formError = not;
+    @saveError = not;
 
 // ---- Helper Functions ----
 
-${
     // Derived: filtered tasks (computed from @tasks, @statusFilter, @searchText)
     function filteredTasks() {
-        let result = @tasks
+        let result = @tasks;
         if (@statusFilter != "All") {
-            result = result.filter(function(t) { return t.status == @statusFilter })
+            result = result.filter(function(t) { return t.status == @statusFilter; });
         }
         if (@searchText.length > 0) {
-            let q = @searchText.toLowerCase()
-            result = result.filter(function(t) { return t.title.toLowerCase().includes(q) })
+            let q = @searchText.toLowerCase();
+            result = result.filter(function(t) { return t.title.toLowerCase().includes(q); });
         }
-        return result
+        return result;
     }
 
     // Derived: count per status (string-based since enum type declared but not runtime-typed here)
     function countByStatus(status) {
-        return @tasks.filter(function(t) { return t.status == status }).length
+        return @tasks.filter(function(t) { return t.status == status; }).length;
     }
 
     // Boolean helpers for if= attributes (complex expressions can't go in unquoted attrs)
     function hasTasks() {
-        return @tasks.length > 0
+        return @tasks.length > 0;
     }
 
     function noTasks() {
-        return @tasks.length == 0
+        return @tasks.length == 0;
     }
 
     function noFilterResults() {
-        return filteredTasks().length == 0
+        return filteredTasks().length == 0;
     }
 
     function isEditing() {
-        return !(@editingId is not)
+        return !(@editingId is not);
     }
 
     function hasFormError() {
-        return !(@formError is not)
+        return !(@formError is not);
     }
 
     function hasSaveError() {
-        return !(@saveError is not)
+        return !(@saveError is not);
     }
 
     // CSS class helpers
     function priorityClass(priority) {
-        if (priority == "High") { return "priority-high" }
-        if (priority == "Medium") { return "priority-medium" }
-        return "priority-low"
+        if (priority == "High") { return "priority-high"; }
+        if (priority == "Medium") { return "priority-medium"; }
+        return "priority-low";
     }
 
     function statusClass(status) {
-        if (status == "Done") { return "status-done" }
-        if (status == "InProgress") { return "status-inprogress" }
-        return "status-todo"
+        if (status == "Done") { return "status-done"; }
+        if (status == "InProgress") { return "status-inprogress"; }
+        return "status-todo";
     }
 
     function filterActive(filterValue) {
-        return @statusFilter == filterValue
+        return @statusFilter == filterValue;
     }
-}
 
 // ---- Server Functions ----
 
-${
     server function loadTasks() {
-        return ?{`SELECT id, title, status, priority FROM tasks ORDER BY id DESC`}.all() !{ _ :> [] }
+        return ?{`SELECT id, title, status, priority FROM tasks ORDER BY id DESC`}.all() !{ _ :> [] };
     }
 
     server function createTask(title, status, priority) {
-        ?{`INSERT INTO tasks (title, status, priority) VALUES (${title}, ${status}, ${priority})`}.run()
-        return ?{`SELECT id, title, status, priority FROM tasks ORDER BY id DESC`}.all() !{ _ :> [] }
+        ?{`INSERT INTO tasks (title, status, priority) VALUES (${title}, ${status}, ${priority})`}.run();
+        return ?{`SELECT id, title, status, priority FROM tasks ORDER BY id DESC`}.all() !{ _ :> [] };
     }
 
     server function updateTask(id, title, status, priority) {
-        ?{`UPDATE tasks SET title = ${title}, status = ${status}, priority = ${priority} WHERE id = ${id}`}.run()
-        return ?{`SELECT id, title, status, priority FROM tasks ORDER BY id DESC`}.all() !{ _ :> [] }
+        ?{`UPDATE tasks SET title = ${title}, status = ${status}, priority = ${priority} WHERE id = ${id}`}.run();
+        return ?{`SELECT id, title, status, priority FROM tasks ORDER BY id DESC`}.all() !{ _ :> [] };
     }
 
     server function deleteTask(id) {
-        ?{`DELETE FROM tasks WHERE id = ${id}`}.run()
-        return ?{`SELECT id, title, status, priority FROM tasks ORDER BY id DESC`}.all() !{ _ :> [] }
+        ?{`DELETE FROM tasks WHERE id = ${id}`}.run();
+        return ?{`SELECT id, title, status, priority FROM tasks ORDER BY id DESC`}.all() !{ _ :> [] };
     }
-}
 
 // ---- Client Event Handlers ----
 
-${
     function openAddForm() {
-        @editingId = not
-        @formTitle = ""
-        @formPriority = "Medium"
-        @formStatus = "Todo"
-        @formError = not
-        @showForm = true
+        @editingId = not;
+        @formTitle = "";
+        @formPriority = "Medium";
+        @formStatus = "Todo";
+        @formError = not;
+        @showForm = true;
     }
 
     function openEditForm(task) {
-        @editingId = task.id
-        @formTitle = task.title
-        @formStatus = task.status
-        @formPriority = task.priority
-        @formError = not
-        @showForm = true
+        @editingId = task.id;
+        @formTitle = task.title;
+        @formStatus = task.status;
+        @formPriority = task.priority;
+        @formError = not;
+        @showForm = true;
     }
 
     function closeForm() {
-        @showForm = false
-        @editingId = not
-        @formError = not
+        @showForm = false;
+        @editingId = not;
+        @formError = not;
     }
 
     function validateForm() {
         if (@formTitle.trim().length == 0) {
-            @formError = "Title is required"
-            return false
+            @formError = "Title is required";
+            return false;
         }
         if (@formTitle.trim().length > 200) {
-            @formError = "Title must be 200 characters or fewer"
-            return false
+            @formError = "Title must be 200 characters or fewer";
+            return false;
         }
-        return true
+        return true;
     }
 
     function saveTask() {
         if (!validateForm()) {
-            return
+            return;
         }
-        @formError = not
-        @saveError = not
+        @formError = not;
+        @saveError = not;
         if (!(@editingId is not)) {
-            @tasks = updateTask(@editingId, @formTitle.trim(), @formStatus, @formPriority)
+            @tasks = updateTask(@editingId, @formTitle.trim(), @formStatus, @formPriority);
         } else {
-            @tasks = createTask(@formTitle.trim(), @formStatus, @formPriority)
+            @tasks = createTask(@formTitle.trim(), @formStatus, @formPriority);
         }
-        closeForm()
+        closeForm();
     }
 
     function removeTask(id) {
-        @tasks = deleteTask(id)
+        @tasks = deleteTask(id);
     }
 
     function setStatusFilter(status) {
-        @statusFilter = status
+        @statusFilter = status;
     }
 
     function handleSearchInput() {
-        @searchText = event.target.value
+        @searchText = event.target.value;
     }
 
     function handleTitleInput() {
-        @formTitle = event.target.value
+        @formTitle = event.target.value;
     }
 
     function handlePriorityInput() {
-        @formPriority = event.target.value
+        @formPriority = event.target.value;
     }
 
     function handleStatusFormInput() {
-        @formStatus = event.target.value
+        @formStatus = event.target.value;
     }
-}
 
 // ---- Initialize on load (like useEffect(fn, []) — runs once on mount) ----
-${ @tasks = loadTasks() }
+ @tasks = loadTasks(); 
 
 // ---- Markup ----
 

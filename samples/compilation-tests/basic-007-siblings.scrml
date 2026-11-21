@@ -1,6 +1,8 @@
+<program reset="none">
 // basic-007-siblings.scrml
 // Sibling tags at the same level. Tests: multiple root-level elements.
 
 <header>Site Header</>
 <main>Main Content</>
 <footer>Site Footer</>
+</program>

@@ -16,21 +16,21 @@
 
 <page db="../../dispatch.db" auth="required">
 
-  import { formatRate } from '../../components/load-card.scrml'
+  import { formatRate } from '../../components/load-card.scrml';
   import {
       invoiceStatus, invoiceStatusClasses, invoiceStatusLabel, formatIsoDate
-  } from '../../components/invoice-card.scrml'
-  import { createSessionStore } from 'scrml:store'
-  import { SESSION_DB_PATH } from '../../models/auth.scrml'
+  } from '../../components/invoice-card.scrml';
+  import { createSessionStore } from 'scrml:store';
+  import { SESSION_DB_PATH } from '../../models/auth.scrml';
   // M5: centralized real-time channel — see SPEC §38.12.6.
-  import { "customer-events" as customerEvents } from '../../channels/customer-events.scrml'
+  import { "customer-events" as customerEvents } from '../../channels/customer-events.scrml';
 
   <db src="../../dispatch.db" protect="password_hash" tables="users, customers, invoices, loads, lin_tokens">
 
     ${
         // Today as ISO date — used for overdue detection. Hardcoded to seed
         // window so the demo isn't anchored to a moving target.
-        const TODAY_ISO = "2026-04-29"
+        const TODAY_ISO = "2026-04-29";
 
 
         // F-AUTH-001 fallback: role gate. Returns user + customer + invoices
@@ -43,13 +43,13 @@
             // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
             // compiles to its own public route, and one taking a userId would let any caller
             // look up any user (S443 post-merge review of #1180).
-            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get();
             if (user is not || user.role != "customer") {
-                return { unauthorized: true }
+                return { unauthorized: true };
             }
 
-            const customer = ?{`SELECT id, name FROM customers WHERE user_id = ${user.id}`}.get()
-            if (customer is not) return { error: "No customer record." }
+            const customer = ?{`SELECT id, name FROM customers WHERE user_id = ${user.id}`}.get();
+            if (customer is not) return { error: "No customer record." };
 
             const invoices = ?{`
                 SELECT
@@ -68,9 +68,9 @@
                 LEFT JOIN loads l ON l.id = i.load_id
                 WHERE i.customer_id = ${customer.id}
                 ORDER BY i.sent_at DESC
-            `}.all()
+            `}.all();
 
-            return { user: user, customer: customer, invoices: invoices }
+            return { user: user, customer: customer, invoices: invoices };
         }
 
         // Demo "self-pay" — sets paid_at + a synthetic payment_reference. Cross-
@@ -86,28 +86,28 @@
             // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
             // compiles to its own public route, and one taking a userId would let any caller
             // look up any user (S443 post-merge review of #1180).
-            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get();
             if (user is not || user.role != "customer") {
-                return { unauthorized: true }
+                return { unauthorized: true };
             }
-            const customer = ?{`SELECT id FROM customers WHERE user_id = ${user.id}`}.get()
-            if (customer is not) return { error: "No customer record." }
+            const customer = ?{`SELECT id FROM customers WHERE user_id = ${user.id}`}.get();
+            if (customer is not) return { error: "No customer record." };
 
             // Verify ownership.
             const inv = ?{`
                 SELECT id, load_id, customer_id, paid_at FROM invoices WHERE id = ${invoiceId}
-            `}.get()
-            if (inv is not) return { error: "Invoice not found." }
+            `}.get();
+            if (inv is not) return { error: "Invoice not found." };
             if (inv.customer_id != customer.id) {
-                return { unauthorized: true }
+                return { unauthorized: true };
             }
             if (inv.paid_at) {
-                return { error: "Invoice already paid." }
+                return { error: "Invoice already paid." };
             }
 
             // Per F-LIN-001: SQL ?{} interpolation doesn't satisfy lin
             // consume; copy into template literal first.
-            const consumeMarker = `consume:${token}`
+            const consumeMarker = `consume:${token}`;
             // Atomic single-use guard: RETURNING yields a row only when this
             // UPDATE flipped consumed_at from NULL. `.run()` returns void
             // (§8.5.1), so the outcome is read from RETURNING via `.get()`;
@@ -120,19 +120,19 @@
                   AND load_id = ${inv.load_id}
                   AND consumed_at IS NULL
                 RETURNING token
-            `}.get()
+            `}.get();
             if (consumed is not) {
-                return { error: "Payment token already used or invalid." }
+                return { error: "Payment token already used or invalid." };
             }
 
-            const ref = `SELFPAY-DEMO-${invoiceId}`
+            const ref = `SELFPAY-DEMO-${invoiceId}`;
             ?{`
                 UPDATE invoices
                 SET paid_at = CURRENT_TIMESTAMP, payment_reference = ${ref}
                 WHERE id = ${invoiceId}
-            `}.run()
+            `}.run();
 
-            return { ok: true }
+            return { ok: true };
         }
 
         <currentUser> = not
@@ -152,43 +152,43 @@
         <highlightLoadId> = 0
 
         function getSessionToken() {
-            const c = document.cookie ? document.cookie : ""
-            const idx = c.indexOf("scrml_session=")
-            if (idx < 0) return ""
-            const tail = c.substring(idx + "scrml_session=".length)
-            const semi = tail.indexOf(";")
-            return semi < 0 ? tail : tail.substring(0, semi)
+            const c = document.cookie ? document.cookie : "";
+            const idx = c.indexOf("scrml_session=");
+            if (idx < 0) return "";
+            const tail = c.substring(idx + "scrml_session=".length);
+            const semi = tail.indexOf(";");
+            return semi < 0 ? tail : tail.substring(0, semi);
         }
 
         function readHighlightFromQuery() {
-            const search = window.location.search
-            if (!search) return 0
-            const idx = search.indexOf("load=")
-            if (idx < 0) return 0
-            const tail = search.substring(idx + "load=".length)
-            const amp = tail.indexOf("&")
-            const raw = amp < 0 ? tail : tail.substring(0, amp)
-            const n = parseInt(raw, 10)
-            return isNaN(n) ? 0 : n
+            const search = window.location.search;
+            if (!search) return 0;
+            const idx = search.indexOf("load=");
+            if (idx < 0) return 0;
+            const tail = search.substring(idx + "load=".length);
+            const amp = tail.indexOf("&");
+            const raw = amp < 0 ? tail : tail.substring(0, amp);
+            const n = parseInt(raw, 10);
+            return isNaN(n) ? 0 : n;
         }
 
         function refresh() {
-            const tok = getSessionToken()
-            const data = fetchInvoicesServer(tok)
+            const tok = getSessionToken();
+            const data = fetchInvoicesServer(tok);
             if (data.unauthorized) {
-                window.location.href = "/auth/login?reason=unauthorized"
-                return
+                window.location.href = "/auth/login?reason=unauthorized";
+                return;
             }
             if (data.error) {
-                @errorMessage = data.error
-                @loaded = true
-                return
+                @errorMessage = data.error;
+                @loaded = true;
+                return;
             }
-            @currentUser = data.user
-            @currentCustomer = data.customer
-            @invoiceRows = data.invoices
-            @highlightLoadId = readHighlightFromQuery()
-            @loaded = true
+            @currentUser = data.user;
+            @currentCustomer = data.customer;
+            @invoiceRows = data.invoices;
+            @highlightLoadId = readHighlightFromQuery();
+            @loaded = true;
         }
 
         // F-RI-001 RESOLVED (W4) — direct @-assignment on error path.
@@ -196,56 +196,56 @@
         // consumption. Replays / double-clicks rejected by DB guard.
         function markPaid(invoiceId, paymentToken) {
             if (!paymentToken || paymentToken == "") {
-                @errorMessage = "Payment token unavailable for this invoice."
-                return
+                @errorMessage = "Payment token unavailable for this invoice.";
+                return;
             }
-            const tok = getSessionToken()
-            const result = markPaidServer(tok, invoiceId, paymentToken)
+            const tok = getSessionToken();
+            const result = markPaidServer(tok, invoiceId, paymentToken);
             if (result.unauthorized) {
-                window.location.href = "/auth/login?reason=unauthorized"
-                return
+                window.location.href = "/auth/login?reason=unauthorized";
+                return;
             }
             if (result.error) {
-                @errorMessage = result.error
-                return
+                @errorMessage = result.error;
+                return;
             }
             // M5: broadcast invoice-paid so other tabs / dispatcher's
             // billing view update live.
-            const customerId = @currentCustomer ? @currentCustomer.id : 0
-            publishCustomerEvent("invoice-paid", customerId, invoiceId, 0)
-            refresh()
+            const customerId = @currentCustomer ? @currentCustomer.id : 0;
+            publishCustomerEvent("invoice-paid", customerId, invoiceId, 0);
+            refresh();
         }
 
         function setError(msg) {
-            @errorMessage = msg
+            @errorMessage = msg;
         }
 
         function logout() {
-            document.cookie = "scrml_session=; Path=/; Max-Age=0"
-            window.location.href = "/auth/login?logout=1"
+            document.cookie = "scrml_session=; Path=/; Max-Age=0";
+            window.location.href = "/auth/login?logout=1";
         }
 
         // Pure helper — does this invoice match the dropdown filter? `filter` is
         // the dropdown <option value> ("all" or an InvoiceStatus variant name).
         // The `match` dispatches the derived InvoiceStatus variant exhaustively.
         fn matchesFilter(inv: asIs, filter: string, today: string) -> boolean {
-            if (filter == "all") return true
+            if (filter == "all") return true;
             return match invoiceStatus(inv, today) {
-                .Paid        :> filter == "Paid"
-                .Overdue     :> filter == "Overdue"
+                .Paid        :> filter == "Paid",
+                .Overdue     :> filter == "Overdue",
                 .Outstanding :> filter == "Outstanding"
-            }
+            };
         }
 
         <lastSeenCustomerEventCount> = 0
         function ackCustomerEvents() {
-            @lastSeenCustomerEventCount = @currentCustomerEvents.length
-            refresh()
+            @lastSeenCustomerEventCount = @currentCustomerEvents.length;
+            refresh();
         }
 
         on mount {
             refresh()
-        }
+        };
     }
 
     <!-- M5: customer-events channel — see channels/customer-events.scrml.
@@ -313,8 +313,8 @@
                   <tbody>
                       ${
                           for (let inv of @invoiceRows) {
-                              if (!matchesFilter(inv, @filter, TODAY_ISO)) continue
-                              const rowClass = (inv.load_id == @highlightLoadId) ? "border-b border-slate-200 bg-yellow-50" : "border-b border-slate-200 hover:bg-slate-50"
+                              if (!matchesFilter(inv, @filter, TODAY_ISO)) continue;
+                              const rowClass = (inv.load_id == @highlightLoadId) ? "border-b border-slate-200 bg-yellow-50" : "border-b border-slate-200 hover:bg-slate-50";
                               lift <tr class="${rowClass}">
                                   <td class="px-3 py-3 text-sm">
                                       <a class="text-blue-600 hover:underline font-medium" href="/customer/loads/${inv.load_id}">
@@ -361,7 +361,7 @@
                                           ${formatIsoDate(inv.paid_at)}
                                       </>
                                   </td>
-                              </tr>
+                              </tr>;
                           }
                       }
                   </tbody>

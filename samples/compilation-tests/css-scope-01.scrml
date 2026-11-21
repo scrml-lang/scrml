@@ -49,7 +49,6 @@
 // PART 2: Component definitions with scoped CSS
 // =====================================================
 
-${
     // Badge: inline label component with selector-based #{} CSS
     const Badge = <span props={ label: string }>
         #{
@@ -65,10 +64,8 @@ ${
             }
         }
         <span class="badge">${label}</>
-    </>
-}
+    </>;
 
-${
     // Card: container component with BOTH selector CSS and flat-declaration CSS
     //   - Selector #{}: .card-wrapper and .card-title → @scope block in CSS
     //   - Flat declaration #{}: color and line-height → style="" on root element
@@ -92,8 +89,7 @@ ${
             line-height: 1.5;
         }
         <h2 class="card-title">${title}</>
-    </>
-}
+    </>;
 
 // =====================================================
 // PART 3: Usage — triggers CE expansion and @scope

@@ -1,7 +1,7 @@
 // const inside <program>
 <program>
     ${
-        const appName = "GauntletApp"
+        const appName = "GauntletApp";
     }
     <h1>${appName}</>
 </>

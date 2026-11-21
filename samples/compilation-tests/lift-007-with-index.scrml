@@ -1,13 +1,15 @@
+<program reset="none">
 // lift-007-with-index.scrml
 // Lift with index tracking. Tests: index counter in for loop.
 
 <ol>
     ${
-        let tasks = ["Design", "Implement", "Test", "Deploy"]
-        let idx = 0
+        let tasks = ["Design", "Implement", "Test", "Deploy"];
+        let idx = 0;
         for (let task of tasks) {
-            idx = idx + 1
-            lift <li>Step ${idx}: ${task}</>
+            idx = idx + 1;
+            lift <li>Step ${idx}: ${task}</>;
         }
     }
 </ol>
+</program>

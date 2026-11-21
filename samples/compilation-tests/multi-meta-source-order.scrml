@@ -11,13 +11,11 @@
 // side effect (to exercise the "completes-before-next" ordering guarantee
 // beyond raw emit position).
 
-${
   <log> = []
 
   function recordPhase(label: string) {
-    @log = [...@log, label]
+    @log = [...@log, label];
   }
-}
 
 ^{ recordPhase("block-1") }
 

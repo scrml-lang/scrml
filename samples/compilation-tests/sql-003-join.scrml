@@ -1,9 +1,11 @@
+<program reset="none">
 // sql-003-join.scrml
 // SQL with JOIN. Tests: ?{} with table join.
 
 <div>
     ${
-        let orders = ?{`SELECT o.id, u.name FROM orders o JOIN users u ON o.user_id = u.id`}
+        let orders = ?{`SELECT o.id, u.name FROM orders o JOIN users u ON o.user_id = u.id`};
     }
     <p>Join query</>
 </div>
+</program>

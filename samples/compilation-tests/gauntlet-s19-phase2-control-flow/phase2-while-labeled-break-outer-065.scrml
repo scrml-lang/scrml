@@ -1,21 +1,21 @@
+<program>
 // break to a labeled outer loop (§49.2.2)
 ${
-    let i = 0
-    let j = 0
-    let found = false
+    let i = 0;
+    let j = 0;
+    let found = false;
     outer: while (i < 3) {
         inner: while (j < 3) {
             if (i == 1 && j == 1) {
-                found = true
-                break outer
+                found = true;
+                break outer;
             }
-            j = j + 1
-        }
-        i = i + 1
-    }
-    log(found)
-    function log(b: bool) { let _ = b }
+            j = j + 1;
+        };
+        i = i + 1;
+    };
+    log(found);
+    function log(b: bool) { let _ = b; }
 }
-<program>
     <p>ok</>
 </>

@@ -1,10 +1,12 @@
+<program reset="none">
 // sql-005-insert.scrml
 // SQL INSERT. Tests: ?{} with write operation.
 
 <div>
     ${
-        let name = "Alice"
-        ?{`INSERT INTO users (name, email) VALUES ('Alice', 'alice@example.com')`}
+        let name = "Alice";
+        ?{`INSERT INTO users (name, email) VALUES ('Alice', 'alice@example.com')`};
     }
     <p>Insert done</>
 </div>
+</program>

@@ -1,16 +1,18 @@
+<program reset="none">
 // logic-015-multiline.scrml
 // Multi-line logic block with complex expressions. Tests: large logic blocks.
 
 <div>
     ${
-        let width = 800
-        let height = 600
-        let area = width * height
-        let aspectRatio = width / height
-        let isLandscape = width > height
-        let label = isLandscape ? "landscape" : "portrait"
-        let pixels = area
-        let megapixels = pixels / 1000000
+        let width = 800;
+        let height = 600;
+        let area = width * height;
+        let aspectRatio = width / height;
+        let isLandscape = width > height;
+        let label = isLandscape ? "landscape" : "portrait";
+        let pixels = area;
+        let megapixels = pixels / 1000000;
     }
     <p>Display calculations done</>
 </div>
+</program>

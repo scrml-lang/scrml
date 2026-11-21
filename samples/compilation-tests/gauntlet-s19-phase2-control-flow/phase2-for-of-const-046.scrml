@@ -1,13 +1,13 @@
+<program>
 // for (const x of xs)
 ${
-    let xs = [1, 2, 3]
-    let total = 0
+    let xs = [1, 2, 3];
+    let total = 0;
     for (const x of xs) {
-        total = total + x
+        total = total + x;
     }
-    log(total)
-    function log(n: number) { let _ = n }
+    log(total);
+    function log(n: number) { let _ = n; }
 }
-<program>
     <p>ok</>
 </>

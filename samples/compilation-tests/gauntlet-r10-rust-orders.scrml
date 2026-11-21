@@ -5,7 +5,6 @@
 // A Rust developer's exploration of scrml enums, match, and state machines.
 // Orders move: Pending -> Processing -> Shipped -> Delivered (or Cancelled).
 
-${
     // --- Type declarations ---
     // In Rust this would be:
     //   #[derive(Debug, Clone, PartialEq)]
@@ -63,18 +62,18 @@ ${
         //   match status { OrderStatus::Pending => vec![Processing], ... }
         // That doesn't work here because status is a string from the JS object array.
         if (status == "Pending") {
-            return ["Processing", "Cancelled"]
+            return ["Processing", "Cancelled"];
         } else if (status == "Processing") {
-            return ["Shipped", "Cancelled"]
+            return ["Shipped", "Cancelled"];
         } else if (status == "Shipped") {
-            return ["Delivered", "Cancelled"]
+            return ["Delivered", "Cancelled"];
         } else {
-            return []
+            return [];
         }
     }
 
     function isFinalState(status) {
-        return status == "Delivered" || status == "Cancelled"
+        return status == "Delivered" || status == "Cancelled";
     }
 
     // --- State label for display ---
@@ -82,21 +81,21 @@ ${
     // scrml: plain function. No trait implementation possible — no trait system.
     // FRICTION: No impl blocks, no trait bounds. The Display pattern is boilerplate.
     function statusLabel(status) {
-        if (status == "Pending") { return "Pending" }
-        if (status == "Processing") { return "Processing" }
-        if (status == "Shipped") { return "Shipped" }
-        if (status == "Delivered") { return "Delivered" }
-        if (status == "Cancelled") { return "Cancelled" }
-        return "Unknown"
+        if (status == "Pending") { return "Pending"; }
+        if (status == "Processing") { return "Processing"; }
+        if (status == "Shipped") { return "Shipped"; }
+        if (status == "Delivered") { return "Delivered"; }
+        if (status == "Cancelled") { return "Cancelled"; }
+        return "Unknown";
     }
 
     function statusClass(status) {
-        if (status == "Pending") { return "status-pending" }
-        if (status == "Processing") { return "status-processing" }
-        if (status == "Shipped") { return "status-shipped" }
-        if (status == "Delivered") { return "status-delivered" }
-        if (status == "Cancelled") { return "status-cancelled" }
-        return "status-unknown"
+        if (status == "Pending") { return "status-pending"; }
+        if (status == "Processing") { return "status-processing"; }
+        if (status == "Shipped") { return "status-shipped"; }
+        if (status == "Delivered") { return "status-delivered"; }
+        if (status == "Cancelled") { return "status-cancelled"; }
+        return "status-unknown";
     }
 
     // --- Transition logic ---
@@ -105,30 +104,30 @@ ${
     // scrml: no Result type, no ? operator. Error handling via if/else or !{}.
     // FRICTION: Every caller must manually check the return value.
     function transitionOrder(orderId, newStatus) {
-        let order = @orders.find(o => o.id == orderId)
-        if (!order) { return }
+        let order = @orders.find(o => o.id == orderId);
+        if (!order) { return; }
 
-        let valid = validTransitions(order.status)
+        let valid = validTransitions(order.status);
         if (valid.indexOf(newStatus) == -1) {
             // In Rust: return Err(TransitionError::InvalidTransition)
             // scrml: we have no propagation mechanism. Just return.
             // The caller has no way to know it failed without an out-of-band signal.
-            return
+            return;
         }
 
-        let timestamp = "Moved: " + newStatus
+        let timestamp = "Moved: " + newStatus;
         let updatedOrder = {
             id: order.id,
             customer: order.customer,
             item: order.item,
             status: newStatus,
             history: [...order.history, timestamp]
-        }
-        @orders = @orders.map(o => o.id == orderId ? updatedOrder : o)
+        };
+        @orders = @orders.map(o => o.id == orderId ? updatedOrder : o);
     }
 
     function selectOrder(id) {
-        @selectedOrderId = id
+        @selectedOrderId = id;
     }
 
     function addOrder() {
@@ -139,19 +138,18 @@ ${
                 item: @newItem,
                 status: "Pending",
                 history: ["Created: Pending"]
-            }
-            @orders = [...@orders, newOrder]
-            @nextId = @nextId + 1
-            @newCustomer = ""
-            @newItem = ""
+            };
+            @orders = [...@orders, newOrder];
+            @nextId = @nextId + 1;
+            @newCustomer = "";
+            @newItem = "";
         }
     }
 
     function selectedOrder() {
-        if (@selectedOrderId == 0) { return not }
-        return @orders.find(o => o.id == @selectedOrderId) || not
+        if (@selectedOrderId == 0) { return not; }
+        return @orders.find(o => o.id == @selectedOrderId) || not;
     }
-}
 
 <div class="order-tracker">
     <header class="tracker-header">
@@ -195,7 +193,7 @@ ${
                                 <span class="order-item-name">${order.item}</>
                                 <span class="order-status ${statusClass(order.status)}">${statusLabel(order.status)}</>
                             </div>
-                        </li>
+                        </li>;
                     }
                 }
             </ul>
@@ -204,7 +202,7 @@ ${
         <section class="order-detail" if=${!(selectedOrder() is not)}>
             <h2>Order Detail</>
             ${
-                let detail = selectedOrder()
+                let detail = selectedOrder();
                 if (detail) {
                     lift <div class="detail-card">
                         <div class="detail-header">
@@ -248,7 +246,7 @@ ${
                                 }
                             </ol>
                         </div>
-                    </div>
+                    </div>;
                 }
             }
         </section>

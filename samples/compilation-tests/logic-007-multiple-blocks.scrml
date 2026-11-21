@@ -1,11 +1,13 @@
+<program reset="none">
 // logic-007-multiple-blocks.scrml
 // Multiple logic blocks in one document. Tests: sequential ${ } blocks.
 
 <div>
-    ${ let x = 1 }
+    ${ let x = 1; }
     <p>First block</>
-    ${ let y = 2 }
+    ${ let y = 2; }
     <p>Second block</>
-    ${ let z = x + y }
+    ${ let z = x + y; }
     <p>Third block</>
 </div>
+</program>

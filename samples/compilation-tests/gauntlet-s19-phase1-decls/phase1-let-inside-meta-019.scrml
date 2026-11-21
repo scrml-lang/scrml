@@ -1,6 +1,8 @@
+<program reset="none">
 // let inside ^{} meta block
 ^{
     let label = "compile-time"
     emit("<!-- " + label + " -->")
 }
 <p>x</>
+</program>

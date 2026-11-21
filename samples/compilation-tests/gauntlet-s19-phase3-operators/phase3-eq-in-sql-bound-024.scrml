@@ -1,8 +1,8 @@
+<program>
 // `==` inside a ?{} WHERE clause, bound param
 ${
-    let uid = 42
-    let row = ?{ SELECT id, name FROM users WHERE id == ${uid} }.get()
+    let uid = 42;
+    let row = ?{ SELECT id, name FROM users WHERE id == ${uid} }.get();
 }
-<program>
     <p>sql</>
 </>

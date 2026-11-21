@@ -1,9 +1,7 @@
-// method call in attribute value — event handler
-${
-    <count> = 0
-    function inc() { @count = @count + 1 }
-}
 <program>
+// method call in attribute value — event handler
+    <count> = 0
+    function inc() { @count = @count + 1; }
     <button onclick=inc()>+1</>
     <p>${@count}</>
 </>

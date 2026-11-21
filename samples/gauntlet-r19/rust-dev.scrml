@@ -1,10 +1,9 @@
+<program reset="none">
 // gauntlet-r19/rust-dev.scrml — Component Showcase
 // Tests: components with props, enum/match, for-of in ^{} S51,
 //        default params in ^{} S52
 
-${
-  type Severity:enum = .Info | .Warning | .Error | .Success
-}
+  type Severity:enum = .Info | .Warning | .Error | .Success;
 
 // Compile-time: generate showcase index using for-of
 ^{
@@ -111,3 +110,4 @@ ${
     font-weight: 700;
   }
 }
+</program>

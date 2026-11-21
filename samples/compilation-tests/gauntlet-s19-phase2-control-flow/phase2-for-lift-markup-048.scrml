@@ -1,8 +1,6 @@
-// for/lift in markup: canonical list iteration (§17.4)
-${
-    <items>: string[] = ["a", "b", "c"]
-}
 <program>
+// for/lift in markup: canonical list iteration (§17.4)
+    <items>: string[] = ["a", "b", "c"]
     <ul>
         ${ for (item of @items) {
             lift <li>${item}/

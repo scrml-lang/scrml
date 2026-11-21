@@ -1,8 +1,6 @@
 // Multiple class: directives + static class coexist.
 <program>
-    ${
         <loading> = false
         <err> = false
-    }
     <div class="box" class:loading=@loading class:error=@err>state</div>
 </program>

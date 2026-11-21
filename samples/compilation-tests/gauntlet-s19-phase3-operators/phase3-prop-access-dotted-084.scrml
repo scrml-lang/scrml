@@ -1,9 +1,9 @@
+<program>
 ${
     type Addr:struct = { city: string, zip: string }
     type User:struct = { name: string, addr: Addr }
-    const u:User = { name: "a", addr: { city: "nyc", zip: "10001" } }
-    const z = u.addr.zip
+    const u:User = { name: "a", addr: { city: "nyc", zip: "10001" } };
+    const z = u.addr.zip;
 }
-<program>
     <p>${z}</>
 </>

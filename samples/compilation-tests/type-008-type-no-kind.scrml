@@ -1,9 +1,11 @@
+<program reset="none">
 // type-008-type-no-kind.scrml
 // Type alias without explicit kind. Tests: type alias.
 
 <div>
     ${
-        type Name = string
+        type Name = string;
     }
     <p>Type alias</>
 </div>
+</program>

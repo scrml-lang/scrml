@@ -1,3 +1,4 @@
+<program reset="none">
 // logic-012-nested-objects.scrml
 // Nested objects and arrays. Tests: complex data structures.
 
@@ -6,7 +7,8 @@
         let config = {
             db: { host: "localhost", port: 5432 },
             features: ["auth", "api", "admin"]
-        }
+        };
     }
     <p>Config loaded</>
 </div>
+</program>

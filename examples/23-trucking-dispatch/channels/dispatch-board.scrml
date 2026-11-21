@@ -27,7 +27,7 @@ export <channel name="dispatch-board">
                 loadId: loadId,
                 status: status,
                 at: new Date().toISOString()
-            }]
+            }];
         }
     }
 </>

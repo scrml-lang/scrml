@@ -4,13 +4,11 @@
 
 <program>
 
-${
     type UserProfile:struct = {
         username: string,
         email:    string,
         age:      number,
     }
-}
 
 <div>
     <h1>User Profile Fields</>

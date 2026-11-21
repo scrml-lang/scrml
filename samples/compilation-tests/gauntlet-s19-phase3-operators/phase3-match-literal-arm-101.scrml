@@ -1,15 +1,15 @@
+<program>
 // match with literal arms over string
 ${
-    let role = "admin"
+    let role = "admin";
     match role {
-        "admin"  -> handleAdmin()
-        "editor" -> handleEditor()
+        "admin"  -> handleAdmin(),
+        "editor" -> handleEditor(),
         _        -> handleGuest()
     }
-    function handleAdmin()  { let _ = 1 }
-    function handleEditor() { let _ = 1 }
-    function handleGuest()  { let _ = 1 }
+    function handleAdmin()  { let _ = 1; }
+    function handleEditor() { let _ = 1; }
+    function handleGuest()  { let _ = 1; }
 }
-<program>
     <p>ok</>
 </>

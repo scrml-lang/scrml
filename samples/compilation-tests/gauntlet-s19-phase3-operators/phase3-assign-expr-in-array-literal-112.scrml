@@ -1,9 +1,9 @@
+<program>
 // assign-expr inside array literal element (§50.4.2)
 ${
-    let a = 0
-    let b = 0
-    const arr = [a = 1, b = 2, a + b]
+    let a = 0;
+    let b = 0;
+    const arr = [a = 1, b = 2, a + b];
 }
-<program>
     <p>${arr.length}</>
 </>

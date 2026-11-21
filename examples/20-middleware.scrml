@@ -28,23 +28,23 @@
   // orphan-brace comment-extraction gap so multi-line function bodies
   // with comments survive the bare-decl auto-lift intact).
   function handle(request, resolve) {
-    const reqId = crypto.randomUUID()
-    const start = Date.now()
+    const reqId = crypto.randomUUID();
+    const start = Date.now();
 
     // resolve(request) runs the rest of the pipeline + the matched
     // route. It MUST be called exactly once on every path that
     // doesn't early-return (E-MW-003 if called zero times or more
     // than once).
-    const response = resolve(request)
+    const response = resolve(request);
 
-    response.headers.set("X-Request-Id", reqId)
-    response.headers.set("X-Response-Time-ms", String(Date.now() - start))
-    return response
+    response.headers.set("X-Request-Id", reqId);
+    response.headers.set("X-Response-Time-ms", String(Date.now() - start));
+    return response;
   }
 
   <count> = 0
 
-  function bump() { @count = @count + 1 }
+  function bump() { @count = @count + 1; }
 
   // Demo-shell + hint styles — co-located with the outer demo wrapper.
   #{

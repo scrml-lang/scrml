@@ -1,16 +1,16 @@
+<program>
 // Long else-if chain — stress the parser on extended chaining
 ${
-    let n = 3
-    let label = ""
-    if (n == 1) { label = "one" }
-    else if (n == 2) { label = "two" }
-    else if (n == 3) { label = "three" }
-    else if (n == 4) { label = "four" }
-    else if (n == 5) { label = "five" }
-    else { label = "other" }
-    log(label)
-    function log(s: string) { let _ = s }
+    let n = 3;
+    let label = "";
+    if (n == 1) { label = "one"; }
+    else if (n == 2) { label = "two"; }
+    else if (n == 3) { label = "three"; }
+    else if (n == 4) { label = "four"; }
+    else if (n == 5) { label = "five"; }
+    else { label = "other"; }
+    log(label);
+    function log(s: string) { let _ = s; }
 }
-<program>
     <p>ok</>
 </>

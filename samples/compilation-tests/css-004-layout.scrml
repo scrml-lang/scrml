@@ -1,3 +1,4 @@
+<program reset="none">
 // css-004-layout.scrml
 // CSS layout properties. Tests: #{} with flex/grid.
 
@@ -12,3 +13,4 @@
     <span>Item 2</>
     <span>Item 3</>
 </div>
+</program>

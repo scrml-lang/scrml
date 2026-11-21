@@ -28,16 +28,16 @@
 // open routes.
 
 ${
-    export { UserRole } from '../schema.scrml'
+    export { UserRole } from '../schema.scrml';
 
     // -----------------------------------------------------------------------
     // Constants — referenced from app.scrml + page handlers.
     // -----------------------------------------------------------------------
 
-    export const SESSION_COOKIE_NAME = "scrml_session"
-    export const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60   // 7 days
-    export const SESSION_DB_PATH = "./dispatch-sessions.db"
-    export const DISPATCH_DB_PATH = "./dispatch.db"
+    export const SESSION_COOKIE_NAME = "scrml_session";
+    export const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;   // 7 days
+    export const SESSION_DB_PATH = "./dispatch-sessions.db";
+    export const DISPATCH_DB_PATH = "./dispatch.db";
 
     // -----------------------------------------------------------------------
     // Pure cookie helpers — safe in any context.
@@ -48,23 +48,23 @@ ${
      * Returns the value string, or null if not found.
      */
     export function readCookieValue(cookieHeader, name) {
-        if (!cookieHeader) return not
-        const parts = cookieHeader.split(";")
+        if (!cookieHeader) return not;
+        const parts = cookieHeader.split(";");
         for (let i = 0; i < parts.length; i = i + 1) {
-            const piece = parts[i].trim()
-            const eqIdx = piece.indexOf("=")
-            if (eqIdx < 0) continue
-            const k = piece.substring(0, eqIdx)
-            if (k == name) return piece.substring(eqIdx + 1)
+            const piece = parts[i].trim();
+            const eqIdx = piece.indexOf("=");
+            if (eqIdx < 0) continue;
+            const k = piece.substring(0, eqIdx);
+            if (k == name) return piece.substring(eqIdx + 1);
         }
-        return not
+        return not;
     }
 
     /**
      * Convenience wrapper for the dispatch app's session cookie.
      */
     export function readSessionCookie(cookieHeader) {
-        return readCookieValue(cookieHeader, SESSION_COOKIE_NAME)
+        return readCookieValue(cookieHeader, SESSION_COOKIE_NAME);
     }
 
     /**
@@ -73,9 +73,9 @@ ${
      */
     export function buildSessionSetCookie(token) {
         if (!token) {
-            return `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`
+            return `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
         }
-        return `${SESSION_COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}`
+        return `${SESSION_COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}`;
     }
 
     // -----------------------------------------------------------------------
@@ -90,8 +90,8 @@ ${
      * ("dispatcher" / "driver" / "customer").
      */
     export function checkRole(user, requiredRole) {
-        if (!user) return false
-        return user.role == requiredRole
+        if (!user) return false;
+        return user.role == requiredRole;
     }
 
     /**
@@ -102,9 +102,9 @@ ${
      * CHECK-constrained column in the schema).
      */
     export function rolePath(role) {
-        if (role == "dispatcher") return "/dispatch/board"
-        if (role == "driver")     return "/driver/home"
-        if (role == "customer")   return "/customer/home"
-        return "/"
+        if (role == "dispatcher") return "/dispatch/board";
+        if (role == "driver")     return "/driver/home";
+        if (role == "customer")   return "/customer/home";
+        return "/";
     }
 }

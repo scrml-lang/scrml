@@ -1,6 +1,6 @@
 // export const value (non-component)
 ${
-    export const APP_VERSION = "1.0.0"
-    export const MAX_RETRIES: number = 3
+    export const APP_VERSION = "1.0.0";
+    export const MAX_RETRIES: number = 3;
 }
 <p>${APP_VERSION}</>

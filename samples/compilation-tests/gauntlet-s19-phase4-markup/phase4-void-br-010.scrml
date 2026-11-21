@@ -1,2 +1,4 @@
+<program reset="none">
 // Void element <br/>.
 <p>first<br/>second</p>
+</program>

@@ -1,10 +1,10 @@
+<program>
 // double-negation `is not not` — §42.8 says it's the presence check
 ${
-    let name: string | not = "alice"
+    let name: string | not = "alice";
     if ((name) is not not) {
-        let _present = 1
+        let _present = 1;
     }
 }
-<program>
     <p>ok</>
 </>

@@ -9,8 +9,8 @@
 
 <page db="../../dispatch.db" auth="required">
 
-  import { createSessionStore } from 'scrml:store'
-  import { SESSION_DB_PATH } from '../../models/auth.scrml'
+  import { createSessionStore } from 'scrml:store';
+  import { SESSION_DB_PATH } from '../../models/auth.scrml';
 
   <db src="../../dispatch.db" protect="password_hash" tables="users, drivers">
 
@@ -20,42 +20,42 @@
             // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
             // compiles to its own public route, and one taking a userId would let any caller
             // look up any user (S443 post-merge review of #1180).
-            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get();
             if (user is not || user.role != "driver") {
-                return { unauthorized: true }
+                return { unauthorized: true };
             }
             const driver = ?{`
                 SELECT id, name, phone, cdl_number, cdl_state, cdl_expires
                 FROM drivers
                 WHERE user_id = ${user.id}
-            `}.get()
-            if (driver is not) return { error: "No driver record." }
+            `}.get();
+            if (driver is not) return { error: "No driver record." };
 
-            return { user: user, driver: driver }
+            return { user: user, driver: driver };
         }
 
         function saveProfileServer(sessionToken, name, phone) {
             // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
             // compiles to its own public route, and one taking a userId would let any caller
             // look up any user (S443 post-merge review of #1180).
-            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get();
             if (user is not || user.role != "driver") {
-                return { unauthorized: true }
+                return { unauthorized: true };
             }
-            const driver = ?{`SELECT id FROM drivers WHERE user_id = ${user.id}`}.get()
-            if (driver is not) return { error: "No driver record." }
+            const driver = ?{`SELECT id FROM drivers WHERE user_id = ${user.id}`}.get();
+            if (driver is not) return { error: "No driver record." };
 
-            const trimmedName = name.trim()
-            const trimmedPhone = phone.trim()
-            if (trimmedName == "") return { error: "Name required." }
+            const trimmedName = name.trim();
+            const trimmedPhone = phone.trim();
+            if (trimmedName == "") return { error: "Name required." };
 
             ?{`
                 UPDATE drivers
                 SET name = ${trimmedName}, phone = ${trimmedPhone}
                 WHERE id = ${driver.id}
-            `}.run()
+            `}.run();
 
-            return { ok: true }
+            return { ok: true };
         }
 
         <currentUser> = not
@@ -75,75 +75,75 @@
         </>
 
         function getSessionToken() {
-            const c = document.cookie ? document.cookie : ""
-            const idx = c.indexOf("scrml_session=")
-            if (idx < 0) return ""
-            const tail = c.substring(idx + "scrml_session=".length)
-            const semi = tail.indexOf(";")
-            return semi < 0 ? tail : tail.substring(0, semi)
-        }
+            const c = document.cookie ? document.cookie : "";
+            const idx = c.indexOf("scrml_session=");
+            if (idx < 0) return "";
+            const tail = c.substring(idx + "scrml_session=".length);
+            const semi = tail.indexOf(";");
+            return semi < 0 ? tail : tail.substring(0, semi);
+        };
 
         function refresh() {
-            const tok = getSessionToken()
-            const data = fetchProfile(tok)
+            const tok = getSessionToken();
+            const data = fetchProfile(tok);
             if (data.unauthorized) {
-                window.location.href = "/auth/login?reason=unauthorized"
-                return
+                window.location.href = "/auth/login?reason=unauthorized";
+                return;
             }
             if (data.error) {
-                @errorMessage = data.error
-                @loaded = true
-                return
+                @errorMessage = data.error;
+                @loaded = true;
+                return;
             }
-            @currentUser = data.user
-            @currentDriver = data.driver
-            @loaded = true
+            @currentUser = data.user;
+            @currentDriver = data.driver;
+            @loaded = true;
         }
 
         function startEdit() {
-            @profileForm.editName = @currentDriver.name
-            @profileForm.editPhone = @currentDriver.phone == "" ? "" : @currentDriver.phone
-            @errorMessage = ""
-            @successMessage = ""
-            @editing = true
+            @profileForm.editName = @currentDriver.name;
+            @profileForm.editPhone = @currentDriver.phone == "" ? "" : @currentDriver.phone;
+            @errorMessage = "";
+            @successMessage = "";
+            @editing = true;
         }
 
         function cancelEdit() {
-            @editing = false
-            @errorMessage = ""
+            @editing = false;
+            @errorMessage = "";
         }
 
         function saveProfile(event) {
-            if (event && event.preventDefault) event.preventDefault()
-            if (!@profileForm.isValid) return
-            const name = @profileForm.editName
-            const phone = @profileForm.editPhone
-            const tok = getSessionToken()
-            const result = saveProfileServer(tok, name, phone)
+            if (event && event.preventDefault) event.preventDefault();
+            if (!@profileForm.isValid) return;
+            const name = @profileForm.editName;
+            const phone = @profileForm.editPhone;
+            const tok = getSessionToken();
+            const result = saveProfileServer(tok, name, phone);
             if (result.unauthorized) {
-                window.location.href = "/auth/login?reason=unauthorized"
-                return
+                window.location.href = "/auth/login?reason=unauthorized";
+                return;
             }
             if (result.error) {
-                @errorMessage = result.error
-                return
+                @errorMessage = result.error;
+                return;
             }
-            @editing = false
-            announceSaved()
-            refresh()
+            @editing = false;
+            announceSaved();
+            refresh();
         }
 
         function announceSaved() {
-            @successMessage = "Profile updated."
+            @successMessage = "Profile updated.";
         }
 
         function setError(msg) {
-            @errorMessage = msg
+            @errorMessage = msg;
         }
 
         on mount {
             refresh()
-        }
+        };
     }
 
       <div class="min-h-screen bg-slate-50 text-slate-900 font-sans">

@@ -1,3 +1,4 @@
+<program reset="none">
 // combined-017-color-picker.scrml
 // Color picker. Tests: reactive + events + dynamic display.
 
@@ -5,7 +6,7 @@
     ${
         <selectedColor> = "red"
         function pickColor(color) {
-            @selectedColor = color
+            @selectedColor = color;
         }
     }
     <h2>Pick a Color</>
@@ -19,3 +20,4 @@
         <p>Selected: ${@selectedColor}</>
     </div>
 </div>
+</program>

@@ -1,3 +1,4 @@
+<program reset="none">
 // reactive-006-array.scrml
 // Reactive array variable. Tests: @ with array values.
 
@@ -5,3 +6,4 @@
     ${ <items> = ["apple", "banana", "cherry"] }
     <p>Items loaded</>
 </div>
+</program>

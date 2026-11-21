@@ -1,14 +1,14 @@
+<program>
 // C-style for loop. Spec §7/§17 don't grant this; §7.x line 620/4209 show it in function
 // bodies. Probably valid passthrough — flagging UNKNOWN for confirmation.
 ${
-    let n = 5
-    let sum = 0
+    let n = 5;
+    let sum = 0;
     for (let i = 0; i < n; i++) {
-        sum = sum + i
+        sum = sum + i;
     }
-    log(sum)
-    function log(m: number) { let _ = m }
+    log(sum);
+    function log(m: number) { let _ = m; }
 }
-<program>
     <p>ok</>
 </>

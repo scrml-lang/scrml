@@ -4,8 +4,8 @@
 < db src="./test.db" tables="users">
 ${
   server function addUser(name, email) {
-    let result = ?{`INSERT INTO users (name, email) VALUES (${name}, ${email})`}.run()
-    return result
+    let result = ?{`INSERT INTO users (name, email) VALUES (${name}, ${email})`}.run();
+    return result;
   }
 }
 <form onsubmit=addUser("Alice", "alice@test.com")>

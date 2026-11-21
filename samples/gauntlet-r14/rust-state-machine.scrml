@@ -1,3 +1,4 @@
+<program reset="none">
 // gauntlet-r14: rust dev — state machine with enums and nested functions
 // Tests R13 fixes: Enum::Variant in match + conditionals, nested functions
 // New: ~ tilde-decl, enum comparisons in if= attributes
@@ -6,52 +7,52 @@
     ${
         type AppState:enum = { Loading, Ready, Error, Saving }
 
-        @state = AppState::Loading
-        @data = not
-        @errorMsg = ""
-        @isLoading = true
-        @isReady = false
-        @isError = false
+        @state = AppState::Loading;
+        @data = not;
+        @errorMsg = "";
+        @isLoading = true;
+        @isReady = false;
+        @isError = false;
 
-        statusLabel = "System Status"
+        statusLabel = "System Status";
 
         function loadData() {
-            @state = AppState::Ready
-            @isLoading = false
-            @isReady = true
-            @data = [{ id: 1, value: "loaded" }]
+            @state = AppState::Ready;
+            @isLoading = false;
+            @isReady = true;
+            @data = [{ id: 1, value: "loaded" }];
         }
 
         function transition(newState) {
             function isValid(from, to) {
-                return true
+                return true;
             }
             if (isValid(@state, newState)) {
-                @state = newState
+                @state = newState;
             }
         }
 
         function saveData() {
             function prepareSave(d) {
-                return d
+                return d;
             }
-            const prepared = prepareSave(@data)
-            @state = AppState::Saving
-            @state = AppState::Ready
+            const prepared = prepareSave(@data);
+            @state = AppState::Saving;
+            @state = AppState::Ready;
         }
 
         function retryLoad() {
-            @state = AppState::Loading
-            @isError = false
-            @isLoading = true
-            loadData()
+            @state = AppState::Loading;
+            @isError = false;
+            @isLoading = true;
+            loadData();
         }
 
         function triggerError(msg) {
-            @state = AppState::Error
-            @errorMsg = msg
-            @isError = true
-            @isReady = false
+            @state = AppState::Error;
+            @errorMsg = msg;
+            @isError = true;
+            @isReady = false;
         }
     }
     <h1>${statusLabel}</>
@@ -71,3 +72,4 @@
         <button onclick=retryLoad()>Retry</>
     </div>
 </div>
+</program>

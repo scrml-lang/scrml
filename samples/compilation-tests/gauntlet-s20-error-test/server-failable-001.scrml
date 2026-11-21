@@ -6,20 +6,20 @@ ${
   type UserError:enum = { NotFound, Forbidden }
 
   server function getUser(id)! -> UserError {
-    let user = ?{`SELECT id, name FROM users WHERE id = ${id}`}.get()
+    let user = ?{`SELECT id, name FROM users WHERE id = ${id}`}.get();
     if user is not {
-      fail UserError.NotFound
+      fail UserError.NotFound;
     }
-    return user
+    return user;
   }
 
   // §19.4.3 — the handler must handle getUser's failure (E-ERROR-002 in
   // every handler form, S440); a non-failable wrapper catches it with !{}.
   function load() {
     getUser(1) !{
-      .NotFound :> @status = "not found"
+      .NotFound :> @status = "not found",
       .Forbidden :> @status = "forbidden"
-    }
+    };
   }
 
   <status> = ""

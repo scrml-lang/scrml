@@ -1,5 +1,7 @@
+<program reset="none">
 // let initialized via chained call
 ${
-    let summary = [1, 2, 3, 4, 5].filter(n => n > 2).map(n => n * 10).join(",")
+    let summary = [1, 2, 3, 4, 5].filter(n => n > 2).map(n => n * 10).join(",");
 }
 <p>${summary}</>
+</program>

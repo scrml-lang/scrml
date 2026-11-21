@@ -3,10 +3,10 @@ ${
     export type Status:enum = { Active, Inactive, Banned }
     export function formatStatus(s: Status) {
         return match s {
-            .Active :> "active"
-            .Inactive :> "inactive"
+            .Active :> "active",
+            .Inactive :> "inactive",
             .Banned :> "banned"
-        }
+        };
     }
-    export const DEFAULT_STATUS = "Active"
+    export const DEFAULT_STATUS = "Active";
 }

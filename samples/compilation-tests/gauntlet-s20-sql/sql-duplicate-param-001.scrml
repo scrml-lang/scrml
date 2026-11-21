@@ -3,8 +3,8 @@
 
 < db src="./test.db" tables="logs">
 ${
-  let userId = 42
-  let row = ?{`SELECT * FROM logs WHERE created_by = ${userId} OR updated_by = ${userId}`}.get()
+  let userId = 42;
+  let row = ?{`SELECT * FROM logs WHERE created_by = ${userId} OR updated_by = ${userId}`}.get();
 }
 <p>Log loaded</>
 </>

@@ -1,11 +1,13 @@
+<program reset="none">
 // logic-004-string-ops.scrml
 // String operations. Tests: string literals, concatenation.
 
 <div>
     ${
-        let first = "John"
-        let last = "Doe"
-        let full = first + " " + last
+        let first = "John";
+        let last = "Doe";
+        let full = first + " " + last;
     }
     <p>Name ready</>
 </div>
+</program>

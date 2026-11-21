@@ -1,11 +1,11 @@
+<program>
 // `is` operator on enum variant, bare if condition
 ${
     type Status:enum = { Active, Banned, Pending }
-    let s:Status = .Active
+    let s:Status = .Active;
     if (s is .Active) {
-        let _ok = 1
+        let _ok = 1;
     }
 }
-<program>
     <p>check</>
 </>

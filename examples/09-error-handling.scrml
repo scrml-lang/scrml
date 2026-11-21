@@ -58,20 +58,20 @@
     // fields (`email`, `reason`) are in scope inside their arm.
     fn errorMessage(e: ContactError) -> string {
         return match e {
-            .EmptyName            :> "Name is required."
-            .EmptyEmail           :> "Email is required."
-            .InvalidEmail(email)  :> email + " is not a valid email address."
+            .EmptyName            :> "Name is required.",
+            .EmptyEmail           :> "Email is required.",
+            .InvalidEmail(email)  :> email + " is not a valid email address.",
             .SubmitFailed(reason) :> "Submission failed: " + reason
-        }
+        };
     }
 
     // validate() is failable. It returns nothing on success and `fail`s a
     // ContactError variant otherwise.
     function validate() ! ContactError {
-        if (@name == "")  fail .EmptyName
-        if (@email == "") fail .EmptyEmail
+        if (@name == "")  fail .EmptyName;
+        if (@email == "") fail .EmptyEmail;
         // Minimal email check — just needs an @.
-        if (!@email.includes("@")) fail .InvalidEmail(@email)
+        if (!@email.includes("@")) fail .InvalidEmail(@email);
     }
 
     // submit() queues the message server-side and is failable. The `?{}`
@@ -90,15 +90,15 @@
             body        text not null,
             received_at timestamp DEFAULT CURRENT_TIMESTAMP
           )
-        `}.run()
+        `}.run();
         const already = ?{`
           SELECT id FROM contact_messages WHERE email = ${email} AND body = ${body}
-        `}.get()
-        if (already is given) fail .SubmitFailed("this message was already sent")
+        `}.get();
+        if (already is given) fail .SubmitFailed("this message was already sent");
         ?{`
           INSERT INTO contact_messages (name, email, body)
           VALUES (${name}, ${email}, ${body})
-        `}.run()
+        `}.run();
     }
 
     // handleSubmit() is the whole lesson. Each `!{}` handler does ONE thing:
@@ -107,17 +107,17 @@
     // the held state, and the `<Failed err>` arm displays it. No variant is
     // enumerated, none is discarded. Success advances to `.Succeeded`.
     function handleSubmit() {
-        @phase = .Submitting
+        @phase = .Submitting;
 
         validate() !{
-            _ err :> { @phase = .Failed(err); return }
-        }
+            _ err :> { @phase = .Failed(err); return; }
+        };
 
         submit(@name, @email, @body) !{
-            _ err :> { @phase = .Failed(err); return }
-        }
+            _ err :> { @phase = .Failed(err); return; }
+        };
 
-        @phase = .Succeeded
+        @phase = .Succeeded;
     }
   }
 

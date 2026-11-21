@@ -1,9 +1,11 @@
+<program reset="none">
 // Phase 9: debug mode — $originalName appended (§47.3)
 // Should compile clean in both debug and production.
 
 ${
-  let debugTest = "value"
+  let debugTest = "value";
   <debugReactive> = 42
 }
 
 <p>${debugTest}: ${@debugReactive}</>
+</program>

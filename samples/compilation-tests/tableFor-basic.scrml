@@ -1,5 +1,5 @@
-${
-    // §41.16 tableFor sample — minimal happy-path for the FOURTH L22 family member.
+<program>
+// §41.16 tableFor sample — minimal happy-path for the FOURTH L22 family member.
     //
     // Demonstrates:
     //   - Markup-element form `<tableFor for=T rows=@cell/>` (Form A per OQ-TF-1)
@@ -9,7 +9,7 @@ ${
     //
     // Compiles to canonical <table>/<thead>/<tbody> markup tree (Pillar 5
     // invariant per §41.16.11) — readable as if hand-authored.
-    import { tableFor } from 'scrml:data'
+    import { tableFor } from 'scrml:data';
 
     type User:struct = {
         id:    integer
@@ -17,9 +17,6 @@ ${
         name:  string req
         role:  string req
     }
-}
-
-<program>
     <users> = [
         { id: 1, email: "alice@example.com", name: "Alice",   role: "Admin"  },
         { id: 2, email: "bob@example.com",   name: "Bob",     role: "Editor" },

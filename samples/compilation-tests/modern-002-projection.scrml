@@ -14,8 +14,8 @@ type Task:struct = {
     <div class="task">
         <span>${task.title}</>
         <span>${ match task.priority {
-            .Low :> "Low"
-            .Medium :> "Medium"
+            .Low :> "Low",
+            .Medium :> "Medium",
             .High :> "High"
         } }</>
     </>

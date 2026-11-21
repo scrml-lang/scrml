@@ -1,7 +1,9 @@
+<program reset="none">
 // logic-001-let-decl.scrml
 // Variable declarations with let inside logic blocks. Tests: ${ let }.
 
 <div>
-    ${ let name = "Alice" }
+    ${ let name = "Alice"; }
     <p>Welcome</>
 </div>
+</program>

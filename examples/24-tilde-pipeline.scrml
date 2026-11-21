@@ -24,15 +24,15 @@
 
 <program>
 
-  function step1(n: number) -> number { return n + 10 }
-  function step2(n: number) -> number { return n * 3 }
+  function step1(n: number) -> number { return n + 10; }
+  function step2(n: number) -> number { return n * 3; }
 
   // Function body has its own `~` scope (§32.4). `step1(start)` is an
   // unbound call — its result initializes `~`. The `return step2(~)`
   // line consumes `~`. No `let` between them.
   function pipeline(start: number) -> number {
-    step1(start)
-    return step2(~)
+    step1(start);
+    return step2(~);
   }
 
   // Top-level pipeline at <program> direct child position — the v0.3
@@ -41,12 +41,12 @@
   // step1(2); const result = step2(intermediate)`. No explicit `${}`
   // wrapper needed — <program> bodies parse as logic by default
   // (SPEC §40.8).
-  step1(2)
-  const result = step2(~)
+  step1(2);
+  const result = step2(~);
 
   // Function call. Each fn body has its OWN ~ scope, so the outer ~
   // above is independent of the one inside `pipeline()`.
-  const piped = pipeline(7)
+  const piped = pipeline(7);
 
   #{
     .demo {

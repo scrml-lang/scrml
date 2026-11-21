@@ -8,7 +8,7 @@
 <program name="doubler">
     ${
         when message(data) {
-            send({ result: data.value * 2 })
+            send({ result: data.value * 2 });
         }
     }
 </>
@@ -22,7 +22,7 @@ ${
     }
 
     when message from <#doubler> (data) {
-        @result = data.result
+        @result = data.result;
     }
 }
 

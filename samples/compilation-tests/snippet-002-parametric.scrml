@@ -4,15 +4,12 @@
 
 <program>
 
-${
     type Item:struct = {
         id:    number,
         label: string,
     }
-}
 
 // List renders each item by calling the row snippet with the item value.
-${
     const List = <div class="list" props={
         items:  Item[],
         row:    snippet(item: Item),
@@ -20,16 +17,13 @@ ${
         ${ for (i of items) {
             lift <div class="list__row">${render row(i)}</>
         }}
-    </>
-}
+    </>;
 
-${
     <items> = [
         { id: 1, label: "First"  },
         { id: 2, label: "Second" },
         { id: 3, label: "Third"  },
     ]
-}
 
 // Call site provides a lambda for the parametric slot.
 <List

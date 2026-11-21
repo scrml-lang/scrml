@@ -1,12 +1,12 @@
+<program reset="none">
 // @reactive declared inside a component body — §15.13 reactive scope
-${
     const Counter = <div class="counter">
         ${
             <localCount> = 0
         }
         <button onclick=${() => @localCount = @localCount + 1}>${@localCount}</>
-    </>
-}
+    </>;
 
 <Counter/>
 <Counter/>
+</program>

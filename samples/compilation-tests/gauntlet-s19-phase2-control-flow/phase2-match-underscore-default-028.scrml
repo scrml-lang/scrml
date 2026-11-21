@@ -1,14 +1,14 @@
+<program>
 // _ is alias for else default
 ${
     type Status:enum = { Active, Banned }
-    let s:Status = .Active
+    let s:Status = .Active;
     let x = match s {
-        .Active => 1
+        .Active => 1,
         _       => 0
-    }
-    log(x)
-    function log(n: number) { let _ = n }
+    };
+    log(x);
+    function log(n: number) { let _ = n; }
 }
-<program>
     <p>ok</>
 </>

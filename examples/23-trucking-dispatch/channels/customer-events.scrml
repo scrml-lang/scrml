@@ -29,7 +29,7 @@ export <channel name="customer-events">
                 invoiceId: invoiceId,
                 loadId: loadId,
                 at: new Date().toISOString()
-            }]
+            }];
         }
     }
 </>

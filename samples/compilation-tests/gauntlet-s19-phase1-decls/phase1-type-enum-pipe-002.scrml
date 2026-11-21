@@ -1,5 +1,5 @@
+<program reset="none">
 // type X:enum with pipe-separated variants (per library-mode-types sample)
-${
     type HttpMethod:enum = { GET | POST | PUT | DELETE | PATCH }
-}
 <p>x</>
+</program>

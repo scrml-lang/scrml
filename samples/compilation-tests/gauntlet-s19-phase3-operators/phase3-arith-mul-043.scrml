@@ -1,6 +1,6 @@
-${
-    const prod = 4 * 5
-}
 <program>
+${
+    const prod = 4 * 5;
+}
     <p>${prod}</>
 </>

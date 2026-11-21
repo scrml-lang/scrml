@@ -1,9 +1,9 @@
+<program reset="none">
 // fn with default parameter values per §7.3.2
-${
     fn clamp(value, min = 0, max = 100) {
-        if (value < min) { return min }
-        if (value > max) { return max }
-        return value
+        if (value < min) { return min; }
+        if (value > max) { return max; }
+        return value;
     }
-}
 <p>${clamp(150)}</>
+</program>

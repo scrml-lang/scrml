@@ -1,5 +1,5 @@
 // bind:checked on checkbox.
 <program>
-    ${ <agreed> = false }
+     <agreed> = false 
     <input type="checkbox" bind:checked=@agreed/>
 </program>

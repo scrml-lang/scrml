@@ -1,9 +1,9 @@
+<program>
 // arithmetic inside a ?{} bound param
 ${
-    let pageSize = 20
-    let page = 3
-    let rows = ?{ SELECT id FROM users LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize} }.all()
+    let pageSize = 20;
+    let page = 3;
+    let rows = ?{ SELECT id FROM users LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize} }.all();
 }
-<program>
     <p>rows: ${rows.length}</>
 </>

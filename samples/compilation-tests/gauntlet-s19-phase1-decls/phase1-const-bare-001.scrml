@@ -1,5 +1,7 @@
+<program reset="none">
 // const, bare form, file-level ${} block
 ${
-    const greeting = "hello"
+    const greeting = "hello";
 }
 <p>${greeting}</>
+</program>

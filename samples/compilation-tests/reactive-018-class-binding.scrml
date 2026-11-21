@@ -1,3 +1,4 @@
+<program reset="none">
 // reactive-018-class-binding.scrml
 // Dynamic class binding demonstrations: class: directive and template literal.
 // Tests: §5.5 dynamic class binding — conditional toggle, multiple directives,
@@ -27,3 +28,4 @@
         Themed card
     </div>
 </div>
+</program>

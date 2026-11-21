@@ -1,3 +1,4 @@
+<program reset="none">
 // Phase 8: @media inside #{} (§8 styles)
 // Should compile clean.
 
@@ -18,3 +19,4 @@
     <p>Responsive content</>
   </div>
 </div>
+</program>

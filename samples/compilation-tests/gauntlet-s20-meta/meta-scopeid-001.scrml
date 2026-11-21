@@ -2,9 +2,7 @@
 // Runtime meta reading its own scope ID. Should compile clean.
 
 <program>
-${
   <debug> = true
-}
 
 <div>
   ^{

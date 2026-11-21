@@ -38,17 +38,17 @@
 
 <page db="../../dispatch.db" auth="required">
 
-  import { driverStatusClasses, driverStatusLabel } from '../../components/driver-card.scrml'
-  import { formatRate, formatPickupAt } from '../../components/load-card.scrml'
-  import { statusBadgeClasses, statusBadgeClassesOf, statusLabel } from '../../components/load-status-badge.scrml'
-  import { LoadStatus } from '../../schema.scrml'
-  import { createSessionStore } from 'scrml:store'
-  import { randomInt } from 'scrml:random'
-  import { SESSION_DB_PATH } from '../../models/auth.scrml'
+  import { driverStatusClasses, driverStatusLabel } from '../../components/driver-card.scrml';
+  import { formatRate, formatPickupAt } from '../../components/load-card.scrml';
+  import { statusBadgeClasses, statusBadgeClassesOf, statusLabel } from '../../components/load-status-badge.scrml';
+  import { LoadStatus } from '../../schema.scrml';
+  import { createSessionStore } from 'scrml:store';
+  import { randomInt } from 'scrml:random';
+  import { SESSION_DB_PATH } from '../../models/auth.scrml';
   // M5: centralized real-time channels — see SPEC §38.12.6.
-  import { "dispatch-board" as dispatchBoard } from '../../channels/dispatch-board.scrml'
-  import { "customer-events" as customerEvents } from '../../channels/customer-events.scrml'
-  import { "load-events" as loadEvents } from '../../channels/load-events.scrml'
+  import { "dispatch-board" as dispatchBoard } from '../../channels/dispatch-board.scrml';
+  import { "customer-events" as customerEvents } from '../../channels/customer-events.scrml';
+  import { "load-events" as loadEvents } from '../../channels/load-events.scrml';
 
   <db src="../../dispatch.db" protect="password_hash" tables="users, drivers, loads, customers, assignments, log_entries, lin_tokens">
 

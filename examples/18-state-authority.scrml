@@ -43,44 +43,44 @@
       <draftTitle> = ""
 
       function loadTasks() {
-        return ?{`SELECT id, title, completed, position FROM tasks ORDER BY position`}.all() !{ _ :> [] }
+        return ?{`SELECT id, title, completed, position FROM tasks ORDER BY position`}.all() !{ _ :> [] };
       }
 
       function addTask(title) {
-        ?{`INSERT INTO tasks (title, position) VALUES (${title}, (SELECT COALESCE(MAX(position), 0) + 1 FROM tasks))`}.run()
-        return ?{`SELECT id, title, completed, position FROM tasks ORDER BY position`}.all() !{ _ :> [] }
+        ?{`INSERT INTO tasks (title, position) VALUES (${title}, (SELECT COALESCE(MAX(position), 0) + 1 FROM tasks))`}.run();
+        return ?{`SELECT id, title, completed, position FROM tasks ORDER BY position`}.all() !{ _ :> [] };
       }
 
       function toggleTask(id, completed) {
-        ?{`UPDATE tasks SET completed = ${completed ? 1 : 0} WHERE id = ${id}`}.run()
-        return ?{`SELECT id, title, completed, position FROM tasks ORDER BY position`}.all() !{ _ :> [] }
+        ?{`UPDATE tasks SET completed = ${completed ? 1 : 0} WHERE id = ${id}`}.run();
+        return ?{`SELECT id, title, completed, position FROM tasks ORDER BY position`}.all() !{ _ :> [] };
       }
 
       function deleteTaskById(id) {
-        ?{`DELETE FROM tasks WHERE id = ${id}`}.run()
-        return ?{`SELECT id, title, completed, position FROM tasks ORDER BY position`}.all() !{ _ :> [] }
+        ?{`DELETE FROM tasks WHERE id = ${id}`}.run();
+        return ?{`SELECT id, title, completed, position FROM tasks ORDER BY position`}.all() !{ _ :> [] };
       }
 
       // Pattern B — explicit `on mount` block triggers the initial
       // fetch (§52.6.5).
       on mount {
         @tasks = loadTasks()
-      }
+      };
 
       // Client functions own @state writes; server functions own DB I/O.
       // These wrap the server fns so the result lands in @tasks on the client.
       function submit() {
-        if (@draftTitle.trim() == "") return
-        @tasks = addTask(@draftTitle) !{ .Transport(_) :> return }
-        reset(@draftTitle)
+        if (@draftTitle.trim() == "") return;
+        @tasks = addTask(@draftTitle) !{ .Transport(_) :> return };
+        reset(@draftTitle);
       }
 
       function toggle(id, completed) {
-        @tasks = toggleTask(id, completed) !{ .Transport(_) :> return }
+        @tasks = toggleTask(id, completed) !{ .Transport(_) :> return };
       }
 
       function remove(id) {
-        @tasks = deleteTaskById(id) !{ .Transport(_) :> return }
+        @tasks = deleteTaskById(id) !{ .Transport(_) :> return };
       }
     }
 
@@ -157,7 +157,7 @@
             <input type="checkbox" checked=t.completed onchange=toggle(t.id, !t.completed)/>
             <span class="title" class:done=t.completed>${t.title}</span>
             <button class="rm" onclick=remove(t.id)>×</button>
-          </li>
+          </li>;
         } }
       </ul>
     </div>

@@ -25,10 +25,8 @@
 // singleton invariant: each outer-instance × one nested-instance.
 
 <program>
-${
     type AppMode:enum  = { Title, Playing, Paused }
     type PlayMode:enum = { Exploring, Battle, Inventory }
-}
 
 <engine for=AppMode initial=.Title>
     <Title rule=.Playing></>

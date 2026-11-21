@@ -1,7 +1,5 @@
 // server @var — §52.4 instance-level authority
 <program db="./test.db">
-    ${
-        server @count = 0
-    }
+        server @count = 0;
     <p>${@count}</>
 </>

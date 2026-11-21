@@ -1,9 +1,9 @@
+<program reset="none">
 // fn calls another fn — valid (§48.6.2; `fn` is the canonical pure form)
-${
-    fn double(x) { return x * 2 }
+    fn double(x) { return x * 2; }
     fn build(x) {
-        let result = double(x)
-        return result
+        let result = double(x);
+        return result;
     }
-}
 <p>${build(3)}</>
+</program>

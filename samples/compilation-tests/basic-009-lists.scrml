@@ -1,3 +1,4 @@
+<program reset="none">
 // basic-009-lists.scrml
 // Ordered and unordered lists. Tests: ul, ol, li nesting.
 
@@ -16,3 +17,4 @@
         <li>Third step</>
     </ol>
 </div>
+</program>

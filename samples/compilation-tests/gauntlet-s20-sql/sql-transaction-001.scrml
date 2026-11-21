@@ -7,12 +7,12 @@
 ${
   server function bulkInsert(name1, name2)! {
     transaction {
-      ?{`INSERT INTO orders (name) VALUES (${name1})`}.run()
-      ?{`INSERT INTO orders (name) VALUES (${name2})`}.run()
+      ?{`INSERT INTO orders (name) VALUES (${name1})`}.run();
+      ?{`INSERT INTO orders (name) VALUES (${name2})`}.run();
     }
   }
 }
-<form onsubmit={ bulkInsert("A", "B") !{ | _ :> console.warn("bulk insert failed") } }>
+<form onsubmit={ bulkInsert("A", "B") !{ | _ :> console.warn("bulk insert failed") }; }>
   <button type="submit">Bulk Insert</>
 </form>
 </>

@@ -1,10 +1,10 @@
+<program>
 // arms lift different concrete types — result is union (§17.6.2 normative)
 ${
-    let x = 1
-    let r = if (x > 0) { lift "yes" } else { lift 0 }
-    log(r)
-    function log(v: string | number) { let _ = v }
+    let x = 1;
+    let r = if (x > 0) { lift "yes"; } else { lift 0; };
+    log(r);
+    function log(v: string | number) { let _ = v; }
 }
-<program>
     <p>ok</>
 </>

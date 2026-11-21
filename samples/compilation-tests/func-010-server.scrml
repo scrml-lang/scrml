@@ -1,12 +1,14 @@
+<program reset="none">
 // func-010-server.scrml
 // Server function declaration. Tests: server keyword prefix.
 
 <div>
     ${
         server function fetchData() {
-            let data = "server-side result"
-            return data
+            let data = "server-side result";
+            return data;
         }
     }
     <p>Server function defined</>
 </div>
+</program>

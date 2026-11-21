@@ -1,11 +1,11 @@
+<program reset="none">
 // lin declare + single consume — valid
-${
-    function fetchToken() { return "tok-abc" }
-    function authenticate(t) { return t }
+    function fetchToken() { return "tok-abc"; }
+    function authenticate(t) { return t; }
 
     function run() {
-        lin token = fetchToken()
-        return authenticate(token)
+        lin token = fetchToken();
+        return authenticate(token);
     }
-}
 <p>${run()}</>
+</program>

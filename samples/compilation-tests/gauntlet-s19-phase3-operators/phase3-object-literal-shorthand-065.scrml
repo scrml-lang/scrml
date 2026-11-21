@@ -1,10 +1,10 @@
+<program>
 // JS shorthand property syntax
 ${
     type Point:struct = { x: number, y: number }
-    let x = 1
-    let y = 2
-    const p:Point = { x, y }
+    let x = 1;
+    let y = 2;
+    const p:Point = { x, y };
 }
-<program>
     <p>${p.x}</>
 </>

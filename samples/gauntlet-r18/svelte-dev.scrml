@@ -7,33 +7,33 @@
 
 <div class="debug-dashboard">
     ${
-        @counter = 0
-        @message = "ready"
-        @logEntries = []
-        @theme = "light"
+        @counter = 0;
+        @message = "ready";
+        @logEntries = [];
+        @theme = "light";
 
         function increment() {
-            @counter = @counter + 1
+            @counter = @counter + 1;
         }
 
         function decrement() {
-            @counter = @counter - 1
+            @counter = @counter - 1;
         }
 
         function setMessage(text) {
-            @message = text
+            @message = text;
         }
 
         function toggleTheme() {
             if (@theme == "light") {
-                @theme = "dark"
+                @theme = "dark";
             } else {
-                @theme = "light"
+                @theme = "light";
             }
         }
 
         function addLog(entry) {
-            @logEntries = [...@logEntries, entry]
+            @logEntries = [...@logEntries, entry];
         }
     }
 

@@ -1,11 +1,13 @@
+<program reset="none">
 // func-001-basic.scrml
 // Basic function declaration. Tests: function keyword in logic.
 
 <div>
     ${
         function greet() {
-            return "Hello!"
+            return "Hello!";
         }
     }
     <p>Function defined</>
 </div>
+</program>

@@ -1,11 +1,13 @@
+<program reset="none">
 // logic-009-expressions.scrml
 // Bare expressions in logic blocks. Tests: expressions without assignment.
 
 <div>
     ${
-        let items = 5
-        let price = 9.99
-        let total = items * price
+        let items = 5;
+        let price = 9.99;
+        let total = items * price;
     }
     <p>Order total computed</>
 </div>
+</program>

@@ -1,3 +1,4 @@
+<program reset="none">
 // match-002-block-form-arm-swap.scrml
 // Match block-form (Tier 1, SPEC §18.0.1) — runtime arm-swap on reactive
 // change. The `<match for=Phase on=@phase>` dispatcher subscribes to @phase;
@@ -26,3 +27,4 @@
         </>
     </match>
 </div>
+</program>

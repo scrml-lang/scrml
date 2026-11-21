@@ -3,10 +3,10 @@
 
 ${
     function greet(name) {
-        return "Hello, " + name
+        return "Hello, " + name;
     }
     function double(x) {
-        return x * 2
+        return x * 2;
     }
 }
 

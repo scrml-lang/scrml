@@ -1,12 +1,13 @@
+<program reset="none">
 // comp-012-pagination.scrml
 // Pagination pattern. Tests: page navigation.
 
 <div>
     ${
         <currentPage> = 1
-        let totalPages = 5
+        let totalPages = 5;
         function goToPage(page) {
-            @currentPage = page
+            @currentPage = page;
         }
     }
     <nav class="pagination">
@@ -17,3 +18,4 @@
         <button onclick=goToPage(5)>Last</>
     </nav>
 </div>
+</program>

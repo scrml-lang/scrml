@@ -1,5 +1,5 @@
 // Reactive attribute value (bare @var, no braces).
 <program>
-    ${ <url> = "/home" }
+     <url> = "/home" 
     <a href=@url>Home</a>
 </program>

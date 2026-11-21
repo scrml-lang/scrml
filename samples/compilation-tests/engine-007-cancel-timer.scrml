@@ -27,9 +27,7 @@
 //     clearTimeout(undefined) browser semantics).
 
 <program>
-${
     type ConfirmPhase:enum = { Idle, Confirming, Confirmed, Dismissed }
-}
 
 <engine for=ConfirmPhase initial=.Idle>
     <Idle rule=.Confirming></>

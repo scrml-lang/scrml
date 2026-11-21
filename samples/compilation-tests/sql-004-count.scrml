@@ -1,7 +1,9 @@
+<program reset="none">
 // sql-004-count.scrml
 // SQL aggregate query. Tests: ?{} with COUNT.
 
 <div>
-    ${ let total = ?{`SELECT COUNT(*) as cnt FROM users`} }
+    ${ let total = ?{`SELECT COUNT(*) as cnt FROM users`}; }
     <p>Count queried</>
 </div>
+</program>

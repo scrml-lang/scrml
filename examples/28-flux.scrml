@@ -51,48 +51,48 @@
     // JS doubles) AND dodge the emitStringFromTree (a+b)%c paren-drop. `nonce` is
     // mixed EARLY so a re-observed cell visibly re-rolls (a late mix barely moves %100).
     fn hashCell(seed: int, x: int, y: int, nonce: int) -> int {
-        let h = seed % 100003 + nonce * 6151 + 101
-        let a = h * 131 + x * 2654435 + 1
-        h = a % 2147483647
-        let b = h * 131 + y * 2654435 + 1
-        h = b % 2147483647
-        let c = h * 131 + 7919
-        h = c % 2147483647
-        return h
+        let h = seed % 100003 + nonce * 6151 + 101;
+        let a = h * 131 + x * 2654435 + 1;
+        h = a % 2147483647;
+        let b = h * 131 + y * 2654435 + 1;
+        h = b % 2147483647;
+        let c = h * 131 + 7919;
+        h = c % 2147483647;
+        return h;
     }
 
     // Terrain for a cell at a given nonce. Border frame + center spawn clearing are
     // STABLE (never shift — keeps the game navigable); the interior re-rolls.
     fn cellTerrain(seed: int, x: int, y: int, cols: int, rows: int, nonce: int) -> Terrain {
-        if (x <= 0 || x >= cols - 1 || y <= 0 || y >= rows - 1) { return .Wall }
-        let cw = cols - 1
-        let ch = rows - 1
-        let cx = cw / 2
-        let cy = ch / 2
-        let ddx = x - cx
-        let ddy = y - cy
-        if (ddx >= -1 && ddx <= 1 && ddy >= -1 && ddy <= 1) { return .Floor }
-        let r = hashCell(seed, x, y, nonce) % 100
+        if (x <= 0 || x >= cols - 1 || y <= 0 || y >= rows - 1) { return .Wall; }
+        let cw = cols - 1;
+        let ch = rows - 1;
+        let cx = cw / 2;
+        let cy = ch / 2;
+        let ddx = x - cx;
+        let ddy = y - cy;
+        if (ddx >= -1 && ddx <= 1 && ddy >= -1 && ddy <= 1) { return .Floor; }
+        let r = hashCell(seed, x, y, nonce) % 100;
         if (x % 4 == 0 || y % 4 == 0) {
-            if (r < 88) { return .Floor }
-            return .Wall
+            if (r < 88) { return .Floor; }
+            return .Wall;
         }
-        if (r < 50) { return .Floor }
-        if (r < 85) { return .Wall }
-        return .Mountain
+        if (r < 50) { return .Floor; }
+        if (r < 85) { return .Wall; }
+        return .Mountain;
     }
 
     fn terrainAtCell(seed: int, x: int, y: int, cols: int, rows: int, nonce: int[]) -> Terrain {
-        let idx = y * cols + x
-        let n = 0
-        if (idx >= 0 && idx < nonce.length) { n = nonce[idx] }
-        return cellTerrain(seed, x, y, cols, rows, n)
+        let idx = y * cols + x;
+        let n = 0;
+        if (idx >= 0 && idx < nonce.length) { n = nonce[idx]; }
+        return cellTerrain(seed, x, y, cols, rows, n);
     }
 
     fn glyphFor(t: Terrain) -> string {
         match t {
-            .Floor    :> "."
-            .Wall     :> "#"
+            .Floor    :> ".",
+            .Wall     :> "#",
             .Mountain :> "^"
         }
     }
@@ -100,177 +100,177 @@
     // Seed-fixed goal axis — biased to a FAR band (one of the outer thirds), so
     // the exit is always a real journey from the center spawn, never next door.
     fn goalAxis(seed: int, salt: int, span: int) -> int {
-        let h = hashCell(seed, salt, salt, 0)
-        let spread = h % 3
-        if (h % 2 == 0) { return spread + 2 }        // far-low band: [2 .. 4]
-        let hi = span - 3
-        return hi - spread                            // far-high band: [span-5 .. span-3]
+        let h = hashCell(seed, salt, salt, 0);
+        let spread = h % 3;
+        if (h % 2 == 0) { return spread + 2; }        // far-low band: [2 .. 4]
+        let hi = span - 3;
+        return hi - spread;                            // far-high band: [span-5 .. span-3]
     }
 
     // --- vision + hints + memory lookup (pure) --------------------------------
 
     fn inVision(px: int, py: int, x: int, y: int, r: int) -> bool {
-        let dx = x - px
-        if (dx < 0) { dx = -dx }
-        let dy = y - py
-        if (dy < 0) { dy = -dy }
-        let m = dx
-        if (dy > dx) { m = dy }
-        return m <= r
+        let dx = x - px;
+        if (dx < 0) { dx = -dx; }
+        let dy = y - py;
+        if (dy < 0) { dy = -dy; }
+        let m = dx;
+        if (dy > dx) { m = dy; }
+        return m <= r;
     }
 
     fn chebyDist(dx: int, dy: int) -> int {
-        let ax = dx
-        if (ax < 0) { ax = -ax }
-        let ay = dy
-        if (ay < 0) { ay = -ay }
-        if (ay > ax) { return ay }
-        return ax
+        let ax = dx;
+        if (ax < 0) { ax = -ax; }
+        let ay = dy;
+        if (ay < 0) { ay = -ay; }
+        if (ay > ax) { return ay; }
+        return ax;
     }
 
     // Compass toward the goal — letters only (distance is a sibling derived int,
     // so we never concat string+int).
     fn compass(dx: int, dy: int) -> string {
-        if (dx == 0 && dy == 0) { return "HERE" }
-        let ns = ""
-        if (dy < 0) { ns = "N" }
-        if (dy > 0) { ns = "S" }
-        let ew = ""
-        if (dx > 0) { ew = "E" }
-        if (dx < 0) { ew = "W" }
-        return ns + ew
+        if (dx == 0 && dy == 0) { return "HERE"; }
+        let ns = "";
+        if (dy < 0) { ns = "N"; }
+        if (dy > 0) { ns = "S"; }
+        let ew = "";
+        if (dx > 0) { ew = "E"; }
+        if (dx < 0) { ew = "W"; }
+        return ns + ew;
     }
 
     fn findMemoryIdx(mems: Memory[], x: int, y: int) -> int {
         for (let i = 0; i < mems.length; i++) {
-            let mm = mems[i]
-            if (mm.x == x && mm.y == y) { return i }
+            let mm = mems[i];
+            if (mm.x == x && mm.y == y) { return i; }
         }
-        return -1
+        return -1;
     }
 
     // --- board render (pure) --------------------------------------------------
     // player > goal(in vision) > memory(frozen) > live(rolled) > home-memory-in-fog > flux void
 
     fn renderBoard(px: int, py: int, seed: int, cols: int, rows: int, vision: int, nonce: int[], mems: Memory[], goalX: int, goalY: int) -> string {
-        let out = ""
+        let out = "";
         for (let y = 0; y < rows; y++) {
             for (let x = 0; x < cols; x++) {
                 if (x == px && y == py) {
-                    out = out + "@"
+                    out = out + "@";
                 } else {
-                    let mi = findMemoryIdx(mems, x, y)
+                    let mi = findMemoryIdx(mems, x, y);
                     if (inVision(px, py, x, y, vision)) {
                         if (x == goalX && y == goalY) {
-                            out = out + "X"
+                            out = out + "X";
                         } else {
                             if (mi >= 0) {
-                                out = out + glyphFor(mems[mi].terrain)
+                                out = out + glyphFor(mems[mi].terrain);
                             } else {
-                                out = out + glyphFor(terrainAtCell(seed, x, y, cols, rows, nonce))
+                                out = out + glyphFor(terrainAtCell(seed, x, y, cols, rows, nonce));
                             }
                         }
                     } else {
                         if (mi >= 0 && mems[mi].home) {
-                            out = out + glyphFor(mems[mi].terrain)
+                            out = out + glyphFor(mems[mi].terrain);
                         } else {
-                            out = out + " "
+                            out = out + " ";
                         }
                     }
                 }
             }
-            out = out + "\n"
+            out = out + "\n";
         }
-        return out
+        return out;
     }
 
     // --- progression + movement (impure) --------------------------------------
 
     function awardXp(amount: int) {
-        @xp = @xp + amount
-        let need = @level * 10
+        @xp = @xp + amount;
+        let need = @level * 10;
         if (@xp >= need) {
-            @level = @level + 1
-            @budget = @budget + 2
+            @level = @level + 1;
+            @budget = @budget + 2;
         }
     }
 
     // Bump the nonce of every cell that WAS in vision but is NOT after the move —
     // those re-roll on next sighting. COW: returns a fresh array.
     fn bumpLeftVision(nonce: int[], opx: int, opy: int, npx: int, npy: int, vision: int, cols: int, rows: int) -> int[] {
-        let result = nonce.slice()
+        let result = nonce.slice();
         for (let y = 0; y < rows; y++) {
             for (let x = 0; x < cols; x++) {
-                let wasIn = inVision(opx, opy, x, y, vision)
-                let isIn = inVision(npx, npy, x, y, vision)
+                let wasIn = inVision(opx, opy, x, y, vision);
+                let isIn = inVision(npx, npy, x, y, vision);
                 if (wasIn && !isIn) {
-                    let idx = y * cols + x
-                    result[idx] = result[idx] + 1
+                    let idx = y * cols + x;
+                    result[idx] = result[idx] + 1;
                 }
             }
         }
-        return result
+        return result;
     }
 
     function move(dx: int, dy: int) {
-        if (@won) { return }
-        let nx = @px + dx
-        let ny = @py + dy
-        if (nx < 0 || nx >= @cols || ny < 0 || ny >= @rows) { return }
-        let isGoal = nx == @goalX && ny == @goalY
+        if (@won) { return; }
+        let nx = @px + dx;
+        let ny = @py + dy;
+        if (nx < 0 || nx >= @cols || ny < 0 || ny >= @rows) { return; }
+        let isGoal = nx == @goalX && ny == @goalY;
         if (!isGoal) {
-            let t = terrainAtCell(@seed, nx, ny, @cols, @rows, @nonce)
-            if (t != Terrain::Floor) { return }
+            let t = terrainAtCell(@seed, nx, ny, @cols, @rows, @nonce);
+            if (t != Terrain::Floor) { return; }
         }
-        @nonce = bumpLeftVision(@nonce, @px, @py, nx, ny, @vision, @cols, @rows)
-        @px = nx
-        @py = ny
+        @nonce = bumpLeftVision(@nonce, @px, @py, nx, ny, @vision, @cols, @rows);
+        @px = nx;
+        @py = ny;
         if (isGoal) {
-            @won = true
-            awardXp(20)
+            @won = true;
+            awardXp(20);
         } else {
-            awardXp(1)
+            awardXp(1);
         }
     }
 
     // --- memory actions (impure) ----------------------------------------------
 
     function lockMemory() {
-        if (@budget < 1) { return }
-        let mi = findMemoryIdx(@memories, @px, @py)
-        if (mi >= 0) { return }
-        let t = terrainAtCell(@seed, @px, @py, @cols, @rows, @nonce)
-        @memories = [...@memories, { x: @px, y: @py, terrain: t, home: false }]
-        @budget = @budget - 1
+        if (@budget < 1) { return; }
+        let mi = findMemoryIdx(@memories, @px, @py);
+        if (mi >= 0) { return; }
+        let t = terrainAtCell(@seed, @px, @py, @cols, @rows, @nonce);
+        @memories = [...@memories, { x: @px, y: @py, terrain: t, home: false }];
+        @budget = @budget - 1;
     }
 
     function pinHome() {
-        let mi = findMemoryIdx(@memories, @px, @py)
-        if (mi < 0) { return }
-        if (@memories[mi].home) { return }
-        if (@budget < 1) { return }
-        let result = []
+        let mi = findMemoryIdx(@memories, @px, @py);
+        if (mi < 0) { return; }
+        if (@memories[mi].home) { return; }
+        if (@budget < 1) { return; }
+        let result = [];
         for (let i = 0; i < @memories.length; i++) {
-            let mm = @memories[i]
+            let mm = @memories[i];
             if (i == mi) {
-                result.push({ x: mm.x, y: mm.y, terrain: mm.terrain, home: true })
+                result.push({ x: mm.x, y: mm.y, terrain: mm.terrain, home: true });
             } else {
-                result.push(mm)
+                result.push(mm);
             }
         }
-        @memories = result
-        @budget = @budget - 1
+        @memories = result;
+        @budget = @budget - 1;
     }
 
     function newGame() {
-        @px = 7
-        @py = 4
-        @level = 1
-        @xp = 0
-        @budget = 6
-        @won = false
-        @nonce = Array(135).fill(0)
-        @memories = []
+        @px = 7;
+        @py = 4;
+        @level = 1;
+        @xp = 0;
+        @budget = 6;
+        @won = false;
+        @nonce = Array(135).fill(0);
+        @memories = [];
     }
 
     // --- render ---------------------------------------------------------------

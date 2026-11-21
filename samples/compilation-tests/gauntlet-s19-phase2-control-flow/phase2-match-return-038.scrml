@@ -1,16 +1,16 @@
+<program>
 // return match ... — valid in function body (§18.3)
 ${
     type Status:enum = { Loading, Success, Error }
     function getLabel(s: Status): string {
         return match s {
-            .Loading => "Loading..."
-            .Success => "Done!"
+            .Loading => "Loading...",
+            .Success => "Done!",
             .Error   => "Failed"
-        }
+        };
     }
-    log(getLabel(.Success))
-    function log(s: string) { let _ = s }
+    log(getLabel(.Success));
+    function log(s: string) { let _ = s; }
 }
-<program>
     <p>ok</>
 </>

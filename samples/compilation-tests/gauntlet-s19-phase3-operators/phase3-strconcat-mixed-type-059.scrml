@@ -1,9 +1,9 @@
+<program>
 // string + number — JS coerces; scrml may require explicit conversion
 ${
-    let name = "count="
-    let n = 42
-    const out = name + n
+    let name = "count=";
+    let n = 42;
+    const out = name + n;
 }
-<program>
     <p>${out}</>
 </>

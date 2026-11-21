@@ -1,12 +1,12 @@
+<program>
 // presence test, multi var — `if (x is given && y is given) { body }` (was the S462-deprecated `given x, y => { body }`; migrated by `scrml fix`)
 ${
-    let first: string | not = "a"
-    let last: string | not = "b"
+    let first: string | not = "a";
+    let last: string | not = "b";
     if (first is given && last is given) {
-        log(first + " " + last)
+        log(first + " " + last);
     }
-    function log(s: string) { let _ = s }
+    function log(s: string) { let _ = s; }
 }
-<program>
     <p>ok</>
 </>

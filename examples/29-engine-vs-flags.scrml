@@ -86,17 +86,17 @@
     // the failure INTO the .Failed phase variant — errors are STATES, not a
     // separate `<hasError>` boolean.
     function fetchItems() ! LoadError {
-        return ?{`SELECT id, name FROM items ORDER BY name`}.all()
+        return ?{`SELECT id, name FROM items ORDER BY name`}.all();
     }
 
     // load() writes bare .Variants through the engine variable @itemsPhase.
     // The engine validates each write against the current state's rule=.
     function load() {
-        @itemsPhase = .Loading
+        @itemsPhase = .Loading;
         const rows = fetchItems() !{
-            _ err :> { @itemsPhase = .Failed("Couldn't load items."); return }
-        }
-        @itemsPhase = .Loaded(rows)
+            _ err :> { @itemsPhase = .Failed("Couldn't load items."); return; }
+        };
+        @itemsPhase = .Loaded(rows);
     }
 
     // ONE engine replaces the four cells + the hand-written render chain.

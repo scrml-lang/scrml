@@ -1,10 +1,12 @@
+<program reset="none">
 // logic-014-template-literal.scrml
 // Template literals. Tests: backtick strings in logic blocks.
 
 <div>
     ${
-        let name = "World"
-        let msg = `Hello ${name}!`
+        let name = "World";
+        let msg = `Hello ${name}!`;
     }
     <p>Template ready</>
 </div>
+</program>

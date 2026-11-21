@@ -1,13 +1,15 @@
+<program reset="none">
 // func-012-multiple-events.scrml
 // Multiple event handlers on different elements. Tests: various event attrs.
 
 <div>
     ${
-        function onHover() { let hovered = true }
-        function onClick() { let clicked = true }
-        function onFocus() { let focused = true }
+        function onHover() { let hovered = true; }
+        function onClick() { let clicked = true; }
+        function onFocus() { let focused = true; }
     }
     <div onmouseover=onHover()>Hover me</>
     <button onclick=onClick()>Click me</>
     <input type="text" onfocus=onFocus()/>
 </div>
+</program>

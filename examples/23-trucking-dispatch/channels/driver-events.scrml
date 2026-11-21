@@ -32,7 +32,7 @@ export <channel name="driver-events">
                 body: body,
                 loadId: loadId,
                 at: new Date().toISOString()
-            }]
+            }];
         }
     }
 </>

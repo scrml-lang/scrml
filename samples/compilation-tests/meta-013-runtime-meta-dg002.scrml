@@ -4,11 +4,9 @@
 // assignments inside runtime meta blocks as consumption sites, not flag them
 // as "declared but never consumed".
 
-${
   <counter> = 0
   <message> = "hello"
   <themeMode> = "dark"
-}
 
 <div>
   <p>Count: ${@counter}</p>

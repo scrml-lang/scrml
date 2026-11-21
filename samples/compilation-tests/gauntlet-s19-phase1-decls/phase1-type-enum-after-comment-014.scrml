@@ -1,6 +1,6 @@
+<program reset="none">
 // :enum decl after a comment line — trips boundary scanners?
-${
     // a leading comment before the type
     type Status:enum = { Active, Idle }
-}
 <p>x</>
+</program>

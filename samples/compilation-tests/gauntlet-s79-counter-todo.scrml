@@ -1,3 +1,4 @@
+<program reset="none">
 // counter-todo.scrml
 // Go/HTMX dev test: counter + todo list
 // Tests: @var reactive state, events, if conditional, for/lift, reactive arrays, CSS, functions
@@ -111,17 +112,16 @@
 }
 
 // --- state ---
-${
     <count> = 0
     <newTodo> = ""
     <todos> = []
 
     function increment() {
-        @count = @count + 1
+        @count = @count + 1;
     }
 
     function decrement() {
-        @count = @count - 1
+        @count = @count - 1;
     }
 
     // captures current @newTodo and pushes it into @todos
@@ -129,14 +129,14 @@ ${
     // spec says @var = value triggers re-render — treating this as a full replace
     function addTodo() {
         if (@newTodo != "") {
-            @todos = @todos.concat([@newTodo])
-            @newTodo = ""
+            @todos = @todos.concat([@newTodo]);
+            @newTodo = "";
         }
     }
 
     function clearAll() {
-        @count = 0
-        @todos = []
+        @count = 0;
+        @todos = [];
     }
 
     // tracks the input field as user types
@@ -145,7 +145,6 @@ ${
         // assumption: event.target.value feeds into the bound @var automatically
         // this is the part I'm not sure about — see Open Questions
     }
-}
 
 // --- counter section ---
 <div class="section">
@@ -157,13 +156,13 @@ ${
     </div>
     ${
         if (@count == 0) {
-            lift <p class="note">Click +/- to change the count</>
+            lift <p class="note">Click +/- to change the count</>;
         }
         if (@count > 9) {
-            lift <p class="note">Getting up there.</>
+            lift <p class="note">Getting up there.</>;
         }
         if (@count < 0) {
-            lift <p class="note">Negative territory.</>
+            lift <p class="note">Negative territory.</>;
         }
     }
 </div>
@@ -188,10 +187,10 @@ ${
     <ul class="todo-list">
         ${
             if (@todos.length == 0) {
-                lift <li class="empty-state">No todos yet.</>
+                lift <li class="empty-state">No todos yet.</>;
             }
             for (let item of @todos) {
-                lift <li class="todo-item">${item}</>
+                lift <li class="todo-item">${item}</>;
             }
         }
     </ul>
@@ -201,3 +200,4 @@ ${
 <div class="btn-row">
     <button class="btn btn-danger" onclick=clearAll()>Reset everything</>
 </div>
+</program>

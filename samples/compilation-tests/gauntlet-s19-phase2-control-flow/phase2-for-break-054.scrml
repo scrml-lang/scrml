@@ -1,16 +1,16 @@
+<program>
 // break inside for-of
 ${
-    let xs = [1, 2, 3, 4, 5]
-    let found = -1
+    let xs = [1, 2, 3, 4, 5];
+    let found = -1;
     for (let x of xs) {
         if (x == 3) {
-            found = x
-            break
+            found = x;
+            break;
         }
     }
-    log(found)
-    function log(n: number) { let _ = n }
+    log(found);
+    function log(n: number) { let _ = n; }
 }
-<program>
     <p>ok</>
 </>

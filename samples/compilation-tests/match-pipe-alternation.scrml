@@ -1,11 +1,9 @@
-${
-    type Color:enum = { Red, Green, Blue, Purple }
+<program>
+type Color:enum = { Red, Green, Blue, Purple }
     <c>: Color = .Red
     const <isWarm> = match @c {
-        .Red | .Purple => true
+        .Red | .Purple => true,
         .Green | .Blue => false
     }
-}
-<program>
     <p>warm: ${@isWarm}</p>
 </program>

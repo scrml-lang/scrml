@@ -14,9 +14,9 @@ export type UserRole:enum = {
 // Pure helper — runs in any context (no @reactive reads, no server I/O).
 export function badgeColor(role: UserRole) -> string {
   match role {
-    .Admin     :> "red"
-    .Moderator :> "blue"
-    .Member    :> "green"
+    .Admin     :> "red",
+    .Moderator :> "blue",
+    .Member    :> "green",
     .Guest     :> "gray"
   }
 }

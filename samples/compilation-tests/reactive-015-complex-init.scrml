@@ -1,3 +1,4 @@
+<program reset="none">
 // reactive-015-complex-init.scrml
 // Reactive variables with complex initial values. Tests: @ with nested structures.
 
@@ -13,3 +14,4 @@
     }
     <p>Settings initialized</>
 </div>
+</program>

@@ -1,7 +1,7 @@
 // Trap: `onclick` name must not be mis-tokenized as a tilde-declaration.
 // This fixture just confirms an `onclick` handler parses cleanly next to a ~{} test block.
 <program>
-    ${ function save() { let _ = 1 } }
+     function save() { let _ = 1; } 
     <button onclick=save()>Save</button>
     ~{
         test("smoke") {

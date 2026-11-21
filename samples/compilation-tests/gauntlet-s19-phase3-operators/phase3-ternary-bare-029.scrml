@@ -1,8 +1,8 @@
+<program>
 // simple ternary as const RHS
 ${
-    let x = 5
-    const label = x > 3 ? "high" : "low"
+    let x = 5;
+    const label = x > 3 ? "high" : "low";
 }
-<program>
     <p>${label}</>
 </>

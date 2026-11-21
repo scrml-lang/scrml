@@ -1,14 +1,16 @@
+<program reset="none">
 // control-012-for-lift-complex.scrml
 // For loop with lift producing complex markup. Tests: lift with nested tags.
 
 <div>
     ${
-        let users = ["Alice", "Bob", "Charlie"]
+        let users = ["Alice", "Bob", "Charlie"];
         for (let user of users) {
             lift <div class="user-card">
                 <h3>${user}</>
                 <p>Active member</>
-            </div>
+            </div>;
         }
     }
 </div>
+</program>

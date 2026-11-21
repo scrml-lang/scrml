@@ -1,10 +1,12 @@
+<program reset="none">
 // Markup then lift — §10.6 target-parent clarity.
 <div>
     <p>static</p>
     ${
-        let items = ["x"]
+        let items = ["x"];
         for (let it of items) {
-            lift <p>${it}</>
+            lift <p>${it}</>;
         }
     }
 </div>
+</program>

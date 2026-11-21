@@ -1,11 +1,11 @@
+<program>
 // Parenthesized compound: method call then `is not` — DQ-12 Phase A
 ${
-    let arr = [1, 2, 3]
-    let hit = arr.find(x => x == 2)
+    let arr = [1, 2, 3];
+    let hit = arr.find(x => x == 2);
     if ((hit) is not) {
-        let _miss = 1
+        let _miss = 1;
     }
 }
-<program>
     <p>ok</>
 </>

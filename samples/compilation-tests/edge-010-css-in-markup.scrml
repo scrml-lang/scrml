@@ -1,3 +1,4 @@
+<program reset="none">
 // edge-010-css-in-markup.scrml
 // CSS block inside markup. Tests: #{} as sibling to tags.
 
@@ -9,3 +10,4 @@
     <h1>Styled Title</>
     <p>This section has inline styles.</>
 </div>
+</program>

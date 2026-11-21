@@ -12,7 +12,7 @@
 ${
     // --- Step tracking ---
     <currentStep> = 1
-    const totalSteps = 3
+    const totalSteps = 3;
 
     // --- Step 1 state: Personal Info ---
     <firstName> = ""
@@ -36,95 +36,95 @@ ${
 
     // --- Validation functions ---
     function validateStep1() {
-        @step1Errors = []
+        @step1Errors = [];
         if (@firstName.length == 0) {
-            @step1Errors = [...@step1Errors, "First name is required"]
+            @step1Errors = [...@step1Errors, "First name is required"];
         }
         if (@lastName.length == 0) {
-            @step1Errors = [...@step1Errors, "Last name is required"]
+            @step1Errors = [...@step1Errors, "Last name is required"];
         }
         if (@email.length == 0) {
-            @step1Errors = [...@step1Errors, "Email is required"]
+            @step1Errors = [...@step1Errors, "Email is required"];
         }
         if (@email.length > 0 && !@email.includes("@")) {
-            @step1Errors = [...@step1Errors, "Email must be valid"]
+            @step1Errors = [...@step1Errors, "Email must be valid"];
         }
-        return @step1Errors.length == 0
+        return @step1Errors.length == 0;
     }
 
     function validateStep2() {
-        @step2Errors = []
+        @step2Errors = [];
         if (@selectedPlan.length == 0) {
-            @step2Errors = [...@step2Errors, "Please select a plan"]
+            @step2Errors = [...@step2Errors, "Please select a plan"];
         }
-        return @step2Errors.length == 0
+        return @step2Errors.length == 0;
     }
 
     // --- Navigation functions ---
     function goNext() {
         if (@currentStep == 1) {
             if (validateStep1()) {
-                @currentStep = 2
+                @currentStep = 2;
             }
         } else if (@currentStep == 2) {
             if (validateStep2()) {
-                @currentStep = 3
+                @currentStep = 3;
             }
         }
     }
 
     function goBack() {
         if (@currentStep > 1) {
-            @currentStep = @currentStep - 1
+            @currentStep = @currentStep - 1;
         }
     }
 
     // --- Input handlers (no bind:value available -- manual oninput) ---
     function handleFirstName() {
-        @firstName = event.target.value
+        @firstName = event.target.value;
     }
     function handleLastName() {
-        @lastName = event.target.value
+        @lastName = event.target.value;
     }
     function handleEmail() {
-        @email = event.target.value
+        @email = event.target.value;
     }
     function handlePlanFree() {
-        @selectedPlan = "free"
+        @selectedPlan = "free";
     }
     function handlePlanPro() {
-        @selectedPlan = "pro"
+        @selectedPlan = "pro";
     }
     function handlePlanEnterprise() {
-        @selectedPlan = "enterprise"
+        @selectedPlan = "enterprise";
     }
     function handleEmailUpdates() {
-        @emailUpdates = !@emailUpdates
+        @emailUpdates = !@emailUpdates;
     }
     function handleSmsAlerts() {
-        @smsAlerts = !@smsAlerts
+        @smsAlerts = !@smsAlerts;
     }
     function handleNewsletter() {
-        @newsletter = !@newsletter
+        @newsletter = !@newsletter;
     }
 
     // --- Submit ---
     server function submitRegistration(firstName, lastName, email, plan, emailUpdates, smsAlerts, newsletter) {
         ?{`INSERT INTO registrations (first_name, last_name, email, plan, email_updates, sms_alerts, newsletter)
-           VALUES (${firstName}, ${lastName}, ${email}, ${plan}, ${emailUpdates}, ${smsAlerts}, ${newsletter})`}.run()
-        return "ok"
+           VALUES (${firstName}, ${lastName}, ${email}, ${plan}, ${emailUpdates}, ${smsAlerts}, ${newsletter})`}.run();
+        return "ok";
     }
 
     function handleSubmit() {
-        @isSubmitting = true
-        @submitError = ""
-        let result = submitRegistration(@firstName, @lastName, @email, @selectedPlan, @emailUpdates, @smsAlerts, @newsletter) !{ .Transport(_) :> return }
+        @isSubmitting = true;
+        @submitError = "";
+        let result = submitRegistration(@firstName, @lastName, @email, @selectedPlan, @emailUpdates, @smsAlerts, @newsletter) !{ .Transport(_) :> return };
         if (result == "ok") {
-            @submitted = true
+            @submitted = true;
         } else {
-            @submitError = "Submission failed. Please try again."
+            @submitError = "Submission failed. Please try again.";
         }
-        @isSubmitting = false
+        @isSubmitting = false;
     }
 }
 
@@ -137,7 +137,7 @@ ${
         <div class="progress-dots">
             ${
                 for (let i = 1; i <= totalSteps; i++) {
-                    lift <span class="dot">${i}</>
+                    lift <span class="dot">${i}</>;
                 }
             }
         </>
@@ -182,7 +182,7 @@ ${
             <ul>
                 ${
                     for (let err of @step1Errors) {
-                        lift <li class="error-item">${err}</>
+                        lift <li class="error-item">${err}</>;
                     }
                 }
             </>
@@ -225,7 +225,7 @@ ${
             <ul>
                 ${
                     for (let err of @step2Errors) {
-                        lift <li class="error-item">${err}</>
+                        lift <li class="error-item">${err}</>;
                     }
                 }
             </>

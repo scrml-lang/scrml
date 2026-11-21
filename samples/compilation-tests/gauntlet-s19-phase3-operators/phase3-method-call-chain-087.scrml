@@ -1,8 +1,8 @@
+<program>
 // method chain: string.split().map().filter()
 ${
-    const csv = "  a, b ,  c , d "
-    const clean = csv.split(",").map(s => s.trim()).filter(s => s != "")
+    const csv = "  a, b ,  c , d ";
+    const clean = csv.split(",").map(s => s.trim()).filter(s => s != "");
 }
-<program>
     <p>${clean.length}</>
 </>

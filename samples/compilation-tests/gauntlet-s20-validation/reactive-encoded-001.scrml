@@ -1,10 +1,9 @@
+<program reset="none">
 // Phase 9: reactive var gets encoded name (§47)
 // Verify @var compiles to _scrml_s_<hash> pattern.
 
-${
   <items> = ["one", "two", "three"]
   <selected> = 0
-}
 
 <ul>
   <each in=@items>
@@ -12,3 +11,4 @@ ${
   </each>
 </ul>
 <p>Selected: ${@selected}</>
+</program>

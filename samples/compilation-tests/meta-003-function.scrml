@@ -1,9 +1,8 @@
+<program reset="none">
 // meta-003-function.scrml
 // Meta block with function. Tests: ^{} with function declaration.
 
-${
-    import { random } from 'scrml:random'
-}
+    import { random } from 'scrml:random';
 
 <div>
     ^{
@@ -13,3 +12,4 @@ ${
     }
     <p>Meta function</>
 </div>
+</program>

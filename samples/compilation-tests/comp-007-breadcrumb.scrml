@@ -1,13 +1,15 @@
+<program reset="none">
 // comp-007-breadcrumb.scrml
 // Breadcrumb navigation pattern. Tests: sequential nav items.
 
 <nav class="breadcrumb">
     <ol>
         ${
-            let crumbs = ["Home", "Products", "Electronics", "Phones"]
+            let crumbs = ["Home", "Products", "Electronics", "Phones"];
             for (let crumb of crumbs) {
-                lift <li><a href="#">${crumb}</a></li>
+                lift <li><a href="#">${crumb}</a></li>;
             }
         }
     </ol>
 </nav>
+</program>

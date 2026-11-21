@@ -1,9 +1,11 @@
+<program reset="none">
 // const with array type annotation, iterated via canonical `<each>` (§17.7)
 ${
-    const items: string[] = ["a", "b", "c"]
+    const items: string[] = ["a", "b", "c"];
 }
 <ul>
     <each in=items as item>
         <li>${item}</li>
     </each>
 </ul>
+</program>

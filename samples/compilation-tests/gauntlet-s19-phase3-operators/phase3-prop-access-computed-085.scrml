@@ -1,9 +1,9 @@
+<program>
 // computed property access a[b]
 ${
-    const arr = [10, 20, 30]
-    let i = 1
-    const v = arr[i]
+    const arr = [10, 20, 30];
+    let i = 1;
+    const v = arr[i];
 }
-<program>
     <p>${v}</>
 </>

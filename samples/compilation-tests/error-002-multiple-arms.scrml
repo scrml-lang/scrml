@@ -1,3 +1,4 @@
+<program reset="none">
 // error-002-multiple-arms.scrml
 // Error effect with multiple match arms. Tests: !{} with several patterns.
 
@@ -10,3 +11,4 @@
     }
     <p>Multi-error handler</>
 </div>
+</program>

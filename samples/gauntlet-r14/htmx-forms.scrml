@@ -8,47 +8,47 @@
 </schema>
 <div class="contact-form">
     ${
-        @name = ""
-        @email = ""
-        @phone = ""
-        @message = ""
-        @submitted = false
-        @errors = []
+        @name = "";
+        @email = "";
+        @phone = "";
+        @message = "";
+        @submitted = false;
+        @errors = [];
 
-        formTitle = "Contact Us"
+        formTitle = "Contact Us";
 
         function validateForm() {
             function checkRequired(field, label) {
                 if (field.length == 0) {
-                    return label + " is required"
+                    return label + " is required";
                 }
-                return not
+                return not;
             }
             function checkEmail(email) {
                 if (email.indexOf("@") == -1) {
-                    return "Invalid email"
+                    return "Invalid email";
                 }
-                return not
+                return not;
             }
-            let nameErr = checkRequired(@name, "Name")
-            let emailErr = checkRequired(@email, "Email")
-            let emailFmt = checkEmail(@email)
-            @errors = [nameErr, emailErr, emailFmt].filter(e => !(e is not))
-            return @errors.length == 0
+            let nameErr = checkRequired(@name, "Name");
+            let emailErr = checkRequired(@email, "Email");
+            let emailFmt = checkEmail(@email);
+            @errors = [nameErr, emailErr, emailFmt].filter(e => !(e is not));
+            return @errors.length == 0;
         }
 
         server function submitForm() {
-            ?{`INSERT INTO messages (name, email, phone, body) VALUES (${@name}, ${@email}, ${@phone}, ${@message})`}
-            @submitted = true
+            ?{`INSERT INTO messages (name, email, phone, body) VALUES (${@name}, ${@email}, ${@phone}, ${@message})`};
+            @submitted = true;
         }
 
         function resetForm() {
-            @name = ""
-            @email = ""
-            @phone = ""
-            @message = ""
-            @submitted = false
-            @errors = []
+            @name = "";
+            @email = "";
+            @phone = "";
+            @message = "";
+            @submitted = false;
+            @errors = [];
         }
     }
     <h1>${formTitle}</>
@@ -69,7 +69,7 @@
             <label>Message</>
             <textarea bind:value=@message></>
         </div>
-        <button onclick={ submitForm() !{ .Transport(_) :> return } }>Send</>
+        <button onclick={ submitForm() !{ .Transport(_) :> return }; }>Send</>
         <ul if=@errors.length>
             ${
                 for (let err of @errors) {

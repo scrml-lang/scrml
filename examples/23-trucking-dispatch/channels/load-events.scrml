@@ -34,7 +34,7 @@ export <channel name="load-events">
                 status: status,
                 location: location,
                 at: new Date().toISOString()
-            }]
+            }];
         }
     }
 </>

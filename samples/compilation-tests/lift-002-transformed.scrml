@@ -1,12 +1,14 @@
+<program reset="none">
 // lift-002-transformed.scrml
 // Lift with transformed data. Tests: lift after computation.
 
 <ul>
     ${
-        let numbers = [1, 2, 3, 4, 5]
+        let numbers = [1, 2, 3, 4, 5];
         for (let n of numbers) {
-            let doubled = n * 2
-            lift <li>${doubled}</>
+            let doubled = n * 2;
+            lift <li>${doubled}</>;
         }
     }
 </ul>
+</program>

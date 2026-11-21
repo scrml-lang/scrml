@@ -1,12 +1,14 @@
+<program reset="none">
 // reactive-011-with-logic.scrml
 // Reactive variables mixed with regular let declarations. Tests: @ and let together.
 
 <div>
     ${
-        let defaultName = "World"
+        let defaultName = "World";
         <greeting> = "Hello, " + defaultName
         <count> = 0
-        let maxCount = 100
+        let maxCount = 100;
     }
     <p>Mixed declarations</>
 </div>
+</program>

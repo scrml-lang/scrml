@@ -1,3 +1,4 @@
+<program reset="none">
 // meta-001-basic.scrml
 // Basic meta block. Tests: ^{} syntax.
 
@@ -7,3 +8,4 @@
     }
     <p>Meta block</>
 </div>
+</program>

@@ -1,3 +1,4 @@
+<program db="./tasks.sqlite">
 // Example 26: Type-derived schema — `schemaFor(StructType)` (§41.15).
 //
 // Demonstrates v0.4 L22-family type-as-argument primitive #3 (after
@@ -50,8 +51,7 @@
 //   SPEC §53.14.3    — type-as-argument family roster (L22 member #3)
 //   examples/17-schema-migrations.scrml — SQL-mirror hand-authored alternative
 
-${
-    import { schemaFor } from 'scrml:data'
+    import { schemaFor } from 'scrml:data';
 
     type UserRole:enum = { Admin, Editor, Viewer }
 
@@ -70,9 +70,6 @@ ${
         priority: integer min(1) max(5)
         status:   TaskStatus req
     }
-}
-
-<program db="./tasks.sqlite">
 
     // Type-derived schema — the table-declarations are SYNTHESIZED from the
     // struct + enum types above. The compiler expands each schemaFor call
@@ -90,5 +87,4 @@ ${
         ${ schemaFor(User) }
         ${ schemaFor(Task) }
     </>
-
 </program>

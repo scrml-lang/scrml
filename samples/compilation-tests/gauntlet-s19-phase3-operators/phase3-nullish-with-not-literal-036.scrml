@@ -1,8 +1,8 @@
+<program>
 // `?? not` — fallback to absence. Probably pointless but syntactically valid.
 ${
-    let x: string | not = "hi"
-    const y = x ?? not
+    let x: string | not = "hi";
+    const y = x ?? not;
 }
-<program>
     <p>${y ?? "absent"}</>
 </>

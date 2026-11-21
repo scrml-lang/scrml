@@ -1,3 +1,4 @@
+<program reset="none">
 // app.scrml — TodoMVC implementation in scrml
 // Per TodoMVC spec: add, toggle, toggle-all, delete, clear completed,
 // filter (All/Active/Completed), item count, double-click edit, localStorage persist.
@@ -11,97 +12,97 @@
             Completed
         }
 
-        @todos = []
-        @newTodoText = ""
+        @todos = [];
+        @newTodoText = "";
         <filter>: FilterMode = .All
-        @editingId = not
-        @editText = ""
-        @nextId = 1
+        @editingId = not;
+        @editText = "";
+        @nextId = 1;
 
         // Persist to localStorage
         function saveTodos() {
-            let data = JSON.stringify(@todos)
-            localStorage.setItem("todomvc-scrml", data)
+            let data = JSON.stringify(@todos);
+            localStorage.setItem("todomvc-scrml", data);
         }
 
         function loadTodos() {
-            let stored = localStorage.getItem("todomvc-scrml")
+            let stored = localStorage.getItem("todomvc-scrml");
             if (stored) {
-                let parsed = JSON.parse(stored)
-                @todos = parsed
-                let maxId = 0
+                let parsed = JSON.parse(stored);
+                @todos = parsed;
+                let maxId = 0;
                 for (let t of parsed) {
                     if (t.id > maxId) {
-                        maxId = t.id
+                        maxId = t.id;
                     }
                 }
-                @nextId = maxId + 1
+                @nextId = maxId + 1;
             }
         }
 
         function addTodo() {
-            let text = @newTodoText.trim()
+            let text = @newTodoText.trim();
             if (text.length > 0) {
-                @todos = [...@todos, { id: @nextId, title: text, completed: false }]
-                @nextId = @nextId + 1
-                @newTodoText = ""
-                saveTodos()
+                @todos = [...@todos, { id: @nextId, title: text, completed: false }];
+                @nextId = @nextId + 1;
+                @newTodoText = "";
+                saveTodos();
             }
         }
 
         function toggleTodo(id) {
             @todos = @todos.map(function(t) {
                 if (t.id == id) {
-                    return { id: t.id, title: t.title, completed: !t.completed }
+                    return { id: t.id, title: t.title, completed: !t.completed };
                 }
-                return t
-            })
-            saveTodos()
+                return t;
+            });
+            saveTodos();
         }
 
         function toggleAll() {
-            let allDone = @todos.every(function(t) { return t.completed })
+            let allDone = @todos.every(function(t) { return t.completed; });
             @todos = @todos.map(function(t) {
-                return { id: t.id, title: t.title, completed: !allDone }
-            })
-            saveTodos()
+                return { id: t.id, title: t.title, completed: !allDone };
+            });
+            saveTodos();
         }
 
         function deleteTodo(id) {
-            @todos = @todos.filter(function(t) { return t.id != id })
-            saveTodos()
+            @todos = @todos.filter(function(t) { return t.id != id; });
+            saveTodos();
         }
 
         function clearCompleted() {
-            @todos = @todos.filter(function(t) { return !t.completed })
-            saveTodos()
+            @todos = @todos.filter(function(t) { return !t.completed; });
+            saveTodos();
         }
 
         function startEdit(id, title) {
-            @editingId = id
-            @editText = title
+            @editingId = id;
+            @editText = title;
         }
 
         function commitEdit(id) {
-            let text = @editText.trim()
+            let text = @editText.trim();
             if (text.length > 0) {
                 @todos = @todos.map(function(t) {
                     if (t.id == id) {
-                        return { id: t.id, title: text, completed: t.completed }
+                        return { id: t.id, title: text, completed: t.completed };
                     }
-                    return t
-                })
-                saveTodos()
+                    return t;
+                });
+                saveTodos();
             } else {
-                deleteTodo(id)
+                deleteTodo(id);
             }
-            @editingId = not
-            @editText = ""
+            @editingId = not;
+            @editText = "";
         }
 
         function cancelEdit() {
-            @editingId = not
-            @editText = ""
+            @editingId = not;
+            @editText = "";
         }
 
         // Edit-mode keyboard handler — Enter commits, Escape cancels.
@@ -109,25 +110,25 @@
         // the `event` argument per §5.2.2.
         function handleEditKey(e) {
             if (e.key == "Enter") {
-                e.preventDefault()
-                commitEdit(@editingId)
+                e.preventDefault();
+                commitEdit(@editingId);
             }
             if (e.key == "Escape") {
-                e.preventDefault()
-                cancelEdit()
+                e.preventDefault();
+                cancelEdit();
             }
         }
 
         function activeCount() {
-            return @todos.filter(function(t) { return !t.completed }).length
+            return @todos.filter(function(t) { return !t.completed; }).length;
         }
 
         function completedCount() {
-            return @todos.filter(function(t) { return t.completed }).length
+            return @todos.filter(function(t) { return t.completed; }).length;
         }
 
         function setFilter(mode) {
-            @filter = mode
+            @filter = mode;
         }
 
         // Helper: returns the filtered list for the current @filter value.
@@ -138,12 +139,12 @@
         // ternary-form both surfaced derived-emit codegen bugs).
         function computeVisibleTodos() {
             if (@filter == FilterMode::Active) {
-                return @todos.filter(function(t) { return !t.completed })
+                return @todos.filter(function(t) { return !t.completed; });
             }
             if (@filter == FilterMode::Completed) {
-                return @todos.filter(function(t) { return t.completed })
+                return @todos.filter(function(t) { return t.completed; });
             }
-            return @todos
+            return @todos;
         }
 
         // Reactive derived view — re-evaluates when @filter or @todos change.
@@ -154,7 +155,7 @@
         const <visibleTodos> = computeVisibleTodos()
 
         // Load on startup
-        loadTodos()
+        loadTodos();
     }
 
     <header class="header">
@@ -184,7 +185,7 @@
                             <button class="destroy" onclick=deleteTodo(todo.id)/>
                         </div>
                         <input class="edit" type="text" if=(@editingId == todo.id) bind:value=@editText onkeydown=handleEditKey() onblur=commitEdit(todo.id) />
-                    </li>
+                    </li>;
                 }
             }
         </ul>
@@ -208,7 +209,7 @@
         </ul>
         ${
             if (completedCount() > 0) {
-                lift <button class="clear-completed" onclick=clearCompleted()>Clear completed</>
+                lift <button class="clear-completed" onclick=clearCompleted()>Clear completed</>;
             }
         }
     </footer>
@@ -453,3 +454,4 @@
         font-weight: 300;
     }
 }
+</program>

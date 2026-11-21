@@ -1,9 +1,7 @@
+<program>
 // `is` inside a bare attribute value (parenthesized)
-${
     type Filter:enum = { All, Active, Done }
     <filter>:Filter = .All
-}
-<program>
     <button class:selected=(@filter is .All)>All</>
     <button class:selected=(@filter is .Active)>Active</>
     <button class:selected=(@filter is .Done)>Done</>

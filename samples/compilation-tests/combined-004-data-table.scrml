@@ -1,9 +1,10 @@
+<program reset="none">
 // combined-004-data-table.scrml
 // Data table with SQL data. Tests: SQL + lift + markup.
 
 <div class="data-table-page">
     ${
-        let users = ?{`SELECT id, name, email FROM users`}
+        let users = ?{`SELECT id, name, email FROM users`};
     }
     <h1>Users</>
     <table>
@@ -21,9 +22,10 @@
                         <td>${user.id}</>
                         <td>${user.name}</>
                         <td>${user.email}</>
-                    </tr>
+                    </tr>;
                 }
             }
         </tbody>
     </table>
 </div>
+</program>

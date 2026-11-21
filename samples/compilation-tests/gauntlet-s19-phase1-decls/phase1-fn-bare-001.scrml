@@ -1,7 +1,7 @@
 // fn shorthand (no params, no parens) per §7.3 + samples
 ${
     fn greet {
-        return "hi"
+        return "hi";
     }
 }
 <p>${greet()}</>

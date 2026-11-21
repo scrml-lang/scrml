@@ -1,9 +1,9 @@
+<program>
 // ternary with `is` on the condition
 ${
     type Tab:enum = { A, B, C }
     <tab>:Tab = .A
-    const label = @tab is .A ? "alpha" : "other"
+    const label = @tab is .A ? "alpha" : "other";
 }
-<program>
     <p>${label}</>
 </>

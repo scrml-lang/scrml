@@ -4,14 +4,12 @@
 
 <program>
 
-${
     type User:struct = {
         id:    number,
         name:  string,
         email: string,
         role:  string,
     }
-}
 
 <div class="schema-view">
     <h3>User struct fields</>

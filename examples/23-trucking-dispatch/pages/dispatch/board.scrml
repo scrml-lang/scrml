@@ -24,16 +24,16 @@
   // Imports at program-block scope so component visibility works in
   // markup (cf. F-COMPONENT-001 — imports inside the db-block scope
   // hit E-COMPONENT-020 even though the import resolves).
-  import { LoadCard } from '../../components/load-card.scrml'
+  import { LoadCard } from '../../components/load-card.scrml';
   // §14.8.8 (typed-SQL-row Tranche 3) — the row contract the `loadRows`
   // cell carries. The SQL projection below width-subtypes into LoadCardRow[].
-  import { LoadCardRow } from '../../components/load-card.scrml'
-  import { LoadStatus } from '../../schema.scrml'
-  import { readSessionCookie } from '../../models/auth.scrml'
-  import { createSessionStore } from 'scrml:store'
-  import { SESSION_DB_PATH } from '../../models/auth.scrml'
+  import { LoadCardRow } from '../../components/load-card.scrml';
+  import { LoadStatus } from '../../schema.scrml';
+  import { readSessionCookie } from '../../models/auth.scrml';
+  import { createSessionStore } from 'scrml:store';
+  import { SESSION_DB_PATH } from '../../models/auth.scrml';
   // Centralized real-time channel — see SPEC §38.12.6.
-  import { "dispatch-board" as dispatchBoard } from '../../channels/dispatch-board.scrml'
+  import { "dispatch-board" as dispatchBoard } from '../../channels/dispatch-board.scrml';
 
   <db src="../../dispatch.db" protect="password_hash" tables="users, loads, customers, assignments, drivers">
 
@@ -47,9 +47,9 @@
             // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
             // compiles to its own public route, and one taking a userId would let any caller
             // look up any user (S443 post-merge review of #1180).
-            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get();
             if (user is not || user.role != "dispatcher") {
-                return { unauthorized: true }
+                return { unauthorized: true };
             }
 
             const rows = ?{`
@@ -62,9 +62,9 @@
                 FROM loads l
                 LEFT JOIN customers c ON c.id = l.customer_id
                 ORDER BY l.pickup_at ASC
-            `}.all()
+            `}.all();
 
-            return { user: user, loadRows: rows }
+            return { user: user, loadRows: rows };
         }
 
         <currentUser> = not
@@ -72,21 +72,21 @@
         <loaded> = false
 
         function refresh() {
-            const sessionToken = document.cookie ? document.cookie.split("scrml_session=")[1] : ""
-            const tok = sessionToken ? sessionToken.split(";")[0] : ""
-            const data = loadBoardData(tok)
+            const sessionToken = document.cookie ? document.cookie.split("scrml_session=")[1] : "";
+            const tok = sessionToken ? sessionToken.split(";")[0] : "";
+            const data = loadBoardData(tok);
             if (data.unauthorized) {
-                window.location.href = "/auth/login?reason=unauthorized"
-                return
+                window.location.href = "/auth/login?reason=unauthorized";
+                return;
             }
-            @currentUser = data.user
-            @loadRows = data.loadRows
-            @loaded = true
+            @currentUser = data.user;
+            @loadRows = data.loadRows;
+            @loaded = true;
         }
 
         function logout() {
-            document.cookie = "scrml_session=; Path=/; Max-Age=0"
-            window.location.href = "/auth/login?logout=1"
+            document.cookie = "scrml_session=; Path=/; Max-Age=0";
+            window.location.href = "/auth/login?logout=1";
         }
 
         // Pure helper — which kanban column a load belongs in. One exhaustive
@@ -95,16 +95,16 @@
         // hidden from the board (visible on load-detail only).
         fn boardColumn(status: LoadStatus) -> string {
             return match status {
-                .Tendered   :> "left"
-                .Booked     :> "left"
-                .Dispatched :> "middle"
-                .Loaded     :> "middle"
-                .InTransit  :> "middle"
-                .Delivered  :> "right"
-                .Invoiced   :> "right"
-                .Paid       :> "right"
+                .Tendered   :> "left",
+                .Booked     :> "left",
+                .Dispatched :> "middle",
+                .Loaded     :> "middle",
+                .InTransit  :> "middle",
+                .Delivered  :> "right",
+                .Invoiced   :> "right",
+                .Paid       :> "right",
                 .Cancelled  :> "hidden"
-            }
+            };
         }
 
         // Tier-1 derived columns — each kanban column is a reactive filtered
@@ -117,13 +117,13 @@
 
         <lastSeenEventCount> = 0
         function ackEvents() {
-            @lastSeenEventCount = @boardEvents.length
-            refresh()
+            @lastSeenEventCount = @boardEvents.length;
+            refresh();
         }
 
         on mount {
             refresh()
-        }
+        };
     }
 
       <!-- Real-time dispatch-board channel — see channels/dispatch-board.scrml.

@@ -24,7 +24,7 @@
   <db src="tickets.db" tables="tickets">
 
     ${
-      import { generateToken } from 'scrml:crypto'
+      import { generateToken } from 'scrml:crypto';
 
       <username> = ""
       <password> = ""
@@ -41,7 +41,7 @@
       // `//` line comments — both work cleanly inside the `${...}` logic
       // block.
       function redeem(lin ticket: string, username: string) {
-        return `Redeemed ticket=${ticket} for user=${username}`
+        return `Redeemed ticket=${ticket} for user=${username}`;
       }
 
       // mintTicket persists each ticket server-side via an idempotent
@@ -51,21 +51,21 @@
       // the same token is a no-op), so no `.idempotent()` assertion is
       // needed on the caller.
       function mintTicket(username, password) {
-        if (username == "" || password == "") return ""
-        const token = `tk_${username}_${generateToken(16)}`
+        if (username == "" || password == "") return "";
+        const token = `tk_${username}_${generateToken(16)}`;
         ?{`
           CREATE TABLE IF NOT EXISTS tickets (
             token     text primary key,
             username  text not null,
             minted_at timestamp DEFAULT CURRENT_TIMESTAMP
           )
-        `}.run()
+        `}.run();
         ?{`
           INSERT INTO tickets (token, username)
           VALUES (${token}, ${username})
           ON CONFLICT DO NOTHING
-        `}.run()
-        return token
+        `}.run();
+        return token;
       }
 
       function login() {
@@ -73,14 +73,14 @@
         // The compiler tracks `ticket` from declaration to consumption
         // and refuses to let it be referenced twice or dropped on any
         // branch.
-        lin ticket = mintTicket(@username, @password)
+        lin ticket = mintTicket(@username, @password);
 
         // Single consumption — passing to the redeem server fn (which
         // itself declares the parameter as `lin`, so the
         // consume-exactly-once rule continues inside that function
         // body).
-        const message = redeem(ticket, @username)
-        @result = message
+        const message = redeem(ticket, @username);
+        @result = message;
 
         // Trying to reference `ticket` again here would be E-LIN-002:
         //   log(ticket)   // ← compile error

@@ -1,11 +1,13 @@
+<program reset="none">
 // func-006-fn-shorthand.scrml
 // fn shorthand syntax. Tests: fn keyword.
 
 <div>
     ${
         fn greet {
-            return "Hello from fn"
+            return "Hello from fn";
         }
     }
     <p>fn defined</>
 </div>
+</program>

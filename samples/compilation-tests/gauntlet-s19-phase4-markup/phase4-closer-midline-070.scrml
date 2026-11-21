@@ -1,2 +1,4 @@
+<program reset="none">
 // `</>` mid-line — closes innermost tag.
 <div>Hello</><p>next</p>
+</program>

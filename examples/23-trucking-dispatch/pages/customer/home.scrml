@@ -24,14 +24,14 @@
 
 <page db="../../dispatch.db" auth="required">
 
-  import { formatRate, formatPickupAt } from '../../components/load-card.scrml'
-  import { statusBadgeClasses, statusLabel } from '../../components/load-status-badge.scrml'
-  import { accountStatusLabel, accountStatusClasses, accountStatusClassesOf } from '../../components/customer-card.scrml'
-  import { invoiceStatus, invoiceStatusClasses, invoiceStatusLabel, formatIsoDate } from '../../components/invoice-card.scrml'
-  import { createSessionStore } from 'scrml:store'
-  import { SESSION_DB_PATH } from '../../models/auth.scrml'
+  import { formatRate, formatPickupAt } from '../../components/load-card.scrml';
+  import { statusBadgeClasses, statusLabel } from '../../components/load-status-badge.scrml';
+  import { accountStatusLabel, accountStatusClasses, accountStatusClassesOf } from '../../components/customer-card.scrml';
+  import { invoiceStatus, invoiceStatusClasses, invoiceStatusLabel, formatIsoDate } from '../../components/invoice-card.scrml';
+  import { createSessionStore } from 'scrml:store';
+  import { SESSION_DB_PATH } from '../../models/auth.scrml';
   // M5: centralized real-time channel — see SPEC §38.12.6.
-  import { "customer-events" as customerEvents } from '../../channels/customer-events.scrml'
+  import { "customer-events" as customerEvents } from '../../channels/customer-events.scrml';
 
   <db src="../../dispatch.db" protect="password_hash" tables="users, customers, loads, invoices">
 
@@ -44,9 +44,9 @@
             // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
             // compiles to its own public route, and one taking a userId would let any caller
             // look up any user (S443 post-merge review of #1180).
-            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get();
             if (user is not || user.role != "customer") {
-                return { unauthorized: true }
+                return { unauthorized: true };
             }
 
             const customer = ?{`
@@ -54,8 +54,8 @@
                        billing_address, payment_terms, account_status
                 FROM customers
                 WHERE user_id = ${user.id}
-            `}.get()
-            if (customer is not) return { error: "No customer record found for this account." }
+            `}.get();
+            if (customer is not) return { error: "No customer record found for this account." };
 
             // Active loads = anything not yet paid or cancelled. Tendered
             // loads count as active (they're awaiting dispatcher rate).
@@ -68,7 +68,7 @@
                   AND status IN ('Tendered', 'Booked', 'Dispatched', 'Loaded', 'InTransit', 'Delivered')
                 ORDER BY created_at DESC
                 LIMIT 5
-            `}.all()
+            `}.all();
 
             const recentInvoices = ?{`
                 SELECT
@@ -81,13 +81,13 @@
                 WHERE i.customer_id = ${customer.id}
                 ORDER BY i.sent_at DESC
                 LIMIT 5
-            `}.all()
+            `}.all();
 
             return {
                 user: user, customer: customer,
                 activeLoads: activeLoads,
                 recentInvoices: recentInvoices
-            }
+            };
         }
 
         <currentUser> = not
@@ -104,44 +104,44 @@
 
         // Today's ISO date — used by invoiceStatus() to detect overdue.
         // Hardcoded to seed window so demo isn't anchored to a moving target.
-        const TODAY_ISO = "2026-04-29"
+        const TODAY_ISO = "2026-04-29";
 
         function getSessionToken() {
-            const c = document.cookie ? document.cookie : ""
-            const idx = c.indexOf("scrml_session=")
-            if (idx < 0) return ""
-            const tail = c.substring(idx + "scrml_session=".length)
-            const semi = tail.indexOf(";")
-            return semi < 0 ? tail : tail.substring(0, semi)
+            const c = document.cookie ? document.cookie : "";
+            const idx = c.indexOf("scrml_session=");
+            if (idx < 0) return "";
+            const tail = c.substring(idx + "scrml_session=".length);
+            const semi = tail.indexOf(";");
+            return semi < 0 ? tail : tail.substring(0, semi);
         }
 
         function refresh() {
-            const tok = getSessionToken()
-            const data = fetchHomeData(tok)
+            const tok = getSessionToken();
+            const data = fetchHomeData(tok);
             if (data.unauthorized) {
-                window.location.href = "/auth/login?reason=unauthorized"
-                return
+                window.location.href = "/auth/login?reason=unauthorized";
+                return;
             }
             if (data.error) {
-                @errorMessage = data.error
-                @loaded = true
-                return
+                @errorMessage = data.error;
+                @loaded = true;
+                return;
             }
-            @currentUser = data.user
-            @currentCustomer = data.customer
-            @activeLoadRows = data.activeLoads
-            @recentInvoiceRows = data.recentInvoices
-            @loaded = true
+            @currentUser = data.user;
+            @currentCustomer = data.customer;
+            @activeLoadRows = data.activeLoads;
+            @recentInvoiceRows = data.recentInvoices;
+            @loaded = true;
         }
 
         function logout() {
-            document.cookie = "scrml_session=; Path=/; Max-Age=0"
-            window.location.href = "/auth/login?logout=1"
+            document.cookie = "scrml_session=; Path=/; Max-Age=0";
+            window.location.href = "/auth/login?logout=1";
         }
 
         on mount {
             refresh()
-        }
+        };
     }
 
     <!-- M5: customer-events channel — see channels/customer-events.scrml.

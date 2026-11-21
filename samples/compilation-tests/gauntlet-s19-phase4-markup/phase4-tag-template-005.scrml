@@ -1,4 +1,6 @@
+<program reset="none">
 // Less-common HTML element — <template>.
 <template id="row">
     <p>row content</p>
 </template>
+</program>

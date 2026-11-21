@@ -1,9 +1,11 @@
+<program reset="none">
 // sql-008-order-limit.scrml
 // SQL with ORDER BY and LIMIT. Tests: ?{} with sorting/paging.
 
 <div>
     ${
-        let recent = ?{`SELECT name, created_at FROM posts ORDER BY created_at DESC LIMIT 10`}
+        let recent = ?{`SELECT name, created_at FROM posts ORDER BY created_at DESC LIMIT 10`};
     }
     <p>Recent posts fetched</>
 </div>
+</program>

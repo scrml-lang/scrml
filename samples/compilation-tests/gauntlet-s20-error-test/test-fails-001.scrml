@@ -1,16 +1,15 @@
+<program reset="none">
 // Phase 7: assert.fails in ~{} test block (§19.12.2)
 // Should compile clean.
 
-${
   type MathError:enum = { DivideByZero, Overflow }
 
   function safeDivide(a, b)! -> MathError {
     if (b == 0) {
-      fail MathError.DivideByZero
+      fail MathError.DivideByZero;
     }
-    return a / b
+    return a / b;
   }
-}
 
 <p>Math utils</>
 
@@ -23,3 +22,4 @@ ${
     assert result == 5
   }
 }
+</program>

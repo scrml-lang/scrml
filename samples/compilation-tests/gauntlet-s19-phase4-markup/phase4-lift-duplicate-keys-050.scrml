@@ -1,9 +1,9 @@
 // Duplicate key= values → W-KEY-001.
 <program>
-    ${ <items> = [{id:1},{id:1},{id:2}] }
+     <items> = [{id:1},{id:1},{id:2}] 
     <ul>${
         for (let it of @items) {
-            lift <li key=it.id>row</>
+            lift <li key=it.id>row</>;
         }
     }</>
 </program>

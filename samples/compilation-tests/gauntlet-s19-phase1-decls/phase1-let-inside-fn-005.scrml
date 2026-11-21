@@ -1,13 +1,13 @@
+<program reset="none">
 // let inside fn body — fn purity allows local let
-${
     fn buildLabel(prefix, n) {
-        let label = prefix
-        let i = 0
+        let label = prefix;
+        let i = 0;
         while (i < n) {
-            label = label + "."
-            i = i + 1
+            label = label + ".";
+            i = i + 1;
         }
-        return label
+        return label;
     }
-}
 <p>${buildLabel("x", 3)}</>
+</program>

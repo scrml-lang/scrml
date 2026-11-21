@@ -1,9 +1,7 @@
+<program>
 // for/lift with key header (§17.4b)
-${
     type Card:struct = { id: number, title: string }
     <cards>: Card[] = [{id:1, title:"a"}, {id:2, title:"b"}]
-}
-<program>
     <div>
         ${ for (let card of @cards key card.id) {
             lift <div class="card">${card.title}/

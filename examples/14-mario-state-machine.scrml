@@ -47,15 +47,15 @@
     // §6.6 derived reactives. const <name> = expr is the canonical derived
     // form. Visible to markup ${@marioEmoji} reads.
     const <marioEmoji> = match @marioState {
-        .Small :> "🧍"
-        .Big   :> "🦸"
-        .Fire  :> "🔥"
+        .Small :> "🧍",
+        .Big   :> "🦸",
+        .Fire  :> "🔥",
         .Cape  :> "🦅"
     }
     const <marioName> = match @marioState {
-        .Small :> "SMALL MARIO"
-        .Big   :> "SUPER MARIO"
-        .Fire  :> "FIRE MARIO"
+        .Small :> "SMALL MARIO",
+        .Big   :> "SUPER MARIO",
+        .Fire  :> "FIRE MARIO",
         .Cape  :> "CAPE MARIO"
     }
 
@@ -63,43 +63,43 @@
     // of the matched variant. Each arm is a block so @coins and @marioState
     // can both update in one step.
     function eatPowerUp(powerUp: PowerUp) {
-        if (@gameOver) { return }
+        if (@gameOver) { return; }
         match powerUp {
             .Mushroom(n) :> {
-                @coins = @coins + n
+                @coins = @coins + n;
                 @marioState = match @marioState {
-                    .Small => MarioState::Big
+                    .Small => MarioState::Big,
                     else   => @marioState
-                }
-            }
+                };
+            },
             .Flower(n) :> {
-                @coins = @coins + n
-                @marioState = .Fire
-            }
+                @coins = @coins + n;
+                @marioState = .Fire;
+            },
             .Feather(n) :> {
-                @coins = @coins + n
-                @marioState = .Cape
+                @coins = @coins + n;
+                @marioState = .Cape;
             }
         }
     }
 
     function getHurt() {
-        if (@gameOver) { return }
-        let wasSmall = @marioState == MarioState::Small
-        @marioState = .Small
+        if (@gameOver) { return; }
+        let wasSmall = @marioState == MarioState::Small;
+        @marioState = .Small;
         if (wasSmall) {
-            @lives = @lives - 1
+            @lives = @lives - 1;
             if (@lives == 0) {
-                @gameOver = true
+                @gameOver = true;
             }
         }
     }
 
     function restart() {
-        @marioState = .Small
-        reset(@coins)
-        @lives    = 3
-        @gameOver = false
+        @marioState = .Small;
+        reset(@coins);
+        @lives    = 3;
+        @gameOver = false;
     }
 
     // §48 — `fn` is the pure-function form. It cannot read or write reactive
@@ -108,7 +108,7 @@
     // like turning a HealthRisk variant into its banner label.
     fn riskBanner(risk: HealthRisk) -> string {
         match risk {
-            .AtRisk :> "ONE HIT AND YOU LOSE A LIFE!"
+            .AtRisk :> "ONE HIT AND YOU LOSE A LIFE!",
             .Safe   :> "POWERED UP — YOU CAN ABSORB A HIT"
         }
     }

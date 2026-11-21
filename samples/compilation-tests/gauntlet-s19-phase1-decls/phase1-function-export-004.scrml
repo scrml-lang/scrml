@@ -1,7 +1,7 @@
 // export function per §21.2
 ${
     export function formatDate(ts) {
-        return new Date(ts).toISOString()
+        return new Date(ts).toISOString();
     }
 }
 <p>x</>
