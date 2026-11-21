@@ -7,22 +7,22 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1953 of 1953 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1956 of 1956 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 767 | 39.3% |
+| PASS | 770 | 39.4% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 3 | 0.2% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 628 | 32.2% |
+| NOT-TWINNED | 628 | 32.1% |
 | UNSUPPORTED | 555 | 28.4% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 770; of those, 767 hold (99.6%). Runtime half executed on the bootstrap for 245 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 773; of those, 770 hold (99.6%). Runtime half executed on the bootstrap for 248 case(s).
 
-- **Vacuous** passes: 15 of 767 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **752**.
+- **Vacuous** passes: 15 of 770 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **755**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 1 of 3; the other 2 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
@@ -124,7 +124,7 @@ NOT-TWINNED by reason (628 cases; a case counts once per distinct reason):
 | attr-executable-sink | 28 | 12 | · | · | · | 11 | 5 | · | · |
 | auth | 65 | 12 | · | · | · | 15 | 38 | · | · |
 | block-grammar | 14 | 11 | · | · | · | 1 | 2 | · | · |
-| body-top | 27 | 20 | · | · | · | 1 | 6 | · | · |
+| body-top | 30 | 23 | · | · | · | 1 | 6 | · | · |
 | capability | 12 | 7 | · | · | · | · | 5 | · | · |
 | channel | 49 | 11 | · | · | · | 37 | 1 | · | · |
 | codegen | 4 | 2 | · | · | · | 1 | 1 | · | · |
@@ -207,7 +207,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (767)
+### PASS / CODES-ONLY (770)
 
 - `attr-executable-sink/base-href-data-neg` — PASS · TWIN
 - `attr-executable-sink/base-href-static-pos` — PASS · TWIN
@@ -248,6 +248,9 @@ none
 - `body-top/code-line-after-declaration-runs` — PASS · TWIN
 - `body-top/declaration-trailing-tokens-rejected` — PASS · TWIN
 - `body-top/declared-prose-renders` — PASS · TWIN
+- `body-top/file-scope-init-after-body-write` — PASS
+- `body-top/file-scope-unread-init-runs` — PASS
+- `body-top/free-display-reads-in-place` — PASS
 - `body-top/js-construct-await` — PASS
 - `body-top/js-construct-class` — PASS
 - `body-top/js-construct-dynamic-import` — PASS
