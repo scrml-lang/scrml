@@ -28,3 +28,16 @@ PA rec adopted (S481)". Cite: `ruling:user-voice-scrml.md-S481-body-run-order`.
 - SPEC §7.6 rule (b): the two struck sentences, server-only rule + S481 r1 provenance; INTERIM narrowed; §17.1.1 clarifying sentence.
 - PA update (S481): server-only rule now owner-ruled — SPEC cites ruling:user-voice-scrml.md-S481-run-order-followups item 3 (verbatim);
   the ⚑ Open texts say "ruled S481 (run-order-followups items 1–2), build follows #2041" (items 1–2 not built here).
+
+## r2 (#2041 S239 re-review)
+- Merge origin/main 1c2c4fbbe (36d6c5687): the 8 self-host conflicts (#2043 `;` / arm-`,` migration) resolved by
+  running the same `scrml fix --rules=stmt-semi,arm-comma` over the PR-head text (fix(merge-base) == main
+  byte-for-byte; fix(PR head) differs from PR head only by inserted `;` / `,`). 20 tests, a7/a1/a5/a6, conformance
+  (763/10/0, same FAIL list) re-passed on the merge.
+- MED-1: lower.scrml `lowerPlaced` / `placedNodes` — a place nested in an element lands among its children (source
+  position), any depth; inside `if=` / slot / match / raw content: after the construct (INTERIM,
+  g-boot-nested-init-place-in-construct-s481). print.scrml: `initsIn` / `withoutInits` / `runOrder` / `placeInits`
+  walk El kids (a nested place must not read as a client read — leak guard test).
+- LOW-1: analyze.scrml `nestedChainGaps` — the span judgment at every level of the program body.
+- INFO-5: bodyInits `serverRead` roots include the functions only server code reaches (same as clientConsts/serverInits).
+- Gaps filed: §S481-body-run-order (nested-construct INTERIM, dead client fn MED, no-server-artifact residue, comment/CSS chain).

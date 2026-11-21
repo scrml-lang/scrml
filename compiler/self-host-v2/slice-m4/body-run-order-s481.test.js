@@ -387,3 +387,158 @@ ${mid}
     expect(await errCodes(chain("").replace('<p id="a"', '${ const a: int = note("a"); }\n<p id="a"'))).toEqual([]);
   }, 120000);
 });
+
+// =============================================================================
+// r2 (#2041 re-review MED-1): a `${ const }` written INSIDE an element runs in its place there —
+// the parser hoists it to a program item listed after the enclosing top-level element, and r1
+// ran it after that whole element. Red on 4f65869bb: l20 rendered "1", l17 "y" (and the place
+// landed after the <div>). Inside a construct whose content does not render once in place (an
+// `if=` element, a component's slot content) the place is just after that construct (INTERIM,
+// g-boot-nested-init-place-in-construct-s481); inside an `<each>` row a declaration is refused
+// (pre-existing, unchanged).
+// =============================================================================
+const LOG = `\${
+    let log: string = "";
+    function note(s: string) -> int { log = log + s; return 1; }
+}`;
+
+describe("§7.6 S481 r2 — a place nested in an element runs where it stands (MED-1)", () => {
+  test("l20: P1 wrapped in a <div> — the unread initializer runs before the display after it", async () => {
+    const src = `<program>
+\${
+    let o: int[free, write] = [1];
+    function bump() -> int { o[0] = o[0] + 10; return o[0]; }
+}
+<div id="w">
+\${ const unused: int = bump(); }
+<p id="c">\${o[0]}</p>
+</div>
+</program>
+`;
+    expect(await texts(src, ["c"])).toEqual(["11"]);
+  }, 120000);
+
+  test("l17: between two displays inside a <div> — after the first, before the second", async () => {
+    const src = `<program>
+${LOG}
+<div id="w">
+<p id="x">x\${log}</p>
+\${ const a: int = note("a"); }
+<p id="y">y\${log}</p>
+</div>
+<p id="z">z\${log}</p>
+</program>
+`;
+    expect(await texts(src, ["x", "y", "z"])).toEqual(["x", "ya", "za"]);
+  }, 120000);
+
+  test("three levels deep, between siblings — the earlier siblings, then the place, then the later ones", async () => {
+    const src = `<program>
+${LOG}
+<div id="w"><ul><li id="l1">1\${log}</li><li>\${ const a: int = note("a"); }<b id="b">b\${log}</b></li><li id="l3">3\${log}</li></ul></div>
+</program>
+`;
+    expect(await texts(src, ["l1", "b", "l3"])).toEqual(["1", "ba", "3a"]);
+  }, 120000);
+
+  test("a nested binding read after its place reads its value; a free display before it does not see the effect", async () => {
+    const src = `<program>
+\${
+    let o: int[free, write] = [1];
+    function bump() -> int { o[0] = o[0] + 10; return o[0]; }
+}
+<div id="w">
+<p id="a">\${o[0]}</p>
+\${ const k: int = bump(); }
+<p id="c">\${k} \${o[0]}</p>
+</div>
+</program>
+`;
+    expect(await texts(src, ["a", "c"])).toEqual(["1", "11 11"]);
+  }, 120000);
+
+  test("INTERIM: inside an `if=` element the place is just after that element (runs once, unconditionally)", async () => {
+    const src = `<program>
+${LOG}
+let <flag:boolean=false/>
+<div id="w"><p id="a" if=(@flag)>\${ const a: int = note("a"); }yes</p><p id="y">y\${log}</p></div>
+</program>
+`;
+    expect(await texts(src, ["y"])).toEqual(["ya"]);
+  }, 120000);
+
+  test("INTERIM: inside a component's slot content the place is just after the instance", async () => {
+    const src = `<card n:int=0>
+</> renders <div class="card"><slot/></div>
+<program>
+${LOG}
+<div id="w"><card><p id="in">in\${log}</p>\${ const a: int = note("a"); }</card><p id="y">y\${log}</p></div>
+</program>
+`;
+    expect(await texts(src, ["in", "y"])).toEqual(["in", "ya"]);
+  }, 120000);
+
+  test("a nested unread initializer reaching a server-only helper stays server-only (no client leak)", async () => {
+    const src = `<program db="./app.db">
+\${
+    const SECRET: string = "zz-secret-salt";
+    function mix(s: string) -> string { return s + SECRET; }
+${DBFN.replace("BODY", "mix(r.name)")}
+}
+let <out:string=""/>
+<div id="w"><section>
+\${ const unused: string = mix("a"); }
+<button id="go" onclick={ @out = label(1) !{ .Transport(t) :> return }; }>go</button>
+</section></div>
+<p id="c">\${@out}</p>
+</program>
+`;
+    const b = await build(src, "unused\\w*");
+    expect(leaked(b.client, ["zz-secret-salt", "function mix", "unused"])).toEqual([]);
+    expect(b.atModule).toBe(true);
+    expect(b.value).toBe("azz-secret-salt");
+  }, 180000);
+});
+
+// =============================================================================
+// r2 (#2041 re-review LOW-1): the chain-gap judgment at every level, not only the program's top
+// level. Red on 4f65869bb: l07 compiled (exit 0; the place moved after the <div>), impl#1 gives
+// E-CTRL-001. The accepted shapes stay accepted nested.
+// =============================================================================
+describe("§17.1.1 r2 — a declaration between chain members breaks the chain at any level (LOW-1)", () => {
+  async function errCodes(src) {
+    const file = join(dir, `nchain${n++}.scrml`);
+    writeFileSync(file, src);
+    const res = await compileSource(file);
+    return res.diagnostics.filter((d) => d.severity === "error").map((d) => d.code);
+  }
+  const nested = (body) => `<program>
+${LOG}
+let <flag:boolean=false/>
+<div id="w"><section>
+${body}
+</section></div>
+</program>
+`;
+  test("l07 (nested): a `${ const }` between `if=` and `else` inside a <div> is E-CTRL-001", async () => {
+    expect(await errCodes(nested(`<p id="a" if=(@flag)>yes</p>
+\${ const a: int = note("a"); }
+<p id="b" else>no \${log}</p>`))).toEqual(["E-CTRL-001"]);
+  }, 120000);
+  test("a function between `if=` and `else-if=` two levels down is E-CTRL-002", async () => {
+    expect(await errCodes(nested(`<p if=(@flag)>yes</p>
+\${ function g() -> int { return 2; } }
+<p else-if=(!@flag)>no</p>`))).toEqual(["E-CTRL-002"]);
+  }, 120000);
+  test("accepted nested: a function inside a member, a declaration between two chains, after an `if=` with no `else`", async () => {
+    expect(await errCodes(nested(`<p if=(@flag)>yes</p>
+<p else>no \${ function f() -> int { return 1; } }</p>
+\${ const a: int = note("a"); }
+<p if=(@flag)>y2</p>
+<p else-if=(!@flag)>n2</p>
+\${ const b: int = note("b"); }
+<p if=(@flag)>y3</p>
+
+<p else>n3</p>`))).toEqual([]);
+  }, 120000);
+});

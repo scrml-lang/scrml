@@ -31095,9 +31095,64 @@ ${
                 .FnItem(f: x) :> [],
                 .MarkupItem(n: x) :> []
             };
-            if (ps.length > 0) out = out.concat(chainGapsIn(file, ps));
+            if (ps.length > 0) {
+                out = out.concat(chainGapsIn(file, ps));
+                // r2 (#2041 review LOW-1): every level below the top too — a `${ }` declaring a
+                // binding, a function or a type inside an element is hoisted to an item after
+                // that element, so its SOURCE position is judged against each nested level's
+                // chain members (the same span rule)
+                let gaps: int[] = [];
+                for (const pi of ps) { if (elemOfItem(pi) is not && markupOfItem(pi) is not) gaps = gaps.concat([pi.span.start]); }
+                if (gaps.length > 0) {
+                    for (const pi2 of ps) {
+                        const e0: AElem | not = elemOfItem(pi2);
+                        if (e0 is given) out = out.concat(nestedChainGaps(file, e0.kids, gaps));
+                    }
+                }
+            }
         }
         return out;
+    }
+
+    fn elemOfItem(it: AItem) -> AElem | not {
+        const n: ANode | not = markupOfItem(it);
+        if (n is not) return not;
+        return elemOfNode(n.k);
+    }
+
+    // r2 — one nested level `ns` (an element's children): a hoisted item whose source start
+    // `gaps` puts between a member and the next `else` / `else-if=` element breaks the chain,
+    // as at the top level (chainGapsIn); then every child element's children, recursively.
+    fn nestedChainGaps(file: string, ns: ANode[], gaps: int[]) -> Diag[] {
+        let out: Diag[] = [];
+        let prev: int = 0;
+        let prevEnd: int = 0;
+        for (const n of ns) {
+            const e: AElem | not = elemOfNode(n.k);
+            if (e is given) {
+                if (prev == 1 && attrNamed(e.attrs, "if") is not) {
+                    let gap = false;
+                    for (const g of gaps) { if (g >= prevEnd && g < e.span.start) gap = true; }
+                    if (gap) out = out.concat(chainGapDiag(file, e));
+                }
+                prev = 0;
+                if (attrNamed(e.attrs, "if") is given || attrNamed(e.attrs, "else-if") is given) prev = 1;
+                prevEnd = e.span.end;
+                out = out.concat(nestedChainGaps(file, e.kids, gaps));
+            } else if (!blankNode(n) && !isCssNode(n)) {
+                prev = 0;
+            }
+        }
+        return out;
+    }
+
+    fn chainGapDiag(file: string, e: AElem) -> Diag[] {
+        const ea: AAttr | not = attrNamed(e.attrs, "else-if");
+        const la: AAttr | not = attrNamed(e.attrs, "else");
+        const why: string = " — a `${ }` block declaring a binding, a function or a type stands between it and the chain; no other construct may appear between chain members (§17.1.1). Move the declaration before the `if=` element or after the chain";
+        if (ea is given) return [newDiag("E-CTRL-002", "`else-if=` on `<" + e.tag + ">` has no preceding `if=` element at the same level" + why, file, ea.span)];
+        if (la is given) return [newDiag("E-CTRL-001", "`else` on `<" + e.tag + ">` has no preceding `if=` element at the same level" + why, file, la.span)];
+        return [];
     }
 
     fn chainGapsIn(file: string, items: AItem[]) -> Diag[] {

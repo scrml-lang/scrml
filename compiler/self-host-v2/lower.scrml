@@ -2759,7 +2759,7 @@ ${
     // `renders` — the index of the first markup node after its `${ }` (renders.length: after
     // the last). lowerRenders puts a View.Init there (§7.6 S481: the body runs in source order).
     type DeclSyntax:struct = { nid: int, file: string, renders: ANode[], hasRenders: boolean, marks: ConstMark[] }
-    type ConstMark:struct = { nid: int, at: int }
+    type ConstMark:struct = { nid: int, at: int, pos: int }
 
     fn declSyntaxes(files: FileAst[]) -> DeclSyntax[] {
         let out: DeclSyntax[] = [];
@@ -2822,8 +2822,11 @@ ${
         return out;
     }
 
-    // s481 — each top-level `const` / `let` of the program body, at its place among the
-    // markup nodes programMarkup keeps (the count of markup items before it).
+    // s481 — each `const` / `let` of the program body, at its place among the markup nodes
+    // programMarkup keeps (`at`: the count of markup items before it) and in the source (`pos`:
+    // where its item starts). r2 (#2041 review MED-1): one written in a `${ }` INSIDE a
+    // top-level element is hoisted by the parser to an item listed after that element; `pos`
+    // puts its place back where it stood (lowerPlaced).
     fn programMarks(items: AItem[]) -> ConstMark[] {
         let out: ConstMark[] = [];
         let at: int = 0;
@@ -2831,7 +2834,7 @@ ${
             const k: AItemK = it.k;
             at = at + markupItemNode(k).length;
             const c: AConst | not = constItemOf1(k);
-            if (c is given) out = out.concat([{ nid: c.nid, at: at }]);
+            if (c is given) out = out.concat([{ nid: c.nid, at: at, pos: it.span.start }]);
         }
         return out;
     }
@@ -2876,8 +2879,8 @@ ${
     }
 
     // s481 — lowerNodes, with a View.Init for each admitted file-scope binding at its place
-    // (§7.6 S481). A place inside an if-chain (§17.1.1) is put after the chain (unreachable since
-    // s481 r1: analyze programChainGaps refuses a declaration between chain members, E-CTRL-001).
+    // (§7.6 S481). A place inside an if-chain (§17.1.1) — written inside a member — is put after
+    // the chain (one BETWEEN members is refused: analyze programChainGaps, E-CTRL-001).
     fn lowerMarked(c: LC, ns: ANode[], marks: ConstMark[]) -> View[] {
         let out: View[] = [];
         let m: int = 0;
@@ -2892,12 +2895,96 @@ ${
                 out = out.concat([chainView(c, ns, i, j)]);
                 i = j;
             } else {
-                out = out.concat(lowerNode(c, ns[i]));
+                // r2 (MED-1): the places written inside this node (hoisted to the items right
+                // after it) are put where they stand in it
+                let inner: ConstMark[] = [];
+                while (m < marks.length && marks[m].at == i + 1 && marks[m].pos >= ns[i].span.start && marks[m].pos < ns[i].span.end) {
+                    inner = inner.concat([marks[m]]);
+                    m = m + 1;
+                }
+                if (inner.length > 0) out = out.concat(lowerPlaced(c, ns[i], inner));
+                else out = out.concat(lowerNode(c, ns[i]));
                 i = i + 1;
             }
         }
         while (m < marks.length) {
             out = out.concat(initView(c, marks[m].nid));
+            m = m + 1;
+        }
+        return out;
+    }
+
+    // s481 r2 (#2041 review MED-1) — node `n` lowered with the places `ms` (each written inside
+    // it, by source position) where they stand: in an element whose children render once, in
+    // place (an HTML element with no `if=`, a `<db>` block), the place lands among its children
+    // (placedNodes), at any depth. Inside a construct whose children do NOT render once in
+    // place — an `if=` element or an if-chain member, an `<each>` row, a component's slot
+    // content, a `<match>`, `<pre>` / `<code>` raw content — "in its place" names no single
+    // point of the one run (the content runs conditionally, per row, or where the component
+    // puts its slot), and a file-scope initializer runs ONCE (§7.6): the place is put just
+    // after that construct (INTERIM, g-boot-nested-init-place-in-construct-s481).
+    fn lowerPlaced(c: LC, n: ANode, ms: ConstMark[]) -> View[] {
+        const e: AElem | not = elemOf(n);
+        if (e is given) {
+            if (!hasAttrNamed(e, "if") && !hasAttrNamed(e, "else-if") && !hasAttrNamed(e, "else")) {
+                const f: ElemFact | not = elemFact(c.t.elems, e.nid);
+                const kind: int = match f {
+                    .MHtml :> 1,
+                    .MDb :> 2,
+                    .MUse(decl: d) :> 0,
+                    .MEach(bind: b) :> 0,
+                    .MSlot :> 0,
+                    .MMatch(m: m) :> 0,
+                    .MSchema :> 0,
+                    .MErrors(of: v) :> 0,
+                    .MStateView(v: v) :> 0,
+                    .MInline(v: v) :> 0,
+                    .MStar(decl: d) :> 0,
+                    not :> 0
+                };
+                if (kind == 1 && !isRawContentElem(e)) return [View.El(e.tag, noValidate(c, e).concat(htmlAttrs(c, e.attrs)), placedNodes(c, e.kids, ms))];
+                if (kind == 2) return placedNodes(c, e.kids, ms);
+            }
+        }
+        let out: View[] = lowerNode(c, n);
+        for (const mk of ms) { out = out.concat(initView(c, mk.nid)); }
+        return out;
+    }
+
+    // lowerNodes over an element's children, each place `ms` (in source order) put before the
+    // first child that starts after it, or inside the child that holds it (lowerPlaced). A
+    // place within an if-chain's span lands after the chain (one between two members is
+    // refused: analyze programChainGaps, at every level since r2).
+    fn placedNodes(c: LC, ns: ANode[], ms: ConstMark[]) -> View[] {
+        let out: View[] = [];
+        let m: int = 0;
+        let i = 0;
+        while (i < ns.length) {
+            while (m < ms.length && ms[m].pos < ns[i].span.start) {
+                out = out.concat(initView(c, ms[m].nid));
+                m = m + 1;
+            }
+            const j: int = chainEnd(ns, i);
+            if (j > i + 1) {
+                out = out.concat([chainView(c, ns, i, j)]);
+                while (m < ms.length && ms[m].pos < ns[j - 1].span.end) {
+                    out = out.concat(initView(c, ms[m].nid));
+                    m = m + 1;
+                }
+                i = j;
+            } else {
+                let inner: ConstMark[] = [];
+                while (m < ms.length && ms[m].pos < ns[i].span.end) {
+                    inner = inner.concat([ms[m]]);
+                    m = m + 1;
+                }
+                if (inner.length > 0) out = out.concat(lowerPlaced(c, ns[i], inner));
+                else out = out.concat(lowerNode(c, ns[i]));
+                i = i + 1;
+            }
+        }
+        while (m < ms.length) {
+            out = out.concat(initView(c, ms[m].nid));
             m = m + 1;
         }
         return out;

@@ -5433,9 +5433,88 @@ ${
         return not;
     }
 
+    // r2 (#2041 review MED-1): a place can stand inside an element (lower lowerPlaced puts it
+    // among the element's children, at any depth) — every reader of the places walks El kids.
     fn initsIn(vs: View[]) -> int[] {
         let out: int[] = [];
-        for (const v of vs) { out = out.concat(initOf(v)); }
+        for (const v of vs) { out = out.concat(initOf(v)).concat(initsIn(elKids(v))); }
+        return out;
+    }
+
+    // The children of an element view (the only view a place is nested in), else none.
+    fn elKids(v: View) -> View[] {
+        return match v {
+            .El(tag: t, attrs: a, kids: ks) :> ks,
+            .Init :> [],
+            .Text :> [],
+            .RawText :> [],
+            .Dyn :> [],
+            .Cond :> [],
+            .Each :> [],
+            .Instance :> [],
+            .Slot :> [],
+            .Star :> [],
+            .Effect :> [],
+            .Run :> [],
+            .Request :> [],
+            .ResetOn :> [],
+            .Errors :> [],
+            .Reach :> [],
+            .Gather :> []
+        };
+    }
+
+    // `v` with its children replaced (an element), else `v`.
+    fn withElKids(v: View, ks: View[]) -> View {
+        return match v {
+            .El(tag: t, attrs: a, kids: x) :> View.El(t, a, ks),
+            .Init :> v,
+            .Text :> v,
+            .RawText :> v,
+            .Dyn :> v,
+            .Cond :> v,
+            .Each :> v,
+            .Instance :> v,
+            .Slot :> v,
+            .Star :> v,
+            .Effect :> v,
+            .Run :> v,
+            .Request :> v,
+            .ResetOn :> v,
+            .Errors :> v,
+            .Reach :> v,
+            .Gather :> v
+        };
+    }
+
+    // r2 (MED-1) — the body in the order it runs: an element holding a place is its own
+    // attributes (the element with no children: they are wired before its children), then its
+    // children in this order; any other view is itself.
+    fn runOrder(vs: View[]) -> View[] {
+        let out: View[] = [];
+        for (const v of vs) {
+            const ks: View[] = elKids(v);
+            if (ks.length > 0 && initsIn(ks).length > 0) out = out.concat([withElKids(v, [])]).concat(runOrder(ks));
+            else out = out.concat([v]);
+        }
+        return out;
+    }
+
+    // r2 (MED-1) — each place in `vs`, at any depth: an in-sequence one (`seq`) becomes the
+    // body-top statement assigning its binding; any other is dropped.
+    fn placeInits(p0: CoreProgram, vs: View[], seq: int[]) -> View[] {
+        let out: View[] = [];
+        for (const v of vs) {
+            const h: int[] = initOf(v);
+            if (h.length == 0) {
+                const ks: View[] = elKids(v);
+                if (ks.length > 0 && initsIn(ks).length > 0) out = out.concat([withElKids(v, placeInits(p0, ks, seq))]);
+                else out = out.concat([v]);
+            } else if (hasInt(seq, h[0])) {
+                const k: CoreConst | not = findConst(p0, h[0]);
+                if (k is given) out = out.concat([View.Run(block([Stmt.Assign(k.sym, k.init, [])]), [])]);
+            }
+        }
         return out;
     }
 
@@ -5594,6 +5673,7 @@ ${
         const rs: View[] = rs0;
         const marked: int[] = initsIn(rs);
         if (marked.length == 0) return { p: p, seq: [] };
+        const order: View[] = runOrder(rs);
         // the program without its places: what the client and the server read otherwise
         const bare: View[] = withoutInits(rs);
         const p0: CoreProgram = withProgramRenders(p, bare);
@@ -5605,6 +5685,9 @@ ${
         for (const k0 of constsReadIn(p0, croots)) { clientRead = clientRead.concat([k0.sym.id]); }
         let sroots: Node[] = [];
         for (const sf of p0.server) { sroots = sroots.concat([Node.NServerFn(sf)]); }
+        // r2 (#2041 re-review INFO-5): the same server roots as clientConsts / serverInits — the
+        // server functions AND the functions only server code reaches (serverOnly0)
+        for (const sf1 of p0.fns) { if (hasInt(serverOnly0, sf1.sym.id)) sroots = sroots.concat([Node.NFn(sf1)]); }
         const serverRead: int[] = constsReached(p0, sroots);
         // what runs before the body: construction (§66.7.6) and the §25.7 CSS bridges
         let pre: Node[] = [];
@@ -5624,8 +5707,8 @@ ${
         let seq: int[] = [];
         let left: int = marked.length;
         let i: int = 0;
-        while (i < rs.length && left > 0) {
-            const v: View = rs[i];
+        while (i < order.length && left > 0) {
+            const v: View = order[i];
             const here: int[] = initOf(v);
             if (here.length > 0) {
                 const id: int = here[0];
@@ -5666,17 +5749,7 @@ ${
             }
             seq = keep;
         }
-        let out: View[] = [];
-        for (const v2 of rs) {
-            const h2: int[] = initOf(v2);
-            if (h2.length == 0) {
-                out = out.concat([v2]);
-            } else if (hasInt(seq, h2[0])) {
-                const k2: CoreConst | not = findConst(p0, h2[0]);
-                if (k2 is given) out = out.concat([View.Run(block([Stmt.Assign(k2.sym, k2.init, [])]), [])]);
-            }
-        }
-        return { p: withProgramRenders(p, out), seq: seq };
+        return { p: withProgramRenders(p, placeInits(p0, rs, seq)), seq: seq };
     }
 
     // s481 — the file-scope bindings the client artifact holds: those its code reads, and
@@ -5768,8 +5841,20 @@ ${
     }
 
     fn withoutInits(rs: View[]) -> View[] {
+        return placeInitsOff(rs);
+    }
+
+    // every place dropped, at any depth (r2: a place nested in an element too — else it would
+    // read as a client read of its binding, and a server-only binding would reach the client)
+    fn placeInitsOff(vs: View[]) -> View[] {
         let out: View[] = [];
-        for (const v of rs) { if (initOf(v).length == 0) out = out.concat([v]); }
+        for (const v of vs) {
+            if (initOf(v).length == 0) {
+                const ks: View[] = elKids(v);
+                if (ks.length > 0 && initsIn(ks).length > 0) out = out.concat([withElKids(v, placeInitsOff(ks))]);
+                else out = out.concat([v]);
+            }
+        }
         return out;
     }
 
