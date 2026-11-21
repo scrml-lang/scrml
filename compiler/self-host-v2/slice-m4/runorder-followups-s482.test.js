@@ -292,6 +292,144 @@ ${RUN}
 });
 
 // =============================================================================
+// B r2 (#2053 r1 review MED-A) — a nested function DECLARATION inside a function body code reaches
+// is its own callable: what it reads counts only through a call of it or its use as a value
+// (§6.7.4 rule 3), at every depth — merely declaring it runs nothing. Red on 0548d92e4: the
+// never-called `inner` below made `h()` "use" `k` (E-SCOPE-001); main and r0 compiled it (1 | 7).
+// =============================================================================
+describe("B r2 — a nested function declaration reaches a later binding only when called or used as a value", () => {
+  const HEAD = `\${ let n: int = 1; }
+\${ let out: int = 0; }
+\${ function run(f: () => int) -> int { return f(); } }
+\${ n = 5; }`;
+  test("legal: a never-called nested declaration (the review's m-nested-decl) compiles and runs (1 | 7)", async () => {
+    const src = `<program>
+\${ let out: int = 0; }
+\${ function h() -> int { function inner() -> int { return k; } return 1; } }
+\${ out = h(); }
+<p id="r">\${out}</p>
+\${ const k: int = 7 + 0; }
+<p id="s">\${k}</p>
+</program>
+`;
+    expect(await errCodes(src)).toEqual([]);
+    expect(await texts(src, ["r", "s"])).toEqual(["1", "7"]);
+  }, 120000);
+
+  test("legal: two levels of never-called nested declarations", async () => {
+    const src = `<program>
+\${ let out: int = 0; }
+\${ function h() -> int {
+    function mid() -> int { function deep() -> int { return k; } return 2; }
+    return 1;
+} }
+\${ out = h(); }
+<p id="r">\${out}</p>
+\${ const k: int = 7 + 0; }
+</program>
+`;
+    expect(await errCodes(src)).toEqual([]);
+    expect(await texts(src, ["r"])).toEqual(["1"]);
+  }, 120000);
+
+  test("legal: two levels, the middle one called but the deepest never called", async () => {
+    const src = `<program>
+\${ let out: int = 0; }
+\${ function h() -> int {
+    function mid() -> int { function deep() -> int { return k; } return 2; }
+    return mid();
+} }
+\${ out = h(); }
+<p id="r">\${out}</p>
+\${ const k: int = 7 + 0; }
+</program>
+`;
+    expect(await errCodes(src)).toEqual([]);
+    expect(await texts(src, ["r"])).toEqual(["2"]);
+  }, 120000);
+
+  test("a nested declaration that IS called: E-SCOPE-001 naming the path through it", async () => {
+    const res = await result(`<program>
+${HEAD}
+\${ function h() -> int { function inner() -> int { return k; } return inner(); } }
+\${ out = h(); }
+\${ const k: int = n + 0; }
+</program>
+`);
+    const d = res.diagnostics.filter((x) => x.severity === "error");
+    expect(d.map((x) => x.code)).toEqual(["E-SCOPE-001"]);
+    expect(d[0].message).toContain("calls `h()`, which reaches `inner()`, which uses `k`");
+  }, 120000);
+
+  // a nested function named as a value is itself INTERIM E-BOOTSTRAP-UNSUPPORTED (§7.3.1, the
+  // bootstrap does not follow its closure out of its function); the reach is judged regardless
+  test("a nested declaration used as a value (passed to a scrml function): E-SCOPE-001", async () => {
+    const res = await result(`<program>
+${HEAD}
+\${ function h() -> int { function inner() -> int { return k; } return run(inner); } }
+\${ out = h(); }
+\${ const k: int = n + 0; }
+</program>
+`);
+    const d = res.diagnostics.filter((x) => x.code === "E-SCOPE-001");
+    expect(d.length).toBe(1);
+    expect(d[0].message).toContain("calls `h()`, which reaches `inner()`, which uses `k`");
+  }, 120000);
+
+  test("a nested declaration used as a value (returned): E-SCOPE-001", async () => {
+    expect(await errCodes(`<program>
+${HEAD}
+\${ function h() -> () => int { function inner() -> int { return k; } return inner; } }
+\${ out = run(h()); }
+\${ const k: int = n + 0; }
+</program>
+`)).toContain("E-SCOPE-001");
+  }, 120000);
+
+  test("a nested declaration called inside a function expression handed on: E-SCOPE-001", async () => {
+    const res = await result(`<program>
+${HEAD}
+\${ function h() -> int { function inner() -> int { return k; } return run(() => inner()); } }
+\${ out = h(); }
+\${ const k: int = n + 0; }
+</program>
+`);
+    const d = res.diagnostics.filter((x) => x.severity === "error");
+    expect(d.map((x) => x.code)).toEqual(["E-SCOPE-001"]);
+    expect(d[0].message).toContain("calls `h()`, which reaches `inner()`, which uses `k`");
+  }, 120000);
+
+  test("two levels, each called: E-SCOPE-001 naming the deepest function", async () => {
+    const res = await result(`<program>
+${HEAD}
+\${ function h() -> int {
+    function mid() -> int { function deep() -> int { return k; } return deep(); }
+    return mid();
+} }
+\${ out = h(); }
+\${ const k: int = n + 0; }
+</program>
+`);
+    const d = res.diagnostics.filter((x) => x.severity === "error");
+    expect(d.map((x) => x.code)).toEqual(["E-SCOPE-001"]);
+    expect(d[0].message).toContain("calls `h()`, which reaches `deep()`, which uses `k`");
+  }, 120000);
+
+  test("a never-called nested declaration beside a direct read still refuses the read", async () => {
+    const res = await result(`<program>
+${HEAD}
+\${ function h() -> int { function inner() -> int { return 0; } return k; } }
+\${ out = h(); }
+\${ const k: int = n + 0; }
+</program>
+`);
+    const d = res.diagnostics.filter((x) => x.severity === "error");
+    expect(d.map((x) => x.code)).toEqual(["E-SCOPE-001"]);
+    expect(d[0].message).toContain("calls `h()`, which uses `k`");
+  }, 120000);
+});
+
+// =============================================================================
 // C — ruling:user-voice-scrml.md-S481-nested-init-chain-comments item 1: a file-scope initializer
 // that acts, written inside `if=` content or a component's slot content: "make it a compile error
 // naming the construct" — E-FILE-SCOPE-INIT-IN-CONSTRUCT (analyze.scrml constructInitDiags). Red on
