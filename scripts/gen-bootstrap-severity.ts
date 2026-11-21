@@ -126,8 +126,11 @@ export function resolveSeverities(
 export function render(specText: string, codes: string[], table: Record<string, CompileSeverity> = PROVISIONAL): string {
   checkProvisional(codes, table);       // every entry is a code the bootstrap still names
   const { entries, gaps } = resolveSeverities(specText, codes, table);
+  // S469 dpa-073 (S481 Track M step 2): a `,` between every pair of arms, the trailing one omitted,
+  // and `;` after the `return match … { }` statement — the text `scrml fix --rules=stmt-semi,arm-comma`
+  // writes, so the generated file is the ruled dialect and a fix run leaves it unchanged.
   const arms = (sev: CompileSeverity) =>
-    entries.filter((e) => e.severity === sev && !e.provisional).map((e) => `            "${e.code}" :> Severity.${sev}`);
+    entries.filter((e) => e.severity === sev && !e.provisional).map((e) => `            "${e.code}" :> Severity.${sev},`);
   const provisional = entries.filter((e) => e.provisional);
   const L: string[] = [];
   L.push("// =============================================================================");
@@ -162,11 +165,11 @@ export function render(specText: string, codes: string[], table: Record<string, 
   L.push(...arms("Error"));
   if (provisional.length > 0) {
     L.push("            // PROVISIONAL — no §34 row yet (scripts/gen-bootstrap-severity.ts PROVISIONAL; each owes a row)");
-    for (const e of provisional) L.push(`            "${e.code}" :> Severity.${e.severity}`);
+    for (const e of provisional) L.push(`            "${e.code}" :> Severity.${e.severity},`);
   }
   L.push("            // no usable §34 row — fail closed (listed in the header)");
   L.push("            _ :> Severity.Error");
-  L.push("        }");
+  L.push("        };");
   L.push("    }");
   L.push("}");
   L.push("");
@@ -181,7 +184,7 @@ export function render(specText: string, codes: string[], table: Record<string, 
  * table against §34, so a broken `render()` would pass the PR and break `slices` on the bot's own PR
  * (auto-merge never fires; every derived block stops updating on main). So: answers differ → exit 1.
  */
-const ARM_RE = /^\s*(?:"([EWI]-[A-Z0-9-]+)"|(_))\s*:>\s*Severity\.(\w+)\s*$/;
+const ARM_RE = /^\s*(?:"([EWI]-[A-Z0-9-]+)"|(_))\s*:>\s*Severity\.(\w+)\s*,?\s*$/; // S481: the arm `,` (dpa-073 F2) is optional here
 /** A line with its trailing `// …` comment removed (codes never contain `//`). S474 r2. */
 const codeOf = (line: string) => line.replace(/\s*\/\/.*$/, "");
 

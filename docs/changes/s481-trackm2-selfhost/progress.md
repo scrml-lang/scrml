@@ -8,5 +8,8 @@ Track M step 2 (user-voice-scrml.md S480 "⭐ RULED — bootstrap census build o
       => item 1's self-host application STOPPED; owner question filed in the PR body.
 - [x] Item 1: `loop-while` / `loop-do-while` rules (compiler/src/commands/fix-loops.js) + tests
       (compiler/tests/commands/fix-loops.test.js). Opt-in (S66_RULES / RULED_ONLY_RULES), not impl#1-safe.
-- [ ] Item 2: self-host migration with stmt-semi + arm-comma only.
-- [ ] Item 3: residual bootstrap parse-gap census.
+- [x] Item 2: self-host migration with stmt-semi + arm-comma only (2868687f2, tool output; bundle
+      byte-identical). severity.scrml via its generator (generator emits the ruled `,` / `;`).
+- [x] Item 3: residual census (62 reports: keyword-named members / `server` 26, `from` 9,
+      multi-line `|` heads 27) — in the PR body.
+- [ ] Final gates: pretest, bootstrap-conformance, CI checks job, PR.
