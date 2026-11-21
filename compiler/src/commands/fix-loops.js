@@ -268,6 +268,25 @@ function headHazard(toks, match, open, close) {
 const DECL_WORDS = new Set(["let", "const", "var", "lin", "function", "fn", "class"]);
 /** Keywords naming one thing (no declarator list). */
 const ONE_NAME_WORDS = new Set(["function", "fn", "class"]);
+/**
+ * The ECMAScript reserved words — strict mode and module code included (impl#1 emits modules) — plus
+ * the literals `true` / `false` / `null`. No binding in emitted JS can carry one of these names.
+ */
+const JS_RESERVED = new Set([
+  "await", "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do",
+  "else", "enum", "export", "extends", "false", "finally", "for", "function", "if", "implements", "import",
+  "in", "instanceof", "interface", "let", "new", "null", "package", "private", "protected", "public",
+  "return", "static", "super", "switch", "this", "throw", "true", "try", "typeof", "var", "void", "while",
+  "with", "yield",
+]);
+/**
+ * Can token `x` be a binding name? An IDENT, or a KEYWORD that is no reserved word (S482, review MED-1
+ * of #2051): impl#1's tokenizer reads ~29 contextual words — `from`, `get`, `set`, `as`, `async`, `type`,
+ * `is`, `when`, `given`, `use`, `env`, `match`, … — as KEYWORD, and each compiles as a variable name.
+ * Only the reserved words are left out, so a keyword impl#1 adds later counts as a name: a refusal,
+ * the safe direction.
+ */
+const nameTok = (x) => !!x && (x.kind === "IDENT" || (x.kind === "KEYWORD" && !JS_RESERVED.has(x.text)));
 
 /**
  * Does a declaration in the loop body capture a name the condition reads? A reason, or null.
@@ -277,7 +296,8 @@ const ONE_NAME_WORDS = new Set(["function", "fn", "class"]);
  * past a `;`-less statement end only finds more names — a refusal, the safe direction. A cell opener
  * written in code (`<done> = …`, `let <done = …/>`, one MARKUP token) names a cell the same way.
  *
- * The condition's names are its IDENT / `@` tokens, less a property name after `.` / `?.` (not a
+ * The condition's names are its name tokens (an IDENT, or a KEYWORD that is no reserved word — `nameTok`)
+ * and `@` tokens, less a property name after `.` / `?.` (not a
  * binding read). A condition whose names this cannot read — a template holding `${ … }`, a block, or
  * markup — fails closed: then ANY declaration captures (S482).
  *
@@ -291,7 +311,7 @@ function declCapture(source, body, cond, opts = {}) {
   const opaque = cond.some((x) => x.kind === "BLOCK_REF" || x.kind === "MARKUP"
     || (x.kind === "STRING" && source[x.start] === "`" && source.slice(x.start, x.end).includes("${")));
   const condNames = new Set(cond
-    .filter((x, i) => (x.kind === "IDENT" || x.kind === "AT_IDENT") && !(i > 0 && (isP(cond[i - 1], ".") || isP(cond[i - 1], "?."))))
+    .filter((x, i) => (nameTok(x) || x.kind === "AT_IDENT") && !(i > 0 && (isP(cond[i - 1], ".") || isP(cond[i - 1], "?."))))
     .map((x) => x.text.replace(/^@/, "")));
   const reads = (nm) => opaque || condNames.has(nm);
   const why = (what) => (opaque
@@ -300,7 +320,7 @@ function declCapture(source, body, cond, opts = {}) {
   const named = (nm) => {
     if (!nm) return null;
     if (isP(nm, "{") || isP(nm, "[")) return "declares names by destructuring";
-    if (nm.kind === "IDENT" && reads(nm.text)) return why(`\`${nm.text}\``);
+    if (nameTok(nm) && reads(nm.text)) return why(`\`${nm.text}\``);
     return null;
   };
   // A statement-leading `<name …` (a cell opener `<done> = …` / `<done = …/>`, read as code tokens or
@@ -312,7 +332,7 @@ function declCapture(source, body, cond, opts = {}) {
       const m = /^<\s*@?([A-Za-z_$][\w$]*)/.exec(source.slice(x.start, x.end));
       return m && reads(m[1]) ? why(`the cell \`${m[1]}\``) : null;
     }
-    if (isP(x, "<") && body[k + 1] && body[k + 1].kind === "IDENT" && reads(body[k + 1].text)) return why(`the cell \`${body[k + 1].text}\``);
+    if (isP(x, "<") && nameTok(body[k + 1]) && reads(body[k + 1].text)) return why(`the cell \`${body[k + 1].text}\``);
     return null;
   };
   let level = 0; // topOnly: the bracket depth of body[k] inside the body
