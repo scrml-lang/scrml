@@ -247,7 +247,7 @@ ${
         if (i >= ts.length) return -1;
         if (p[k] == "...") {
             let j: int = i;
-            while (j < ts.length) {
+            for (; j < ts.length; ) {
                 const r: int = refMatchFrom(ts, j, p, k + 1, line);
                 if (r >= 0) return r;
                 const t: PTok = ts[j];
@@ -263,7 +263,7 @@ ${
     fn glueHolds(ts: PTok[], i: int, end: int, glue: string) -> boolean {
         if (glue == "tight") {
             let j: int = i;
-            while (j + 1 < end) {
+            for (; j + 1 < end; ) {
                 if (ts[j].end != ts[j + 1].start) return false;
                 j = j + 1;
             }
@@ -278,7 +278,7 @@ ${
     fn refLineStarts(src: string) -> int[] {
         let out: int[] = [0];
         let i: int = src.indexOf("\n");
-        while (i >= 0) {
+        for (; i >= 0; ) {
             out = out.concat([i + 1]);
             i = src.indexOf("\n", i + 1);
         }
@@ -289,7 +289,7 @@ ${
     fn refLineOf(starts: int[], at: int) -> int {
         let lo: int = 0;
         let hi: int = starts.length - 1;
-        while (lo < hi) {
+        for (; lo < hi; ) {
             const mid: int = lo + Math.floor((hi - lo + 1) / 2);
             if (starts[mid] <= at) {
                 lo = mid;
@@ -333,7 +333,7 @@ ${
         const table: Refusal[] = refusalTable();
         let out: Firing[] = [];
         let i: int = 0;
-        while (i < ts.length) {
+        for (; i < ts.length; ) {
             let next: int = i + 1;
             let done: boolean = false;
             for (const r of table) {
@@ -368,7 +368,7 @@ ${
     fn closerLine(ts: PTok[], k: int) -> int {
         let depth: int = 0;
         let j: int = k;
-        while (j < ts.length) {
+        for (; j < ts.length; ) {
             const t: PTok = ts[j];
             if (t.cls == TC.End) return ts[j].line;
             if (!refTplPiece(t) && t.cls != TC.Str) {

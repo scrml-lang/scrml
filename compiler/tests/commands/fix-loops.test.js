@@ -17,7 +17,7 @@ import { describe, test, expect } from "bun:test";
 import { fixLoops, planLoops, canonicalLoops, WHILE_RULE, DO_WHILE_RULE, LOOP_RULES } from "../../src/commands/fix-loops.js";
 import { normalizedArtifact } from "../../src/commands/fix-terminators.js";
 import { fixS66, S66_RULES, IMPL1_SAFE_RULES, RULED_ONLY_RULES } from "../../src/commands/fix-s66.js";
-import { parseFixArgs } from "../../src/commands/fix.js";
+import { parseFixArgs, effectiveRules } from "../../src/commands/fix.js";
 import { compileScrml } from "../../src/api.js";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -176,5 +176,218 @@ describe("wiring", () => {
     const r = fixS66(src, { filePath: F, rules: ["stmt-semi", "loop-while"], verify: false });
     expect(r.output).toBe(prog("    function f(n) {\n        let i = 0;\n        for (i < n) {\n            i = i + 1;\n        }\n        return i;\n    }"));
     expect(r.applied.filter((a) => a.rule === "loop-while")).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S481 s481-selfhost-while — the INTERIM impl#1-compilable spelling (PA decision S481), and the
+// S239 review LOW-1 (`~{}` / `^{}` loops noted) / LOW-2 (every declarator, every binding form).
+// ---------------------------------------------------------------------------
+
+const fixedInterim = (src) => {
+  const r = fixLoops(src, { filePath: F, verify: false, interim: true });
+  expect(planLoops(F, r.output).sites).toEqual([]); // idempotent: no `while` / `do` left
+  return r.output;
+};
+
+describe("INTERIM spelling (`interim` / `--loop-interim`): heads impl#1 compiles", () => {
+  test("`while (c)` → the counted head `for (; c; )`; label and body kept", () => {
+    expect(fixedInterim(prog("    function f(g) {\n        outer: while (g.more()) {\n            g.step();\n        }\n    }")))
+      .toBe(prog("    function f(g) {\n        outer: for (; g.more(); ) {\n            g.step();\n        }\n    }"));
+  });
+
+  test("`do { S } while (c)` → `for (;;) { S if (!(c)) { break; } }`", () => {
+    const src = prog("    function f() {\n        let n = 0;\n        do {\n            n = n + 1;\n        } while (n < 3);\n        return n;\n    }");
+    expect(fixedInterim(src)).toBe(prog("    function f() {\n        let n = 0;\n        for (;;) {\n            n = n + 1;\n            if (!(n < 3)) { break; }\n        }\n        return n;\n    }"));
+  });
+
+  test("a head holding a string literal is spelled top-check: impl#1 drops a `for` head's string quotes (g-impl1-c-for-head-template-and-string-literals-mangled-s470)", () => {
+    expect(fixedInterim(prog("    function f(s) {\n        let i = 0;\n        while (i < s.length && s.charAt(i) != \"x\") {\n            i = i + 1;\n        }\n        return i;\n    }")))
+      .toBe(prog("    function f(s) {\n        let i = 0;\n        for (;;) {\n            if (!(i < s.length && s.charAt(i) != \"x\")) { break; }\n            i = i + 1;\n        }\n        return i;\n    }"));
+    expect(fixedInterim(prog("    function f(s) { let i = 0; while (s.charAt(i) == \"\") { i = i + 1; } return i; }")))
+      .toBe(prog("    function f(s) { let i = 0; for (;;) { if (!(s.charAt(i) == \"\")) { break; } i = i + 1; } return i; }"));
+    // the ruled spelling is unchanged: `for (cond)` (the bootstrap reads string literals in it)
+    expect(fixed(prog("    function f(s) { let i = 0; while (s.charAt(i) == \"\") { i = i + 1; } return i; }"))).toContain("for (s.charAt(i) == \"\") {");
+  });
+
+  test("measured: the literal-head loops verify with impl#1 (the counted spelling of them would not), and `continue` keeps its meaning", () => {
+    const src = prog("    function f(s) {\n        let i = 0;\n        let n = 0;\n        while (i < s.length && s.charAt(i) != \"x\") {\n            i = i + 1;\n            if (s.charAt(i) == \"b\") { continue; }\n            n = n + 1;\n        }\n        while (s.charAt(i) == \"\") { i = i + 1; }\n        return n;\n    }") + "<p>${f(\"abcx\")}</p>\n";
+    const r = fixLoops(src, { filePath: F, interim: true });
+    expect(r.blockers).toEqual([]);
+    expect(r.applied).toHaveLength(2);
+    expect(r.output).toContain("        for (;;) {\n            if (!(i < s.length && s.charAt(i) != \"x\")) { break; }\n            i = i + 1;");
+    const n = (s) => normalizedArtifact(s, canonicalLoops);
+    expect(n("while (a) { f(); continue; }")).toBe(n("for (;;) { if (!(a)) { break; } f(); continue; }"));
+    expect(n("while (a) { f(); }")).not.toBe(n("for (;;) { if (a) { break; } f(); }"));
+    expect(n("while (a) { f(); }")).not.toBe(n("for (;;) { if (!(a)) { break x; } f(); }"));
+  });
+
+  test("a `do … while` with `continue` is still refused (INTERIM: the flag-variable rewrite is not built)", () => {
+    const src = prog("    function f() { let n = 0; do { n = n + 1; if (n == 2) { continue; } g(n); } while (n < 5); }");
+    expect(fixLoops(src, { filePath: F, verify: false, interim: true }).changed).toBe(false);
+  });
+
+  test("verified on a compiling program; the written output itself compiles with impl#1, no errors", () => {
+    const src = prog("    function f(n) {\n        let i = 0;\n        let s = 0;\n        outer: while (i < n) {\n            i = i + 1;\n            if (i == 2) { continue; }\n            if (i == 5) { break outer; }\n            s = s + i;\n        }\n        do {\n            s = s + 1;\n        } while (s < 100);\n        return s;\n    }") + "<p>${f(10)}</p>\n";
+    const r = fixLoops(src, { filePath: F, interim: true });
+    expect(r.blockers).toEqual([]);
+    expect(r.applied.map((a) => a.rule)).toEqual([WHILE_RULE, DO_WHILE_RULE]);
+    expect(r.output).toContain("outer: for (; i < n; ) {");
+    expect(r.output).toContain("        for (;;) {\n            s = s + 1;\n            if (!(s < 100)) { break; }\n        }");
+    const dir = mkdtempSync(join(tmpdir(), "fix-loops-interim-"));
+    try {
+      const file = join(dir, "a.scrml");
+      writeFileSync(file, r.output);
+      const c = compileScrml({ inputFiles: [file], write: false, outputDir: join(dir, "out"), log: () => {} });
+      expect((c.errors ?? []).filter((e) => e.severity !== "warning").map((e) => e.code)).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("CLI: `--loop-interim` lifts the --s66 gate for the loop rules only; alone it adds them to the defaults", () => {
+    expect(parseFixArgs(["a.scrml", "--loop-interim", "--rules=loop-while,loop-do-while"]).rules).toEqual(["loop-while", "loop-do-while"]);
+    expect(() => parseFixArgs(["a.scrml", "--loop-interim", "--rules=rhs-decl"])).toThrow(/impl#1 cannot compile/);
+    expect(() => parseFixArgs(["a.scrml", "--rules=loop-while"])).toThrow(/impl#1 cannot compile/);
+    const o = parseFixArgs(["a.scrml", "--loop-interim"]);
+    expect(o.dryRun).toBe(false);
+    expect(effectiveRules(o)).toEqual([...IMPL1_SAFE_RULES, ...LOOP_RULES]);
+    expect(effectiveRules(parseFixArgs(["a.scrml"]))).toEqual([...IMPL1_SAFE_RULES]);
+  });
+
+  test("fixS66 `loopInterim` passes the spelling through", () => {
+    const src = prog("    function f(n) {\n        let i = 0\n        while (i < n) {\n            i = i + 1\n        }\n        return i\n    }");
+    const r = fixS66(src, { filePath: F, rules: ["stmt-semi", "loop-while"], verify: false, loopInterim: true });
+    expect(r.output).toBe(prog("    function f(n) {\n        let i = 0;\n        for (; i < n; ) {\n            i = i + 1;\n        }\n        return i;\n    }"));
+  });
+});
+
+describe("S239 review LOW-1 — a loop inside `~{}` / `^{}` is noted, not silently skipped", () => {
+  test("each `while` in a `~{}` and a `^{}` gets a note on its own line; the code `while` is rewritten", () => {
+    const src = "<program>\n${\n  function f() {\n    let i = 0\n    while (i < 3) { i = i + 1 }\n    return i\n  }\n  ~{\n    let k = 0\n    while (k < 2) { k = k + 1 }\n    assert k == 2\n  }\n  ^{\n    let m = 0\n    while (m < 2) { m = m + 1 }\n  }\n}\n<p id=\"o\">${f()}</p>\n</program>\n";
+    const r = fixLoops(src, { filePath: F, verify: false });
+    expect(r.output).toContain("    for (i < 3) { i = i + 1 }");
+    expect(r.output).toContain("    while (k < 2) { k = k + 1 }");
+    expect(r.output).toContain("    while (m < 2) { m = m + 1 }");
+    const ns = r.blockers.map((b) => `${b.line} ${b.reason}`);
+    expect(ns.some((x) => x.startsWith("10 ") && x.includes("inside a `~{ … }` block"))).toBe(true);
+    expect(ns.some((x) => x.startsWith("15 ") && x.includes("inside a `^{ … }` block"))).toBe(true);
+  });
+});
+
+describe("S239 review LOW-2 — the capture guard reads every declarator and every binding form", () => {
+  const doBody = (decl) => prog(`    let done = false;\n    let n = 0;\n    function step(k) { return k > 2; }\n    function f() {\n        do {\n            ${decl}\n            n = n + 1;\n        } while (!done && n < 10);\n        return n;\n    }`);
+  test("a later declarator (`let x = n, done = step(n);`) captures", () => {
+    expect(notes(doBody("let x = n, done = step(n);"))).toContain("declares `done`, which the condition reads");
+    expect(fixLoops(doBody("let x = n, done = step(n);"), { filePath: F, verify: false }).changed).toBe(false);
+  });
+  test("`lin`, `const` (any declarator), `var`, `fn` all capture", () => {
+    for (const d of ["lin done = step(n);", "const a = 1, done = step(n);", "var done = step(n);", "fn done() { return true; }"]) {
+      expect(fixLoops(doBody(d), { filePath: F, verify: false }).changed).toBe(false);
+    }
+  });
+  test("a destructuring later declarator is refused; a name inside an initializer's brackets is not a declarator", () => {
+    expect(notes(doBody("let x = 1, { done } = o;"))).toContain("destructuring");
+    expect(fixLoops(doBody("let x = g(n, done), y = [done, n];"), { filePath: F, verify: false }).changed).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S482 s482-loop-interim-tdz — review MED-1 of #2046: the top-check spelling
+// `for (;;) { if (!(cond)) { break; } body }` moves the condition INTO the body's block scope, so a
+// name the body declares at its top level captures the condition (a TDZ ReferenceError for
+// `let` / `const` / `class`, a different value for a `function`). Refused, never rewritten; the
+// verify's canonical fold no longer equates the two shapes when the body would capture.
+// ---------------------------------------------------------------------------
+
+describe("S482 MED-1 — the top-check spelling refuses a body declaration that captures the condition", () => {
+  const litLoop = (decl, cond = "c != \"x\" && n < 3") => prog(`    function f(s) {\n        let c = "a";\n        let n = 0;\n        while (${cond}) {\n            ${decl}\n            n = n + 1;\n        }\n        return n;\n    }`) + "<p>${f(\"abc\")}</p>\n";
+  const interim = (src, verify = false) => fixLoops(src, { filePath: F, verify, interim: true });
+  const capNote = (r) => r.blockers.map((b) => b.reason).join("\n");
+
+  test("the reviewer's probe: `let c` in the body shadows the condition's `c` — refused, source unchanged (verify on)", () => {
+    const src = litLoop("let c = s.charAt(n);");
+    const r = interim(src, true);
+    expect(r.changed).toBe(false);
+    expect(r.output).toBe(src);
+    expect(capNote(r)).toContain("declares `c`, which the condition reads");
+    expect(r.blockers.map((b) => b.line)).toEqual([6]); // the `while` line
+  });
+
+  test("the reviewer's runtime proof: the top-check spelling of that loop throws where the `while` returned 3", () => {
+    // Plain JS, the shape impl#1 emits for both spellings (probe/tdzrun.js).
+    const before = new Function("s", "let c = \"a\"; let n = 0; while (c != \"x\" && n < 3) { let c = s.charAt(n); n = n + 1; } return n;");
+    const after = new Function("s", "let c = \"a\"; let n = 0; for (;;) { if (!(c != \"x\" && n < 3)) { break; } let c = s.charAt(n); n = n + 1; } return n;");
+    expect(before("abc")).toBe(3);
+    expect(() => after("abc")).toThrow(ReferenceError);
+  });
+
+  test("`const`, a later declarator, `lin`, a nested `function` / `fn`, `class` — all refused", () => {
+    for (const d of ["const c = s.charAt(n);", "let k = 1, c = s.charAt(n);", "lin c = s.charAt(n);", "function c() { return 1; }", "fn c() { return 1; }", "class c { }"]) {
+      const r = interim(litLoop(d));
+      expect(r.changed).toBe(false);
+      expect(capNote(r)).toContain("declares `c`, which the condition reads");
+    }
+  });
+
+  test("a destructuring declaration at the body's top level is refused (its names are not read here)", () => {
+    for (const d of ["let { c } = o;", "const [c, d] = xs;", "let k = 1, { c } = o;"]) {
+      const r = interim(litLoop(d));
+      expect(r.changed).toBe(false);
+      expect(capNote(r)).toContain("destructuring");
+    }
+  });
+
+  test("a member read `c.x` in the condition: `c` shadowed → refused; a declared `x` (the property name) does not capture", () => {
+    expect(interim(litLoop("let c = s;", "c.x != \"q\" && n < 3")).changed).toBe(false);
+    const ok = interim(litLoop("let x = 1;", "c.x != \"q\" && n < 3"));
+    expect(ok.changed).toBe(true);
+    expect(ok.output).toContain("if (!(c.x != \"q\" && n < 3)) { break; }");
+  });
+
+  test("a name declared only in a NESTED block of the body is safe — still rewritten (verify on)", () => {
+    for (const d of ["if (n > 0) { let c = s.charAt(n); n = n + c.length - 1; }", "function g() { let c = 1; return c; }", "for (let c = 0; c < 1; c = c + 1) { n = n + c; }"]) {
+      const src = litLoop(d);
+      const r = interim(src, true);
+      expect(r.blockers).toEqual([]);
+      expect(r.changed).toBe(true);
+      expect(r.output).toContain("for (;;) {\n            if (!(c != \"x\" && n < 3)) { break; }");
+    }
+  });
+
+  test("a body that declares no condition name is still rewritten; a label and a `continue` keep the top test", () => {
+    const src = prog("    function f(s) {\n        let c = \"a\";\n        let n = 0;\n        outer: while (c != \"x\" && n < 5) {\n            n = n + 1;\n            if (n == 2) { continue outer; }\n            if (n == 3) { continue; }\n            c = s.charAt(n);\n        }\n        return n;\n    }") + "<p>${f(\"abxd\")}</p>\n";
+    const r = interim(src, true);
+    expect(r.blockers).toEqual([]);
+    expect(r.output).toContain("outer: for (;;) {\n            if (!(c != \"x\" && n < 5)) { break; }\n            n = n + 1;");
+    // `continue` (labelled or not) re-enters at the test, exactly like the `while`.
+    const w = new Function("s", "let c = \"a\"; let n = 0; outer: while (c != \"x\" && n < 5) { n = n + 1; if (n == 2) { continue outer; } if (n == 3) { continue; } c = s.charAt(n); } return n;");
+    const t = new Function("s", "let c = \"a\"; let n = 0; outer: for (;;) { if (!(c != \"x\" && n < 5)) { break; } n = n + 1; if (n == 2) { continue outer; } if (n == 3) { continue; } c = s.charAt(n); } return n;");
+    for (const s of ["abxd", "aaaaaa", "xxxx"]) expect(t(s)).toBe(w(s));
+  });
+
+  test("a numeric-only head keeps the counted head `for (; cond; )` — the condition stays outside the body, a shadowing body is unaffected", () => {
+    const src = prog("    function f(s) {\n        let c = 0;\n        let n = 0;\n        while (c < 1 && n < 3) {\n            let c = 5;\n            n = n + 1;\n        }\n        return n;\n    }") + "<p>${f(\"abc\")}</p>\n";
+    const r = interim(src, true);
+    expect(r.blockers).toEqual([]);
+    expect(r.output).toContain("for (; c < 1 && n < 3; ) {\n            let c = 5;");
+  });
+
+  test("a condition holding a template whose `${ }` names this rule cannot read fails closed when the body declares anything", () => {
+    const r = interim(litLoop("let k = 1;", "`${c}` != \"x\" && n < 3"));
+    expect(r.changed).toBe(false);
+    expect(capNote(r)).toContain("cannot read");
+    // no top-level declaration at all: nothing to capture, rewritten
+    expect(interim(litLoop("g(n);", "`${c}` != \"x\" && n < 3")).changed).toBe(true);
+  });
+
+  test("verify: the canonical fold no longer equates a capturing top-check with the `while`", () => {
+    const n = (s) => normalizedArtifact(s, canonicalLoops);
+    expect(n("while (c != 1) { let c = 2; f(c); }")).not.toBe(n("for (;;) { if (!(c != 1)) { break; } let c = 2; f(c); }"));
+    expect(n("while (c.x) { function c() {} }")).not.toBe(n("for (;;) { if (!(c.x)) { break; } function c() {} }"));
+    expect(n("while (c) { let { c: d, ...c } = o; }")).not.toBe(n("for (;;) { if (!(c)) { break; } let { c: d, ...c } = o; }"));
+    // no capture (nested block / property name): still folds
+    expect(n("while (c != 1) { { let c = 2; } f(); }")).toBe(n("for (;;) { if (!(c != 1)) { break; } { let c = 2; } f(); }"));
+    expect(n("while (o.c != 1) { let c = 2; }")).toBe(n("for (;;) { if (!(o.c != 1)) { break; } let c = 2; }"));
   });
 });

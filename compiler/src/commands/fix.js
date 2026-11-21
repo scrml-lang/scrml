@@ -58,6 +58,7 @@ import { readFileSync, writeFileSync, statSync, readdirSync, existsSync } from "
 import { resolve, join, relative, sep, dirname } from "path";
 import { fixS66, S66_RULES, IMPL1_SAFE_RULES, S66_DECL_RULES, RULED_ONLY_RULES, moduleEdges, hasProgramRoot } from "./fix-s66.js";
 import { compileErrorsTogether, compileErrorsOfText } from "./fix-verify-shared.js";
+import { LOOP_RULES } from "./fix-loops.js";
 
 const HELP = `scrml fix <file|dir> [options]
 
@@ -89,15 +90,22 @@ that changes what the compiler reports is withdrawn and reported.
 (loop-while, loop-do-while). Their output is the ruled dialect, which TODAY'S COMPILER CANNOT
 COMPILE. --s66 is a preview: dry-run unless --write is given.
 
+--loop-interim (INTERIM, S481: the self-host, whose bundle today's compiler builds): the loop rules
+write heads today's compiler DOES compile — \`while (cond)\` → \`for (; cond; )\`, \`do … while (cond)\` →
+\`for (;;) { …; if (!(cond)) { break; } }\` — so they need no --s66 and write in place, verified like
+the default rules. Alone it adds the loop rules to the defaults. A later pass renames the heads to
+\`for (cond)\` once the bootstrap builds its own bundle.
+
 Options:
   --dry-run            Print a diff; write nothing
   --check              Write nothing; exit 1 if a file would change, else 2 if a reported construct
                        was left untouched, else 0 (3 if a file was refused, in every mode)
   --s66                Add the §66 declaration rules (dry-run unless --write; output not compilable today)
   --write              With --s66: write the §66 rewrite in place
+  --loop-interim       Loop rules in the INTERIM impl#1-compilable spelling (no --s66 needed)
   --entry              Treat every file as an application entry (program-wrap applies)
   --no-program-wrap    Never wrap a file in <program>
-  --rules=<a,b,...>    Restrict to these rules (the declaration and loop rules need --s66): ${S66_RULES.join(", ")}
+  --rules=<a,b,...>    Restrict to these rules (the declaration rules need --s66; the loop rules --s66 or --loop-interim): ${S66_RULES.join(", ")}
   --json               Print a JSON report to stdout
   --help, -h           Show this message
 `;
@@ -189,7 +197,7 @@ export function lineDiff(a, b, label) {
 }
 
 export function parseFixArgs(args) {
-  const o = { targets: [], dryRun: false, check: false, entry: false, noWrap: false, rules: null, json: false, help: false, s66: false, write: false };
+  const o = { targets: [], dryRun: false, check: false, entry: false, noWrap: false, rules: null, json: false, help: false, s66: false, write: false, loopInterim: false };
   for (const a of args) {
     if (a === "--dry-run") o.dryRun = true;
     else if (a === "--check") o.check = true;
@@ -198,6 +206,7 @@ export function parseFixArgs(args) {
     else if (a === "--json") o.json = true;
     else if (a === "--s66") o.s66 = true;
     else if (a === "--write") o.write = true;
+    else if (a === "--loop-interim") o.loopInterim = true;
     else if (a === "--help" || a === "-h") o.help = true;
     else if (a.startsWith("--rules=")) o.rules = a.slice(8).split(",").map((s) => s.trim()).filter(Boolean);
     else if (a.startsWith("--")) throw new Error(`unknown option ${a}`);
@@ -205,7 +214,8 @@ export function parseFixArgs(args) {
   }
   if (o.rules) for (const r of o.rules) if (!S66_RULES.includes(r)) throw new Error(`unknown rule '${r}' (rules: ${S66_RULES.join(", ")})`);
   if (o.rules && !o.s66) {
-    const decl = o.rules.filter((r) => RULED_ONLY_RULES.includes(r));
+    // --loop-interim: the loop rules write impl#1-compilable heads (fix-loops.js), so they need no --s66.
+    const decl = o.rules.filter((r) => RULED_ONLY_RULES.includes(r) && !(o.loopInterim && LOOP_RULES.includes(r)));
     if (decl.length) throw new Error(`rule(s) ${decl.join(", ")} produce ruled-dialect output (§66 openers / the S469 \`for\` heads), which impl#1 cannot compile — pass --s66 to preview them`);
   }
   if (o.write && !o.s66) throw new Error("--write is only for --s66 (the default rules write in place already)");
@@ -236,7 +246,7 @@ export function applyFixRules(file, source, rel, o, files = [file], extra = {}) 
   const project = resolveProject(file);
   const scan = {};
   if (rules.some((x) => S66_DECL_RULES.includes(x))) for (const f of files) if (f !== file && !(f in project)) scan[f] = readCached(f);
-  const r = fixS66(source, { filePath: file, entry: cls.entry, rules, auxSources: project, scanSources: scan, inPlaceClean: extra.inPlaceClean === true });
+  const r = fixS66(source, { filePath: file, entry: cls.entry, rules, auxSources: project, scanSources: scan, inPlaceClean: extra.inPlaceClean === true, loopInterim: o.loopInterim === true });
   return { cls, r };
 }
 
@@ -334,6 +344,8 @@ export function judgeTargets(files, isDir, rules) {
 /** The rules a run applies (parsed options → rule names). */
 export function effectiveRules(o) {
   let rules = o.rules ?? (o.s66 ? [...S66_RULES] : [...IMPL1_SAFE_RULES]);
+  // --loop-interim alone: the impl#1-safe defaults plus the loop rules in their INTERIM spelling.
+  if (!o.rules && !o.s66 && o.loopInterim) rules.push(...LOOP_RULES);
   if (o.noWrap) rules = rules.filter((r) => r !== "program-wrap");
   return rules;
 }

@@ -131,7 +131,7 @@ ${
             if (s.decl.id == d.id && instKey(s.inst) == instKey(i) && hasPrefix(path, s.path)) {
                 let rest: FieldRef[] = [];
                 let k: int = s.path.length;
-                while (k < path.length) {
+                for (; k < path.length; ) {
                     rest = rest.concat([path[k]]);
                     k = k + 1;
                 }
@@ -148,7 +148,7 @@ ${
     fn dropFirst(path: FieldRef[]) -> FieldRef[] {
         let out: FieldRef[] = [];
         let k = 1;
-        while (k < path.length) {
+        for (; k < path.length; ) {
             out = out.concat([path[k]]);
             k = k + 1;
         }
@@ -165,7 +165,7 @@ ${
     fn hasPrefix(path: FieldRef[], pre: FieldRef[]) -> boolean {
         if (path.length < pre.length) return false;
         let k = 0;
-        while (k < pre.length) {
+        for (; k < pre.length; ) {
             if (path[k].owner.id != pre[k].owner.id || path[k].idx != pre[k].idx) return false;
             k = k + 1;
         }
@@ -335,7 +335,7 @@ ${
         let acc: Expr | not = not;
         if (qs[0] != "") acc = Expr.Lit(Literal.Str(qs[0]));
         let i: int = 0;
-        while (i < ss.length) {
+        for (; i < ss.length; ) {
             let part: Expr = lowerExpr(c, ss[i]);
             if (text[i]) part = Expr.Prim(PrimOp.Text, [part]);
             acc = catOnto(acc, part);
@@ -398,7 +398,7 @@ ${
     fn allText(n: int) -> boolean[] {
         let out: boolean[] = [];
         let i: int = 0;
-        while (i < n) {
+        for (; i < n; ) {
             out = out.concat([true]);
             i = i + 1;
         }
@@ -430,7 +430,7 @@ ${
         if (run.length > 0) parts = parts.concat([Expr.ArrayOf(run)]);
         let out: Expr = parts[0];
         let i = 1;
-        while (i < parts.length) {
+        for (; i < parts.length; ) {
             out = Expr.Prim(PrimOp.TapeConcat, [out, parts[i]]);
             i = i + 1;
         }
@@ -1536,7 +1536,7 @@ ${
         let writes: Stmt[] = [];
         if (prepend) {
             let j: int = tmps.length - 1;
-            while (j >= 0) {
+            for (; j >= 0; ) {
                 writes = writes.concat([Stmt.Write(w.cap, target, w.edit, Expr.Local(tmps[j]), w.check)]);
                 j = j - 1;
             }
@@ -1783,7 +1783,7 @@ ${
     fn lowerNodes(c: LC, ns: ANode[]) -> View[] {
         let out: View[] = [];
         let i = 0;
-        while (i < ns.length) {
+        for (; i < ns.length; ) {
             const j: int = chainEnd(ns, i);          // s451: an if-chain (§17.1.1) starting here
             if (j > i + 1) {
                 out = out.concat([chainView(c, ns, i, j)]);
@@ -1852,7 +1852,7 @@ ${
         let end: int = i + 1;
         let k: int = i + 1;
         let open = true;
-        while (open && k < ns.length) {
+        for (; open && k < ns.length; ) {
             const e: AElem | not = elemOf(ns[k]);
             if (e is given) {
                 if (hasAttrNamed(e, "if")) {
@@ -1876,7 +1876,7 @@ ${
     fn chainView(c: LC, ns: ANode[], i: int, j: int) -> View {
         let arms: CondArm[] = [];
         let k: int = i;
-        while (k < j) {
+        for (; k < j; ) {
             const e: AElem | not = elemOf(ns[k]);
             if (e is given) arms = arms.concat([{ test: chainTest(c, e), body: bareElem(c, e) }]);
             k = k + 1;
@@ -2413,7 +2413,7 @@ ${
     fn matchArmViews(c: LC, read: Expr, es: Sym, a: MatchBlockArm) -> View[] {
         let views: View[] = lowerNodes(c, a.elem.kids);
         let k: int = a.elem.binds.length - 1;
-        while (k >= 0) {
+        for (; k >= 0; ) {
             const b: ABind = a.elem.binds[k];
             const s: Sym | not = letSym(bindFact(c.t.binds, b.nid));
             if (s is given && b.name != "_" && a.variant >= 0) {
@@ -2637,7 +2637,7 @@ ${
         let out: ConstructAttr[] = [];
         let idx = 0;
         let remaining: int = raw.length;
-        while (remaining > 0) {
+        for (; remaining > 0; ) {
             for (const a of raw) {
                 if (a.field == idx) {
                     out = out.concat([a]);
@@ -2915,8 +2915,8 @@ ${
         let out: View[] = [];
         let m: int = 0;
         let i = 0;
-        while (i < ns.length) {
-            while (m < marks.length && marks[m].at <= i) {
+        for (; i < ns.length; ) {
+            for (; m < marks.length && marks[m].at <= i; ) {
                 out = out.concat(initView(c, marks[m].nid));
                 m = m + 1;
             }
@@ -2928,7 +2928,7 @@ ${
                 // r2 (MED-1): the places written inside this node (hoisted to the items right
                 // after it) are put where they stand in it
                 let inner: ConstMark[] = [];
-                while (m < marks.length && marks[m].at == i + 1 && marks[m].pos >= ns[i].span.start && marks[m].pos < ns[i].span.end) {
+                for (; m < marks.length && marks[m].at == i + 1 && marks[m].pos >= ns[i].span.start && marks[m].pos < ns[i].span.end; ) {
                     inner = inner.concat([marks[m]]);
                     m = m + 1;
                 }
@@ -2937,7 +2937,7 @@ ${
                 i = i + 1;
             }
         }
-        while (m < marks.length) {
+        for (; m < marks.length; ) {
             out = out.concat(initView(c, marks[m].nid));
             m = m + 1;
         }
@@ -2994,22 +2994,22 @@ ${
         let out: View[] = [];
         let m: int = 0;
         let i = 0;
-        while (i < ns.length) {
-            while (m < ms.length && ms[m].pos < ns[i].span.start) {
+        for (; i < ns.length; ) {
+            for (; m < ms.length && ms[m].pos < ns[i].span.start; ) {
                 out = out.concat(initView(c, ms[m].nid));
                 m = m + 1;
             }
             const j: int = chainEnd(ns, i);
             if (j > i + 1) {
                 out = out.concat([chainView(c, ns, i, j)]);
-                while (m < ms.length && ms[m].pos < ns[j - 1].span.end) {
+                for (; m < ms.length && ms[m].pos < ns[j - 1].span.end; ) {
                     out = out.concat(initView(c, ms[m].nid));
                     m = m + 1;
                 }
                 i = j;
             } else {
                 let inner: ConstMark[] = [];
-                while (m < ms.length && ms[m].pos < ns[i].span.end) {
+                for (; m < ms.length && ms[m].pos < ns[i].span.end; ) {
                     inner = inner.concat([ms[m]]);
                     m = m + 1;
                 }
@@ -3018,7 +3018,7 @@ ${
                 i = i + 1;
             }
         }
-        while (m < ms.length) {
+        for (; m < ms.length; ) {
             out = out.concat(initView(c, ms[m].nid));
             m = m + 1;
         }
@@ -3611,7 +3611,7 @@ ${
         // the if chain, built from the last arm up
         let chain: Block | not = not;
         let k: int = arms.length - 1;
-        while (k >= 0) {
+        for (; k >= 0; ) {
             const a: AArm = arms[k];
             const test: Expr = Expr.Prim(PrimOp.EqPrim, [Expr.Local(m.pick), Expr.Lit(Literal.Int(k))]);
             chain = block([Stmt.If(test, plainArmBlock(c, m, a), chain, not)]);
@@ -4590,7 +4590,7 @@ ${
 
     fn cpsStmts(ss: Stmt[], tail: Stmt[]) -> Stmt[] {
         let i: int = 0;
-        while (i < ss.length) {
+        for (; i < ss.length; ) {
             const s: Stmt = ss[i];
             const sus: SuspendParts | not = suspendParts(s);
             if (sus is given) {
@@ -4930,7 +4930,7 @@ ${
         let metas: CoreMeta[] = [];
         const pairs: string[] = ["description", "description", "version", "application-version", "author", "author", "license", "license"];
         let i = 0;
-        while (i < pairs.length) {
+        for (; i < pairs.length; ) {
             const v: string = literalAttr(p, pairs[i]);
             if (v != "") metas = metas.concat([{ name: pairs[i + 1], content: v }]);
             i = i + 2;
