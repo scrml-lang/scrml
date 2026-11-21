@@ -2,6 +2,15 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S481 — 2026-11-20 → 11-21 (bryan · theRog) — Track M step 2 landed; body run order, `^{}` phases 0+1 and self-host `while` in review
+
+Rulings: user-voice §S481 (four batches, PA recs adopted). Every code PR took an S239 adversarial review on a frozen tree; every fix round a fresh agent.
+
+- #2042 — Track M step 2 (corpus): 654 positive programs and 9 conformance case sources migrated to the S469 `;` / arm `,` dialect with `scrml fix` (impl#1-safe rules only; impl#1 compiles the same set before and after). Bootstrap-clean 15 → 169 of 701; bootstrap conformance PASS 760 → 767, FAIL 10 → 3.
+- #2043 — Track M step 2 (self-host): the self-host sources migrated to `;` / `,` (impl#1 builds the bootstrap bundle byte-identical); new `scrml fix` rules for retired `while` / `do…while`.
+- #2039 — records: review markers, #2025 residue gaps, P1–P3 run-order divergences (ruled S481).
+- In review at wrap: #2041 (the program body runs once, in source order — §7.6 / §40.8), #2045 (`^{}` meta in the bootstrap, phases 0+1: static checks, a compile-time scrml interpreter, emit splice), #2046 (self-host off `while`, 457 → 4).
+
 ## S480 — 2026-11-19 → 11-20 (bryan · theRog) — 32 PRs + bot regens: bootstrap channels follow-ups, timed engine + `<onIdle>`, W-UNUSED-BINDING, build mode + driver-text withholding, trap holes, `??` / `@.` / `is .V` / `class:`; impl#1 endpoint + URL-attribute carve-outs; compile time near-linear in function count; conformance PASS ~706 → 760
 
 Rulings: user-voice §S480 (PA recs adopted on every batch). Every code PR took an S239 adversarial review on a frozen tree (or a PA-direct read for small/records PRs); every fix round got a fresh re-review.
