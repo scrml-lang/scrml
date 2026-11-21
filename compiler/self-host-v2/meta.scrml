@@ -77,7 +77,7 @@ ${
         let diags: Diag[] = [];
         for (const f of files) {
             const env: MEnv = envOf(f, files);
-            const c0: MC = { file: f.path, env: env, next: next, diags: [], errs: f.errs, hits: 0 };
+            const c0: MC = { file: f.path, env: env, next: next, diags: [], errs: f.errs, hits: 0, used: { chars: 0, tags: 0, nodes: 0 } };
             const r: RItems = mItems(c0, f.items, "program", true);
             next = r.c.next;
             diags = diags.concat(r.c.diags);
@@ -264,26 +264,28 @@ ${
     // walk's state: the diagnostics so far, the next node id, `hits` (blocks
     // replaced — a file with none is returned as it was).
     // =========================================================================
-    type MC:struct = { file: string, env: MEnv, next: int, diags: Diag[], errs: ASpan[], hits: int }
+    type MC:struct = { file: string, env: MEnv, next: int, diags: Diag[], errs: ASpan[], hits: int, used: MUsed }
+    // THE EMIT BUDGET spent by the file's blocks so far (characters, `<` characters, nodes).
+    type MUsed:struct = { chars: int, tags: int, nodes: int }
 
     fn withDiag(c: MC, code: string, msg: string, span: ASpan) -> MC {
-        return { file: c.file, env: c.env, next: c.next, diags: c.diags.concat([newDiag(code, msg, c.file, span)]), errs: c.errs, hits: c.hits };
+        return { file: c.file, env: c.env, next: c.next, diags: c.diags.concat([newDiag(code, msg, c.file, span)]), errs: c.errs, hits: c.hits, used: c.used };
     }
 
     fn withDiags(c: MC, ds: Diag[]) -> MC {
-        return { file: c.file, env: c.env, next: c.next, diags: c.diags.concat(ds), errs: c.errs, hits: c.hits };
+        return { file: c.file, env: c.env, next: c.next, diags: c.diags.concat(ds), errs: c.errs, hits: c.hits, used: c.used };
     }
 
     fn withNext(c: MC, next: int) -> MC {
-        return { file: c.file, env: c.env, next: next, diags: c.diags, errs: c.errs, hits: c.hits };
+        return { file: c.file, env: c.env, next: next, diags: c.diags, errs: c.errs, hits: c.hits, used: c.used };
     }
 
     fn withErr(c: MC, span: ASpan) -> MC {
-        return { file: c.file, env: c.env, next: c.next, diags: c.diags, errs: c.errs.concat([span]), hits: c.hits };
+        return { file: c.file, env: c.env, next: c.next, diags: c.diags, errs: c.errs.concat([span]), hits: c.hits, used: c.used };
     }
 
     fn hit(c: MC) -> MC {
-        return { file: c.file, env: c.env, next: c.next, diags: c.diags, errs: c.errs, hits: c.hits + 1 };
+        return { file: c.file, env: c.env, next: c.next, diags: c.diags, errs: c.errs, hits: c.hits + 1, used: c.used };
     }
 
     type RItems:struct = { items: AItem[], c: MC }
@@ -955,7 +957,8 @@ ${
             return { nodes: [], c: withDiag(c, "E-BOOTSTRAP-UNSUPPORTED", "a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap builds compile-time `^{}` (§22.4) only (INTERIM, g-boot-meta-runtime-unbuilt-s481)", m.span) };
         }
         // 4. evaluate
-        const s: MS = runBlock(c.env, m.body);
+        const u: MUsed = c.used;
+        const s: MS = runBlock(c.env, m.body, { room: maxFileChars() - u.chars, troom: maxFileTags() - u.tags, tags: 0, alloc: 0 });
         if (s.err != "") return { nodes: [], c: withDiag(c, s.code, s.err, m.span) };
         if (s.emits > 0 && attr != "") {
             return { nodes: [], c: withDiag(c, "E-META-EVAL-002", "this compile-time `^{}` is the value of the attribute `" + attr + "=` and emits markup: `emit()` output is inlined where markup sits (§22.4.1 \"Where emitted output lands\"), and an attribute value is no markup position — write the value as an expression (`" + attr + "=" + "$" + "{…}`), or move the `^{}` among the element's children", m.span) };
@@ -970,7 +973,31 @@ ${
         // 5. re-read, judge, splice
         let p: string = parent;
         if (bodyTop || p == "") p = "program";
-        return spliceOut(c, m, s.out, p, bodyTop);
+        const c2: MC = withUsed(c, { chars: u.chars + s.out.length, tags: u.tags + s.bud.tags, nodes: u.nodes });
+        const r: RNodes = spliceOut(c2, m, s.out, p, bodyTop);
+        if (r.nodes.length == 0) return r;
+        // the nodes read count against the file's budget (THE EMIT BUDGET)
+        const nn: int = u.nodes + countNodes(r.nodes);
+        if (nn > maxFileNodes()) return { nodes: [], c: withDiag(r.c, "E-META-EVAL-001", "compile-time `^{}` evaluation failed: " + emitBudgetMsg("nodes (elements and text, once read)", nn, maxFileNodes() - u.nodes, maxFileNodes()) + " (§22.4: a block the compile-time evaluator cannot finish is refused, never evaluated without the failing statement)", m.span) };
+        return { nodes: r.nodes, c: withUsed(r.c, { chars: r.c.used.chars, tags: r.c.used.tags, nodes: nn }) };
+    }
+
+    fn withUsed(c: MC, u: MUsed) -> MC {
+        return { file: c.file, env: c.env, next: c.next, diags: c.diags, errs: c.errs, hits: c.hits, used: u };
+    }
+
+    // The nodes of a spliced run, every descendant counted.
+    fn countNodes(ns: ANode[]) -> int {
+        let n: int = 0;
+        for (const x of ns) {
+            n = n + 1;
+            match x.k {
+                .Elem(e: el) :> { n = n + countNodes(el.kids); },
+                // no-default-arm: text (and nothing else) passes the gate besides elements
+                _ :> {}
+            }
+        }
+        return n;
     }
 
     fn errWithin(errs: ASpan[], sp: ASpan) -> boolean {
@@ -993,13 +1020,15 @@ ${
     // =========================================================================
     type MRef:struct = { name: string, span: ASpan }
     type MBad:struct = { msg: string, span: ASpan }
-    type MFacts:struct = { emits: boolean, reflects: MRef[], runtime: boolean, nested: boolean, sqls: ASpan[], compiler: boolean, lifts: ASpan[], bad: MBad[], ambig: MRef[] }
+    // A static fault with its own code (S482 r3): E-TYPE-063, E-EQ-002, E-SCOPE-REDECLARE.
+    type MCoded:struct = { code: string, msg: string, span: ASpan }
+    type MFacts:struct = { emits: boolean, reflects: MRef[], runtime: boolean, nested: boolean, sqls: ASpan[], compiler: boolean, lifts: ASpan[], bad: MBad[], ambig: MRef[], coded: MCoded[] }
     // `reads` / `nodes`: the free names the walk read and the expressions it
     // walked (the interpreter's CLOSURES pins use them, keepFn).
     type FX:struct = { f: MFacts, scopes: string[][], reads: string[], nodes: int }
 
     fn noFacts() -> MFacts {
-        return { emits: false, reflects: [], runtime: false, nested: false, sqls: [], compiler: false, lifts: [], bad: [], ambig: [] };
+        return { emits: false, reflects: [], runtime: false, nested: false, sqls: [], compiler: false, lifts: [], bad: [], ambig: [], coded: [] };
     }
 
     fn isCompileTime(f: MFacts) -> boolean {
@@ -1025,7 +1054,7 @@ ${
 
     fn fxBad(x: FX, msg: string, span: ASpan) -> FX {
         const f: MFacts = x.f;
-        return { f: { emits: f.emits, reflects: f.reflects, runtime: f.runtime, nested: f.nested, sqls: f.sqls, compiler: f.compiler, lifts: f.lifts, bad: f.bad.concat([{ msg: msg, span: span }]), ambig: f.ambig }, scopes: x.scopes, reads: x.reads, nodes: x.nodes };
+        return { f: { emits: f.emits, reflects: f.reflects, runtime: f.runtime, nested: f.nested, sqls: f.sqls, compiler: f.compiler, lifts: f.lifts, bad: f.bad.concat([{ msg: msg, span: span }]), ambig: f.ambig, coded: f.coded }, scopes: x.scopes, reads: x.reads, nodes: x.nodes };
     }
 
     fn fxSet(x: FX, what: string, span: ASpan, name: string) -> FX {
@@ -1044,13 +1073,18 @@ ${
         if (what == "sql") sqls = sqls.concat([span]);
         if (what == "compiler") compiler = true;
         if (what == "lift") lifts = lifts.concat([span]);
-        return { f: { emits: emits, reflects: reflects, runtime: runtime, nested: nested, sqls: sqls, compiler: compiler, lifts: lifts, bad: f.bad, ambig: f.ambig }, scopes: x.scopes, reads: x.reads, nodes: x.nodes };
+        return { f: { emits: emits, reflects: reflects, runtime: runtime, nested: nested, sqls: sqls, compiler: compiler, lifts: lifts, bad: f.bad, ambig: f.ambig, coded: f.coded }, scopes: x.scopes, reads: x.reads, nodes: x.nodes };
     }
 
     // A bare variant with no type context (S481 r1: §14.10 E-VARIANT-AMBIGUOUS).
     fn fxAmbig(x: FX, n: string, span: ASpan) -> FX {
         const f: MFacts = x.f;
-        return { f: { emits: f.emits, reflects: f.reflects, runtime: f.runtime, nested: f.nested, sqls: f.sqls, compiler: f.compiler, lifts: f.lifts, bad: f.bad, ambig: f.ambig.concat([{ name: n, span: span }]) }, scopes: x.scopes, reads: x.reads, nodes: x.nodes };
+        return { f: { emits: f.emits, reflects: f.reflects, runtime: f.runtime, nested: f.nested, sqls: f.sqls, compiler: f.compiler, lifts: f.lifts, bad: f.bad, ambig: f.ambig.concat([{ name: n, span: span }]), coded: f.coded }, scopes: x.scopes, reads: x.reads, nodes: x.nodes };
+    }
+
+    fn fxCoded(x: FX, code: string, msg: string, span: ASpan) -> FX {
+        const f: MFacts = x.f;
+        return { f: { emits: f.emits, reflects: f.reflects, runtime: f.runtime, nested: f.nested, sqls: f.sqls, compiler: f.compiler, lifts: f.lifts, bad: f.bad, ambig: f.ambig, coded: f.coded.concat([{ code: code, msg: msg, span: span }]) }, scopes: x.scopes, reads: x.reads, nodes: x.nodes };
     }
 
     fn fxPush(x: FX, names: string[]) -> FX { return { f: x.f, scopes: x.scopes.concat([names]), reads: x.reads, nodes: x.nodes }; }
@@ -1087,6 +1121,7 @@ ${
                 out = out.concat([newDiag("E-META-001", b.msg, c.file, b.span)]);
             }
         }
+        for (const k of f.coded) { out = out.concat([newDiag(k.code, k.msg, c.file, k.span)]); }
         for (const a of f.ambig) {
             out = out.concat([newDiag("E-VARIANT-AMBIGUOUS", "the bare variant `." + a.name + "` initializes a local with no type annotation, so no enum type fixes its qualifier (§14.10) — annotate the local (`const v: T = ." + a.name + ";`); inside a `^{}` body the qualified form `T." + a.name + "` is not available (a type name is only the argument of `reflect`, §22.12 item 1)", c.file, a.span)]);
         }
@@ -1111,7 +1146,10 @@ ${
     }
 
     // ---- the walk ------------------------------------------------------------
-    fn fBlock(env: MEnv, x0: FX, b: ABlock, params: string[]) -> FX {
+    fn fBlock(env: MEnv, x0: FX, b: ABlock, params: string[]) -> FX { return fBlockP(env, x0, b, params, []); }
+
+    // `fnParams`: the block is a function's top-level block, these its parameters.
+    fn fBlockP(env: MEnv, x0: FX, b: ABlock, params: string[], fnParams: string[]) -> FX {
         // a function declared in a block is bound for the whole block (hoisted)
         let names: string[] = params;
         for (const s of b.stmts) {
@@ -1121,9 +1159,57 @@ ${
                 _ :> {}
             }
         }
-        let x: FX = fxPush(x0, names);
+        let x: FX = fxPush(redeclares(x0, b, fnParams), names);
         for (const s of b.stmts) { x = fStmt(env, x, s); }
         return fxPop(x);
+    }
+
+    // §7.3.3 "A block binds each name once" (S482 r3, review LOW-4 — a `^{}` body is
+    // held to the rule its source would be): a `let` / `const` / local `fn` that
+    // redeclares a name the SAME block (or, in a function's top-level block, its
+    // parameter list) binds is E-SCOPE-REDECLARE. A nested block may shadow; two
+    // `fn`s of one name, or a `fn` named like a parameter, are outside the rule —
+    // analyze.scrml blockRedeclares, the same rule for source.
+    fn redeclares(x0: FX, b: ABlock, params: string[]) -> FX {
+        let x: FX = x0;
+        let names: string[] = params;
+        let spans: ASpan[] = [];
+        let fnNames: string[] = [];
+        let fnSpans: ASpan[] = [];
+        const nParams: int = params.length;
+        for (const st of b.stmts) {
+            match st.k {
+                .LocalFn(f: f) :> {
+                    if (fnNames.indexOf(f.name) < 0) {
+                        let j: int = nParams;
+                        for (; j < names.length; ) {
+                            if (names[j] == f.name) x = fxCoded(x, "E-SCOPE-REDECLARE", redeclMsg(f.name, false, spans[j - nParams]), st.span);
+                            j = j + 1;
+                        }
+                    }
+                    fnNames = fnNames.concat([f.name]);
+                    fnSpans = fnSpans.concat([st.span]);
+                },
+                .Local(name: n) :> {
+                    const i: int = names.indexOf(n);
+                    if (i >= 0 && i < nParams) x = fxCoded(x, "E-SCOPE-REDECLARE", redeclMsg(n, true, st.span), st.span);
+                    if (i >= nParams) x = fxCoded(x, "E-SCOPE-REDECLARE", redeclMsg(n, false, spans[i - nParams]), st.span);
+                    const k: int = fnNames.indexOf(n);
+                    if (i < 0 && k >= 0) x = fxCoded(x, "E-SCOPE-REDECLARE", redeclMsg(n, false, fnSpans[k]), st.span);
+                    names = names.concat([n]);
+                    spans = spans.concat([st.span]);
+                },
+                // no-default-arm: only a declaration binds a name in its block
+                _ :> {}
+            }
+        }
+        return x;
+    }
+
+    fn redeclMsg(n: string, isParam: boolean, first: ASpan) -> string {
+        let what: string = "a declaration (at offset " + String(first.start) + ")";
+        if (isParam) what = "a parameter";
+        return "`" + n + "` is already bound in this block of the `^{}` body by " + what + " — a block binds each name once; a NESTED block may shadow it (§7.3.3)";
     }
 
     // A local's value (S481 r1): §14.10 names `let x = .Small` "with no
@@ -1131,6 +1217,9 @@ ${
     // judge without a type check. Every other bare variant (a comparison with a
     // typed local, a typed parameter or return, an annotated local) is resolved
     // when the body runs: a body is not type-checked (PA default Q10, INTERIM).
+    // An annotated local whose value is a bare variant the annotated enum does not
+    // declare is E-TYPE-063 (§14.10 — S482 r3, review LOW-1: the annotation names
+    // the enum, so the check needs no type check).
     fn fLocalInit(env: MEnv, x: FX, ty: AType | not, init: AExpr) -> FX {
         const y: FX = fExpr(env, x, init);
         if (ty is not) {
@@ -1139,8 +1228,31 @@ ${
                 // no-default-arm: any other value has been walked
                 _ :> {}
             }
+            return y;
+        }
+        match init.k {
+            .Variant(name: n) :> {
+                const en: string = enumNameOf(ty);
+                const t: MType | not = findType(env, en);
+                if (t is given && t.kind == "enum" && t.variants.indexOf(n) < 0) {
+                    return fxCoded(y, "E-TYPE-063", "`." + n + "` is not a variant of the enum `" + en + "` (its variants: " + t.variants.join(", ") + ") — a variant the enum does not declare is a compile error (§14.10)", init.span);
+                }
+            },
+            // no-default-arm: only a bare variant is judged against the annotation
+            _ :> {}
         }
         return y;
+    }
+
+    // The enum an annotation names (`C`, `C | not`), or "".
+    fn enumNameOf(t: AType) -> string {
+        const k: ATypeK = t.k;
+        return match k {
+            .TName(name: n) :> n,
+            .TMaybe(inner: i) :> enumNameOf(i),
+            // no-default-arm: any other annotation names no single enum
+            _ :> ""
+        };
     }
 
     fn fStmt(env: MEnv, x: FX, s: AStmt) -> FX {
@@ -1158,7 +1270,7 @@ ${
             .Break(label: l) :> x,
             .Continue(label: l) :> x,
             .Lift(what: w) :> fxSet(fLift(env, x, w), "lift", s.span, ""),
-            .LocalFn(f: f) :> fBlock(env, x, f.body, paramNames(f.params))
+            .LocalFn(f: f) :> fBlockP(env, x, f.body, paramNames(f.params), paramNames(f.params))
         };
     }
 
@@ -1255,7 +1367,7 @@ ${
             .Member(obj: o, name: n) :> fMember(env, x, e, o, n),
             .Call(callee: f, args: xs) :> fCall(env, x, f, xs),
             .Unary(op: op, e: y) :> fExpr(env, x, y),
-            .Binary(op: op, l: l, r: r) :> fExpr(env, fExpr(env, x, l), r),
+            .Binary(op: op, l: l, r: r) :> fEqNot(fExpr(env, fExpr(env, x, l), r), op, l, r, e.span),
             .Ternary(test: t, yes: y, no: n) :> fExpr(env, fExpr(env, fExpr(env, x, t), y), n),
             .Assign(target: t, value: v) :> fAssign(env, x, e, t, v),
             .ArrayLit(elems: xs) :> fExprs(env, x, xs),
@@ -1263,11 +1375,29 @@ ${
             .Spread(e: y) :> fExpr(env, x, y),
             .Index(obj: o, idx: i) :> fIndex(env, x, e, o, i),
             .Lambda(params: ps, body: b) :> fxPop(fExpr(env, fxPush(x, ps), b)),
-            .BlockLambda(params: ps, body: b) :> fBlock(env, x, b, paramNames(blockParams(e))),
+            .BlockLambda(params: ps, body: b) :> fBlockP(env, x, b, paramNames(blockParams(e)), paramNames(blockParams(e))),
             .Sql(q: q) :> fExprs(env, fxSet(x, "sql", e.span, ""), q.params),
             .Handled(h: h) :> fHandled(env, x, h),
             .Template(quasis: qs, slots: xs) :> fExprs(env, x, xs),
             .Foreign(f: f) :> fxBad(x, "a `_={ … }=` foreign code block is not available inside `^{}` meta blocks — foreign code is host code, never a scrml construct. " + allowedSet(), e.span)
+        };
+    }
+
+    // §45.2: "`x == not` is NOT valid. Use `x is not` instead (compile error
+    // E-EQ-002)" — the literal `not` on either side of `==` / `!=` (S482 r3, review LOW-2).
+    fn fEqNot(x: FX, op: BinOp, l: AExpr, r: AExpr, span: ASpan) -> FX {
+        if (op != BinOp.Eq && op != BinOp.Ne) return x;
+        if (!isNotLitE(l) && !isNotLitE(r)) return x;
+        let fix: string = "x is not";
+        if (op == BinOp.Ne) fix = "x is given";
+        return fxCoded(x, "E-EQ-002", "absence is tested with `is not` / `is given`, not equality against `not` — write `" + fix + "` (§45.2, §42.2)", span);
+    }
+
+    fn isNotLitE(e: AExpr) -> boolean {
+        return match e.k {
+            .NotLit :> true,
+            // no-default-arm: one question of an expression — is it the literal `not`
+            _ :> false
         };
     }
 
@@ -1497,8 +1627,9 @@ ${
     // the frames below it are the captured ones), and a write to a binding that a
     // function made earlier reads (`pinI` / `pinN` — the frame index and name of
     // each binding a kept function reads). A lambda written directly as the
-    // argument of a list method (`xs.map((x) => …)`) is called there and kept by
-    // nobody, so it pins nothing.
+    // CALLBACK of a list method (`xs.map((x) => …)`, argument 0) is called there
+    // and kept by nobody, so it pins nothing; a lambda in any other argument is
+    // pinned (S482 r3 — `reduce`'s initial value is kept).
     // =========================================================================
     type MV:enum = {
         VStr(s: string),
@@ -1518,9 +1649,11 @@ ${
     // evaluated so far; `busy`: the ones being evaluated (a cycle is refused).
     // `floor`: the frames below it belong to the function being run's captured
     // scope; `pinI` / `pinN`: the bindings a kept function reads (CLOSURES above).
+    // `bud`: the block's share of the FILE's emit budget and its allocation count
+    // (MBud, THE BUDGET below).
     type MS:struct = { frames: MFrame[], out: string, emits: int, steps: int, depth: int, err: string, code: string,
                        ctl: int, label: string, ret: MV, cNames: string[], cVals: MV[], busy: string[],
-                       floor: int, pinI: int[], pinN: string[] }
+                       floor: int, pinI: int[], pinN: string[], bud: MBud }
     type MR:struct = { v: MV, s: MS }
 
     fn maxSteps() -> int { return 1000000; }
@@ -1535,9 +1668,28 @@ ${
     fn maxSize() -> int { return 16777216; }
     fn maxElems() -> int { return 1048576; }
     fn maxNest() -> int { return 256; }
+    // THE EMIT BUDGET (S482 r3, review HIGH-1): what every `^{}` block of ONE FILE
+    // emits, together — 1 Mi characters, 64 Ki `<` characters (the markup reader's
+    // cost grows faster than linearly in the tags it reads, so they are bounded
+    // before it reads them) and 32 Ki nodes once read (the rest of the compile's
+    // cost grows with them). A block that would pass one is refused (E-META-EVAL-001).
+    fn maxFileChars() -> int { return 1048576; }
+    fn maxFileTags() -> int { return 65536; }
+    fn maxFileNodes() -> int { return 32768; }
+    // THE ALLOCATION BOUND (S482 r3, review HIGH-3): what one block's built-ins
+    // allocate, counted as it is made and never given back — a character 1 unit,
+    // a list slot / record field copied 8, an element value created 128 (about
+    // the bytes each costs the host) — at most 256 Mi units.
+    fn maxAlloc() -> int { return 268435456; }
+    fn slotUnit() -> int { return 8; }
+    fn elemUnit() -> int { return 128; }
 
-    fn runBlock(env: MEnv, b: ABlock) -> MS {
-        const s0: MS = { frames: [], out: "", emits: 0, steps: 0, depth: 0, err: "", code: "", ctl: 0, label: "", ret: MV.VUndef, cNames: [], cVals: [], busy: [], floor: 0, pinI: [], pinN: [] };
+    // `room` / `troom`: the characters / `<` characters the file's blocks may still
+    // emit; `tags`: the `<` characters this block has emitted; `alloc`: its allocation.
+    type MBud:struct = { room: int, troom: int, tags: int, alloc: number }
+
+    fn runBlock(env: MEnv, b: ABlock, bud: MBud) -> MS {
+        const s0: MS = { frames: [], out: "", emits: 0, steps: 0, depth: 0, err: "", code: "", ctl: 0, label: "", ret: MV.VUndef, cNames: [], cVals: [], busy: [], floor: 0, pinI: [], pinN: [], bud: bud };
         const s: MS = execBlock(env, b, s0);
         if (s.err == "" && s.ctl == 3) return failS(s, "a `return` at the top level of a `^{}` body leaves no function");
         if (s.err == "" && (s.ctl == 1 || s.ctl == 2)) return failS(s, "a `break` / `continue` outside a loop");
@@ -1551,7 +1703,7 @@ ${
         if (s.err != "") return s;
         let m: string = msg;
         if (code == "E-META-EVAL-001") m = "compile-time `^{}` evaluation failed: " + msg + " (§22.4: a block the compile-time evaluator cannot finish is refused, never evaluated without the failing statement)";
-        return { frames: s.frames, out: s.out, emits: s.emits, steps: s.steps, depth: s.depth, err: m, code: code, ctl: s.ctl, label: s.label, ret: s.ret, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: s.floor, pinI: s.pinI, pinN: s.pinN };
+        return { frames: s.frames, out: s.out, emits: s.emits, steps: s.steps, depth: s.depth, err: m, code: code, ctl: s.ctl, label: s.label, ret: s.ret, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: s.floor, pinI: s.pinI, pinN: s.pinN, bud: s.bud };
     }
 
     fn bad(s: MS, msg: string) -> MR { return { v: MV.VUndef, s: failS(s, msg) }; }
@@ -1561,7 +1713,7 @@ ${
     }
 
     fn withSteps(s: MS, n: int) -> MS {
-        return { frames: s.frames, out: s.out, emits: s.emits, steps: n, depth: s.depth, err: s.err, code: s.code, ctl: s.ctl, label: s.label, ret: s.ret, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: s.floor, pinI: s.pinI, pinN: s.pinN };
+        return { frames: s.frames, out: s.out, emits: s.emits, steps: n, depth: s.depth, err: s.err, code: s.code, ctl: s.ctl, label: s.label, ret: s.ret, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: s.floor, pinI: s.pinI, pinN: s.pinN, bud: s.bud };
     }
 
     fn tick(s: MS) -> MS {
@@ -1663,13 +1815,26 @@ ${
         return "";
     }
 
-    // A built value, its `work` charged and its size checked.
+    // A built value, its `work` charged, its size checked and what it allocates
+    // counted (THE ALLOCATION BOUND: a string's characters, a list's / record's slots).
     fn made(v: MV, s0: MS, work: number) -> MR {
         const s: MS = charge(s0, work);
         if (s.err != "") return vr(MV.VUndef, s);
+        const sa: MS = allocOf(s, v);
+        if (sa.err != "") return vr(MV.VUndef, sa);
         const why: string = sizeFault(v);
-        if (why != "") return bad(s, why);
-        return vr(v, s);
+        if (why != "") return bad(sa, why);
+        return vr(v, sa);
+    }
+
+    fn allocOf(s: MS, v: MV) -> MS {
+        return match v {
+            .VStr(s: x) :> allocC(s, x.length),
+            .VTape(xs: xs) :> allocS(s, xs.length),
+            .VRec(vals: vs) :> allocS(s, vs.length),
+            // no-default-arm: a scalar is one step's value
+            _ :> s
+        };
     }
 
     // A list counted element by element (mkTape walks it).
@@ -1692,29 +1857,53 @@ ${
         if (s.err != "") return s;
         const why: string = strFault(n);
         if (why != "") return failS(s, why);
-        return charge(s, n);
+        return allocC(charge(s, n), n);
     }
 
     fn withFrames(s: MS, fs: MFrame[]) -> MS {
-        return { frames: fs, out: s.out, emits: s.emits, steps: s.steps, depth: s.depth, err: s.err, code: s.code, ctl: s.ctl, label: s.label, ret: s.ret, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: s.floor, pinI: s.pinI, pinN: s.pinN };
+        return { frames: fs, out: s.out, emits: s.emits, steps: s.steps, depth: s.depth, err: s.err, code: s.code, ctl: s.ctl, label: s.label, ret: s.ret, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: s.floor, pinI: s.pinI, pinN: s.pinN, bud: s.bud };
     }
 
     fn withPins(s: MS, pi: int[], pn: string[]) -> MS {
-        return { frames: s.frames, out: s.out, emits: s.emits, steps: s.steps, depth: s.depth, err: s.err, code: s.code, ctl: s.ctl, label: s.label, ret: s.ret, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: s.floor, pinI: pi, pinN: pn };
+        return { frames: s.frames, out: s.out, emits: s.emits, steps: s.steps, depth: s.depth, err: s.err, code: s.code, ctl: s.ctl, label: s.label, ret: s.ret, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: s.floor, pinI: pi, pinN: pn, bud: s.bud };
     }
 
     fn withCtl(s: MS, ctl: int, label: string, ret: MV) -> MS {
-        return { frames: s.frames, out: s.out, emits: s.emits, steps: s.steps, depth: s.depth, err: s.err, code: s.code, ctl: ctl, label: label, ret: ret, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: s.floor, pinI: s.pinI, pinN: s.pinN };
+        return { frames: s.frames, out: s.out, emits: s.emits, steps: s.steps, depth: s.depth, err: s.err, code: s.code, ctl: ctl, label: label, ret: ret, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: s.floor, pinI: s.pinI, pinN: s.pinN, bud: s.bud };
     }
 
-    // The output grows by `text` (charged by its own length; the total is bounded).
+    // The output grows by `text` (charged by its own length; the total is bounded,
+    // and so is the file's — THE EMIT BUDGET).
     fn withOut(s0: MS, text: string) -> MS {
         const why: string = strFault(s0.out.length + text.length);
         if (why != "") return failS(s0, "the block's emit() output: " + why);
+        const b: MBud = s0.bud;
+        if (s0.out.length + text.length > b.room) return failS(s0, emitBudgetMsg("characters", s0.out.length + text.length, b.room, maxFileChars()));
+        const nt: int = text.split("<").length - 1;
+        if (b.tags + nt > b.troom) return failS(s0, emitBudgetMsg("`<` characters (markup tags)", b.tags + nt, b.troom, maxFileTags()));
         const s: MS = charge(s0, text.length);
         if (s.err != "") return s;
-        return { frames: s.frames, out: s.out + text, emits: s.emits + 1, steps: s.steps, depth: s.depth, err: s.err, code: s.code, ctl: s.ctl, label: s.label, ret: s.ret, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: s.floor, pinI: s.pinI, pinN: s.pinN };
+        const b2: MBud = { room: b.room, troom: b.troom, tags: b.tags + nt, alloc: b.alloc };
+        return { frames: s.frames, out: s.out + text, emits: s.emits + 1, steps: s.steps, depth: s.depth, err: s.err, code: s.code, ctl: s.ctl, label: s.label, ret: s.ret, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: s.floor, pinI: s.pinI, pinN: s.pinN, bud: b2 };
     }
+
+    fn emitBudgetMsg(what: string, n: int, room: int, limit: int) -> string {
+        return "the `^{}` blocks of this file would emit " + String(n + limit - room) + " " + what + ", past the file's emit budget (" + String(limit) + " " + what + " emitted by all of a file's `^{}` blocks together; §22.4) — emitted markup is compiled as source is, so a short body cannot make the compile unbounded; the bound is the same on every machine";
+    }
+
+    // THE ALLOCATION BOUND: `chars` characters, `slots` copied slots / fields and
+    // `elems` created element values are about to be made — counted, and refused
+    // past the bound BEFORE they are made.
+    fn alloc(s: MS, chars: number, slots: number, elems: number) -> MS {
+        if (s.err != "") return s;
+        const b: MBud = s.bud;
+        const n: number = b.alloc + chars + slots * slotUnit() + elems * elemUnit();
+        if (n > maxAlloc()) return failS(s, "its built-ins would allocate " + String(n) + " units, past the evaluator's allocation bound (" + String(maxAlloc()) + " units per block, never given back: a character 1, a list slot or record field copied " + String(slotUnit()) + ", an element value created " + String(elemUnit()) + ") — a compile-time body allocates a bounded amount, so it cannot take the compiler's memory; the bound is the same on every machine");
+        return { frames: s.frames, out: s.out, emits: s.emits, steps: s.steps, depth: s.depth, err: s.err, code: s.code, ctl: s.ctl, label: s.label, ret: s.ret, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: s.floor, pinI: s.pinI, pinN: s.pinN, bud: { room: b.room, troom: b.troom, tags: b.tags, alloc: n } };
+    }
+
+    fn allocC(s: MS, chars: number) -> MS { return alloc(s, chars, 0, 0); }
+    fn allocS(s: MS, slots: number) -> MS { return alloc(s, 0, slots, 0); }
 
     fn pushFrame(s: MS) -> MS { return withFrames(s, s.frames.concat([{ names: [], vals: [], muts: [] }])); }
 
@@ -2002,7 +2191,8 @@ ${
     // list built by halves (no quadratic copying).
     fn charsOf(str: string, s0: MS) -> MArgs {
         if (str.length > maxElems()) return { vs: [], s: failS(s0, sizeMsg("a list of the characters of a string", str.length, maxElems(), "elements")) };
-        const s: MS = chargeW(s0, str.length);
+        // every character becomes an element value (THE ALLOCATION BOUND, S482 r3 HIGH-3)
+        const s: MS = alloc(chargeW(s0, str.length), 0, str.length, str.length);
         if (s.err != "") return { vs: [], s: s };
         return { vs: strsToMV(str.split(""), 0, str.length), s: s };
     }
@@ -2307,14 +2497,14 @@ ${
             const x0: FX = { f: noFacts(), scopes: [], reads: [], nodes: 0 };
             const fx: FX = fExpr(env, x0, init);
             if (fx.f.bad.length > 0) return { v: MV.VUndef, s: failCode(s, "E-META-001", "the captured declaration `" + d.name + "`: " + fx.f.bad[0].msg) };
-            const inner: MS = { frames: [], out: s.out, emits: s.emits, steps: s.steps, depth: s.depth + 1, err: "", code: "", ctl: 0, label: "", ret: MV.VUndef, cNames: s.cNames, cVals: s.cVals, busy: s.busy.concat([d.name]), floor: 0, pinI: [], pinN: [] };
+            const inner: MS = { frames: [], out: s.out, emits: s.emits, steps: s.steps, depth: s.depth + 1, err: "", code: "", ctl: 0, label: "", ret: MV.VUndef, cNames: s.cNames, cVals: s.cVals, busy: s.busy.concat([d.name]), floor: 0, pinI: [], pinN: [], bud: s.bud };
             if (inner.depth > maxDepth()) return bad(s, "captured declarations nested past the evaluator's depth bound");
             const r: MR = evalE(env, init, inner);
             if (r.s.err != "") return { v: MV.VUndef, s: failCode(s, r.s.code, r.s.err) };
             v = r.v;
-            s2 = { frames: s.frames, out: r.s.out, emits: r.s.emits, steps: r.s.steps, depth: s.depth, err: "", code: "", ctl: s.ctl, label: s.label, ret: s.ret, cNames: r.s.cNames, cVals: r.s.cVals, busy: s.busy, floor: s.floor, pinI: s.pinI, pinN: s.pinN };
+            s2 = { frames: s.frames, out: r.s.out, emits: r.s.emits, steps: r.s.steps, depth: s.depth, err: "", code: "", ctl: s.ctl, label: s.label, ret: s.ret, cNames: r.s.cNames, cVals: r.s.cVals, busy: s.busy, floor: s.floor, pinI: s.pinI, pinN: s.pinN, bud: r.s.bud };
         }
-        const s3: MS = { frames: s2.frames, out: s2.out, emits: s2.emits, steps: s2.steps, depth: s2.depth, err: s2.err, code: s2.code, ctl: s2.ctl, label: s2.label, ret: s2.ret, cNames: s2.cNames.concat([d.name]), cVals: s2.cVals.concat([v]), busy: s2.busy, floor: s2.floor, pinI: s2.pinI, pinN: s2.pinN };
+        const s3: MS = { frames: s2.frames, out: s2.out, emits: s2.emits, steps: s2.steps, depth: s2.depth, err: s2.err, code: s2.code, ctl: s2.ctl, label: s2.label, ret: s2.ret, cNames: s2.cNames.concat([d.name]), cVals: s2.cVals.concat([v]), busy: s2.busy, floor: s2.floor, pinI: s2.pinI, pinN: s2.pinN, bud: s2.bud };
         return vr(v, s3);
     }
 
@@ -2392,8 +2582,9 @@ ${
         const b: MV = rr.v;
         const st: MS = rr.s;
         if (op == BinOp.Eq || op == BinOp.Ne) {
-            const why: string = eqFault(a, b);
-            if (why != "") return { v: MV.VUndef, s: failCode(st, why, eqMsg(why, a, b)) };
+            const q: EqR = eqFault(a, b, st);
+            if (q.s.err != "") return vr(MV.VUndef, q.s);
+            if (q.code != "") return { v: MV.VUndef, s: failCode(q.s, q.code, eqMsg(q.code, a, b)) };
         }
         return match op {
             .Add :> addValues(a, b, st),
@@ -2414,21 +2605,104 @@ ${
         };
     }
 
-    // §45.3 "`==` between incompatible types is a compile error" (E-EQ-001); §45
-    // functions are not comparable (E-EQ-003). A body is not type-checked (PA
-    // default Q10), so the rule is applied to the values when `==` / `!=` runs
-    // (S481 r1 — review: the bootstrap answered `1 == "1"` with false). An absent
-    // value compares with any (a `T | not` side has a same-type partner).
-    fn eqFault(a: MV, b: MV) -> string {
-        if (isFnV(a) || isFnV(b)) return "E-EQ-003";
-        if (isAbsent(a) || isAbsent(b)) return "";
-        if (kindName(a) != kindName(b)) return "E-EQ-001";
-        return "";
+    // §45.3 "`==` between incompatible types is a compile error" (E-EQ-001); §45.2
+    // "`==` on a type containing function fields is compile error E-EQ-003". A body
+    // is not type-checked (PA default Q10), so the rule is applied to the values when
+    // `==` / `!=` runs (S481 r1), DEEPLY (S482 r3, review LOW-3): a function anywhere
+    // in either side is E-EQ-003; lists compare their elements' types (a list's
+    // elements share one type, so its first present element stands for them), records
+    // the types of the fields both have. The literal `not` on a side is E-EQ-002,
+    // judged before the body runs (fEqNot). An absent VALUE (`not` held by a `T | not`
+    // binding, a missing field) is not judged: the evaluator sees values, not the
+    // declared types §45.3 compares, so it cannot tell which `T` the absent side has.
+    type EqR:struct = { code: string, s: MS }
+
+    fn eqFault(a: MV, b: MV, s: MS) -> EqR {
+        if (hasFnV(a) || hasFnV(b)) return { code: "E-EQ-003", s: s };
+        return eqTypes(a, b, s);
+    }
+
+    fn hasFnV(v: MV) -> boolean {
+        return match v {
+            .VFn(f: f) :> true,
+            .VTape(xs: xs) :> anyFn(xs),
+            .VRec(vals: vs) :> anyFn(vs),
+            // no-default-arm: a scalar holds no function
+            _ :> false
+        };
+    }
+
+    fn anyFn(xs: MV[]) -> boolean {
+        for (const x of xs) { if (hasFnV(x)) return true; }
+        return false;
+    }
+
+    fn eqTypes(a: MV, b: MV, s: MS) -> EqR {
+        if (s.err != "" || isAbsent(a) || isAbsent(b)) return { code: "", s: s };
+        if (kindName(a) != kindName(b)) return { code: "E-EQ-001", s: s };
+        return match a {
+            .VTape(xs: xs) :> eqTapes(xs, b, s),
+            .VRec(keys: ks, vals: vs) :> eqRecs(ks, vs, b, s),
+            // no-default-arm: two scalars of one kind are of one type
+            _ :> { code: "", s: s }
+        };
+    }
+
+    fn eqTapes(xs: MV[], b: MV, s: MS) -> EqR {
+        return match b {
+            .VTape(xs: ys) :> eqTypes(firstPresent(xs), firstPresent(ys), s),
+            // no-default-arm: eqTypes compares a list with a list only
+            _ :> { code: "", s: s }
+        };
+    }
+
+    fn sameKeys(a: string[], b: string[]) -> boolean {
+        if (a.length != b.length) return false;
+        let i: int = 0;
+        for (; i < a.length; ) {
+            if (a[i] != b[i]) return false;
+            i = i + 1;
+        }
+        return true;
+    }
+
+    fn firstPresent(xs: MV[]) -> MV {
+        for (const x of xs) { if (!isAbsent(x)) return x; }
+        return MV.VUndef;
+    }
+
+    fn eqRecs(ks: string[], vs: MV[], b: MV, s0: MS) -> EqR {
+        return match b {
+            .VRec(keys: k2, vals: v2) :> {
+                // the fields both have; matched by place when the keys stand alike,
+                // else looked up (that search charged — THE BUDGET)
+                let s: MS = s0;
+                const same: boolean = sameKeys(ks, k2);
+                if (!same) s = chargeW(s, ks.length * k2.length);
+                let i: int = 0;
+                for (; i < ks.length; ) {
+                    if (s.err != "") return { code: "", s: s };
+                    let j: int = i;
+                    if (!same) j = k2.indexOf(ks[i]);
+                    if (j >= 0) {
+                        const r: EqR = eqTypes(vs[i], v2[j], s);
+                        if (r.code != "" || r.s.err != "") return r;
+                        s = r.s;
+                    }
+                    i = i + 1;
+                }
+                return { code: "", s: s };
+            },
+            // no-default-arm: eqTypes compares a record with a record only
+            _ :> { code: "", s: s0 }
+        };
     }
 
     fn eqMsg(code: string, a: MV, b: MV) -> string {
-        if (code == "E-EQ-003") return "`==` on a function value in a compile-time `^{}` body — functions are not comparable (§45)";
-        return "`==` between " + kindName(a) + " and " + kindName(b) + " in a compile-time `^{}` body — `==` between incompatible types is a compile error (§45.3); compare values of one type (convert one side first, e.g. `n.toString()`)";
+        if (code == "E-EQ-003") return "`==` on a function value, or on a list or record holding one, in a compile-time `^{}` body — functions are not comparable (§45.2)";
+        let what: string = kindName(a) + " and " + kindName(b);
+        if (kindName(a) == kindName(b)) what = what + " whose elements or fields have incompatible types";
+        return "`==` between " + what + " in a compile-time `^{}` body — `==` between incompatible types is a compile error (§45.3); compare values of one type (convert one side first, e.g. `n.toString()`)";
     }
 
     fn isStrV(v: MV) -> boolean {
@@ -2515,11 +2789,39 @@ ${
         if (root == "") return bad(s, "a field write through `" + n + "` is evaluated only on a binding (`x." + n + " = …`)");
         const cur: MV | not = lookup(s, root);
         if (cur is not) return bad(s, "`" + root + "` is written here, and it is no local binding of the body");
-        const r: MV | not = withField(cur, n, v);
-        if (r is not) return bad(s, "`" + root + "." + n + " = …` writes a field of " + kindName(cur) + ", which has no fields");
-        const rm: MR = made(r, s, 0);
+        const ks: string[] = recKeys(cur);
+        if (!isRecV(cur)) return bad(s, "`" + root + "." + n + " = …` writes a field of " + kindName(cur) + ", which has no fields");
+        // a field write copies the record's fields and walks them once (S482 r3, review HIGH-2)
+        const s1: MS = chargeW(s, ks.length + 1);
+        if (s1.err != "") return vr(MV.VUndef, s1);
+        const kv: KV = kvMerge({ ks: ks, vs: recVals(cur) }, [n], [v]);
+        const rm: MR = madeRec(kv.ks, kv.vs, s1);
         if (rm.s.err != "") return rm;
-        return vr(v, assignAny(rm.s, root, r));
+        return vr(v, assignAny(rm.s, root, rm.v));
+    }
+
+    fn isRecV(v: MV) -> boolean {
+        return match v {
+            .VRec(keys: k) :> true,
+            // no-default-arm: one question of a value — is it a record
+            _ :> false
+        };
+    }
+
+    fn recKeys(v: MV) -> string[] {
+        return match v {
+            .VRec(keys: k) :> k,
+            // no-default-arm: only a record has keys
+            _ :> []
+        };
+    }
+
+    fn recVals(v: MV) -> MV[] {
+        return match v {
+            .VRec(vals: x) :> x,
+            // no-default-arm: only a record has values
+            _ :> []
+        };
     }
 
     // A field write mutates the record the binding holds (even a `const` one, as
@@ -2541,69 +2843,80 @@ ${
         return s;
     }
 
-    fn withField(cur: MV, n: string, v: MV) -> MV | not {
-        return match cur {
-            .VRec(keys: ks, vals: vs) :> recSet(ks, vs, n, v),
-            // no-default-arm: only a record has fields to write
-            _ :> not
-        };
-    }
-
-    fn recSet(ks: string[], vs: MV[], n: string, v: MV) -> MV {
-        const i: int = ks.indexOf(n);
-        if (i < 0) return mkRec(ks.concat([n]), vs.concat([v]));
-        return mkRec(ks, vs.slice(0, i).concat([v]).concat(vs.slice(i + 1, vs.length)));
-    }
-
     // A list literal; its size and nesting summed as it is built (a spread adds
-    // the spread list's, no walk of it).
+    // the spread list's, no walk of it). The elements are gathered by halves (no
+    // copy per element — S482 r3) and every slot is counted (THE ALLOCATION BOUND).
     fn evalArray(env: MEnv, xs: AExpr[], s0: MS) -> MR {
-        let s: MS = s0;
-        let out: MV[] = [];
-        let w: number = 1;
-        let d: int = 0;
-        for (const x of xs) {
-            if (s.err == "") {
-                const sp: AExpr | not = spreadOf(x);
-                if (sp is given) {
-                    const r: MR = evalE(env, sp, s);
-                    s = r.s;
-                    const v: MV = r.v;
-                    match v {
-                        .VTape(xs: ys, w: yw, d: yd) :> {
-                            if (out.length + ys.length > maxElems()) {
-                                s = failS(s, sizeMsg("a list", out.length + ys.length, maxElems(), "elements"));
-                            } else {
-                                s = charge(s, out.length + ys.length);
-                                if (s.err == "") {
-                                    out = out.concat(ys);
-                                    w = w + yw - 1;
-                                    if (yd - 1 > d) d = yd - 1;
-                                }
+        const g: ArrPart = arrRange(env, xs, 0, xs.length, s0);
+        if (g.s.err != "") return vr(MV.VUndef, g.s);
+        return madeWD(g.vs, g.w + 1, g.d + 1, g.s);
+    }
+
+    // `w`: the size of the elements gathered (the list's own 1 is added by the caller's `madeWD`).
+    type ArrPart:struct = { vs: MV[], w: number, d: int, s: MS }
+
+    fn arrRange(env: MEnv, xs: AExpr[], lo: int, hi: int, s0: MS) -> ArrPart {
+        if (hi - lo <= 32) {
+            let s: MS = s0;
+            let out: MV[] = [];
+            let w: number = 1;
+            let d: int = 0;
+            let i: int = lo;
+            for (; i < hi; ) {
+                if (s.err == "") {
+                    const x: AExpr = xs[i];
+                    const sp: AExpr | not = spreadOf(x);
+                    if (sp is given) {
+                        const r: MR = evalE(env, sp, s);
+                        s = r.s;
+                        const v: MV = r.v;
+                        if (s.err == "") {
+                            match v {
+                                .VTape(xs: ys, w: yw, d: yd) :> {
+                                    if (out.length + ys.length > maxElems()) {
+                                        s = failS(s, sizeMsg("a list", out.length + ys.length, maxElems(), "elements"));
+                                    } else {
+                                        s = charge(s, out.length + ys.length);
+                                        if (s.err == "") {
+                                            out = out.concat(ys);
+                                            w = w + yw - 1;
+                                            if (yd - 1 > d) d = yd - 1;
+                                        }
+                                    }
+                                },
+                                .VStr(s: str) :> {
+                                    const rc: MArgs = charsOf(str, s);
+                                    s = rc.s;
+                                    if (s.err == "") {
+                                        out = out.concat(rc.vs);
+                                        w = w + 2 * str.length;
+                                    }
+                                },
+                                // no-default-arm: a list spreads a list or a string
+                                _ :> { s = failS(s, "a spread `...` of " + kindName(v) + " in a list"); }
                             }
-                        },
-                        .VStr(s: str) :> {
-                            const rc: MArgs = charsOf(str, s);
-                            s = rc.s;
-                            if (s.err == "") {
-                                out = out.concat(rc.vs);
-                                w = w + 2 * str.length;
-                            }
-                        },
-                        // no-default-arm: a list spreads a list or a string
-                        _ :> { s = failS(s, "a spread `...` of " + kindName(v) + " in a list"); }
+                        }
+                    } else {
+                        const r: MR = evalE(env, x, s);
+                        s = r.s;
+                        out = out.concat([r.v]);
+                        w = w + wOf(r.v);
+                        if (dOf(r.v) > d) d = dOf(r.v);
                     }
-                } else {
-                    const r: MR = evalE(env, x, s);
-                    s = r.s;
-                    out = out.concat([r.v]);
-                    w = w + wOf(r.v);
-                    if (dOf(r.v) > d) d = dOf(r.v);
                 }
+                i = i + 1;
             }
+            return { vs: out, w: w - 1, d: d, s: s };
         }
-        if (s.err != "") return vr(MV.VUndef, s);
-        return madeWD(out, w, d + 1, s);
+        const mid: int = lo + Math.floor((hi - lo) / 2);
+        const l: ArrPart = arrRange(env, xs, lo, mid, s0);
+        if (l.s.err != "") return l;
+        const r: ArrPart = arrRange(env, xs, mid, hi, l.s);
+        if (r.s.err != "") return r;
+        if (l.vs.length + r.vs.length > maxElems()) return { vs: [], w: 0, d: 0, s: failS(r.s, sizeMsg("a list", l.vs.length + r.vs.length, maxElems(), "elements")) };
+        let d: int = l.d;
+        if (r.d > d) d = r.d;
+        return { vs: l.vs.concat(r.vs), w: l.w + r.w, d: d, s: charge(r.s, l.vs.length + r.vs.length) };
     }
 
     fn spreadOf(x: AExpr) -> AExpr | not {
@@ -2614,51 +2927,97 @@ ${
         };
     }
 
+    // A record literal (S482 r3, review HIGH-2): the fields are gathered as key /
+    // value lists and the record is made ONCE at the end (one walk), every field
+    // charged — a field written walks the keys so far (a key repeated keeps its
+    // first place and takes the last value, as in JavaScript), a spread into
+    // nothing takes the spread record's lists whole.
     fn evalObject(env: MEnv, ps: AProp[], s0: MS) -> MR {
         let s: MS = s0;
-        let ks: string[] = [];
-        let vs: MV[] = [];
+        let kv: KV = { ks: [], vs: [] };
         for (const p of ps) {
             if (s.err == "") {
                 const r: MR = evalE(env, p.value, s);
                 s = r.s;
-                if (p.spread) {
-                    const v: MV = r.v;
-                    match v {
-                        .VRec(keys: k2, vals: v2) :> {
-                            s = charge(s, ks.length * k2.length);
-                            let i: int = 0;
-                            for (; i < k2.length; ) {
-                                const merged: MV = recSet(ks, vs, k2[i], v2[i]);
-                                match merged {
-                                    .VRec(keys: k3, vals: v3) :> {
-                                        ks = k3;
-                                        vs = v3;
-                                    },
-                                    // no-default-arm: recSet builds a record
-                                    _ :> {}
-                                }
-                                i = i + 1;
-                            }
-                        },
-                        // no-default-arm: an object spreads a record (`not` spreads nothing)
-                        _ :> { if (!isAbsent(v)) s = failS(s, "a spread `...` of " + kindName(v) + " in an object"); }
-                    }
-                } else {
-                    const merged: MV = recSet(ks, vs, p.name, r.v);
-                    match merged {
-                        .VRec(keys: k3, vals: v3) :> {
-                            ks = k3;
-                            vs = v3;
-                        },
-                        // no-default-arm: recSet builds a record
-                        _ :> {}
+                if (s.err == "") {
+                    if (p.spread) {
+                        const v: MV = r.v;
+                        match v {
+                            .VRec(keys: k2, vals: v2) :> {
+                                s = chargeW(s, kv.ks.length * k2.length + k2.length);
+                                if (s.err == "") kv = kvMerge(kv, k2, v2);
+                            },
+                            // no-default-arm: an object spreads a record (`not` spreads nothing)
+                            _ :> { if (!isAbsent(v)) s = failS(s, "a spread `...` of " + kindName(v) + " in an object"); }
+                        }
+                    } else {
+                        s = chargeW(s, kv.ks.length + 1);
+                        if (s.err == "") kv = kvMerge(kv, [p.name], [r.v]);
                     }
                 }
             }
         }
         if (s.err != "") return vr(MV.VUndef, s);
-        return made(mkRec(ks, vs), s, 0);
+        return madeRec(kv.ks, kv.vs, s);
+    }
+
+    type KV:struct = { ks: string[], vs: MV[] }
+
+    // `a`'s fields, then `k2` / `v2`'s written over them (`k2`'s keys are distinct
+    // — a record's): a written key keeps its place, a new one is added at the end.
+    // One pass over each side; the lists are built by halves (no copy per field).
+    fn kvMerge(a: KV, k2: string[], v2: MV[]) -> KV {
+        if (a.ks.length == 0) return { ks: k2, vs: v2 };
+        if (k2.length == 0) return a;
+        const vs: MV[] = kvOver(a.ks, a.vs, k2, v2, 0, a.ks.length);
+        const add: KV = kvNew(a.ks, k2, v2, 0, k2.length);
+        return { ks: a.ks.concat(add.ks), vs: vs.concat(add.vs) };
+    }
+
+    fn kvOver(ks: string[], vs: MV[], k2: string[], v2: MV[], lo: int, hi: int) -> MV[] {
+        if (hi - lo <= 32) {
+            let out: MV[] = [];
+            let i: int = lo;
+            for (; i < hi; ) {
+                const j: int = k2.indexOf(ks[i]);
+                if (j >= 0) {
+                    out = out.concat([v2[j]]);
+                } else {
+                    out = out.concat([vs[i]]);
+                }
+                i = i + 1;
+            }
+            return out;
+        }
+        const mid: int = lo + Math.floor((hi - lo) / 2);
+        return kvOver(ks, vs, k2, v2, lo, mid).concat(kvOver(ks, vs, k2, v2, mid, hi));
+    }
+
+    fn kvNew(ks: string[], k2: string[], v2: MV[], lo: int, hi: int) -> KV {
+        if (hi - lo <= 32) {
+            let nk: string[] = [];
+            let nv: MV[] = [];
+            let i: int = lo;
+            for (; i < hi; ) {
+                if (ks.indexOf(k2[i]) < 0) {
+                    nk = nk.concat([k2[i]]);
+                    nv = nv.concat([v2[i]]);
+                }
+                i = i + 1;
+            }
+            return { ks: nk, vs: nv };
+        }
+        const mid: int = lo + Math.floor((hi - lo) / 2);
+        const l: KV = kvNew(ks, k2, v2, lo, mid);
+        const r: KV = kvNew(ks, k2, v2, mid, hi);
+        return { ks: l.ks.concat(r.ks), vs: l.vs.concat(r.vs) };
+    }
+
+    // A record made from its lists: its walk (mkRec sums its size) charged, its size checked.
+    fn madeRec(ks: string[], vs: MV[], s: MS) -> MR {
+        const s1: MS = chargeW(s, ks.length);
+        if (s1.err != "") return vr(MV.VUndef, s1);
+        return made(mkRec(ks, vs), s1, 0);
     }
 
     fn evalIndex(env: MEnv, o: AExpr, i: AExpr, s: MS) -> MR {
@@ -2810,7 +3169,11 @@ ${
                     s = r.s;
                     const v: MV = r.v;
                     match v {
-                        .VTape(xs: ys) :> { out = out.concat(ys); },
+                        .VTape(xs: ys) :> {
+                            // copied (THE BUDGET; unreachable while the parser refuses `f(...xs)` in a body)
+                            s = allocS(charge(s, out.length + ys.length), ys.length);
+                            if (s.err == "") out = out.concat(ys);
+                        },
                         // no-default-arm: arguments spread a list
                         _ :> { s = failS(s, "a spread `...` of " + kindName(v) + " in a call"); }
                     }
@@ -2826,31 +3189,17 @@ ${
 
     type MArgs:struct = { vs: MV[], s: MS }
 
-    // A callback list method's arguments (callbackMethod): a lambda written there is
-    // called by the method and kept by nobody, so it is made without pins (CLOSURES).
+    // A callback list method's arguments (callbackMethod): a lambda written as the
+    // CALLBACK — argument 0, the one function the method calls now — is kept by
+    // nobody, so it is made without pins (CLOSURES). Every other argument is
+    // evaluated as any value is (S482 r3, review MED-1: `reduce`'s initial value is
+    // returned and kept, so a lambda there is pinned like any other).
     fn evalListArgs(env: MEnv, xs: AExpr[], s0: MS) -> MArgs {
-        let plain: boolean = true;
-        for (const x of xs) {
-            if (spreadOf(x) is given) return evalArgs(env, xs, s0);
-            if (lambdaNow(x, s0) is given) plain = false;
-        }
-        if (plain) return evalArgs(env, xs, s0);
-        let s: MS = s0;
-        let out: MV[] = [];
-        for (const x of xs) {
-            if (s.err == "") {
-                const lv: MV | not = lambdaNow(x, s);
-                if (lv is given) {
-                    out = out.concat([lv]);
-                    s = tick(s);
-                } else {
-                    const r: MR = evalE(env, x, s);
-                    s = r.s;
-                    out = out.concat([r.v]);
-                }
-            }
-        }
-        return { vs: out, s: s };
+        if (xs.length == 0 || spreadOf(xs[0]) is given) return evalArgs(env, xs, s0);
+        const lv: MV | not = lambdaNow(xs[0], s0);
+        if (lv is not) return evalArgs(env, xs, s0);
+        const rest: MArgs = evalArgs(env, xs.slice(1, xs.length), tick(s0));
+        return { vs: [lv].concat(rest.vs), s: rest.s };
     }
 
     // The list methods that call the function they are given and keep it nowhere.
@@ -2918,7 +3267,7 @@ ${
         }
         const frame: MFrame = { names: names, vals: vals, muts: muts };
         // `floor`: the captured frames are below it (CLOSURES — a write to them is refused)
-        const inner: MS = { frames: f.env.concat([frame]), out: s.out, emits: s.emits, steps: s.steps, depth: s.depth + 1, err: "", code: "", ctl: 0, label: "", ret: MV.VUndef, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: f.env.length, pinI: [], pinN: [] };
+        const inner: MS = { frames: f.env.concat([frame]), out: s.out, emits: s.emits, steps: s.steps, depth: s.depth + 1, err: "", code: "", ctl: 0, label: "", ret: MV.VUndef, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: f.env.length, pinI: [], pinN: [], bud: s.bud };
         let v: MV = MV.VUndef;
         let after: MS = inner;
         const ex1: AExpr | not = f.expr;
@@ -2945,7 +3294,7 @@ ${
             }
             j = j + 1;
         }
-        const back: MS = { frames: s.frames, out: after.out, emits: after.emits, steps: after.steps, depth: s.depth, err: after.err, code: after.code, ctl: 0, label: "", ret: MV.VUndef, cNames: after.cNames, cVals: after.cVals, busy: s.busy, floor: s.floor, pinI: pi, pinN: pn };
+        const back: MS = { frames: s.frames, out: after.out, emits: after.emits, steps: after.steps, depth: s.depth, err: after.err, code: after.code, ctl: 0, label: "", ret: MV.VUndef, cNames: after.cNames, cVals: after.cVals, busy: s.busy, floor: s.floor, pinI: pi, pinN: pn, bud: after.bud };
         if (back.err != "") return vr(MV.VUndef, back);
         return vr(v, back);
     }
@@ -2962,10 +3311,17 @@ ${
             s2 = t.s;
             text = t.str;
         }
-        // the normalization reads the text character by character (a walk)
-        if (normalize) s2 = chargeW(s2, text.length);
         if (s2.err != "") return vr(MV.VUndef, s2);
-        if (normalize) text = normalizeEmit(text);
+        // the normalization reads the text character by character (a walk); text
+        // with no backslash is its own normalization. It is never run on text past
+        // the file's emit budget (S482 r3: the normalized text is at least half as long)
+        if (normalize && text.indexOf("\\") >= 0) {
+            const room: int = s2.bud.room - s2.out.length;
+            if (text.length > 2 * room) return vr(MV.VUndef, failS(s2, emitBudgetMsg("characters", s2.out.length + Math.ceil(text.length / 2), s2.bud.room, maxFileChars()) + " (at least that many: the text's escapes are not yet read)"));
+            s2 = chargeW(s2, text.length);
+            if (s2.err != "") return vr(MV.VUndef, s2);
+            text = normalizeEmit(text);
+        }
         return vr(MV.VUndef, withOut(s2, text));
     }
 
@@ -3034,7 +3390,11 @@ ${
             if (lit) return bad(s2, "`reflect(" + name + ")` names no declared type");
             return vr(MV.VNot, s2);
         }
-        return vr(typeInfo(t), s2);
+        // the type's fields / variants become values (THE BUDGET, S482 r3 sweep)
+        const n: int = t.fields.length + t.variants.length;
+        const s3: MS = alloc(chargeW(s2, n), 0, 3 * n, 2 * n);
+        if (s3.err != "") return vr(MV.VUndef, s3);
+        return made(typeInfo(t), s3, 0);
     }
 
     fn typeInfo(t: MType) -> MV {
@@ -3128,7 +3488,7 @@ ${
         if (s.err != "") return vr(MV.VUndef, s);
         if (m == "toLowerCase") return madeStr(x.toLowerCase(), s);
         if (m == "toUpperCase") return madeStr(x.toUpperCase(), s);
-        if (m == "trim") return vr(MV.VStr(x.trim()), s);
+        if (m == "trim") return madeStr(x.trim(), s);
         if (m == "includes") return vr(MV.VBool(x.indexOf(argStr(args, 0, "undefined")) >= 0), s);
         if (m == "startsWith") {
             const p: string = argStr(args, 0, "undefined");
@@ -3143,7 +3503,7 @@ ${
             const a: int = relIndex(argNum(args, 0, 0), x.length);
             const b: int = relIndex(argNum(args, 1, x.length), x.length);
             if (b <= a) return vr(MV.VStr(""), s);
-            return vr(MV.VStr(x.substring(a, b)), s);
+            return madeStr(x.substring(a, b), s);
         }
         if (m == "split") {
             if (args.length == 0 || isAbsent(args[0])) return madeTape([MV.VStr(x)], s);
@@ -3151,7 +3511,10 @@ ${
             // at most one part past the bound is made (JavaScript split's limit)
             const parts: string[] = x.split(strOf(args[0]), maxElems() + 1);
             if (parts.length > maxElems()) return bad(s, overMsg("the list of parts of a `.split(…)`"));
-            return madeTape(strsToMV(parts, 0, parts.length), s);
+            // every part becomes an element value (THE ALLOCATION BOUND, S482 r3 HIGH-3)
+            const sp: MS = alloc(chargeW(s, parts.length), x.length, 0, parts.length);
+            if (sp.err != "") return vr(MV.VUndef, sp);
+            return madeTape(strsToMV(parts, 0, parts.length), sp);
         }
         if (m == "repeat") {
             const n: number = argNum(args, 0, 0);

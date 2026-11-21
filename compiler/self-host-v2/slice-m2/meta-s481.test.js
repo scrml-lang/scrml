@@ -201,16 +201,20 @@ describe("s481 r1 — the budget: size and work bounded by the step count (MED-1
     expect(evalErr(D(`let t = [1]; for (let i = 0; i < 100000; i = i + 1) { t = [t]; } emit("<p>" + (t == t) + "</p>");`))).toContain("256 levels of nesting");
   }, 60000);
   test("a built-in's work is charged: a quadratic push loop and a re-read of a long string run out of steps", () => {
-    expect(evalErr(D(`let t = []; for (let i = 0; i < 200000; i = i + 1) { t.push(i); } emit("<p>" + t.length + "</p>");`))).toContain("step bound");
-    expect(evalErr(D(`const s = "x".repeat(10000000); let n = 0; for (let i = 0; i < 100000; i = i + 1) { if ((s + i).charAt(0) == "x") n = n + 1; } emit("<p>" + n + "</p>");`))).toContain("step bound");
+    // S482 r3: each push copies the list, and each `s + i` builds a 10 Mi string — the allocation
+    // bound (never given back) counts them, and is reached before the step bound
+    expect(evalErr(D(`let t = []; for (let i = 0; i < 200000; i = i + 1) { t.push(i); } emit("<p>" + t.length + "</p>");`))).toContain("allocation bound");
+    expect(evalErr(D(`const s = "x".repeat(10000000); let n = 0; for (let i = 0; i < 100000; i = i + 1) { if ((s + i).charAt(0) == "x") n = n + 1; } emit("<p>" + n + "</p>");`))).toContain("allocation bound");
     expect(evalErr(D(`let t = [1]; for (let i = 0; i < 20; i = i + 1) { t = t.concat(t); } let n = 0; for (let i = 0; i < 100000; i = i + 1) { if (t.includes(2)) n = n + 1; } emit("<p>" + n + "</p>");`))).toContain("step bound");
   }, 60000);
   test("the bounds are deterministic: the same body fails with the same message", () => {
     const b = D(`let t = []; for (let i = 0; i < 200000; i = i + 1) { t.push(i); } emit("<p>" + t.length + "</p>");`);
     expect(evalErr(b)).toBe(evalErr(b));
   }, 60000);
-  test("ordinary bodies stay well inside the budget (building 20000 items, a 30000-element map, sort, split)", () => {
-    expect(html(D(`let xs = []; for (const i of 0..20000) { xs.push(i); } emit("<p>" + xs.map((i) => "<li>" + i + "</li>").join("").length + "</p>");`))).toContain("<p>268890</p>");
+  test("ordinary bodies stay well inside the budget (building 5000 items by push, a 30000-element map, sort, split)", () => {
+    // S482 r3: a push loop copies the list at every push (Σ n slots), counted by the allocation
+    // bound — 5000 pushes stay inside it; a list built whole (`map`, `concat`) costs its length once
+    expect(html(D(`let xs = []; for (const i of 0..5000) { xs.push(i); } emit("<p>" + xs.map((i) => "<li>" + i + "</li>").join("").length + "</p>");`))).toContain("<p>63890</p>");
     expect(html(D(`let t = [1]; for (let i = 0; i < 15; i = i + 1) { t = t.concat(t); } const u = t.map((x, i) => i); emit("<p>" + u.length + "," + u.at(-1) + "</p>");`))).toContain("<p>32768,32767</p>");
     expect(html(D(`let s = ""; for (let i = 0; i < 2000; i = i + 1) { s = s + "<i>" + i + "</i>"; } emit("<p>" + s.length + "</p>");`))).toContain("<p>20890</p>");
     expect(html(D(`const p = "ab,".repeat(100000).split(","); let t = [3, 1, 2]; t.sort((a, b) => a - b); emit("<p>" + p.length + t.join("") + "</p>");`))).toContain("<p>100001123</p>");
@@ -414,4 +418,89 @@ describe("s481 — differential: the interpreter renders what impl#1's realm ren
       expect(inner(out.html, true)).toBe(inner(a, false));
     }, 60000);
   }
+});
+
+// ---------------------------------------------------------------------------
+// S482 r3 — the re-review of #2045 (~/.cache/scrml/review/s482-2045-rev/review.md)
+// ---------------------------------------------------------------------------
+const codeMsg = (src, code) => {
+  const r = run(src);
+  expect(errs(r)).toEqual([code]);
+  return r.diags.find((d) => d.code === code).message;
+};
+
+describe("s482 r3 — HIGH-1: a file's `^{}` blocks share one emit budget (§22.4)", () => {
+  test("characters: two blocks of 600000 characters each — the second is refused, naming the file's budget", () => {
+    const b = `<p>^{ emit("abcdef".repeat(100000)); }</p>`;
+    expect(codeMsg(P(`<div>${b}${b}</div>`), "E-META-EVAL-001")).toContain("file's emit budget (1048576 characters");
+    expect(errs(run(P(`<div>${b}</div>`)))).toEqual([]);
+  }, 60000);
+  test("tags: `<` characters are bounded before the markup reader reads them", () => {
+    expect(evalErr(D(`emit("<i></i>".repeat(40000));`))).toContain("65536 `<` characters");
+  }, 60000);
+  test("nodes: the nodes read are bounded across the file's blocks", () => {
+    const b = `^{ emit("<i>x</i>".repeat(10000)); }`;
+    expect(errs(run(P(`<div>${b}</div>`)))).toEqual([]);
+    expect(codeMsg(P(`<div>${b}${b}</div>`), "E-META-EVAL-001")).toContain("32768 nodes");
+  }, 60000);
+  test("emit() text past the budget is refused before it is normalized", () => {
+    expect(evalErr(D(`emit("a\\\\b".repeat(1000000));`))).toContain("file's emit budget");
+  }, 60000);
+});
+
+describe("s482 r3 — HIGH-2 / HIGH-3: record building and element creation are charged (§22.4)", () => {
+  const keys = Array.from({ length: 1000 }, (_, i) => `k${i}: ${i}`).join(", ");
+  test("a spread copies per field: a 1000-field spread in a loop runs out of steps, fast", () => {
+    const t0 = performance.now();
+    expect(evalErr(D(`const r = { ${keys} }; let n = 0; for (n < 50000) { const c = { ...r }; n = n + 1; } emit("<p>" + n + "</p>");`))).toContain("step bound");
+    expect(performance.now() - t0).toBeLessThan(20000);
+  }, 60000);
+  test("a field write copies per field: a 1000-field record written in a loop runs out of steps", () => {
+    expect(evalErr(D(`let r = { ${keys} }; let n = 0; for (n < 50000) { r.k1 = n; n = n + 1; } emit("<p>" + n + "</p>");`))).toContain("step bound");
+  }, 60000);
+  test("a spread and a field write give JavaScript's record (the last value wins)", () => {
+    expect(html(D(`const a = { x: 1, y: 2 }; let b = { ...a, z: 3, x: 9 }; b.y = 7; b.w = 0; emit("<p>" + b.x + b.y + b.z + b.w + "</p>");`))).toContain("<p>9730</p>");
+  }, 60000);
+  test("split makes an element per part: repeated splits of a long string stop at the allocation bound", () => {
+    expect(evalErr(D(`const s = "x".repeat(1000000); const a = s.split(""); const b = s.split(""); const c = s.split(""); emit("<p>" + a.length + "</p>");`))).toContain("allocation bound");
+    expect(html(D(`const s = "ab,".repeat(1000); emit("<p>" + s.split(",").length + "</p>");`))).toContain("<p>1001</p>");
+  }, 60000);
+});
+
+describe("s482 r3 — MED-1: only the callback a list method calls now is exempt from pins", () => {
+  test("reduce's initial value is kept, so a later write is refused (cl_reduce, cl_reduce_rec, cl_find, the copied-through-map variant)", () => {
+    expect(evalErr(D(`let n = 1; const g = [1].reduce((a, x) => a, () => n); n = 5; emit("<p>g=" + g() + "</p>");`))).toContain("`n` is written after a function or lambda that reads it was made");
+    expect(evalErr(D(`let r = { k: 1 }; const g = [1].reduce((a, x) => a, () => r.k); r.k = 7; emit("<p>g=" + g() + "</p>");`))).toContain("`r` is written after");
+    expect(evalErr(D(`let n = 1; const g = [1].map((x) => x).reduce((a, x) => a, (y) => n + y); n = 5; emit("<p>g=" + g(0) + "</p>");`))).toContain("`n` is written after");
+    expect(evalErr(D(`let n = 1; const g = [1].reduce((a, x) => a, (z) => n); const h = [g].map((f) => f); n = 9; emit("<p>" + h[0](0) + "</p>");`))).toContain("`n` is written after");
+  });
+  test("with no later write the kept initial value is right; the callback itself still pins nothing", () => {
+    expect(html(D(`let n = 1; const g = [1].reduce((a, x) => a, () => n); emit("<p>g=" + g() + "</p>");`))).toContain("<p>g=1</p>");
+    expect(html(D(`let n = 1; const t = [1].map((x) => x + n); n = 5; emit("<p>" + t[0] + n + "</p>");`))).toContain("<p>25</p>");
+  });
+});
+
+describe("s482 r3 — LOW-1..4: the source rules hold in a body", () => {
+  const T = (b) => P(`    type C:enum = { A, B }\n<div>^{ ${b} }</div>`);
+  test("LOW-1: an annotated local initialized with a variant the enum does not declare is E-TYPE-063 (§14.10)", () => {
+    expect(codeMsg(T(`let x: C = .Zzz; emit("<p>" + x + "</p>");`), "E-TYPE-063")).toContain("not a variant of the enum `C`");
+    expect(errs(run(T(`let x: C = .B; emit("<p>" + x + "</p>");`)))).toEqual([]);
+  });
+  test("LOW-2: `x == not` / `not != x` is E-EQ-002 (§45.2)", () => {
+    expect(errs(run(D(`const x = 1; emit("<p>" + (x == not) + "</p>");`)))).toEqual(["E-EQ-002"]);
+    expect(errs(run(D(`const x = 1; emit("<p>" + (not != x) + "</p>");`)))).toEqual(["E-EQ-002"]);
+  });
+  test("LOW-3: `==` judges element and field types deeply (§45.2 / §45.3)", () => {
+    expect(errs(run(D(`emit("<p>" + ([1] == ["1"]) + "</p>");`)))).toEqual(["E-EQ-001"]);
+    expect(errs(run(D(`emit("<p>" + ([[1]] == [["a"]]) + "</p>");`)))).toEqual(["E-EQ-001"]);
+    expect(errs(run(D(`emit("<p>" + ({ a: 1 } == { a: "x" }) + "</p>");`)))).toEqual(["E-EQ-001"]);
+    expect(errs(run(D(`const r = { f: () => 1 }; emit("<p>" + (r == r) + "</p>");`)))).toEqual(["E-EQ-003"]);
+    expect(errs(run(D(`const t = [() => 1]; emit("<p>" + (t == t) + "</p>");`)))).toEqual(["E-EQ-003"]);
+    expect(html(D(`emit("<p>" + ([1] == [2]) + ([] == ["a"]) + ({ a: [1] } == { a: [1] }) + "</p>");`))).toContain("<p>falsefalsetrue</p>");
+  });
+  test("LOW-4: a redeclaration in one block of a body is E-SCOPE-REDECLARE (§7.3.3); a nested block may shadow", () => {
+    expect(errs(run(D(`let n = 1; const g = () => n; let n = 5; emit("<p>g=" + g() + "</p>");`)))).toEqual(["E-SCOPE-REDECLARE"]);
+    expect(errs(run(D(`fn f(a) { let a = 2; return a; } emit("<p>" + f(1) + "</p>");`)))).toEqual(["E-SCOPE-REDECLARE"]);
+    expect(html(D(`let n = 1; if (n == 1) { let n = 2; emit("<p>" + n + "</p>"); }`))).toContain("<p>2</p>");
+  });
 });
