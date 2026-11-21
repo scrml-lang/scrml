@@ -1,0 +1,12 @@
+// §7.6 rule (b) (S482 r1) — a body-top statement hands a function value to a function that calls it; the value reads a binding whose place is later: E-SCOPE-001.
+<program>
+${ let n: int = 1; }
+${ let out: int = 0; }
+${ function g() -> int { return k; } }
+${ function run(f: () => int) -> int { return f(); } }
+${ n = 5; }
+${ out = run(g); }
+<p id="a">${out}</p>
+${ const k: int = n + 0; }
+<p id="b">${k}</p>
+</program>

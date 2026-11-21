@@ -177,22 +177,117 @@ ${SEVEN}
     expect(await texts(src, ["a"])).toEqual(["7"]);
   }, 120000);
 
-  test("legal: a handler calling it runs after the body; a function value passed, not called", async () => {
+  test("legal: a handler calling it runs after the body", async () => {
     const src = `<program>
 ${SEVEN}
 \${
     function g() -> int { return k; }
-    function keep(f: () => int) -> int { return 0; }
     let out: int = 0;
 }
 <button id="b" onclick={ out = g(); }>go</button>
-\${ keep(() => g()); }
 \${ const k: int = seven(); }
 <p id="a">\${k}</p>
 </program>
 `;
     expect(await errCodes(src)).toEqual([]);
     expect(await texts(src, ["a"])).toEqual(["7"]);
+  }, 120000);
+});
+
+// =============================================================================
+// B r1 (#2053 review MED-1) — a function VALUE body code hands on counts as called (§6.7.4 rule 3:
+// "whatever receives it may call it"), so a reach through one is E-SCOPE-001 too. PA reading of
+// ruling item 2's "calls a function reaching a binding whose place is later" (prov=pa-ruled S482
+// r1, conditional; measured 0 newly rejected over 2964 corpus files). Red on 758b0577b: it
+// compiled and showed k = 1 (k ran before the body), not 5.
+// =============================================================================
+describe("B r1 — body code reaching a later binding through a function value is E-SCOPE-001", () => {
+  const RUN = `\${ let n: int = 1; }
+\${ let out: int = 0; }
+\${ function g() -> int { return k; } }
+\${ function run(f: () => int) -> int { return f(); } }
+\${ n = 5; }`;
+  test("a statement passing a function, which the callee calls (the review's b-fnvalue)", async () => {
+    const res = await result(`<program>
+${RUN}
+\${ out = run(g); }
+<p id="a">\${out}</p>
+\${ const k: int = n + 0; }
+<p id="b">\${k}</p>
+</program>
+`);
+    const d = res.diagnostics.filter((x) => x.severity === "error");
+    expect(d.map((x) => x.code)).toEqual(["E-SCOPE-001"]);
+    expect(d[0].message).toContain("`k`");
+  }, 120000);
+
+  test("a display passing it (a call through a function value in a display is also E-VALUE-WRITE-UNPROVEN, §6.15)", async () => {
+    expect(await errCodes(`<program>
+${RUN}
+<p id="a">\${run(g)}</p>
+\${ const k: int = n + 0; }
+</program>
+`)).toContain("E-SCOPE-001");
+  }, 120000);
+
+  test("a function expression passed in body code", async () => {
+    expect(await errCodes(`<program>
+${RUN}
+\${ out = run(() => k); }
+\${ const k: int = n + 0; }
+</program>
+`)).toEqual(["E-SCOPE-001"]);
+  }, 120000);
+
+  test("a function value inside a function the body calls, at depth", async () => {
+    expect(await errCodes(`<program>
+${RUN}
+\${ function h() -> int { return run(g); } }
+\${ out = h(); }
+\${ const k: int = n + 0; }
+</program>
+`)).toEqual(["E-SCOPE-001"]);
+  }, 120000);
+
+  test("over-refusal, stated: a function value handed on and never called while the body runs", async () => {
+    // §7.6 rule (b) S482 r1: the analysis cannot tell a callee that ignores it; it counts as called
+    expect(await errCodes(`<program>
+${SEVEN}
+\${
+    function g() -> int { return k; }
+    function keep(f: () => int) -> int { return 0; }
+}
+\${ keep(() => g()); }
+\${ const k: int = seven(); }
+</program>
+`)).toEqual(["E-SCOPE-001"]);
+  }, 120000);
+
+  test("legal: the same shapes after the binding's place run in source order (5)", async () => {
+    const src = `<program>
+${RUN}
+\${ const k: int = n + 0; }
+\${ out = run(g); }
+<p id="a">\${out}</p>
+\${ out = out + run(() => k); }
+<p id="b">\${out}</p>
+</program>
+`;
+    expect(await errCodes(src)).toEqual([]);
+    expect(await texts(src, ["a", "b"])).toEqual(["5", "10"]);
+  }, 120000);
+
+  test("legal: a function value in an event handler is not judged", async () => {
+    // (what it shows is g-boot-handler-reach-runs-binding-early-s482: the printer runs `k` before
+    // the body when a handler reaches it — pre-existing, not judged here)
+    const src = `<program>
+${RUN}
+<button id="x" onclick=\${ out = run(g); }>go</button>
+\${ const k: int = n + 0; }
+<p id="b">\${k}</p>
+</program>
+`;
+    expect(await errCodes(src)).toEqual([]);
   }, 120000);
 });
 
