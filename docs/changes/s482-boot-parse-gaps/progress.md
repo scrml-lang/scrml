@@ -37,6 +37,17 @@ Branch `s482-boot-parse-gaps` from origin/main eca9c5af5. Scratch: ~/.cache/scrm
 - [x] re-measure: lower.scrml rises are lines 4900+ (the old `} else {` E-STMT-UNEXPECTED-TOKEN derailed the
       rest of the file's parse); lex.scrml rises likewise past the old separator cascade at :368
 
-## TODO
-- [ ] red-on-base proof for the test file
-- [ ] final gates
+- [x] commit 2 (6903be00d) — hook PASS
+
+## Final gates (head 6903be00d)
+- [x] tests red on base: slice-m4/keyword-member-from-alt-head-s482.test.js — 12 of 16 fail on base (lex/parse/print
+      from origin/main); the 4 green are must-stay guards (server modifier, `return .A` / `is .B`, import … from,
+      missing `,` still E-MATCH-ARM-SEPARATOR); 16/16 on head
+- [x] pretest
+- [x] bootstrap-conformance --json, 1958 cases: base (origin/main self-host) PASS 770 FAIL 4 UNSUPPORTED 556 CRASH 0;
+      head PASS 772 FAIL 3 UNSUPPORTED 555 CRASH 0. Only changes: the 2 new cases (FAIL parse-reject -> PASS,
+      UNSUPPORTED -> PASS). No PASS->FAIL.
+- [x] byte-compare (bootstrap front end + printProgram + printServer, twin source as the runner grades it, all 1958
+      cases): 1956 identical (diagnostics, client JS, HTML, server JS); 2 differ = the 2 new cases (base rejected).
+- [x] CI checks: s34-census --check-new, types-gate --check, snippet-gate, claim-gate, corpus-compile-floor --check,
+      gen-md-shim --check — all exit 0
