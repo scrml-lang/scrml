@@ -2696,12 +2696,18 @@ ${
         return mkE(t2, start, AExprK.Call(callee.e, args))
     }
 
-    // The body's E-PARSE-* reports (from `d0` on) re-coded E-META-002, in place.
-    // Every other code the body drew (a missing `;`, a named refusal) stands as is.
+    // The body's GENERIC token-level parse reports (from `d0` on) re-coded E-META-002, in
+    // place (§22.11 "Invalid token in `^{}` meta block"). A report naming a specific rule
+    // (`===`, `null`, a missing `;`, a named refusal) stands as is — one code per rule, the
+    // more specific winning (S473 D29).
+    fn metaTokenCode(code: string) -> boolean {
+        return code == "E-PARSE-EXPR" || code == "E-PARSE-EXPECTED" || code == "E-PARSE-TRAILING" || code == "E-PARSE-ITEM" || code == "E-PARSE-UNCLOSED"
+    }
+
     fn metaBodyErrors(tp: TP, d0: int) -> TP {
         let ds: Diag[] = tp.diags.slice(0, d0)
         for (const d of tp.diags.slice(d0, tp.diags.length)) {
-            if (d.code.indexOf("E-PARSE") == 0) {
+            if (metaTokenCode(d.code)) {
                 ds = ds.concat([newDiag("E-META-002", "invalid token in a `^{}` meta block (§22.11): " + d.message, d.file, d.span)])
             } else {
                 ds = ds.concat([d])

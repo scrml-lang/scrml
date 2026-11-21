@@ -64,6 +64,14 @@ describe("s481 — the static checks (§22.11, §22.12)", () => {
       expect([...new Set(errs(r))].sort()).toEqual(codes);
     });
   }
+  test("a parse report naming a specific rule stands as its own code (D29), not E-META-002", () => {
+    const c = errs(run(P(`^{ if (1 === 1) { emit("<p>x</p>"); } }`)));
+    expect(c.length).toBeGreaterThan(0);
+    expect(c).not.toContain("E-META-002");
+  });
+  test("a compile-time match no arm of which matches runs nothing (as impl#1's evaluation)", () => {
+    expect(html(P(`<div id="m">^{ const v = "z"; match v { "a" :> emit("<p>a</p>"), "b" :> emit("<p>b</p>"), } emit("<p>end</p>"); }</div>`))).toContain(`<div id="m"><p>end</p></div>`);
+  });
   test("a block that fails a static check is not also refused as unsupported", () => {
     for (const [, src] of STATIC) expect(errs(run(src))).not.toContain("E-BOOTSTRAP-UNSUPPORTED");
   });

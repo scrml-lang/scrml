@@ -2274,7 +2274,9 @@ ${
             if (s.err != "") return vr(MV.VUndef, s)
             if (t.hit) return armValue(env, a, s)
         }
-        return bad(s, "no arm of the `match` matches " + jsStr(rs.v))
+        // no arm matches: nothing runs and the value is absent — what the JavaScript impl#1
+        // evaluates a compile-time `match` as does (an if-chain with no fall-through error)
+        return vr(MV.VUndef, s)
     }
 
     type ArmTest:struct = { hit: boolean, s: MS }
