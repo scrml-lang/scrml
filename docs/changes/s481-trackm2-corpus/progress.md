@@ -15,4 +15,7 @@ Scratch + drivers: `~/.cache/scrml/review/s481-trackm2-corpus/` (`drv/snap-run.t
     leaves 3 export files unwrapped; 2 importers gain).
 - [x] Item 2 — conformance case sources: 3 by `scrml fix` (commit 2), 6 + the ctrl-011-for-in-pos twin by hand (commit 3).
   7 FAIL→PASS; 3 stay FAIL by decision / out of terminator scope (see PR body).
-- [ ] Item 3 — CI checks on final head.
+- [x] Item 3 — pretest, bootstrap-conformance (PASS 760 → 767, FAIL 10 → 3, CRASH 0, 0 PASS→FAIL), and the CI checks
+  job (s34-census, types-gate, snippet-gate, claim-gate, corpus-compile-floor, gen-md-shim) all pass on 4d2e660d7.
+- [x] Gap filed: g-when-from-body-semi-spurious-dropped-warning-s481 (the only new impl#1 console warning across the
+  701 migrated programs; `examples/13-worker.scrml`).
