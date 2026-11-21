@@ -2885,8 +2885,8 @@ ${
         let out: View[] = [];
         let m: int = 0;
         let i = 0;
-        while (i < ns.length) {
-            while (m < marks.length && marks[m].at <= i) {
+        for (; i < ns.length; ) {
+            for (; m < marks.length && marks[m].at <= i; ) {
                 out = out.concat(initView(c, marks[m].nid));
                 m = m + 1;
             }
@@ -2898,7 +2898,7 @@ ${
                 // r2 (MED-1): the places written inside this node (hoisted to the items right
                 // after it) are put where they stand in it
                 let inner: ConstMark[] = [];
-                while (m < marks.length && marks[m].at == i + 1 && marks[m].pos >= ns[i].span.start && marks[m].pos < ns[i].span.end) {
+                for (; m < marks.length && marks[m].at == i + 1 && marks[m].pos >= ns[i].span.start && marks[m].pos < ns[i].span.end; ) {
                     inner = inner.concat([marks[m]]);
                     m = m + 1;
                 }
@@ -2907,7 +2907,7 @@ ${
                 i = i + 1;
             }
         }
-        while (m < marks.length) {
+        for (; m < marks.length; ) {
             out = out.concat(initView(c, marks[m].nid));
             m = m + 1;
         }
@@ -2959,22 +2959,22 @@ ${
         let out: View[] = [];
         let m: int = 0;
         let i = 0;
-        while (i < ns.length) {
-            while (m < ms.length && ms[m].pos < ns[i].span.start) {
+        for (; i < ns.length; ) {
+            for (; m < ms.length && ms[m].pos < ns[i].span.start; ) {
                 out = out.concat(initView(c, ms[m].nid));
                 m = m + 1;
             }
             const j: int = chainEnd(ns, i);
             if (j > i + 1) {
                 out = out.concat([chainView(c, ns, i, j)]);
-                while (m < ms.length && ms[m].pos < ns[j - 1].span.end) {
+                for (; m < ms.length && ms[m].pos < ns[j - 1].span.end; ) {
                     out = out.concat(initView(c, ms[m].nid));
                     m = m + 1;
                 }
                 i = j;
             } else {
                 let inner: ConstMark[] = [];
-                while (m < ms.length && ms[m].pos < ns[i].span.end) {
+                for (; m < ms.length && ms[m].pos < ns[i].span.end; ) {
                     inner = inner.concat([ms[m]]);
                     m = m + 1;
                 }
@@ -2983,7 +2983,7 @@ ${
                 i = i + 1;
             }
         }
-        while (m < ms.length) {
+        for (; m < ms.length; ) {
             out = out.concat(initView(c, ms[m].nid));
             m = m + 1;
         }
