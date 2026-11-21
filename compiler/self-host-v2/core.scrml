@@ -1248,7 +1248,7 @@ ${
 
     // A program with no documentary attribute and no `<title>` of its own.
     export fn plainHead() -> CoreHead {
-        return { title: HeadTitle.Default, metas: [] }
+        return { title: HeadTitle.Default, metas: [] };
     }
 
     export type DbLoad:struct = { cell: Sym, fn: Sym, val: Sym }
@@ -1275,87 +1275,87 @@ ${
     // (in M2) by `lower`. Qualified variant construction resolves in every
     // position under impl#1; these exist for readability, not as a workaround.
     // -------------------------------------------------------------------------
-    export fn mkSym(id: int, hint: string) -> Sym { return { id: id, hint: hint } }
+    export fn mkSym(id: int, hint: string) -> Sym { return { id: id, hint: hint }; }
 
-    export fn block(stmts: Stmt[]) -> Block { return { stmts: stmts } }
-    export fn noGrants() -> GrantSet { return { replace: false, edits: [] } }
-    export fn replaceGrant() -> GrantSet { return { replace: true, edits: [] } }
+    export fn block(stmts: Stmt[]) -> Block { return { stmts: stmts }; }
+    export fn noGrants() -> GrantSet { return { replace: false, edits: [] }; }
+    export fn replaceGrant() -> GrantSet { return { replace: true, edits: [] }; }
 
-    export fn litInt(v: int) -> Expr { return Expr.Lit(Literal.Int(v)) }
-    export fn litStr(v: string) -> Expr { return Expr.Lit(Literal.Str(v)) }
-    export fn litBool(v: boolean) -> Expr { return Expr.Lit(Literal.Bool(v)) }
-    export fn litVariant(enumSym: Sym, idx: int) -> Expr { return Expr.Lit(Literal.Variant(enumSym, idx)) }
+    export fn litInt(v: int) -> Expr { return Expr.Lit(Literal.Int(v)); }
+    export fn litStr(v: string) -> Expr { return Expr.Lit(Literal.Str(v)); }
+    export fn litBool(v: boolean) -> Expr { return Expr.Lit(Literal.Bool(v)); }
+    export fn litVariant(enumSym: Sym, idx: int) -> Expr { return Expr.Lit(Literal.Variant(enumSym, idx)); }
 
-    export fn fref(owner: Sym, idx: int) -> FieldRef { return { owner: owner, idx: idx } }
+    export fn fref(owner: Sym, idx: int) -> FieldRef { return { owner: owner, idx: idx }; }
 
     // A read of field `idx` of declaration `decl` through `inst`.
     export fn readField(decl: Sym, inst: InstRef, idx: int) -> Expr {
-        return Expr.Read(Place.Cell(decl, inst, [fref(decl, idx)]))
+        return Expr.Read(Place.Cell(decl, inst, [fref(decl, idx)]));
     }
 
     // A read of struct field `idx` (of struct type `owner`) of a local.
     export fn readLocalField(local: Sym, owner: Sym, idx: int) -> Expr {
-        return Expr.Read(Place.LocalPath(local, [fref(owner, idx)]))
+        return Expr.Read(Place.LocalPath(local, [fref(owner, idx)]));
     }
 
-    export fn prim2(op: PrimOp, a: Expr, b: Expr) -> Expr { return Expr.Prim(op, [a, b]) }
-    export fn prim1(op: PrimOp, a: Expr) -> Expr { return Expr.Prim(op, [a]) }
-    export fn call0(callee: Sym) -> Expr { return Expr.Call(callee, []) }
+    export fn prim2(op: PrimOp, a: Expr, b: Expr) -> Expr { return Expr.Prim(op, [a, b]); }
+    export fn prim1(op: PrimOp, a: Expr) -> Expr { return Expr.Prim(op, [a]); }
+    export fn call0(callee: Sym) -> Expr { return Expr.Call(callee, []); }
 
-    export fn el(tag: string, attrs: Attr[], kids: View[]) -> View { return View.El(tag, attrs, kids) }
-    export fn textView(t: string) -> View { return View.Text(t) }
-    export fn dyn(e: Expr) -> View { return View.Dyn(e) }
-    export fn staticAttr(name: string, value: string) -> Attr { return Attr.Static(name, value) }
-    export fn onEvent(event: string, stmts: Stmt[]) -> Attr { return Attr.On(event, block(stmts)) }
-    export fn construct(field: int, value: Expr) -> ConstructAttr { return { field: field, value: value } }
+    export fn el(tag: string, attrs: Attr[], kids: View[]) -> View { return View.El(tag, attrs, kids); }
+    export fn textView(t: string) -> View { return View.Text(t); }
+    export fn dyn(e: Expr) -> View { return View.Dyn(e); }
+    export fn staticAttr(name: string, value: string) -> Attr { return Attr.Static(name, value); }
+    export fn onEvent(event: string, stmts: Stmt[]) -> Attr { return Attr.On(event, block(stmts)); }
+    export fn construct(field: int, value: Expr) -> ConstructAttr { return { field: field, value: value }; }
 
     // -------------------------------------------------------------------------
     // Lookups — pure, derived from the program (never hand-kept lists).
     // -------------------------------------------------------------------------
-    export fn sameSym(a: Sym, b: Sym) -> boolean { return a.id == b.id }
+    export fn sameSym(a: Sym, b: Sym) -> boolean { return a.id == b.id; }
 
     export fn findDecl(p: CoreProgram, s: Sym) -> Decl | not {
         for (const d of p.decls) {
-            if (d.sym.id == s.id) return d
+            if (d.sym.id == s.id) return d;
         }
-        return not
+        return not;
     }
 
     export fn findTypeDef(p: CoreProgram, s: Sym) -> TypeDef | not {
         for (const t of p.types) {
-            if (typeDefSym(t).id == s.id) return t
+            if (typeDefSym(t).id == s.id) return t;
         }
-        return not
+        return not;
     }
 
     export fn typeDefSym(t: TypeDef) -> Sym {
         return match t {
-            .EnumDef(sym: s, variants: vs)  :> s
-            .StructDef(sym: s, fields: fs)  :> s
+            .EnumDef(sym: s, variants: vs)  :> s,
+            .StructDef(sym: s, fields: fs)  :> s,
             .HostDef(sym: s)                :> s
-        }
+        };
     }
 
     export fn findFn(p: CoreProgram, s: Sym) -> Fn | not {
         for (const f of p.fns) {
-            if (f.sym.id == s.id) return f
+            if (f.sym.id == s.id) return f;
         }
-        return not
+        return not;
     }
 
     // s451 (U1a)
     export fn findServerFn(p: CoreProgram, s: Sym) -> ServerFn | not {
         for (const f of p.server) {
-            if (f.sym.id == s.id) return f
+            if (f.sym.id == s.id) return f;
         }
-        return not
+        return not;
     }
 
     export fn findDb(p: CoreProgram, s: Sym) -> Db | not {
         for (const d of p.dbs) {
-            if (d.sym.id == s.id) return d
+            if (d.sym.id == s.id) return d;
         }
-        return not
+        return not;
     }
 
     // The declaration + field index a write capability belongs to.
@@ -1363,24 +1363,24 @@ ${
 
     export fn capOwner(p: CoreProgram, cap: Sym) -> CapOwner | not {
         for (const d of p.decls) {
-            let i = 0
+            let i = 0;
             for (const f of d.fields) {
-                const w: Sym | not = f.wcap
+                const w: Sym | not = f.wcap;
                 if (w is given) {
-                    if (w.id == cap.id) return { decl: d, idx: i }
+                    if (w.id == cap.id) return { decl: d, idx: i };
                 }
-                i = i + 1
+                i = i + 1;
             }
         }
-        return not
+        return not;
     }
 
     // s449 — the declaration and instance reference a surface is reached through.
     export fn validityDecl(v: ValidityOf) -> Sym {
         return match v {
-            .OfField(decl: d, inst: i, idx: x) :> d
+            .OfField(decl: d, inst: i, idx: x) :> d,
             .OfDecl(decl: d, inst: i) :> d
-        }
+        };
     }
     // The instances a renders mounts UNCONDITIONALLY — reached through element
     // children only, never through a conditional arm, an <each> row or slot
@@ -1388,44 +1388,44 @@ ${
     // declaration's record, before anything renders (`inst.kids[k]`); the
     // printer numbers them so, and a gate names them so (InstRef.Kid).
     export fn mountedInstances(views: View[]) -> View[] {
-        let out: View[] = []
-        for (const v of views) { out = out.concat(mountedIn(v)) }
-        return out
+        let out: View[] = [];
+        for (const v of views) { out = out.concat(mountedIn(v)); }
+        return out;
     }
 
     fn mountedIn(v: View) -> View[] {
         return match v {
-            .El(kids: ks) :> mountedInstances(ks)
-            .Instance(decl: d) :> [v]
-            .Text :> []
-            .RawText :> []
-            .Dyn :> []
-            .Cond :> []
-            .Each :> []
-            .Slot :> []
-            .Star :> []
-            .Effect :> []
-            .Run :> []
-            .Init :> []
-            .Request :> []
-            .ResetOn :> []
-            .Errors :> []
-            .Reach :> []
+            .El(kids: ks) :> mountedInstances(ks),
+            .Instance(decl: d) :> [v],
+            .Text :> [],
+            .RawText :> [],
+            .Dyn :> [],
+            .Cond :> [],
+            .Each :> [],
+            .Slot :> [],
+            .Star :> [],
+            .Effect :> [],
+            .Run :> [],
+            .Init :> [],
+            .Request :> [],
+            .ResetOn :> [],
+            .Errors :> [],
+            .Reach :> [],
             .Gather :> []
-        }
+        };
     }
 
     export fn validityInst(v: ValidityOf) -> InstRef {
         return match v {
-            .OfField(decl: d, inst: i, idx: x) :> i
+            .OfField(decl: d, inst: i, idx: x) :> i,
             .OfDecl(decl: d, inst: i) :> i
-        }
+        };
     }
 
     // Does a field's contract grant ANY write? (the wcap invariant, §66.11.1)
     export fn grantsAnyWrite(f: Field) -> boolean {
-        if (f.grants.replace) return true
-        return f.grants.edits.length > 0
+        if (f.grants.replace) return true;
+        return f.grants.edits.length > 0;
     }
 
     // -------------------------------------------------------------------------
@@ -1502,61 +1502,61 @@ ${
     //   - a `scrml:` stdlib file's key path is its `scrml:` path, whatever the project.
     // The hash never sees an absolute path.
     export fn normalPath(path: string) -> string {
-        let p: string = path.replaceAll("\\", "/")
-        while (p.indexOf("//") >= 0) { p = p.replaceAll("//", "/") }
-        while (p.startsWith("./")) { p = p.slice(2) }
-        return p
+        let p: string = path.replaceAll("\\", "/");
+        while (p.indexOf("//") >= 0) { p = p.replaceAll("//", "/"); }
+        while (p.startsWith("./")) { p = p.slice(2); }
+        return p;
     }
 
     // The key path of the front-end file `file` under the source root `keyBase` (above).
     export fn fileKeyPath(keyBase: string, file: string) -> string {
-        const base: string = normalPath(keyBase)
-        if (base == "" || base == "." || file.startsWith("scrml:")) return normalPath(file)
-        return normalPath(base + "/" + file)
+        const base: string = normalPath(keyBase);
+        if (base == "" || base == "." || file.startsWith("scrml:")) return normalPath(file);
+        return normalPath(base + "/" + file);
     }
 
     fn hexDigit(d: int) -> string {
-        return "0123456789abcdef".slice(d, d + 1)
+        return "0123456789abcdef".slice(d, d + 1);
     }
 
     fn hex8(v: int) -> string {
-        let h: int = v
-        let out = ""
-        let k = 0
+        let h: int = v;
+        let out = "";
+        let k = 0;
         while (k < 8) {
-            out = hexDigit(h % 16) + out
-            h = (h - h % 16) / 16
-            k = k + 1
+            out = hexDigit(h % 16) + out;
+            h = (h - h % 16) / 16;
+            k = k + 1;
         }
-        return out
+        return out;
     }
 
     // a XOR b for two bytes (0..255) — the bootstrap dialect has no bitwise operators.
     fn xorByte(a: int, b: int) -> int {
-        let x: int = a
-        let y: int = b
-        let r = 0
-        let bit = 1
-        let k = 0
+        let x: int = a;
+        let y: int = b;
+        let r = 0;
+        let bit = 1;
+        let k = 0;
         while (k < 8) {
-            const xa: int = x % 2
-            const ya: int = y % 2
-            if (xa != ya) r = r + bit
-            x = (x - xa) / 2
-            y = (y - ya) / 2
-            bit = bit * 2
-            k = k + 1
+            const xa: int = x % 2;
+            const ya: int = y % 2;
+            if (xa != ya) r = r + bit;
+            x = (x - xa) / 2;
+            y = (y - ya) / 2;
+            bit = bit * 2;
+            k = k + 1;
         }
-        return r
+        return r;
     }
 
     // One FNV-1a 32-bit round over a byte: h ^= b; h *= 16777619 (mod 2^32). The multiply is
     // split so every intermediate is exact in a double: 16777619 = 2^24 + 403, and
     // (h * 2^24) mod 2^32 = (h mod 2^8) * 2^24.
     fn fnvByte(h: int, b: int) -> int {
-        const low: int = h % 256
-        const x: int = h - low + xorByte(low, b)
-        return ((x % 256) * 16777216 + x * 403) % 4294967296
+        const low: int = h % 256;
+        const x: int = h - low + xorByte(low, b);
+        return ((x % 256) * 16777216 + x * 403) % 4294967296;
     }
 
     // The file tag: 16 lowercase hex digits — two INDEPENDENT 32-bit hashes of the key path's
@@ -1569,28 +1569,28 @@ ${
     // operators. A collision is now rare, not unreachable — analyze.scrml dupDecls still fails
     // closed on one.
     export fn fileTag(path: string) -> string {
-        const p: string = normalPath(path)
-        let a = 2166136261
-        let m = 7
-        let i = 0
+        const p: string = normalPath(path);
+        let a = 2166136261;
+        let m = 7;
+        let i = 0;
         while (i < p.length) {
-            const u: int = p.charCodeAt(i)
-            const lo: int = u % 256
-            const hi: int = (u - lo) / 256
-            a = fnvByte(a, lo)
-            if (hi > 0) a = fnvByte(a, hi)
-            m = (m * 1000003 + u) % 4294967291
-            i = i + 1
+            const u: int = p.charCodeAt(i);
+            const lo: int = u % 256;
+            const hi: int = (u - lo) / 256;
+            a = fnvByte(a, lo);
+            if (hi > 0) a = fnvByte(a, hi);
+            m = (m * 1000003 + u) % 4294967291;
+            i = i + 1;
         }
-        return hex8(a) + hex8(m)
+        return hex8(a) + hex8(m);
     }
 
     // The CSS scope key of the component `name` declared at the KEY PATH `path` (§9.1 DQ-7 as
     // re-ruled S474): its root's `data-scrml` value and its sheet's `@scope ([data-scrml="…"])`.
-    export fn scopeKey(path: string, name: string) -> string { return name + "~" + fileTag(path) }
+    export fn scopeKey(path: string, name: string) -> string { return name + "~" + fileTag(path); }
 
     // The key of the declaration `name` in the front-end file `file`, under the source root `keyBase`.
-    export fn declScopeKey(keyBase: string, file: string, name: string) -> string { return scopeKey(fileKeyPath(keyBase, file), name) }
+    export fn declScopeKey(keyBase: string, file: string, name: string) -> string { return scopeKey(fileKeyPath(keyBase, file), name); }
 
     // One file's stylesheet. `reset` = the §65.3.4 built-in reset is on (opt out:
     // `<program reset="none">`). `global` = program-level `#{}` rules (§9.1, the

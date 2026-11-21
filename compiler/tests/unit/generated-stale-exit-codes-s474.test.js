@@ -381,7 +381,7 @@ describe("gen-bootstrap-severity.ts --check — stale is 4, a crash is not (S474
   // S474 r1 (review F1): severity.test.js grades the ON-DISK table, so a broken render() would land green
   // and only break `slices` on the bot's regen PR (auto-merge never fires; every block stops updating).
   test("GENERATOR drift that changes an answer (Info rendered as Warning) → 1, never 4", () => {
-    const r = check(sevMirror({ mutate: (s) => s.replace('Severity.${sev}`)', 'Severity.${sev === "Info" ? "Warning" : sev}`)') }));
+    const r = check(sevMirror({ mutate: (s) => s.replace('Severity.${sev},`)', 'Severity.${sev === "Info" ? "Warning" : sev},`)') }));
     expect(r.out).toContain("DIFFERENT ANSWERS");
     expect(r.rc).toBe(1);
   });

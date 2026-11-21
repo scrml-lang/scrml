@@ -61,10 +61,10 @@
 // Any construct the scan still misses fails SAFE: it keeps its generic codes.
 // =============================================================================
 ${
-    import { Diag, ASpan, newDiag, mkSpan } from "./ast.scrml"
-    import { Severity } from "./severity.scrml"
-    import { lex } from "./lex.scrml"
-    import { TC, PTok, toPToks } from "./parse.scrml"
+    import { Diag, ASpan, newDiag, mkSpan } from "./ast.scrml";
+    import { Severity } from "./severity.scrml";
+    import { lex } from "./lex.scrml";
+    import { TC, PTok, toPToks } from "./parse.scrml";
 
     export type Refusal:struct = {
         construct: string, section: string, code: string,
@@ -75,19 +75,19 @@ ${
 
     // A row with the defaults (`glue` none, `on` the cascade codes, line-scoped).
     fn row(construct: string, section: string, code: string, pattern: string[], hint: string) -> Refusal {
-        return { construct: construct, section: section, code: code, pattern: pattern, glue: "", on: [], near: false, hint: hint }
+        return { construct: construct, section: section, code: code, pattern: pattern, glue: "", on: [], near: false, hint: hint };
     }
     fn rowG(construct: string, section: string, code: string, pattern: string[], glue: string, hint: string) -> Refusal {
-        return { construct: construct, section: section, code: code, pattern: pattern, glue: glue, on: [], near: false, hint: hint }
+        return { construct: construct, section: section, code: code, pattern: pattern, glue: glue, on: [], near: false, hint: hint };
     }
     fn rowOn(construct: string, section: string, code: string, pattern: string[], on: string[], near: boolean, hint: string) -> Refusal {
-        return { construct: construct, section: section, code: code, pattern: pattern, glue: "", on: on, near: near, hint: hint }
+        return { construct: construct, section: section, code: code, pattern: pattern, glue: "", on: on, near: near, hint: hint };
     }
 
     // THE TABLE. Order matters: at a token, the FIRST row whose pattern matches
     // is the one tried (`for await` before `await`, `use foreign:` before `use`).
     export fn refusalTable() -> Refusal[] {
-        const U: string = "E-BOOTSTRAP-UNSUPPORTED"
+        const U: string = "E-BOOTSTRAP-UNSUPPORTED";
         return [
             // ---- not scrml: the SPEC's own code (§7.2.1 the E-*-NOT-IN-SCRML family) ----
             // s478-boot-semicolon-residue: the block-opening spellings first — a statement-start `{`
@@ -192,7 +192,7 @@ ${
             rowOn("new X(…)", "App. D", U, ["new", "$w"], ["E-SCOPE-001"], true, "a host constructor call is not in the bootstrap"),
             rowOn("field type negation !T", "§14.3", U, [":", "!"], ["E-PARSE-TYPE"], false, ""),
             rowOn("field type conjunction (!A && !B)", "§14.3", U, [":", "(", "!"], ["E-PARSE-TYPE"], false, ""),
-        ]
+        ];
     }
 
     // The codes a firing replaces file-wide: the parse-structure, unknown-name
@@ -201,126 +201,126 @@ ${
         return ["E-PARSE-ITEM", "E-PARSE-TRAILING", "E-PARSE-EXPECTED", "E-PARSE-TAG", "E-PARSE-TYPE", "E-PARSE-ARM",
                 "E-PARSE-PROGRAM", "E-PARSE-EXPR", "E-PARSE-UNCLOSED", "E-PARSE-CLOSER", "E-PARSE-DECL-BODY",
                 "E-PARSE-OBJECT", "E-PARSE-LOCAL", "E-PARSE-IMPORT", "E-SCOPE-001", "E-TYPE-UNKNOWN",
-                "E-TYPE-STRUCT-CONTEXT"].indexOf(c) >= 0
+                "E-TYPE-STRUCT-CONTEXT"].indexOf(c) >= 0;
     }
 
     // The codes a row accepts as its symptom when it names none: the cascade
     // codes, and the line-local statement codes a misread construct produces.
     fn symptomCode(c: string) -> boolean {
-        if (cascadeCode(c)) return true
+        if (cascadeCode(c)) return true;
         // s478: E-UNQUOTED-DISPLAY-TEXT — a construct at a `<program>` body top that the
         // statement reader cannot parse is read as undeclared display text (parse.scrml
         // bodyTopRun); a row naming the construct on that line is the real report
         return ["E-STMT-MISSING-SEMICOLON", "E-MATCH-ARM-SEPARATOR", "E-STMT-NO-EFFECT", "E-ASSIGN-POSITION",
                 "E-FOR-UNPARENTHESIZED-HEAD", "E-DECL-OPENER-EXPR-UNPARENTHESIZED", "E-STATE-UNDECLARED",
-                "E-UNQUOTED-DISPLAY-TEXT"].indexOf(c) >= 0
+                "E-UNQUOTED-DISPLAY-TEXT"].indexOf(c) >= 0;
     }
 
     // ---- the matcher ----------------------------------------------------------
-    fn refTplPiece(t: PTok) -> boolean { return t.cls == TC.TChunk || t.cls == TC.TIStart || t.cls == TC.TIEnd }
+    fn refTplPiece(t: PTok) -> boolean { return t.cls == TC.TChunk || t.cls == TC.TIStart || t.cls == TC.TIEnd; }
 
     fn oneMatches(el: string, t: PTok) -> boolean {
-        if (t.cls == TC.End) return false
-        if (el == "*") return true
-        if (el == "$w") return t.cls == TC.Ident || t.cls == TC.Keyword
-        if (el == "$v") return t.cls == TC.Variant
-        if (el == "$n") return t.cls == TC.Num
-        if (el == "$s") return t.cls == TC.Str
-        if (el == "@") return t.cls == TC.At
-        if (t.cls == TC.Str || refTplPiece(t)) return false
-        return t.text == el
+        if (t.cls == TC.End) return false;
+        if (el == "*") return true;
+        if (el == "$w") return t.cls == TC.Ident || t.cls == TC.Keyword;
+        if (el == "$v") return t.cls == TC.Variant;
+        if (el == "$n") return t.cls == TC.Num;
+        if (el == "$s") return t.cls == TC.Str;
+        if (el == "@") return t.cls == TC.At;
+        if (t.cls == TC.Str || refTplPiece(t)) return false;
+        return t.text == el;
     }
 
     fn elemMatches(el: string, t: PTok) -> boolean {
-        if (t.cls == TC.End) return false
-        if (el.length > 1 && el.substring(0, 1) == "!") return !elemMatches(el.substring(1), t)
+        if (t.cls == TC.End) return false;
+        if (el.length > 1 && el.substring(0, 1) == "!") return !elemMatches(el.substring(1), t);
         for (const a of el.split("|")) {
-            if (oneMatches(a, t)) return true
+            if (oneMatches(a, t)) return true;
         }
-        return false
+        return false;
     }
 
     // Where pattern `p` from element `k` matches the tokens from `i`: the index
     // just past the last matched token, or -1.
     fn refMatchFrom(ts: PTok[], i: int, p: string[], k: int, line: int) -> int {
-        if (k >= p.length) return i
-        if (i >= ts.length) return -1
+        if (k >= p.length) return i;
+        if (i >= ts.length) return -1;
         if (p[k] == "...") {
-            let j: int = i
+            let j: int = i;
             while (j < ts.length) {
-                const r: int = refMatchFrom(ts, j, p, k + 1, line)
-                if (r >= 0) return r
-                const t: PTok = ts[j]
-                if (t.cls == TC.End || t.line != line || t.text == "{" || t.text == ";") return -1
-                j = j + 1
+                const r: int = refMatchFrom(ts, j, p, k + 1, line);
+                if (r >= 0) return r;
+                const t: PTok = ts[j];
+                if (t.cls == TC.End || t.line != line || t.text == "{" || t.text == ";") return -1;
+                j = j + 1;
             }
-            return -1
+            return -1;
         }
-        if (!elemMatches(p[k], ts[i])) return -1
-        return refMatchFrom(ts, i + 1, p, k + 1, ts[i].line)
+        if (!elemMatches(p[k], ts[i])) return -1;
+        return refMatchFrom(ts, i + 1, p, k + 1, ts[i].line);
     }
 
     fn glueHolds(ts: PTok[], i: int, end: int, glue: string) -> boolean {
         if (glue == "tight") {
-            let j: int = i
+            let j: int = i;
             while (j + 1 < end) {
-                if (ts[j].end != ts[j + 1].start) return false
-                j = j + 1
+                if (ts[j].end != ts[j + 1].start) return false;
+                j = j + 1;
             }
-            return true
+            return true;
         }
-        if (glue == "spaced") return end - i < 2 || ts[i].end != ts[i + 1].start
-        if (glue == "lead") return i == 0 || ts[i - 1].line != ts[i].line
-        return true
+        if (glue == "spaced") return end - i < 2 || ts[i].end != ts[i + 1].start;
+        if (glue == "lead") return i == 0 || ts[i - 1].line != ts[i].line;
+        return true;
     }
 
     // ---- lines ------------------------------------------------------------------
     fn refLineStarts(src: string) -> int[] {
-        let out: int[] = [0]
-        let i: int = src.indexOf("\n")
+        let out: int[] = [0];
+        let i: int = src.indexOf("\n");
         while (i >= 0) {
-            out = out.concat([i + 1])
-            i = src.indexOf("\n", i + 1)
+            out = out.concat([i + 1]);
+            i = src.indexOf("\n", i + 1);
         }
-        return out
+        return out;
     }
 
     // The 1-based line holding offset `at`.
     fn refLineOf(starts: int[], at: int) -> int {
-        let lo: int = 0
-        let hi: int = starts.length - 1
+        let lo: int = 0;
+        let hi: int = starts.length - 1;
         while (lo < hi) {
-            const mid: int = lo + Math.floor((hi - lo + 1) / 2)
+            const mid: int = lo + Math.floor((hi - lo + 1) / 2);
             if (starts[mid] <= at) {
-                lo = mid
+                lo = mid;
             } else {
-                hi = mid - 1
+                hi = mid - 1;
             }
         }
-        return lo + 1
+        return lo + 1;
     }
 
     // One firing: the row, the construct's span, and its lines.
     type Firing:struct = { r: Refusal, start: int, end: int, first: int, last: int }
 
-    fn refIsError(d: Diag) -> boolean { return d.severity == Severity.Error }
+    fn refIsError(d: Diag) -> boolean { return d.severity == Severity.Error; }
 
     // Is there a symptom of row `r`'s firing among the file's diagnostics?
     fn hasSymptom(r: Refusal, start: int, end: int, first: int, last: int, ds: Diag[], starts: int[]) -> boolean {
         for (const d of ds) {
             if (refIsError(d)) {
-                const known: boolean = r.on.length == 0 ? symptomCode(d.code) : r.on.indexOf(d.code) >= 0
+                const known: boolean = r.on.length == 0 ? symptomCode(d.code) : r.on.indexOf(d.code) >= 0;
                 if (known) {
                     if (r.near) {
-                        if (d.span.start >= start && d.span.start <= end) return true
+                        if (d.span.start >= start && d.span.start <= end) return true;
                     } else {
-                        const l: int = refLineOf(starts, d.span.start)
-                        if (l >= first && l <= last) return true
+                        const l: int = refLineOf(starts, d.span.start);
+                        if (l >= first && l <= last) return true;
                     }
                 }
             }
         }
-        return false
+        return false;
     }
 
     // The firings in one file whose front-end diagnostics are `ds`.
@@ -328,102 +328,102 @@ ${
         // A closing tag's `</` would let the lexer, which reads the whole file as code, take the
         // rest of its line for a regex literal (`/p> …`) and hide a construct written after it:
         // `</` is scanned as `<<` (same length — every span, so every line, is unchanged).
-        const ts: PTok[] = toPToks(lex(src.split("</").join("<<")))
-        const starts: int[] = refLineStarts(src)
-        const table: Refusal[] = refusalTable()
-        let out: Firing[] = []
-        let i: int = 0
+        const ts: PTok[] = toPToks(lex(src.split("</").join("<<")));
+        const starts: int[] = refLineStarts(src);
+        const table: Refusal[] = refusalTable();
+        let out: Firing[] = [];
+        let i: int = 0;
         while (i < ts.length) {
-            let next: int = i + 1
-            let done: boolean = false
+            let next: int = i + 1;
+            let done: boolean = false;
             for (const r of table) {
                 if (!done) {
-                    const end: int = refMatchFrom(ts, i, r.pattern, 0, ts[i].line)
+                    const end: int = refMatchFrom(ts, i, r.pattern, 0, ts[i].line);
                     if (end > i && glueHolds(ts, i, end, r.glue) && r.code == "PASS") {
                         // a pass-through row: the tokens are not this table's construct — skip them
-                        next = end
-                        done = true
+                        next = end;
+                        done = true;
                     } else if (end > i && glueHolds(ts, i, end, r.glue)) {
-                        const first: int = ts[i].line
-                        const last: int = ts[end - 1].line
-                        const s: int = ts[i].start
-                        const e: int = ts[end - 1].end
+                        const first: int = ts[i].line;
+                        const last: int = ts[end - 1].line;
+                        const s: int = ts[i].start;
+                        const e: int = ts[end - 1].end;
                         if (hasSymptom(r, s, e, first, last, ds, starts)) {
                             // a construct that opens a block (`try {`, `transitions {`) owns the
                             // block's lines: its body is misread with it
-                            const blockLast: int = ts[end - 1].text == "{" ? closerLine(ts, end - 1) : last
-                            out = out.concat([{ r: r, start: s, end: e, first: first, last: blockLast }])
-                            next = end
-                            done = true
+                            const blockLast: int = ts[end - 1].text == "{" ? closerLine(ts, end - 1) : last;
+                            out = out.concat([{ r: r, start: s, end: e, first: first, last: blockLast }]);
+                            next = end;
+                            done = true;
                         }
                     }
                 }
             }
-            i = next
+            i = next;
         }
-        return out
+        return out;
     }
 
     // The line of the `}` that closes the `{` at `k` (the last token's line when it is never closed).
     fn closerLine(ts: PTok[], k: int) -> int {
-        let depth: int = 0
-        let j: int = k
+        let depth: int = 0;
+        let j: int = k;
         while (j < ts.length) {
-            const t: PTok = ts[j]
-            if (t.cls == TC.End) return ts[j].line
+            const t: PTok = ts[j];
+            if (t.cls == TC.End) return ts[j].line;
             if (!refTplPiece(t) && t.cls != TC.Str) {
-                if (t.text == "{") depth = depth + 1
+                if (t.text == "{") depth = depth + 1;
                 if (t.text == "}") {
-                    depth = depth - 1
-                    if (depth == 0) return t.line
+                    depth = depth - 1;
+                    if (depth == 0) return t.line;
                 }
             }
-            j = j + 1
+            j = j + 1;
         }
-        return ts[ts.length - 1].line
+        return ts[ts.length - 1].line;
     }
 
     fn refusalDiag(f: Firing, path: string, src: string) -> Diag {
-        const r: Refusal = f.r
+        const r: Refusal = f.r;
         if (r.code == "E-BOOTSTRAP-UNSUPPORTED") {
-            const tail: string = r.hint == "" ? "" : " — " + r.hint
-            return newDiag(r.code, "`" + r.construct + "` (" + r.section + ") is not in the bootstrap yet; it is refused here by name rather than misread" + tail, path, mkSpan(f.start, f.end))
+            const tail: string = r.hint == "" ? "" : " — " + r.hint;
+            return newDiag(r.code, "`" + r.construct + "` (" + r.section + ") is not in the bootstrap yet; it is refused here by name rather than misread" + tail, path, mkSpan(f.start, f.end));
         }
-        return newDiag(r.code, r.hint, path, mkSpan(f.start, f.end))
+        return newDiag(r.code, r.hint, path, mkSpan(f.start, f.end));
     }
 
     // Is `d` part of the cascade a firing in its file replaces?
     fn refReplaced(d: Diag, fs: Firing[], starts: int[]) -> boolean {
-        if (!refIsError(d)) return false
-        if (cascadeCode(d.code)) return true
-        const l: int = refLineOf(starts, d.span.start)
+        if (!refIsError(d)) return false;
+        if (cascadeCode(d.code)) return true;
+        const l: int = refLineOf(starts, d.span.start);
         for (const f of fs) {
-            if (l >= f.first && l <= f.last) return true
+            if (l >= f.first && l <= f.last) return true;
         }
-        return false
+        return false;
     }
 
     fn refKeep(ds: Diag[], path: string, fs: Firing[], starts: int[]) -> Diag[] {
-        let out: Diag[] = []
+        let out: Diag[] = [];
         for (const d of ds) {
-            if (d.file != path || !refReplaced(d, fs, starts)) out = out.concat([d])
+            if (d.file != path || !refReplaced(d, fs, starts)) out = out.concat([d]);
         }
-        return out
+        return out;
     }
 
     fn refInFile(ds: Diag[], path: string) -> Diag[] {
-        let out: Diag[] = []
+        let out: Diag[] = [];
         for (const d of ds) {
-            if (d.file == path) out = out.concat([d])
+            if (d.file == path) out = out.concat([d]);
         }
-        return out
+        return out;
     }
 
     fn refAnyError(ds: Diag[]) -> boolean {
         for (const d of ds) {
-            if (refIsError(d)) return true
+            if (refIsError(d)) return true;
         }
-        return false
+        return false;
     }
 
     // THE ENTRY (slice-m2/lowered.js `frontEnd`): the front end's parse-phase
@@ -431,21 +431,21 @@ ${
     // failed reported by name and its cascade dropped. The named refusals lead
     // the later list.
     export fn relabelRefusals(files: SrcFile[], parse: Diag[], later: Diag[]) -> Relabeled {
-        let p: Diag[] = parse
-        let l: Diag[] = later
-        let named: Diag[] = []
+        let p: Diag[] = parse;
+        let l: Diag[] = later;
+        let named: Diag[] = [];
         for (const f of files) {
-            const mine: Diag[] = refInFile(p, f.path).concat(refInFile(l, f.path))
+            const mine: Diag[] = refInFile(p, f.path).concat(refInFile(l, f.path));
             if (refAnyError(mine)) {
-                const fs: Firing[] = firingsIn(f.src, mine)
+                const fs: Firing[] = firingsIn(f.src, mine);
                 if (fs.length > 0) {
-                    const starts: int[] = refLineStarts(f.src)
-                    for (const x of fs) { named = named.concat([refusalDiag(x, f.path, f.src)]) }
-                    p = refKeep(p, f.path, fs, starts)
-                    l = refKeep(l, f.path, fs, starts)
+                    const starts: int[] = refLineStarts(f.src);
+                    for (const x of fs) { named = named.concat([refusalDiag(x, f.path, f.src)]); }
+                    p = refKeep(p, f.path, fs, starts);
+                    l = refKeep(l, f.path, fs, starts);
                 }
             }
         }
-        return { parse: p, later: named.concat(l) }
+        return { parse: p, later: named.concat(l) };
     }
 }

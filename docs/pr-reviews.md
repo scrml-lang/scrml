@@ -2919,3 +2919,11 @@ Each `probe=` names the reviewed head of every round and the report path. Where 
 <!-- @review pr=2029 verdict=clean by=S480-bryan date=2026-11-20 probe=PA-direct review CLEAN: one reserved-name list (reservedElementName) for program cells, theme decl opener fix, §19.9.1 stored driver text sentence; 0 newly-rejecting, 7 latent legacy samples (page/errors/theme) -->
 <!-- @review pr=2030 verdict=carve-out by=S480-bryan date=2026-11-20 probe=bot post-merge regen of generated blocks -->
 <!-- @review pr=2031 verdict=carve-out by=S480-bryan date=2026-11-20 probe=bot post-merge regen of generated blocks -->
+<!-- @review pr=2025 verdict=finding by=S481-bryan date=2026-11-20 probe=S239 chain on the CLI artifact path (compileSource → runBootstrapArtifact): r0 BLOCK → r1 → r1rev BLOCK → r2 → r2rev FIX → r3 → r3rev FIX (seed guard failed open 3 rounds) → r4 commutation invariant (seedHazard) → r4rev LAND-W-F/U at 6c0b28485, 0 introduced findings over 101 prior probes + new attacks; residue filed §S481-records (INTERIM seed refusals: validator heads, object-literal keys, ^{}; guard comment LOW; pre-existing init/render-order divergences P1–P3 as owner questions); probes ~/.cache/scrml/review/s480-2025-r4rev/scratch/p/ -->
+<!-- @review pr=2032 verdict=clean by=S481-bryan date=2026-11-20 probe=PA-direct review CLEAN (S480): compile-time fixed flag on rt.classOn keeps a static class a class: toggle names; impl#1 residue g-impl1-class-directive-strips-static-class-s480 -->
+<!-- @review pr=2033 verdict=carve-out by=S481-bryan date=2026-11-20 probe=bot post-merge regen of generated blocks -->
+<!-- @review pr=2034 verdict=carve-out by=S481-bryan date=2026-11-20 probe=wrap records PR: hand-off, SPEC text, gaps, markers, changelog, one conformance case fixture; no compiler/runtime code path -->
+<!-- @review pr=2035 verdict=carve-out by=S481-bryan date=2026-11-20 probe=bot post-merge regen of generated blocks -->
+<!-- @review pr=2036 verdict=carve-out by=S481-bryan date=2026-11-20 probe=hand-off addendum only (hand-off.md) -->
+<!-- @review pr=2037 verdict=carve-out by=S481-bryan date=2026-11-20 probe=bot post-merge regen of generated blocks -->
+<!-- @review pr=2038 verdict=carve-out by=S481-bryan date=2026-11-20 probe=bot post-merge regen of generated blocks -->
