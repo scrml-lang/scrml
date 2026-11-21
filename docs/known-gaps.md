@@ -1575,6 +1575,13 @@ PA-verified on 91c1c9ca4: `~/.cache/scrml/review/s470-l1e/F4/nested-match-in-arm
 
 PA-verified on 07ebed34b (`~/.cache/scrml/review/s470-aw3/d/tpl2.scrml`): exit 0, emitted `for (let i = 0; $; i++) {`. Without a global `$` this throws a ReferenceError (fails closed). With jQuery, or any page-level `$`, the test is truthy, so `` `${@pw}` == "secret" ``-style gates pass for every input. A lost quote turns a string into an identifier read, so it throws. The `s470-action-body-await` lane refuses a C-style head naming a waiting function outside `when`, so the server-call instance is closed. The emitter defect itself is open everywhere. Fix direction: read the head with the expression reader (the parsed tree), not re-tokenised text.
 
+> **S481 (s481-selfhost-while), more evidence. The lost quote does not always throw.** Each case is measured on impl#1 with `for (; c; )`:
+> - A digit string becomes a NUMBER, with no diagnostic. `s.charAt(i) >= "0" && s.charAt(i) <= "9"` emits `>= 0 && … <= 9`, which is a numeric comparison. A silent miscompile.
+> - An empty string `""` vanishes, giving invalid JS: `== ""` emits `===;`, reported as E-CODEGEN-INVALID-LOGIC.
+> - `"x"` becomes the identifier `x`.
+>
+> The `scrml fix` loop rules therefore never write a counted head that holds a literal. They write the top-check form `for (;;) { if (!(cond)) { break; } … }` instead (fix-loops.js; `g-selfhost-while-migration-blocked-s481`).
+
 <!-- @gap id=g-when-changes-stale-response-s470 sev=MED status=narrowed narrowed-by=s470-when-changes-latest-wins locus=compiler/runtime/runtime-template.js(_scrml_when_changes ~5417 — no sequence / stale-response guard on an async body) prov=review:S470-#1554-round-1(M1, bin/race.mjs);empirical:S470(~/.cache/scrml/review/s470-aw2/race/whenhelper.scrml) -->
 ### g-when-changes-stale-response-s470 — (security, race) an async `when … changes` body has no stale-response guard: `@pw` set right then wrong in quick succession, with the right password's round trip slower, ends on "LOGGED IN" while `@pw` is "wrong" — `NEW S470; MED; NARROWED S470 (#1560: the body's own awaits; a helper that writes the cell itself remains)`
 
@@ -33929,10 +33936,18 @@ Probes `e01-render-model.scrml`, `e02-bodylevel-derived-css.scrml`, `e03-bodylev
 
 ## §S481-trackm2-selfhost — Track M step 2 residue (2026-11-20; change `docs/changes/s481-trackm2-selfhost/`; ruling user-voice-scrml.md S480 "⭐ RULED — bootstrap census build order" item 1. Measured on the migrated self-host sources with `scrml-boot compile` per file. FILED, not fixed: this lane does not touch the bootstrap parser.)
 
-<!-- @gap id=g-selfhost-while-migration-blocked-s481 sev=MED status=open locus=compiler/self-host-v2/*.scrml(457 `while` loops)+compiler/src/commands/fix-loops.js(output head `for (cond)`) prov=lane:s481-trackm2-selfhost;ruling:user-voice-scrml.md-S480-census-recs;spec:§49.4.1("whose fix-it is `for (cond) { … }`") -->
-### g-selfhost-while-migration-blocked-s481 — the self-host sources keep their `while` loops: `scrml fix`'s `loop-while` writes `for (cond)`, which impl#1 (the compiler that builds the bootstrap bundle) refuses — `NEW S481 (s481-trackm2-selfhost); MED; open — owner question`
+<!-- @gap id=g-selfhost-while-migration-blocked-s481 sev=MED status=partial-impl locus=compiler/self-host-v2/*.scrml(658 loops in INTERIM spelling; 4 braceless `while` in parse.scrml)+compiler/src/commands/fix-loops.js(`interim` / `--loop-interim`) prov=lane:s481-trackm2-selfhost;lane:s481-selfhost-while;decision:PA-S481-interim-loop-spelling;ruling:user-voice-scrml.md-S480-census-recs;spec:§49.4.1("whose fix-it is `for (cond) { … }`") -->
+### g-selfhost-while-migration-blocked-s481 — the self-host sources keep their `while` loops: `scrml fix`'s `loop-while` writes `for (cond)`, which impl#1 (the compiler that builds the bootstrap bundle) refuses — `NEW S481 (s481-trackm2-selfhost); MED; partial (s481-selfhost-while): INTERIM spelling applied`
 
 E-LOOP-WHILE-RETIRED is now the bootstrap's first own error in 18 of 28 self-host files (457 reports). impl#1 reports E-IMPL1-RULED-FORM-UNSUPPORTED on `for (cond) { … }` (§49.8: it "has no condition head"). impl#1 does compile the counted head `for (; cond; )` to the same JS as `while (cond)`, and the bootstrap accepts it, so a rule that wrote `for (; cond; )` would unblock the self-host today. That is not §49.4.1's fix-it spelling; owner question in PR (s481-trackm2-selfhost).
+
+> **PARTIAL S481 (s481-selfhost-while), INTERIM spelling applied** (PA decision S481, a tool choice, not a language ruling). `scrml fix --loop-interim` writes `for (; cond; )` for a `while`, and `for (;;) { S if (!(c)) { break; } }` for a `do … while`. Measured: impl#1 drops the quotes of a string literal in any C-style `for` head (`g-impl1-c-for-head-template-and-string-literals-mangled-s470`). So a `while` whose head holds a string, template or regex is spelled with the test at the top of the body instead: `for (;;) { if (!(cond)) { break; } … }`. A `continue` re-enters at the test in both spellings.
+>
+> Applied to the self-host: 658 loops in 21 files, 584 counted and 74 top-check. The bootstrap's E-LOOP-WHILE-RETIRED count drops from 457 to 4. The 4 left are braceless `while (…) stmt` loops in `parse.scrml` (lines 7271, 7276, 7283, 10297); the rule reports them and does not rewrite them.
+>
+> **Still open:**
+> - **The rename to the ruled fix-it `for (cond)`** (§49.4.1), once the bootstrap builds its own bundle. It is mechanical: `for (; c; )` → `for (c)`, and the top-check form → `for (c) { … }`. The same verify applies.
+> - **`do … while` whose body holds a `continue`.** It is still refused. This is INTERIM, not PERMANENT. The capable form is a flag-variable rewrite: the condition is stored in a flag at the body's end and before each `continue`, and the loop is `for (; again; )`. No boolean typing is needed. There are 0 such loops in the self-host.
 
 <!-- @gap id=g-boot-keyword-named-member-s481 sev=MED status=open locus=compiler/self-host-v2/parse.scrml(member access after `.`; identifier `server`) prov=lane:s481-trackm2-selfhost;spec:§7.2.2 -->
 ### g-boot-keyword-named-member-s481 — the bootstrap parser ends a statement at a keyword-named member (`e.fn.id`, `t.server.plan`, `d.renders`) or the identifier `server`, and reports E-STMT-MISSING-SEMICOLON on a line that already has its `;` — `NEW S481 (s481-trackm2-selfhost); MED; open`
