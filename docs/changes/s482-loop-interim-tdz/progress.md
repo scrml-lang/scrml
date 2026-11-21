@@ -21,4 +21,16 @@ Branch `s482-loop-interim-tdz` from origin/main 1107f35d5 (#2046 merged).
       All 13 counted heads, no literals.
 - [x] bundle base (1107f35d5) vs head: 30 chunks, 3 text-differ (parse/lower/print — only the 17
       loops), canonical AST 0 diffs; WhileStatement 17 -> 0
-- [ ] bootstrap-conformance compare, final gates, PR
+- [x] bootstrap self-host (scrml-boot compile, every self-host-v2/*.scrml): E-LOOP-WHILE-RETIRED 17 -> 0
+      (lower 9, parse 4, print 4). Loop bodies are now analysed: E-BOOTSTRAP-UNSUPPORTED +22,
+      E-WRITE-NOT-GRANTED +23, E-STRING-METHOD-UNKNOWN +2 (the #2046 effect).
+
+## Final gates (head cf027dcc0)
+- [x] pretest; bootstrap-conformance --json: base 1107f35d5 and head identical per case
+      (bucket+reason+emitted, 1956/1956); PASS 770, FAIL 3, NOT-TWINNED 628, UNSUPPORTED 555, CRASH 0
+- [x] impl#1 compile of all 1956 conformance cases, base vs head: 1955 byte-identical; 1 differs only
+      in the per-build `data-scrml-build` id (path-derived)
+- [x] s34-census PASS, types-gate OK (182 unchanged), snippet-gate 0 fail, claim-gate 0 fail,
+      corpus-compile-floor PASS, gen-md-shim current
+- [x] corpus (plan-only, 5401 .scrml files): 130 sites / 11 top-check / 7 notes on both tools — 0 newly refused
+- [ ] push, PR
