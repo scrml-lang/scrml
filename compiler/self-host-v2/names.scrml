@@ -40,176 +40,176 @@ ${
     // A set of distinct texts, each with a value (here: its position in a tape).
     type SIdx:struct = { ks: string[][], vs: int[][] }
 
-    fn sixEmpty() -> SIdx { return { ks: [], vs: [] } }
+    fn sixEmpty() -> SIdx { return { ks: [], vs: [] }; }
 
     // `ix` with `k` (not present) → `v`.
     fn sixAdd(ix: SIdx, k: string, v: int) -> SIdx {
-        let ck: string[] = [k]
-        let cv: int[] = [v]
-        let n: int = ix.ks.length
+        let ck: string[] = [k];
+        let cv: int[] = [v];
+        let n: int = ix.ks.length;
         while (n > 0 && ix.ks[n - 1].length == ck.length) {
-            const m: SIdx = sixMerge(ix.ks[n - 1], ix.vs[n - 1], ck, cv)
-            ck = m.ks[0]
-            cv = m.vs[0]
-            n = n - 1
+            const m: SIdx = sixMerge(ix.ks[n - 1], ix.vs[n - 1], ck, cv);
+            ck = m.ks[0];
+            cv = m.vs[0];
+            n = n - 1;
         }
-        return { ks: ix.ks.slice(0, n).concat([ck]), vs: ix.vs.slice(0, n).concat([cv]) }
+        return { ks: ix.ks.slice(0, n).concat([ck]), vs: ix.vs.slice(0, n).concat([cv]) };
     }
 
     // Two sorted levels merged into one (returned as the one level of an SIdx), into
     // fresh tapes written in place.
     fn sixMerge(ak: string[], av: int[], bk: string[], bv: int[]) -> SIdx {
-        const n: int = ak.length + bk.length
-        let mk: string[] = blanks(n)
-        let mv: int[] = minusOnes(n)
-        let i: int = 0
-        let j: int = 0
-        let o: int = 0
+        const n: int = ak.length + bk.length;
+        let mk: string[] = blanks(n);
+        let mv: int[] = minusOnes(n);
+        let i: int = 0;
+        let j: int = 0;
+        let o: int = 0;
         while (o < n) {
             if (j >= bk.length || (i < ak.length && ak[i] < bk[j])) {
-                mk[o] = ak[i]
-                mv[o] = av[i]
-                i = i + 1
+                mk[o] = ak[i];
+                mv[o] = av[i];
+                i = i + 1;
             } else {
-                mk[o] = bk[j]
-                mv[o] = bv[j]
-                j = j + 1
+                mk[o] = bk[j];
+                mv[o] = bv[j];
+                j = j + 1;
             }
-            o = o + 1
+            o = o + 1;
         }
-        return { ks: [mk], vs: [mv] }
+        return { ks: [mk], vs: [mv] };
     }
 
     // The value of `k` in `ix`, else -1.
     fn sixFind(ix: SIdx, k: string) -> int {
-        let l: int = 0
+        let l: int = 0;
         while (l < ix.ks.length) {
-            const ks: string[] = ix.ks[l]
-            let lo: int = 0
-            let hi: int = ks.length
+            const ks: string[] = ix.ks[l];
+            let lo: int = 0;
+            let hi: int = ks.length;
             while (lo < hi) {
-                const mid: int = Math.floor((lo + hi) / 2)
-                const x: string = ks[mid]
-                if (x == k) return ix.vs[l][mid]
+                const mid: int = Math.floor((lo + hi) / 2);
+                const x: string = ks[mid];
+                if (x == k) return ix.vs[l][mid];
                 if (x < k) {
-                    lo = mid + 1
+                    lo = mid + 1;
                 } else {
-                    hi = mid
+                    hi = mid;
                 }
             }
-            l = l + 1
+            l = l + 1;
         }
-        return -1
+        return -1;
     }
 
     // Fresh tapes of `n` entries (by doubling, not one concat per entry).
     fn blanks(n: int) -> string[] {
-        if (n <= 0) return []
-        let out: string[] = [""]
-        while (out.length + out.length <= n) { out = out.concat(out) }
-        return out.concat(blanks(n - out.length))
+        if (n <= 0) return [];
+        let out: string[] = [""];
+        while (out.length + out.length <= n) { out = out.concat(out); }
+        return out.concat(blanks(n - out.length));
     }
 
     fn minusOnes(n: int) -> int[] {
-        if (n <= 0) return []
-        let out: int[] = [-1]
-        while (out.length + out.length <= n) { out = out.concat(out) }
-        return out.concat(minusOnes(n - out.length))
+        if (n <= 0) return [];
+        let out: int[] = [-1];
+        while (out.length + out.length <= n) { out = out.concat(out); }
+        return out.concat(minusOnes(n - out.length));
     }
 
     // A total, injective encoding of a key (compared as a string).
     export fn keyText(k: NameKey) -> string {
         return match k {
-            .OfSym(id: id) :> "sym:" + id
-            .Factory(decl: d) :> "mk:" + d
-            .Render(decl: d) :> "render:" + d
-            .SharedGet(decl: d) :> "shared:" + d
-            .DeclInfo(decl: d) :> "decl:" + d
-            .Edges(decl: d, field: f) :> "edges:" + d + "." + f
+            .OfSym(id: id) :> "sym:" + id,
+            .Factory(decl: d) :> "mk:" + d,
+            .Render(decl: d) :> "render:" + d,
+            .SharedGet(decl: d) :> "shared:" + d,
+            .DeclInfo(decl: d) :> "decl:" + d,
+            .Edges(decl: d, field: f) :> "edges:" + d + "." + f,
             .Runtime :> "rt"
-        }
+        };
     }
 
-    export fn emptyNames() -> NameTable { return { keys: [], names: [], bases: [], nexts: [], kix: sixEmpty(), nix: sixEmpty(), bix: sixEmpty() } }
+    export fn emptyNames() -> NameTable { return { keys: [], names: [], bases: [], nexts: [], kix: sixEmpty(), nix: sixEmpty(), bix: sixEmpty() }; }
 
     // JavaScript reserved words + the globals emitted code references.
     export fn isReserved(n: string) -> boolean {
         return match n {
-            "break" :> true
-            "case" :> true
-            "catch" :> true
-            "class" :> true
-            "const" :> true
-            "continue" :> true
-            "debugger" :> true
-            "default" :> true
-            "delete" :> true
-            "do" :> true
-            "else" :> true
-            "enum" :> true
-            "export" :> true
-            "extends" :> true
-            "false" :> true
-            "finally" :> true
-            "for" :> true
-            "function" :> true
-            "if" :> true
-            "import" :> true
-            "in" :> true
-            "instanceof" :> true
-            "new" :> true
-            "null" :> true
-            "return" :> true
-            "super" :> true
-            "switch" :> true
-            "this" :> true
-            "throw" :> true
-            "true" :> true
-            "try" :> true
-            "typeof" :> true
-            "var" :> true
-            "void" :> true
-            "while" :> true
-            "with" :> true
-            "yield" :> true
-            "let" :> true
-            "static" :> true
-            "await" :> true
-            "async" :> true
-            "arguments" :> true
-            "eval" :> true
-            "undefined" :> true
-            "NaN" :> true
-            "Infinity" :> true
-            "document" :> true
-            "window" :> true
-            "globalThis" :> true
-            "Object" :> true
-            "Array" :> true
-            "JSON" :> true
-            "Math" :> true
-            "String" :> true
-            "Number" :> true
-            "Date" :> true
+            "break" :> true,
+            "case" :> true,
+            "catch" :> true,
+            "class" :> true,
+            "const" :> true,
+            "continue" :> true,
+            "debugger" :> true,
+            "default" :> true,
+            "delete" :> true,
+            "do" :> true,
+            "else" :> true,
+            "enum" :> true,
+            "export" :> true,
+            "extends" :> true,
+            "false" :> true,
+            "finally" :> true,
+            "for" :> true,
+            "function" :> true,
+            "if" :> true,
+            "import" :> true,
+            "in" :> true,
+            "instanceof" :> true,
+            "new" :> true,
+            "null" :> true,
+            "return" :> true,
+            "super" :> true,
+            "switch" :> true,
+            "this" :> true,
+            "throw" :> true,
+            "true" :> true,
+            "try" :> true,
+            "typeof" :> true,
+            "var" :> true,
+            "void" :> true,
+            "while" :> true,
+            "with" :> true,
+            "yield" :> true,
+            "let" :> true,
+            "static" :> true,
+            "await" :> true,
+            "async" :> true,
+            "arguments" :> true,
+            "eval" :> true,
+            "undefined" :> true,
+            "NaN" :> true,
+            "Infinity" :> true,
+            "document" :> true,
+            "window" :> true,
+            "globalThis" :> true,
+            "Object" :> true,
+            "Array" :> true,
+            "JSON" :> true,
+            "Math" :> true,
+            "String" :> true,
+            "Number" :> true,
+            "Date" :> true,
             _ :> false
-        }
+        };
     }
 
     fn sanitize(hint: string) -> string {
         // s474 r1 (review L3): `#` — a composed batch's hint (`book#batch`), which no identifier spells
-        const s: string = hint.replaceAll("$", "_").replaceAll("#", "_")
-        if (s.length == 0) return "x"
-        const c: int = s.charCodeAt(0)
-        if (c >= 48 && c <= 57) return "_" + s
-        return s
+        const s: string = hint.replaceAll("$", "_").replaceAll("#", "_");
+        if (s.length == 0) return "x";
+        const c: int = s.charCodeAt(0);
+        if (c >= 48 && c <= 57) return "_" + s;
+        return s;
     }
 
     fn taken(t: NameTable, n: string) -> boolean {
-        return sixFind(t.nix, n) >= 0
+        return sixFind(t.nix, n) >= 0;
     }
 
     fn hasKey(t: NameTable, k: string) -> boolean {
-        return sixFind(t.kix, k) >= 0
+        return sixFind(t.kix, k) >= 0;
     }
 
     // Mint a name for `key` from `hint` (idempotent per key): the first of `base`,
@@ -219,38 +219,38 @@ ${
     // resumes where that one stopped (`nexts`) instead of re-testing them all (k mints of
     // one hint, e.g. a local name every function uses, were O(k²) candidates).
     export fn mint(t: NameTable, key: NameKey, hint: string) -> NameTable {
-        const k: string = keyText(key)
-        if (hasKey(t, k)) return t
-        const base: string = sanitize(hint)
-        const bi: int = sixFind(t.bix, base)
-        let cand: string = base
-        let n = 1
+        const k: string = keyText(key);
+        if (hasKey(t, k)) return t;
+        const base: string = sanitize(hint);
+        const bi: int = sixFind(t.bix, base);
+        let cand: string = base;
+        let n = 1;
         if (bi >= 0) {
-            n = t.nexts[bi]
-            cand = base + "_" + n
-            n = n + 1
+            n = t.nexts[bi];
+            cand = base + "_" + n;
+            n = n + 1;
         }
         while (isReserved(cand) || taken(t, cand)) {
-            cand = base + "_" + n
-            n = n + 1
+            cand = base + "_" + n;
+            n = n + 1;
         }
-        const at: int = t.keys.length
-        const kix: SIdx = sixAdd(t.kix, k, at)
-        const nix: SIdx = sixAdd(t.nix, cand, at)
+        const at: int = t.keys.length;
+        const kix: SIdx = sixAdd(t.kix, k, at);
+        const nix: SIdx = sixAdd(t.nix, cand, at);
         if (bi >= 0) {
             return { keys: t.keys.concat([k]), names: t.names.concat([cand]), bases: t.bases,
-                     nexts: t.nexts.slice(0, bi).concat([n]).concat(t.nexts.slice(bi + 1)), kix: kix, nix: nix, bix: t.bix }
+                     nexts: t.nexts.slice(0, bi).concat([n]).concat(t.nexts.slice(bi + 1)), kix: kix, nix: nix, bix: t.bix };
         }
         return { keys: t.keys.concat([k]), names: t.names.concat([cand]), bases: t.bases.concat([base]), nexts: t.nexts.concat([n]),
-                 kix: kix, nix: nix, bix: sixAdd(t.bix, base, t.bases.length) }
+                 kix: kix, nix: nix, bix: sixAdd(t.bix, base, t.bases.length) };
     }
 
     // The minted name for `key`. An unminted key is a printer bug; it prints as
     // a name that cannot be a minted one and will fail loudly when run.
     export fn nameOf(t: NameTable, key: NameKey) -> string {
-        const k: string = keyText(key)
-        const i: int = sixFind(t.kix, k)
-        if (i >= 0) return t.names[i]
-        return "unminted$" + k.replaceAll(":", "_").replaceAll(".", "_")
+        const k: string = keyText(key);
+        const i: int = sixFind(t.kix, k);
+        if (i >= 0) return t.names[i];
+        return "unminted$" + k.replaceAll(":", "_").replaceAll(".", "_");
     }
 }

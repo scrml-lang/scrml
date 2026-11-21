@@ -62,37 +62,37 @@ ${
              Field, Decl, Fn, CoreProgram,
              mkSym, block, noGrants, replaceGrant, litStr, litBool, litVariant, litInt,
              readField, readLocalField, prim1, prim2, call0,
-             el, textView, dyn, staticAttr, onEvent, construct, plainHead, scopeKey } from "../core.scrml"
+             el, textView, dyn, staticAttr, onEvent, construct, plainHead, scopeKey } from "../core.scrml";
 
     // A sequence type with no grants is fully constrained (§66.12.1).
     fn fixedSeq(elem: Type) -> Type {
-        return Type.Seq(elem, { length: LengthGrant.Fixed, at: [], shrink: [], positionsWritable: false, replace: false })
+        return Type.Seq(elem, { length: LengthGrant.Fixed, at: [], shrink: [], positionsWritable: false, replace: false });
     }
 
     // `T[replace]` — the grant is on the TYPE (§66.12.3; s469-boot-tape-grants put it in SeqGrants).
     fn replaceSeq(elem: Type) -> Type {
-        return Type.Seq(elem, { length: LengthGrant.Fixed, at: [], shrink: [], positionsWritable: false, replace: true })
+        return Type.Seq(elem, { length: LengthGrant.Fixed, at: [], shrink: [], positionsWritable: false, replace: true });
     }
 
     fn strList(xs: string[]) -> Expr {
-        let out: Expr[] = []
-        for (const x of xs) { out = out.concat([litStr(x)]) }
-        return Expr.ArrayOf(out)
+        let out: Expr[] = [];
+        for (const x of xs) { out = out.concat([litStr(x)]); }
+        return Expr.ArrayOf(out);
     }
 
     fn line(id: int, name: string, sLine: Sym) -> Expr {
-        return Expr.StructOf(sLine, [litInt(id), litStr(name)])
+        return Expr.StructOf(sLine, [litInt(id), litStr(name)]);
     }
 
     // THE ORACLE: §66.19.3 exactly as written (`lines` is locked — no grants).
-    export fn dropdownCore() -> CoreProgram { return buildDropdown(false, false) }
+    export fn dropdownCore() -> CoreProgram { return buildDropdown(false, false); }
 
     // A TEST FIXTURE, not an oracle: the same program with `lines` given a
     // `replace` grant (`<lines:Line[replace]=…>`, O10 spelling, ruled S469) and three
     // functions that rewrite it, so the runtime's row reconciliation (reorder /
     // remove / insert of rows owning dropdown instances, §66.7.3) can be driven
     // through the program's own writes. §66.19.3 itself never changes `lines`.
-    export fn dropdownReorderCore() -> CoreProgram { return buildDropdown(true, false) }
+    export fn dropdownReorderCore() -> CoreProgram { return buildDropdown(true, false); }
 
     // A TEST FIXTURE for L12 (b) (ruled S437): the same program plus user code
     // that reads the unconditional handle `@country` BEFORE the first render —
@@ -101,76 +101,76 @@ ${
     //   <p class="early">Early ${countryValue()} / ${@firstCountry}</p>   // placed BEFORE the instances
     // The instance record must exist when the program is CONSTRUCTED, not when
     // its DOM mounts.
-    export fn dropdownEarlyReadCore() -> CoreProgram { return buildDropdown(false, true) }
+    export fn dropdownEarlyReadCore() -> CoreProgram { return buildDropdown(false, true); }
 
     fn buildDropdown(reorderable: boolean, earlyRead: boolean) -> CoreProgram {
         // ---- symbols ----
-        const sOpenness: Sym  = mkSym(0, "Openness")
-        const sClosed: Sym    = mkSym(1, "Closed")
-        const sOpened: Sym    = mkSym(2, "Opened")
-        const sLine: Sym      = mkSym(3, "Line")
-        const sLineId: Sym    = mkSym(4, "id")
-        const sLineName: Sym  = mkSym(5, "name")
-        const sDropdown: Sym  = mkSym(6, "dropdown")
-        const sLabel: Sym     = mkSym(7, "label")
-        const sOptions: Sym   = mkSym(8, "options")
-        const sValue: Sym     = mkSym(9, "value")
-        const sOpen: Sym      = mkSym(10, "open")
-        const wValue: Sym     = mkSym(11, "value")       // write capability: `export let <value/>`
-        const wOpen: Sym      = mkSym(12, "open")        // write capability: the `rule=` graph
-        const sProgram: Sym   = mkSym(13, "program")
-        const sLines: Sym     = mkSym(14, "lines")
-        const sShowColor: Sym = mkSym(15, "showColor")
-        const wShowColor: Sym = mkSym(16, "showColor")
-        const hCountry: Sym   = mkSym(17, "country")     // as=country  (on the program instance)
-        const hColor: Sym     = mkSym(18, "color")       // as=color    (on the program instance)
-        const hQty: Sym       = mkSym(19, "qty")         // as=qty      (ROW-scoped, §66.7.4)
-        const sCloseCountry: Sym = mkSym(20, "closeCountry")
-        const sClearColor: Sym   = mkSym(21, "clearColor")
-        const sC: Sym         = mkSym(22, "c")           // given c = @color
-        const sOpt: Sym       = mkSym(23, "opt")         // <each in=options as opt>
-        const sLineRow: Sym   = mkSym(24, "line")        // <each in=@lines … as line>
+        const sOpenness: Sym  = mkSym(0, "Openness");
+        const sClosed: Sym    = mkSym(1, "Closed");
+        const sOpened: Sym    = mkSym(2, "Opened");
+        const sLine: Sym      = mkSym(3, "Line");
+        const sLineId: Sym    = mkSym(4, "id");
+        const sLineName: Sym  = mkSym(5, "name");
+        const sDropdown: Sym  = mkSym(6, "dropdown");
+        const sLabel: Sym     = mkSym(7, "label");
+        const sOptions: Sym   = mkSym(8, "options");
+        const sValue: Sym     = mkSym(9, "value");
+        const sOpen: Sym      = mkSym(10, "open");
+        const wValue: Sym     = mkSym(11, "value");       // write capability: `export let <value/>`
+        const wOpen: Sym      = mkSym(12, "open");        // write capability: the `rule=` graph
+        const sProgram: Sym   = mkSym(13, "program");
+        const sLines: Sym     = mkSym(14, "lines");
+        const sShowColor: Sym = mkSym(15, "showColor");
+        const wShowColor: Sym = mkSym(16, "showColor");
+        const hCountry: Sym   = mkSym(17, "country");     // as=country  (on the program instance)
+        const hColor: Sym     = mkSym(18, "color");       // as=color    (on the program instance)
+        const hQty: Sym       = mkSym(19, "qty");         // as=qty      (ROW-scoped, §66.7.4)
+        const sCloseCountry: Sym = mkSym(20, "closeCountry");
+        const sClearColor: Sym   = mkSym(21, "clearColor");
+        const sC: Sym         = mkSym(22, "c");           // given c = @color
+        const sOpt: Sym       = mkSym(23, "opt");         // <each in=options as opt>
+        const sLineRow: Sym   = mkSym(24, "line");        // <each in=@lines … as line>
 
         // Field indices.
-        const LABEL: int = 0
-        const OPTIONS: int = 1
-        const VALUE: int = 2
-        const OPEN: int = 3
-        const LINES: int = 0
-        const SHOWCOLOR: int = 1
-        const LINE_ID: int = 0
-        const LINE_NAME: int = 1
-        const CLOSED: int = 0
-        const OPENED: int = 1
+        const LABEL: int = 0;
+        const OPTIONS: int = 1;
+        const VALUE: int = 2;
+        const OPEN: int = 3;
+        const LINES: int = 0;
+        const SHOWCOLOR: int = 1;
+        const LINE_ID: int = 0;
+        const LINE_NAME: int = 1;
+        const CLOSED: int = 0;
+        const OPENED: int = 1;
 
-        const here: InstRef = InstRef.Lexical(0)
+        const here: InstRef = InstRef.Lexical(0);
 
         // ---- types ----
         const openness: TypeDef = TypeDef.EnumDef(sOpenness, [
             { sym: sClosed, fields: [] },
             { sym: sOpened, fields: [] },
-        ])
+        ]);
         const lineType: TypeDef = TypeDef.StructDef(sLine, [
             { sym: sLineId, ty: Type.Int, grants: noGrants() },
             { sym: sLineName, ty: Type.Str, grants: noGrants() },
-        ])
+        ]);
 
         // ---- declaration <dropdown> ----
         const fLabel: Field = {
             sym: sLabel, ty: Type.Str, init: not,                          // ⚑ O33
             mode: FieldMode.Locked, role: FieldRole.Attribute, grants: noGrants(),
             graph: not, exported: false, wcap: not, vals: [], persist: not, timing: not,
-        }
+        };
         const fOptions: Field = {
             sym: sOptions, ty: fixedSeq(Type.Str), init: not,              // ⚑ O33
             mode: FieldMode.Locked, role: FieldRole.Attribute, grants: noGrants(),
             graph: not, exported: false, wcap: not, vals: [], persist: not, timing: not,
-        }
+        };
         const fValue: Field = {
             sym: sValue, ty: Type.Str, init: litStr(""),
             mode: FieldMode.Let, role: FieldRole.Child, grants: replaceGrant(),      // a child since S447 (§66.4 rule 6)
             graph: not, exported: true, wcap: wValue, vals: [], persist: not, timing: not,
-        }
+        };
         const fOpen: Field = {
             sym: sOpen, ty: Type.Named(sOpenness), init: litVariant(sOpenness, CLOSED),
             mode: FieldMode.Locked, role: FieldRole.Child,
@@ -180,9 +180,9 @@ ${
                 { origin: OPENED, targets: [CLOSED] },
             ], idle: not },
             exported: true, wcap: wOpen, vals: [], persist: not, timing: not,
-        }
+        };
 
-        const readOpen: Expr = readField(sDropdown, here, OPEN)
+        const readOpen: Expr = readField(sDropdown, here, OPEN);
 
         // onclick=(@dropdown.open = open == .Closed ? .Opened : .Closed)
         // The conditional is a Match over a bool (L7); the write is a graph
@@ -192,13 +192,13 @@ ${
                 { pat: Pattern.PLit(Literal.Bool(true)), body: litVariant(sOpenness, OPENED) },
                 { pat: Pattern.PLit(Literal.Bool(false)), body: litVariant(sOpenness, CLOSED) },
             ]),
-            Check.RuntimeEdge)
+            Check.RuntimeEdge);
 
         // <li onclick={ @dropdown.value = opt; @dropdown.open = .Closed }>${opt}</li>
         const pick: View = el("li", [onEvent("click", [
             Stmt.Write(wValue, here, EditKind.Replace, Expr.Local(sOpt), Check.Static),
             Stmt.Write(wOpen, here, EditKind.Transition, litVariant(sOpenness, CLOSED), Check.RuntimeEdge),
-        ])], [dyn(Expr.Local(sOpt))])
+        ])], [dyn(Expr.Local(sOpt))]);
 
         // dpa-045 follow-up 4 (RULED S442, SPEC §4.18.5): whitespace-only text
         // between elements is kept exactly — the source's newline + indentation
@@ -225,51 +225,51 @@ ${
             textView("\n    "),
             View.Slot,
             textView("                                                   \n"),
-        ])
+        ]);
 
         const dropdown: Decl = {
             sym: sDropdown, key: scopeKey("lib/dropdown.scrml", sDropdown.hint), kind: DeclKind.User, single: false,
             fields: [fLabel, fOptions, fValue, fOpen],
             renders: [dropdownView], wiring: [], handles: [],
-        }
+        };
 
         // ---- the program (a `single` declaration, R4) ----
-        const wLines: Sym = mkSym(25, "lines")       // fixture only
-        const initLines: Expr = Expr.ArrayOf([line(1, "Tea", sLine), line(2, "Milk", sLine)])
+        const wLines: Sym = mkSym(25, "lines");       // fixture only
+        const initLines: Expr = Expr.ArrayOf([line(1, "Tea", sLine), line(2, "Milk", sLine)]);
         let fLines: Field = {
             sym: sLines, ty: fixedSeq(Type.Named(sLine)), init: initLines,
             mode: FieldMode.Locked, role: FieldRole.Child, grants: noGrants(),
             graph: not, exported: false, wcap: not, vals: [], persist: not, timing: not,
-        }
+        };
         if (reorderable) {
             fLines = {
                 sym: sLines, ty: replaceSeq(Type.Named(sLine)), init: initLines,
                 mode: FieldMode.Locked, role: FieldRole.Child, grants: replaceGrant(),
                 graph: not, exported: false, wcap: wLines, vals: [], persist: not, timing: not,
-            }
+            };
         }
         const fShowColor: Field = {
             sym: sShowColor, ty: Type.Bool, init: litBool(false),
             mode: FieldMode.Let, role: FieldRole.Child, grants: replaceGrant(),
             graph: not, exported: false, wcap: wShowColor, vals: [], persist: not, timing: not,
-        }
+        };
 
-        const qtyValue: Expr = Expr.Read(Place.Cell(sDropdown, InstRef.Alias(hQty), [{ owner: sDropdown, idx: VALUE }]))
-        const countryValue: Expr = Expr.Read(Place.Cell(sDropdown, InstRef.Alias(hCountry), [{ owner: sDropdown, idx: VALUE }]))
+        const qtyValue: Expr = Expr.Read(Place.Cell(sDropdown, InstRef.Alias(hQty), [{ owner: sDropdown, idx: VALUE }]));
+        const countryValue: Expr = Expr.Read(Place.Cell(sDropdown, InstRef.Alias(hCountry), [{ owner: sDropdown, idx: VALUE }]));
 
         // ---- the L12 (b) fixture's additions (earlyRead only) ----
-        const sCountryValue: Sym = mkSym(30, "countryValue")
-        const sFirstCountry: Sym = mkSym(31, "firstCountry")
-        const wFirstCountry: Sym = mkSym(32, "firstCountry")
-        const FIRSTCOUNTRY: int = 2
-        let earlyViews: View[] = []
+        const sCountryValue: Sym = mkSym(30, "countryValue");
+        const sFirstCountry: Sym = mkSym(31, "firstCountry");
+        const wFirstCountry: Sym = mkSym(32, "firstCountry");
+        const FIRSTCOUNTRY: int = 2;
+        let earlyViews: View[] = [];
         if (earlyRead) {
             earlyViews = [el("p", [staticAttr("class", "early")], [
                 textView("Early "),
                 dyn(call0(sCountryValue)),
                 textView(" / "),
                 dyn(readField(sProgram, here, FIRSTCOUNTRY)),
-            ]), textView("\n        ")]
+            ]), textView("\n        ")];
         }
 
         const main: View = el("main", [staticAttr("class", "filters")], [textView("\n        ")].concat(earlyViews).concat([
@@ -328,15 +328,15 @@ ${
                     textView("\n        "),
                 ]),
             textView("\n\n        \n        \n    "),
-        ]))
+        ]));
 
-        let programFields: Field[] = [fLines, fShowColor]
+        let programFields: Field[] = [fLines, fShowColor];
         if (earlyRead) {
             programFields = programFields.concat([{
                 sym: sFirstCountry, ty: Type.Str, init: call0(sCountryValue),
                 mode: FieldMode.Seeded, role: FieldRole.Child, grants: replaceGrant(),
                 graph: not, exported: false, wcap: wFirstCountry, vals: [], persist: not, timing: not,
-            }])
+            }]);
         }
 
         const program: Decl = {
@@ -344,7 +344,7 @@ ${
             fields: programFields,
             renders: [main], wiring: [],
             handles: [hCountry, hColor],                 // top-level as= cells live on the program instance (L10)
-        }
+        };
 
         // function closeCountry() { @country.open = .Closed }
         const closeCountry: Fn = {
@@ -353,7 +353,7 @@ ${
                 Stmt.Write(wOpen, InstRef.Alias(hCountry), EditKind.Transition,
                     litVariant(sOpenness, CLOSED), Check.RuntimeEdge),
             ]),
-        }
+        };
         // function clearColor() { given c = @color :> { c.value = "" } }
         // `given` over an instance handle → Let + If(IsSome) + a write through
         // `.Narrowed(c)` (L11).
@@ -365,11 +365,11 @@ ${
                     block([Stmt.Write(wValue, InstRef.Narrowed(sC), EditKind.Replace, litStr(""), Check.Static)]),
                     not, not),
             ]),
-        }
+        };
 
-        let fns: Fn[] = [closeCountry, clearColor]
+        let fns: Fn[] = [closeCountry, clearColor];
         if (reorderable) {
-            const shared: InstRef = InstRef.Shared(sProgram)
+            const shared: InstRef = InstRef.Shared(sProgram);
             fns = fns.concat([
                 rewriteLines(mkSym(26, "reorderLines"), wLines, shared, [line(2, "Milk", sLine), line(1, "Tea", sLine)]),
                 rewriteLines(mkSym(27, "dropTea"), wLines, shared, [line(2, "Milk", sLine)]),
@@ -377,15 +377,15 @@ ${
                     [line(2, "Milk", sLine), line(1, "Tea", sLine), line(3, "Coffee", sLine)]),
                 // Same keys, same order — only row 1's CONTENT changes.
                 rewriteLines(mkSym(29, "renameTea"), wLines, shared, [line(1, "Green tea", sLine), line(2, "Milk", sLine)]),
-            ])
+            ]);
         }
         if (earlyRead) {
             // function countryValue() { return @country.value }
             const fCountryValue: Fn = {
                 sym: sCountryValue, params: [], pure: false, err: not, waits: false, host: not,
                 body: block([Stmt.Return(countryValue)]),
-            }
-            fns = fns.concat([fCountryValue])
+            };
+            fns = fns.concat([fCountryValue]);
         }
 
         return {
@@ -406,7 +406,7 @@ ${
             tool: not,
             endpoints: [],
             channels: [],
-        }
+        };
     }
 
     // `function <name>() { @lines = [ …literal rows… ] }` — an unclassifiable
@@ -415,6 +415,6 @@ ${
         return {
             sym: name, params: [], pure: false, err: not, waits: false, host: not,
             body: block([Stmt.Write(cap, shared, EditKind.Replace, Expr.ArrayOf(rows), Check.Static)]),
-        }
+        };
     }
 }

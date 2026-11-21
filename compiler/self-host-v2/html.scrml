@@ -26,13 +26,13 @@ ${
         HStyle(text: string),
     }
 
-    export fn escStyleText(s: string) -> string { return s.replaceAll("<", "\\3c ") }
+    export fn escStyleText(s: string) -> string { return s.replaceAll("<", "\\3c "); }
 
     export fn escText(s: string) -> string {
-        const a: string = s.replaceAll("&", "&amp;")
-        const b: string = a.replaceAll("<", "&lt;")
-        const c: string = b.replaceAll(">", "&gt;")
-        return c
+        const a: string = s.replaceAll("&", "&amp;");
+        const b: string = a.replaceAll("<", "&lt;");
+        const c: string = b.replaceAll(">", "&gt;");
+        return c;
     }
 
     // s468 — a raw-content body (SPEC §4.17, S462 Q21): "Every `<` and `>` in a
@@ -43,9 +43,9 @@ ${
     // or spell a closer, so the body can build no element (impl#1
     // raw-content-encode.ts `encodeAngles`).
     export fn escRawText(s: string) -> string {
-        const a: string = s.replaceAll("<", "&lt;")
-        const b: string = a.replaceAll(">", "&gt;")
-        return b
+        const a: string = s.replaceAll("<", "&lt;");
+        const b: string = a.replaceAll(">", "&gt;");
+        return b;
     }
 
     // An attribute value escapes `<` and `>` too, not only `&` and `"`. The
@@ -57,89 +57,89 @@ ${
     // review, Chromium). With `<` escaped, no value can spell a closer.
     // `escText` already escapes all three.
     export fn escAttr(s: string) -> string {
-        const a: string = s.replaceAll("&", "&amp;")
-        const b: string = a.replaceAll("\"", "&quot;")
-        const c: string = b.replaceAll("<", "&lt;")
-        const d: string = c.replaceAll(">", "&gt;")
-        return d
+        const a: string = s.replaceAll("&", "&amp;");
+        const b: string = a.replaceAll("\"", "&quot;");
+        const c: string = b.replaceAll("<", "&lt;");
+        const d: string = c.replaceAll(">", "&gt;");
+        return d;
     }
 
     // HTML void elements: no closer, no children.
     export fn isVoid(tag: string) -> boolean {
         return match tag {
-            "area" :> true
-            "base" :> true
-            "br" :> true
-            "col" :> true
-            "embed" :> true
-            "hr" :> true
-            "img" :> true
-            "input" :> true
-            "link" :> true
-            "meta" :> true
-            "source" :> true
-            "track" :> true
-            "wbr" :> true
+            "area" :> true,
+            "base" :> true,
+            "br" :> true,
+            "col" :> true,
+            "embed" :> true,
+            "hr" :> true,
+            "img" :> true,
+            "input" :> true,
+            "link" :> true,
+            "meta" :> true,
+            "source" :> true,
+            "track" :> true,
+            "wbr" :> true,
             _ :> false
-        }
+        };
     }
 
     fn attrsText(attrs: HAttr[]) -> string {
-        let out = ""
+        let out = "";
         for (const a of attrs) {
-            out = out + " " + a.name + "=\"" + escAttr(a.value) + "\""
+            out = out + " " + a.name + "=\"" + escAttr(a.value) + "\"";
         }
-        return out
+        return out;
     }
 
     // Compact print of one node.
     export fn printNode(n: HNode) -> string {
         return match n {
-            .HElem(tag: tag, attrs: attrs, kids: kids) :> elemText(tag, attrs, kids)
-            .HText(text: t) :> escText(t)
-            .HRawText(text: t) :> escRawText(t)
-            .HComment(text: t) :> "<!--" + t + "-->"
+            .HElem(tag: tag, attrs: attrs, kids: kids) :> elemText(tag, attrs, kids),
+            .HText(text: t) :> escText(t),
+            .HRawText(text: t) :> escRawText(t),
+            .HComment(text: t) :> "<!--" + t + "-->",
             .HStyle(text: t) :> escStyleText(t)
-        }
+        };
     }
 
     fn elemText(tag: string, attrs: HAttr[], kids: HNode[]) -> string {
-        const open: string = "<" + tag + attrsText(attrs) + ">"
-        if (isVoid(tag)) return open
-        const body: string = printNodes(kids)
+        const open: string = "<" + tag + attrsText(attrs) + ">";
+        if (isVoid(tag)) return open;
+        const body: string = printNodes(kids);
         // s474 r3: print.scrml buildEl has already cut the ONE line ending the parser drops after a
         // `<pre>` / `<listing>` / `<textarea>` start tag, so these kids are what the page must hold; when
         // they still start with a line ending, one more is printed for the parser to drop.
-        if (dropsLeadingLf(tag) && startsWithNewline(body)) return open + "\n" + body + "</" + tag + ">"
-        return open + body + "</" + tag + ">"
+        if (dropsLeadingLf(tag) && startsWithNewline(body)) return open + "\n" + body + "</" + tag + ">";
+        return open + body + "</" + tag + ">";
     }
 
     fn startsWithNewline(t: string) -> boolean {
-        if (t.length == 0) return false
-        const c0: int = t.charCodeAt(0)
-        return c0 == 10 || c0 == 13
+        if (t.length == 0) return false;
+        const c0: int = t.charCodeAt(0);
+        return c0 == 10 || c0 == 13;
     }
 
     // s474 r3 (re-review of #1727, S1 / S2; PA ruling: match HTML and base): the HTML parser drops ONE
     // line ending right after a `<pre>` / `<listing>` / `<textarea>` start tag (HTML §13.2.6.4.7; a CRLF
     // or a lone CR is normalized to LF first). `t` without that one line ending.
     export fn cutNewline(t: string) -> string {
-        if (t.length == 0) return t
-        const c0: int = t.charCodeAt(0)
-        if (c0 == 13 && t.length > 1 && t.charCodeAt(1) == 10) return t.substring(2, t.length)   // CR LF
-        if (c0 == 10 || c0 == 13) return t.substring(1, t.length)                              // LF, or a lone CR
-        return t
+        if (t.length == 0) return t;
+        const c0: int = t.charCodeAt(0);
+        if (c0 == 13 && t.length > 1 && t.charCodeAt(1) == 10) return t.substring(2, t.length);   // CR LF
+        if (c0 == 10 || c0 == 13) return t.substring(1, t.length);                              // LF, or a lone CR
+        return t;
     }
 
     export fn dropsLeadingLf(tag: string) -> boolean {
-        const t: string = tag.toLowerCase()
-        return t == "pre" || t == "listing" || t == "textarea"
+        const t: string = tag.toLowerCase();
+        return t == "pre" || t == "listing" || t == "textarea";
     }
 
     export fn printNodes(ns: HNode[]) -> string {
-        let out = ""
-        for (const n of ns) { out = out + printNode(n) }
-        return out
+        let out = "";
+        for (const n of ns) { out = out + printNode(n); }
+        return out;
     }
 
     // A page: head lines + body lines, one element per line (the SHELL is
@@ -148,12 +148,12 @@ ${
     export type Page:struct = { title: string | not, head: HNode[], body: HNode[] }
 
     export fn printPage(pg: Page) -> string {
-        let out = "<!doctype html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n"
-        const t: string | not = pg.title
-        if (t is given) out = out + "<title>" + escText(t) + "</title>\n"
-        for (const n of pg.head) { out = out + printNode(n) + "\n" }
-        out = out + "</head>\n<body>\n"
-        for (const n of pg.body) { out = out + printNode(n) + "\n" }
-        return out + "</body>\n</html>\n"
+        let out = "<!doctype html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n";
+        const t: string | not = pg.title;
+        if (t is given) out = out + "<title>" + escText(t) + "</title>\n";
+        for (const n of pg.head) { out = out + printNode(n) + "\n"; }
+        out = out + "</head>\n<body>\n";
+        for (const n of pg.body) { out = out + printNode(n) + "\n"; }
+        return out + "</body>\n</html>\n";
     }
 }

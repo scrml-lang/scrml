@@ -50,6 +50,15 @@
  *                   seventh, after given-presence and before the §66 declaration rules (their verify
  *                   compiles the file with impl#1 — identical artifacts — which the declaration rules'
  *                   output makes impossible); their own module (fix-terminators.js).
+ *   loop-while      S469 "loops: one `for`" (§49.4.1, S481 Track M step 2): `while (cond) { … }` →
+ *                   `for (cond) { … }`.
+ *   loop-do-while   `do { … } while (cond)` → §49.3.6's body-first `for { …; if (!(cond)) { break; } }`
+ *                   (refused when the body holds a `continue` or captures a name the condition reads).
+ *                   Both chained eighth, planned and verified on the impl#1-readable text (impl#1
+ *                   compiles the same edits spelled `for (; cond; )` / `for (;;)`), applied with the
+ *                   declaration edits at the end. NOT impl#1-safe (impl#1 has no `for (cond)` /
+ *                   `for { … }` head, §49.8): opt-in, like the declaration rules. Own module
+ *                   (fix-loops.js).
  *   rhs-decl        `<x> = v` / `<x>: T = v` / `<x attrs> = v` → `<x:T=v attrs/>` (locked) or
  *                   `let <x:T=v attrs/>`. §66.21 row 1 as amended S449 (dialect ruling 2): LOCKED
  *                   only when the cell is never written AND its initializer reads no cell;
@@ -115,6 +124,7 @@ import { fixIsSome } from "./fix-is-some.js";
 import { fixClientServerCall } from "./fix-client-server-call.js";
 import { fixSqlFailable } from "./fix-sql-failable.js";
 import { fixTerminators, logicBlockStatements, seedPrefixUnits } from "./fix-terminators.js";
+import { fixLoops, LOOP_RULES } from "./fix-loops.js";
 import { writeScratchProject, errorSeverityCodes, scratchRefusalReason } from "./fix-verify-shared.js";
 import { compileScrml } from "../api.js";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync, existsSync } from "node:fs";
@@ -136,6 +146,11 @@ export const WRAP_OPENER = '<program reset="none">';
 export const IMPL1_SAFE_RULES = Object.freeze(["pre-migrate", "arm-pipe", "client-server-call", "sql-failable", "is-some", "given-presence", "stmt-semi", "arm-comma", "program-wrap", "program-move", "unwrap-logic"]);
 /** The §66 declaration rules: their output is the §66 opener dialect, which impl#1 does NOT compile. */
 export const S66_DECL_RULES = Object.freeze(["rhs-decl", "const-cell", "engine-simple"]);
+/**
+ * Every rule whose output impl#1 does NOT compile: the §66 declaration rules, and the S469 loop rules
+ * (`for (cond)` / `for { … }` — §49.8: impl#1 has neither head). Opt-in only (`--s66`), never a default.
+ */
+export const RULED_ONLY_RULES = Object.freeze([...S66_DECL_RULES, "loop-while", "loop-do-while"]);
 
 export const S66_RULES = Object.freeze([
   "pre-migrate",
@@ -146,6 +161,8 @@ export const S66_RULES = Object.freeze([
   "given-presence",
   "stmt-semi",
   "arm-comma",
+  "loop-while",
+  "loop-do-while",
   "rhs-decl",
   "const-cell",
   "engine-simple",
@@ -1622,6 +1639,22 @@ export function fixS66(source, opts = {}) {
     blockers.push(...tr.blockers);
   }
 
+  // S469 loops ruling (S481 Track M step 2) — `while (c)` → `for (c)`, `do … while (c)` → the
+  // body-first `for { … }` (§49.4.1 / §49.3.6). Planned and verified here, on the impl#1-readable
+  // text (its verify compiles impl#1-readable heads, commands/fix-loops.js), but APPLIED with the
+  // other edits at the end: its output is a head impl#1 does not compile, so the structural verify
+  // below must not see it.
+  let loopEdits = [];
+  if (LOOP_RULES.some((r) => enabled.has(r))) {
+    const lr = fixLoops(src, {
+      filePath, auxSources: opts.auxSources, verify: opts.verify, inPlaceClean: opts.inPlaceClean,
+      allowNonCompiling: opts.allowNonCompiling, rules: LOOP_RULES.filter((r) => enabled.has(r)),
+    });
+    loopEdits = lr.edits;
+    applied.push(...lr.applied);
+    blockers.push(...lr.blockers);
+  }
+
   // The same memoized front-end reading moduleEdges / the CLI's project walk use (one parse per file).
   let ast = frontEndMemo(filePath, src)?.ast ?? null;
   if (!ast) try {
@@ -1688,7 +1721,7 @@ export function fixS66(source, opts = {}) {
   // ---- collect the legacy sites --------------------------------------------------------------
   const decls = [];   // { node, stack }
   const engines = []; // { node, stack }
-  const edits = [];   // { start, end, text, rule, detail }
+  const edits = [...loopEdits];   // { start, end, text, rule, detail }
   const tagUses = new Map(); // tag name → first offset (render-by-tag detection)
   // A `^{}` meta block can write any cell at runtime: in ANY file whose writes this decision reads
   // (the fixed file, its import closure, the scanned target files) it makes every cell `let` /
@@ -2232,6 +2265,7 @@ export function fixS66(source, opts = {}) {
   if (structural?.kind === "move") applied.push({ rule: "program-move", line: 1, detail: "moved items outside <program> inside it" });
   for (const ed of edits) {
     if (ed.rule === "unwrap-logic" && ed.detail === "}") continue;
+    if (LOOP_RULES.includes(ed.rule)) continue; // reported per loop by fixLoops
     applied.push({ rule: ed.rule, line: lineOf(src, ed.start), detail: ed.detail });
   }
   return { output, changed: output !== source, applied, blockers, infos };

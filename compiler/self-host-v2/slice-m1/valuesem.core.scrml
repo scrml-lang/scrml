@@ -25,21 +25,21 @@ ${
     import { Sym, InstRef, PrimOp, Expr, EditKind, Check, Stmt, View, FieldMode, FieldRole,
              DeclKind, Type, LengthGrant, SeqAt, Field, Decl, Fn, CoreProgram,
              mkSym, block, replaceGrant, litInt, litStr, readField, prim1, call0,
-             el, textView, dyn, onEvent, plainHead } from "../core.scrml"
+             el, textView, dyn, onEvent, plainHead } from "../core.scrml";
 
     export fn valuesemCore() -> CoreProgram {
-        const sProgram: Sym = mkSym(0, "program")
-        const sAudit: Sym   = mkSym(1, "audit")
-        const sSeen: Sym    = mkSym(2, "seen")
-        const wAudit: Sym   = mkSym(3, "audit")      // capability from the [free, end] grants
-        const wSeen: Sym    = mkSym(4, "seen")
-        const sLog: Sym     = mkSym(5, "log")
-        const sBefore: Sym  = mkSym(6, "before")
+        const sProgram: Sym = mkSym(0, "program");
+        const sAudit: Sym   = mkSym(1, "audit");
+        const sSeen: Sym    = mkSym(2, "seen");
+        const wAudit: Sym   = mkSym(3, "audit");      // capability from the [free, end] grants
+        const wSeen: Sym    = mkSym(4, "seen");
+        const sLog: Sym     = mkSym(5, "log");
+        const sBefore: Sym  = mkSym(6, "before");
 
-        const AUDIT: int = 0
-        const SEEN: int = 1
-        const here: InstRef = InstRef.Lexical(0)
-        const shared: InstRef = InstRef.Shared(sProgram)
+        const AUDIT: int = 0;
+        const SEEN: int = 1;
+        const here: InstRef = InstRef.Lexical(0);
+        const shared: InstRef = InstRef.Shared(sProgram);
 
         const fAudit: Field = {
             sym: sAudit,
@@ -48,12 +48,12 @@ ${
             mode: FieldMode.Locked, role: FieldRole.Child,
             grants: { replace: false, edits: [EditKind.Append] },
             graph: not, exported: false, wcap: wAudit, vals: [], persist: not, timing: not,
-        }
+        };
         const fSeen: Field = {
             sym: sSeen, ty: Type.Int, init: litInt(0),
             mode: FieldMode.Let, role: FieldRole.Child, grants: replaceGrant(),
             graph: not, exported: false, wcap: wSeen, vals: [], persist: not, timing: not,
-        }
+        };
 
         const log: Fn = {
             sym: sLog, params: [], pure: false, err: not, waits: false, host: not,
@@ -62,7 +62,7 @@ ${
                 Stmt.Write(wAudit, shared, EditKind.Append, litStr("x"), Check.Static),
                 Stmt.Write(wSeen, shared, EditKind.Replace, prim1(PrimOp.Length, Expr.Local(sBefore)), Check.Static),
             ]),
-        }
+        };
 
         // dpa-045 follow-up 4 (RULED S442, SPEC §4.18.5): whitespace-only text
         // between elements is kept exactly (L13, which dropped it, is retired).
@@ -76,12 +76,12 @@ ${
                 dyn(prim1(PrimOp.Length, readField(sProgram, here, AUDIT))),
             ]),
             textView("\n    "),
-        ])
+        ]);
 
         const program: Decl = {
             sym: sProgram, key: sProgram.hint, kind: DeclKind.Program, single: true,
             fields: [fAudit, fSeen], renders: [main], wiring: [], handles: [],
-        }
-        return { program: sProgram, decls: [program], types: [], fns: [log], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [], loads: [], envelopes: [], head: plainHead(), tool: not, endpoints: [], channels: [] }
+        };
+        return { program: sProgram, decls: [program], types: [], fns: [log], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [], loads: [], envelopes: [], head: plainHead(), tool: not, endpoints: [], channels: [] };
     }
 }
