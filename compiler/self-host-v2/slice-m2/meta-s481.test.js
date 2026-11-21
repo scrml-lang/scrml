@@ -270,6 +270,19 @@ describe("s481 r1 — one fault, one correct code (LOW-1..5)", () => {
     expect(r.diags[0].message).toContain("namespaced attribute");
     expect(r.diags[0].message).not.toContain("contains a declaration");
   });
+  test("§45.3: `==` between incompatible types is E-EQ-001 when it runs (the review: `1 == \"1\"` answered false)", () => {
+    expect(errs(run(D(`emit("<p>" + (1 == "1") + "</p>");`)))).toEqual(["E-EQ-001"]);
+    expect(html(D(`const r = { a: 1 }; emit("<p>" + (1 == 1) + (r.b == "x") + ("a" != "b") + "</p>");`))).toContain("<p>truefalsetrue</p>");
+  });
+  test("§14.10: `const c = .B` (no annotation) is E-VARIANT-AMBIGUOUS; an annotation, a comparison, a typed param / return resolve", () => {
+    const T = (b) => P(`    type C:enum = { A, B }\n<div>^{ ${b} }</div>`);
+    expect(errs(run(T(`const c = .B; match c { .A :> { emit("<p>a</p>"); } }`)))).toEqual(["E-VARIANT-AMBIGUOUS"]);
+    expect(html(T(`const c: C = .B; match c { .A :> { emit("<p>a</p>"); }, .B :> { emit("<p>b</p>"); }, }`))).toContain("<p>b</p>");
+    // §14.10's own examples: `state == .Small`, `applyMushroom(.Small)`, `return .Big` — never refused
+    expect(html(T(`const c: C = .B; if (c == .B) { emit("<p>eq</p>"); }`))).toContain("<p>eq</p>");
+    expect(html(T(`fn f(x: C) -> string { return "k"; } emit("<p>" + f(.A) + "</p>");`))).toContain("<p>k</p>");
+    expect(html(T(`fn g() -> C { return .A; } const c: C = g(); match c { .A :> { emit("<p>a</p>"); }, .B :> { emit("<p>b</p>"); }, }`))).toContain("<p>a</p>");
+  });
   test("LOW-5: a sort comparator that returns a boolean is refused by name (its order is engine-defined)", () => {
     expect(evalErr(D(`let xs = [3, 1, 2]; xs.sort((a, b) => a > b); emit("<p>" + xs.join(",") + "</p>");`))).toContain("comparator returned a boolean");
     expect(html(D(`let xs = [3, 1, 2]; xs.sort((a, b) => a - b); emit("<p>" + xs.join(",") + "</p>");`))).toContain("<p>1,2,3</p>");

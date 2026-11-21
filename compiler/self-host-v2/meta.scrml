@@ -993,13 +993,13 @@ ${
     // =========================================================================
     type MRef:struct = { name: string, span: ASpan }
     type MBad:struct = { msg: string, span: ASpan }
-    type MFacts:struct = { emits: boolean, reflects: MRef[], runtime: boolean, nested: boolean, sqls: ASpan[], compiler: boolean, lifts: ASpan[], bad: MBad[] }
+    type MFacts:struct = { emits: boolean, reflects: MRef[], runtime: boolean, nested: boolean, sqls: ASpan[], compiler: boolean, lifts: ASpan[], bad: MBad[], ambig: MRef[] }
     // `reads` / `nodes`: the free names the walk read and the expressions it
     // walked (the interpreter's CLOSURES pins use them, keepFn).
     type FX:struct = { f: MFacts, scopes: string[][], reads: string[], nodes: int }
 
     fn noFacts() -> MFacts {
-        return { emits: false, reflects: [], runtime: false, nested: false, sqls: [], compiler: false, lifts: [], bad: [] }
+        return { emits: false, reflects: [], runtime: false, nested: false, sqls: [], compiler: false, lifts: [], bad: [], ambig: [] }
     }
 
     fn isCompileTime(f: MFacts) -> boolean {
@@ -1025,7 +1025,7 @@ ${
 
     fn fxBad(x: FX, msg: string, span: ASpan) -> FX {
         const f: MFacts = x.f
-        return { f: { emits: f.emits, reflects: f.reflects, runtime: f.runtime, nested: f.nested, sqls: f.sqls, compiler: f.compiler, lifts: f.lifts, bad: f.bad.concat([{ msg: msg, span: span }]) }, scopes: x.scopes, reads: x.reads, nodes: x.nodes }
+        return { f: { emits: f.emits, reflects: f.reflects, runtime: f.runtime, nested: f.nested, sqls: f.sqls, compiler: f.compiler, lifts: f.lifts, bad: f.bad.concat([{ msg: msg, span: span }]), ambig: f.ambig }, scopes: x.scopes, reads: x.reads, nodes: x.nodes }
     }
 
     fn fxSet(x: FX, what: string, span: ASpan, name: string) -> FX {
@@ -1044,7 +1044,13 @@ ${
         if (what == "sql") sqls = sqls.concat([span])
         if (what == "compiler") compiler = true
         if (what == "lift") lifts = lifts.concat([span])
-        return { f: { emits: emits, reflects: reflects, runtime: runtime, nested: nested, sqls: sqls, compiler: compiler, lifts: lifts, bad: f.bad }, scopes: x.scopes, reads: x.reads, nodes: x.nodes }
+        return { f: { emits: emits, reflects: reflects, runtime: runtime, nested: nested, sqls: sqls, compiler: compiler, lifts: lifts, bad: f.bad, ambig: f.ambig }, scopes: x.scopes, reads: x.reads, nodes: x.nodes }
+    }
+
+    // A bare variant with no type context (S481 r1: §14.10 E-VARIANT-AMBIGUOUS).
+    fn fxAmbig(x: FX, n: string, span: ASpan) -> FX {
+        const f: MFacts = x.f
+        return { f: { emits: f.emits, reflects: f.reflects, runtime: f.runtime, nested: f.nested, sqls: f.sqls, compiler: f.compiler, lifts: f.lifts, bad: f.bad, ambig: f.ambig.concat([{ name: n, span: span }]) }, scopes: x.scopes, reads: x.reads, nodes: x.nodes }
     }
 
     fn fxPush(x: FX, names: string[]) -> FX { return { f: x.f, scopes: x.scopes.concat([names]), reads: x.reads, nodes: x.nodes } }
@@ -1080,6 +1086,9 @@ ${
                 seen = seen.concat([b.msg])
                 out = out.concat([newDiag("E-META-001", b.msg, c.file, b.span)])
             }
+        }
+        for (const a of f.ambig) {
+            out = out.concat([newDiag("E-VARIANT-AMBIGUOUS", "the bare variant `." + a.name + "` initializes a local with no type annotation, so no enum type fixes its qualifier (§14.10) — annotate the local (`const v: T = ." + a.name + ";`); inside a `^{}` body the qualified form `T." + a.name + "` is not available (a type name is only the argument of `reflect`, §22.12 item 1)", c.file, a.span)])
         }
         if (f.compiler) out = out.concat([newDiag("E-META-010", "the `compiler.*` namespace is reserved for future use and is not implemented (§22.4) — remove the reference, or use a compile-time primitive (reflect, emit, emit.raw)", c.file, m.span)])
         for (const l of f.lifts) {
@@ -1117,11 +1126,28 @@ ${
         return fxPop(x)
     }
 
+    // A local's value (S481 r1): §14.10 names `let x = .Small` "with no
+    // annotation" as E-VARIANT-AMBIGUOUS — the one position a `^{}` body can
+    // judge without a type check. Every other bare variant (a comparison with a
+    // typed local, a typed parameter or return, an annotated local) is resolved
+    // when the body runs: a body is not type-checked (PA default Q10, INTERIM).
+    fn fLocalInit(env: MEnv, x: FX, ty: AType | not, init: AExpr) -> FX {
+        const y: FX = fExpr(env, x, init)
+        if (ty is not) {
+            match init.k {
+                .Variant(name: n) :> { return fxAmbig(y, n, init.span) }
+                // no-default-arm: any other value has been walked
+                _ :> {}
+            }
+        }
+        return y
+    }
+
     fn fStmt(env: MEnv, x: FX, s: AStmt) -> FX {
         const k: AStmtK = s.k
         return match k {
             .Eval(e: e) :> fExpr(env, x, e)
-            .Local(name: n, init: init) :> fxDeclare(fExpr(env, x, init), n)
+            .Local(name: n, ty: ty, init: init) :> fxDeclare(fLocalInit(env, x, ty, init), n)
             .Return(e: e) :> fOpt(env, x, e)
             .If(cond: cond, thenB: tb, elseB: eb) :> fIf(env, x, cond, tb, eb)
             .Given(name: n, subject: subj, body: b) :> fBlock(env, fExpr(env, x, subj), b, [n])
@@ -2364,6 +2390,10 @@ ${
         const a: MV = rl.v
         const b: MV = rr.v
         const st: MS = rr.s
+        if (op == BinOp.Eq || op == BinOp.Ne) {
+            const why: string = eqFault(a, b)
+            if (why != "") return { v: MV.VUndef, s: failCode(st, why, eqMsg(why, a, b)) }
+        }
         return match op {
             .Add :> addValues(a, b, st)
             .Sub :> vr(MV.VNum(toNum(a) - toNum(b)), charge(st, strLen(a) + strLen(b)))
@@ -2381,6 +2411,23 @@ ${
             .Or :> vr(b, st)
             .Nullish :> vr(b, st)
         }
+    }
+
+    // §45.3 "`==` between incompatible types is a compile error" (E-EQ-001); §45
+    // functions are not comparable (E-EQ-003). A body is not type-checked (PA
+    // default Q10), so the rule is applied to the values when `==` / `!=` runs
+    // (S481 r1 — review: the bootstrap answered `1 == "1"` with false). An absent
+    // value compares with any (a `T | not` side has a same-type partner).
+    fn eqFault(a: MV, b: MV) -> string {
+        if (isFnV(a) || isFnV(b)) return "E-EQ-003"
+        if (isAbsent(a) || isAbsent(b)) return ""
+        if (kindName(a) != kindName(b)) return "E-EQ-001"
+        return ""
+    }
+
+    fn eqMsg(code: string, a: MV, b: MV) -> string {
+        if (code == "E-EQ-003") return "`==` on a function value in a compile-time `^{}` body — functions are not comparable (§45)"
+        return "`==` between " + kindName(a) + " and " + kindName(b) + " in a compile-time `^{}` body — `==` between incompatible types is a compile error (§45.3); compare values of one type (convert one side first, e.g. `n.toString()`)"
     }
 
     fn isStrV(v: MV) -> boolean {
