@@ -401,6 +401,7 @@ ${
             .Star(decl: d, inst: inst) :> [Node.NInst(inst)],
             .Effect(deps: ds, body: b) :> effectDepNodes(ds).concat([Node.NBlock(b)]),
             .Run(body: b) :> [Node.NBlock(b)],
+            .Init(k: k) :> [Node.NExpr(Expr.Local(k))],          // s481: the place reads (assigns) the binding
             // s475 — the target, the deps and the signals are cells (their instances are children)
             .Request(target: t, deps: ds, body: b, state: st) :>
                 effectDepNodes([t].concat(ds).concat(requestStateDeps(st))).concat([Node.NBlock(b)]),
@@ -510,6 +511,7 @@ ${
             .Star(decl: x) :> [],
             .Effect(deps: x) :> [],
             .Run(body: x) :> [],
+            .Init(k: x) :> [],
             .ResetOn(triggers: x) :> [],
             .Errors(of: x) :> [],
             .Reach(fields: x) :> [],
@@ -706,6 +708,7 @@ ${
             .Star(decl: d) :> [],
             .Effect(deps: ds) :> [],
             .Run(hoist: hs) :> hs,                           // s478-boot-run-locals: its top-level locals (declared by runJs)
+            .Init(k: x) :> [],                               // s481: a file-scope binding (module level), not a scope local
             .Request(handle: h) :> optSym(h),                // s475 r1: the request's handle (bound by requestJs)
             .ResetOn(triggers: ds) :> [],
             .Errors(of: x) :> [],
