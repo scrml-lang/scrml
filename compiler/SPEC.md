@@ -27787,7 +27787,15 @@ state that are in scope where `^{}` appears are accessible inside the meta block
   that are lexically in scope at the point where `^{}` appears.
 - A `^{}` meta context SHALL have access to the type registry, including all user-declared
   types and compiler-synthesized types (e.g., §14.8 generated table types).
-- A `^{}` meta context SHALL have access to the encoded variable name registry (see ADR-001).
+- ~~A `^{}` meta context SHALL have access to the encoded variable name registry (see ADR-001).~~
+  *(struck S481: the encoded-name registry is impl#1's — §47.1–§47.5, output name encoding, are an impl#1
+  annex, not a language obligation (S473 D4) — and nothing in the closed primitive set of §22.5.1 or §22.4
+  exposes it, so the sentence named no observable obligation.)*
+
+  > **Provenance:** ruling:user-voice-scrml.md S473 D4 "your recs on all" (*"§47.1–§47.5 (output name
+  > encoding) are NOT a language obligation. They are demoted to an impl#1 annex"*) — the S481 `^{}` design
+  > read (F1) found this §22.3 bullet still binding a registry D4 had demoted. **Direction of change:** inert —
+  > no program can observe the registry; no implementation builds a surface for it.
 - The mechanism by which access is provided SHALL differ between compile-time and runtime
   meta (see §22.4 and §22.5 respectively). Both modes SHALL satisfy the access guarantees
   stated above.
@@ -28048,6 +28056,21 @@ Given a call `reflect(expr)` inside a `^{}` block:
   runtime values is a runtime block; its `reflect()` calls that happen to have literal
   arguments are still emitted as `meta.types.reflect(...)` calls in the runtime block output.
   The inlining optimization (strategy 1) applies only when the ENTIRE block is compile-time.
+  A literal argument does not change this: `^{ const i = reflect(User); meta.emit("<p>" + i.name + "</p>") }`
+  is a RUNTIME block whose `reflect(User)` resolves by the runtime path, and it compiles — it is not a
+  phase mix (§22.8), and `E-META-005` does not apply to it.
+
+  > **Provenance:** ruling:user-voice-scrml.md S481 "⭐ RULED — `^{}` meta in the bootstrap: four design
+  > questions" item 1 (*"compile it (§22.4.2), and drop the E-META-005 trigger from §22.8 for this case"*;
+  > ruling:user-voice-scrml.md-S481-meta-four). Resolves the §22.4.2 / §22.8 contradiction the S481 design read
+  > found (F2). **Direction of change:** newly-accepting — a runtime block holding a literal `reflect(T)` was
+  > `E-META-005` in impl#1.
+  >
+  > **impl#1 status (S481).** impl#1 still reports `E-META-005` for this block (meta-checker.ts
+  > `bodyMixesPhases` counts a PascalCase `reflect(User)` as a compile-time pattern); impl#1 is frozen (S471),
+  > so this is a carried impl#1 divergence. The bootstrap classifies by this paragraph (meta.scrml
+  > `isCompileTime`); it builds compile-time `^{}` only, so it refuses such a block today as a runtime block
+  > not yet built (`E-BOOTSTRAP-UNSUPPORTED`), never as `E-META-005`.
 - `reflect(unknownLiteral)` where the literal does not match any known type name SHALL be a
   compile error (E-META-003: reflect() called on unknown type).
 - `reflect(variable)` where `variable` could hold an unknown type name at runtime SHALL
@@ -28312,13 +28335,14 @@ all types that are in scope at any runtime `^{}` breakout point.
 ```javascript
 {
   TypeName: {
-    kind: "struct" | "enum" | "union",
+    kind: "struct" | "enum" | …,   // the declaration's kind (a primitive: "primitive")
+    name: "TypeName",
     fields: [          // present when kind === "struct"
-      { name: "fieldName", type: "TypeName" | primitive },
+      { name: "fieldName", type: "string" },   // `type`: the field's written type, as text
       ...
     ],
     variants: [        // present when kind === "enum"
-      { name: "VariantName" },
+      "VariantName",   // the variant NAMES, as strings
       ...
     ]
   },
@@ -28326,8 +28350,31 @@ all types that are in scope at any runtime `^{}` breakout point.
 }
 ```
 
+~~`kind: "struct" | "enum" | "union"` … `variants: [ { name: "VariantName" }, … ]`~~ *(struck S481 — the
+shape above is the rule; see the provenance below.)*
+
 The shape of each type entry SHALL be identical to what `reflect(TypeName)` produces in
-compile-time meta (§22.4).
+compile-time meta (§22.4): an object with `kind` and `name`; a struct's `fields`, each
+`{ name, type }` with `type` the field's written type as text; an enum's `variants`, the
+variant names as strings (as §14.4.2: "`.variants` is an array of variant-NAME strings").
+A declared type of any other kind carries `kind` and `name` only.
+
+The compiler-known type `TypeInfo` names an entry for a compiler that types `reflect()`
+results: `TypeInfo:struct = { kind: string, name: string, fields: FieldInfo[], variants: string[] }`
+with `FieldInfo:struct = { name: string, type: string }`.
+
+> **Provenance:** ruling:user-voice-scrml.md S481 "⭐ RULED — `^{}` meta in the bootstrap: four design
+> questions" item 3 (*"adopt impl#1's shape, as the permanent rule. `variants` is a list of name strings,
+> `fields` is `{name, type}`, plus `kind` and `name`. Amend §22.5.4 to match. Add a compiler-known `TypeInfo`
+> type so the bootstrap can type-check uses of it."* — PERMANENT; ruling:user-voice-scrml.md-S481-meta-four) ·
+> supersedes: *"kind: "struct" | "enum" | "union" … variants: [ { name: "VariantName" } ]"* (the struck shape,
+> which neither implementation produced — impl#1's compile-time `createReflect` and, since S211, its runtime
+> registry return name strings). **Direction of change:** inert for impl#1 (the rule now states what it
+> produces); meaning-changing only for a reader of the struck `{ name }` variant shape, which no
+> implementation returned. *(⚑ OPEN — owner question, S481: what a `TypeInfo`-typed read of the member a kind
+> does not carry (`fields` of an enum) yields — absent, as impl#1's entry has it, or the empty list. The
+> bootstrap's compile-time evaluator returns impl#1's entry as is (absent); the question binds the typed
+> runtime-`^{}` phase. Gap `g-boot-meta-typeinfo-absent-member-s481`.)*
 
 **The `meta.types` API:**
 
@@ -28449,10 +28496,22 @@ executes at program run time. These phases SHALL NOT be mixed in a single `^{}` 
 
 **Normative statements:**
 
-- A `^{}` block SHALL NOT reference both compile-time API patterns (e.g., `reflect()`,
-  `emit()`, `emit.raw()`) and runtime-only values in the same block.
-- The compiler SHALL reject any `^{}` block that mixes compile-time and runtime access
-  patterns (E-META-005).
+- ~~A `^{}` block SHALL NOT reference both compile-time API patterns (e.g., `reflect()`,
+  `emit()`, `emit.raw()`) and runtime-only values in the same block.~~
+- ~~The compiler SHALL reject any `^{}` block that mixes compile-time and runtime access
+  patterns (E-META-005).~~
+- A `^{}` block SHALL NOT use a compile-time-only output API — `emit()` or `emit.raw()` — and a
+  runtime-only value (an `@cell`, the `meta` object, a runtime binding) in the same block. The
+  compiler SHALL reject such a block (E-META-005).
+- A `reflect()` call is not a compile-time-only pattern for this rule: a block holding
+  `reflect(T)` (literal argument or not) beside a runtime-only value is a runtime block, and
+  its `reflect()` resolves by §22.4.2's runtime path — no `E-META-005`.
+
+  > **Provenance:** ruling:user-voice-scrml.md-S481-meta-four item 1 (*"compile it (§22.4.2), and drop the
+  > E-META-005 trigger from §22.8 for this case"*) · supersedes: the two struck bullets above (*"A `^{}` block
+  > SHALL NOT reference both compile-time API patterns (e.g., `reflect()`, `emit()`, `emit.raw()`) and
+  > runtime-only values in the same block."*). **Direction of change:** newly-accepting (a literal `reflect`
+  > beside a runtime value); unchanged for `emit` / `emit.raw` beside one.
 - `reflect(expr)` is the single programmer-facing API for type reflection. The compiler
   resolves `reflect(expr)` to either a compile-time inline (when `expr` is a literal) or a
   `meta.types.reflect(expr)` call (when `expr` is a runtime variable), per §22.4.2.
@@ -37933,6 +37992,11 @@ Value-native maps (§59) hash a **runtime key value** rather than a `ResolvedTyp
 - **Runtime `^{}` blocks** (non-deterministic per §22.6): `reflect()` decodes the encoded variable name using the runtime decode table bundled in `clientJs`.
 
 #### 47.2.2 Return Type
+
+*(S481: the LANGUAGE's `reflect()` result is §22.5.4's entry — `kind`, `name`, a struct's `fields` of
+`{ name, type }` with `type` the written type as text, an enum's `variants` as name strings
+(ruling:user-voice-scrml.md-S481-meta-four item 3, PERMANENT). The nested `TypeDescriptor` below described
+impl#1's planned decode table and binds nothing; where it differs from §22.5.4, §22.5.4 governs.)*
 
 `reflect()` returns a `TypeDescriptor` object:
 

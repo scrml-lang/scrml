@@ -1,5 +1,7 @@
+<program>
 ${ type User:struct = { name: string, age: number } }
 ^{
-  const info = reflect(User)
-  emit("<p>" + info.name + "</p>")
+  const info = reflect(User);
+  emit("<p>" + info.name + "</p>");
 }
+</program>

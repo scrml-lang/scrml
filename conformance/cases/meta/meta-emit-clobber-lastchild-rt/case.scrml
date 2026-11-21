@@ -2,7 +2,7 @@
 <label> = "hi"
 <div id="host">
 ^{
-  meta.emit("<form><input name=\"lastChild\"><img src=\"x\" onerror=\"window.__pwn = 40\"></form>")
+  meta.emit("<form><input name=\"lastChild\"><img src=\"x\" onerror=\"window.__pwn = 40\"></form>");
 }
 </div>
 </program>

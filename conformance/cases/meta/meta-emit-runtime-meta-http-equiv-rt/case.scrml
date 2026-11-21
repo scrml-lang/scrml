@@ -2,7 +2,7 @@
 <label> = "hi"
 <div id="host">
 ^{
-  meta.emit("<meta http-equiv=\"refresh\" content=\"0;url=https://x\"><p>" + meta.get("label") + "</p>")
+  meta.emit("<meta http-equiv=\"refresh\" content=\"0;url=https://x\"><p>" + meta.get("label") + "</p>");
 }
 </div>
 </program>

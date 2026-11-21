@@ -1,7 +1,9 @@
+<program>
 ${ type Color:enum = { Red, Green, Blue } }
 ^{
-  reflect(Color)
+  reflect(Color);
   ^{
-    emit("<span>inner</span>")
+    emit("<span>inner</span>");
   }
 }
+</program>

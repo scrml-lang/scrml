@@ -14,9 +14,9 @@ Rulings: user-voice-scrml.md S480 census build order item 2; ruling:user-voice-s
 - [x] slice-m2/meta-s481.test.js — 47 tests (static codes, eval, splice, drift, differential vs impl#1).
 
 ## In progress / remaining
-- [ ] conformance meta case sources migrated (`;`, `<program>` wrap, backtick SQL) — scratch run: 39 PASS, 0 FAIL, 27 UNSUPPORTED (runtime, phase 2)
-- [ ] SPEC edits: §22.4.2/§22.8 (item 1), §22.5.4 + §47.2.2 (item 3), §22.3 encoded-name registry (S473 D4)
-- [ ] records: gaps (runtime meta phase 2, imported capture, logic-position), g-meta-code-runs-unsandboxed status check
+- [x] conformance meta case sources migrated (`;` via the bootstrap terminators, `<program>` wrap, backtick SQL): impl#1 68/68 pass; bootstrap 39 PASS, 0 FAIL, 27 UNSUPPORTED (runtime, phase 2; one `log()`)
+- [x] SPEC edits: §22.4.2/§22.8 (item 1), §22.5.4 + §47.2.2 (item 3), §22.3 encoded-name registry (S473 D4)
+- [x] records (gaps filed; g-meta-code-runs-unsandboxed verified resolved; coverage rows; doc spec-ahead markers): gaps (runtime meta phase 2, imported capture, logic-position), g-meta-code-runs-unsandboxed status check
 - [ ] final gates + PR
 
 ## Notes
