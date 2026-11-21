@@ -268,6 +268,110 @@ ${LOGF}
 });
 
 // =============================================================================
+// C (r1, #2053 review HIGH-1) — the same ruling names `<match>`: "A file-scope initializer that
+// acts, written inside `if=` content, a component's slot content, or a `<match>`". A `${}` written
+// directly in an arm is a parse error, but one nested in an element of an arm was not refused: it
+// ran once, unconditionally, whichever arm showed (`post[a]` with the `Idle` arm hidden, in
+// Chromium). analyze.scrml constructAt now names the arm. Red on the PR head 758b0577b.
+// =============================================================================
+describe("C r1 — an acting initializer inside a `<match>` arm is refused, naming the arm", () => {
+  const LOGM = `\${
+    let log: string = "";
+    function note(s: string) -> int { log = log + s; return 7; }
+}
+\${ type Ph:enum = { Idle, Ready, Done(n: int) } }
+let <f:boolean=true/>
+let <ph:Ph=.Ready/>`;
+  async function refusal(body) {
+    const res = await result(`<program>\n${LOGM}\n${body}\n<p id="r">post[\${log}]</p>\n</program>\n`);
+    return res.diagnostics.filter((x) => x.severity === "error");
+  }
+  test("a non-binder arm that is not shown (the review's c-match-idle)", async () => {
+    const d = await refusal(`<match for=Ph on=@ph>
+  <Idle><div><p>\${ const a: int = note("a"); }</p></div></>
+  <Ready><p>ready</p></>
+  <Done(n)><p>done</p></>
+</match>`);
+    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(d[0].message).toContain("the `<Idle>` arm of `<match for=Ph>`");
+  }, 120000);
+
+  test("deeper, in the arm that is shown, a `let`", async () => {
+    const d = await refusal(`<match for=Ph on=@ph>
+  <Idle><p>idle</p></>
+  <Ready><section><div><span>\${ let a: int = note("a") + 1; }</span></div></section></>
+  <Done(n)><p>done</p></>
+</match>`);
+    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(d[0].message).toContain("the `<Ready>` arm of `<match for=Ph>`");
+  }, 120000);
+
+  test("the wildcard arm, and a `<match>` with no `for=`", async () => {
+    const d = await refusal(`<match on=@ph>
+  <Ready><p>ready</p></>
+  <_><div>\${ const a: int = note("a"); }</div></>
+</match>`);
+    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(d[0].message).toContain("the `<_>` arm of `<match>`");
+  }, 120000);
+
+  test("a binder arm (also refused by the bootstrap for its binders)", async () => {
+    const d = await refusal(`<match for=Ph on=@ph>
+  <Idle><p>idle</p></>
+  <Ready><p>ready</p></>
+  <Done(n)><p>\${ const a: int = note("a"); }</p></>
+</match>`);
+    expect(d.map((x) => x.code)).toContain("E-FILE-SCOPE-INIT-IN-CONSTRUCT");
+    expect(d.find((x) => x.code === "E-FILE-SCOPE-INIT-IN-CONSTRUCT").message).toContain("the `<Done>` arm of `<match for=Ph>`");
+  }, 120000);
+
+  test("a `<match>` inside `if=` content: the innermost construct (the arm) is named", async () => {
+    const d = await refusal(`<div if=(@f)><match for=Ph on=@ph>
+  <Idle><p>\${ const a: int = note("a"); }</p></>
+  <Ready><p>ready</p></>
+  <Done(n)><p>done</p></>
+</match></div>`);
+    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(d[0].message).toContain("the `<Idle>` arm of `<match for=Ph>`");
+  }, 120000);
+
+  test("an `if=` element inside an arm: the `if=` (innermost) is named", async () => {
+    const d = await refusal(`<match for=Ph on=@ph>
+  <Idle><p>idle</p></>
+  <Ready><p if=(@f)>\${ const a: int = note("a"); }</p></>
+  <Done(n)><p>done</p></>
+</match>`);
+    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(d[0].message).toContain("`if=` element");
+  }, 120000);
+
+  test("an `<each>` row inside an arm (also refused for the row)", async () => {
+    const d = await refusal(`<match for=Ph on=@ph>
+  <Idle><p>idle</p></>
+  <Ready><ul><each in=([1, 2])><li>\${ const a: int = note("a"); }</li></each></ul></>
+  <Done(n)><p>done</p></>
+</match>`);
+    expect(d.map((x) => x.code)).toContain("E-FILE-SCOPE-INIT-IN-CONSTRUCT");
+    expect(d.find((x) => x.code === "E-FILE-SCOPE-INIT-IN-CONSTRUCT").message).toContain("the `<Ready>` arm of `<match for=Ph>`");
+  }, 120000);
+
+  test("legal: an initializer that does not act, inside an arm", async () => {
+    const src = `<program>
+\${ type Ph:enum = { Idle, Ready } }
+let <ph:Ph=.Idle/>
+<match for=Ph on=@ph>
+  <Idle><p>\${ const a: int = 1 + 2; }</p></>
+  <Ready><p>ready</p></>
+</match>
+<p id="r">\${a}</p>
+</program>
+`;
+    expect(await errCodes(src)).toEqual([]);
+    expect(await texts(src, ["r"])).toEqual(["3"]);
+  }, 120000);
+});
+
+// =============================================================================
 // D — ruling:user-voice-scrml.md-S481-nested-init-chain-comments item 2: a `//` comment or a `#{}`
 // style block between `if=` / `else` members: "neither breaks the chain" (§17.1.1 S482). The
 // bootstrap already accepted both (the parser drops a `//` comment; analyze's chain check skips a

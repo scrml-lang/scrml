@@ -11488,8 +11488,9 @@ ${
     // alternative, an initializer scoped to the branch, is a different feature."* —
     // E-FILE-SCOPE-INIT-IN-CONSTRUCT. One that does not act (a literal, arithmetic over bindings)
     // stays legal: running it once, just after the construct, cannot be observed. Inside an
-    // `<each>` row a declaration is refused already (E-BOOTSTRAP-UNSUPPORTED); a `<match>` arm
-    // cannot hold one (the parser refuses it).
+    // `<each>` row a declaration is refused already (E-BOOTSTRAP-UNSUPPORTED). s482 r1 (#2053
+    // review HIGH-1): a `<match>` arm is such a construct too (the ruling names `<match>`) — a
+    // `${ }` written directly in an arm is a parse error, but one in an element of an arm is not.
     // =========================================================================
     fn constructInitDiags(g: Globals, t: Tables) -> Diag[] {
         let out: Diag[] = [];
@@ -11539,8 +11540,8 @@ ${
     }
 
     // The construct whose content holds source position `pos`, named for a message: the
-    // innermost `if=` / `else-if=` / `else` element or component use (slot content) on the path
-    // from the body's top nodes down to `pos`; "" when there is none.
+    // innermost `if=` / `else-if=` / `else` element, component use (slot content) or `<match>`
+    // arm on the path from the body's top nodes down to `pos`; "" when there is none.
     fn constructAt(t: Tables, ns: ANode[], pos: int) -> string {
         for (const n of ns) {
             const e: AElem | not = elemOfNodeK(n.k);
@@ -11557,10 +11558,28 @@ ${
                     _ :> false
                 };
                 if (use) return "the slot content of `<" + e.tag + ">`";
+                // s482 r1 (#2053 review HIGH-1) — a `<match>` arm renders only while its variant
+                // is the matched value: the arm (a kid element of `<match>`) holding `pos`.
+                if (!e.star && e.tag == "match") {
+                    for (const ak of e.kids) {
+                        const ae: AElem | not = elemOfNodeK(ak.k);
+                        if (ae is given && ae.span.start <= pos && pos < ae.span.end) return "the `<" + ae.tag + ">` arm of " + matchShown(e);
+                    }
+                }
                 return "";
             }
         }
         return "";
+    }
+
+    // A `<match>` element named for a message: `<match for=T>` when it names its type, else `<match>`.
+    fn matchShown(e: AElem) -> string {
+        const fa: AAttr | not = attrNamed(e.attrs, "for");
+        if (fa is given) {
+            const tn: string = bareName(fa.value);
+            if (tn != "") return "`<match for=" + tn + ">`";
+        }
+        return "`<match>`";
     }
 
     // What an initializer does that can be observed (§7.6 rule (b): "no call, no write") — a

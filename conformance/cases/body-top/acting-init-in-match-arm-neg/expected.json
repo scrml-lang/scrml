@@ -1,0 +1,24 @@
+{
+  "id": "body-top-acting-init-in-match-arm-neg",
+  "description": "§7.6 rule (b) (S482) — `${ const a = note(\"a\"); }` written in an element inside the `Idle` arm of a `<match>`: the initializer calls a function, and a file-scope initializer runs once — not when, or each time, the arm shows — so it is refused, naming the arm (E-FILE-SCOPE-INIT-IN-CONSTRUCT). Before #2053 r1 it ran once, unconditionally, with the `Ready` arm showing.",
+  "language-version": "1.0",
+  "spec": "§7.6 rule (b) (S482), §34",
+  "source-test": "compiler/self-host-v2/slice-m4/runorder-followups-s482.test.js",
+  "rationale": "§7.6 rule (b) (S482): \"Inside the content of an `if=` / `else-if=` / `else` element, a component's slot content, or a `<match>` arm, at any depth … A file-scope initializer written there that acts — a call, a write, a `?{}` query, a foreign block — SHALL be a compile error, `E-FILE-SCOPE-INIT-IN-CONSTRUCT`, whose message names the construct.\" ruling:user-voice-scrml.md-S481-nested-init-chain-comments item 1 — \"A file-scope initializer that acts, written inside `if=` content, a component's slot content, or a `<match>` … make it a compile error naming the construct; refusing means nobody is surprised.\" (owner: \"aprove both, lets wrap\").",
+  "expect": {
+    "codes": ["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-init-in-construct-s482",
+      "fails": {
+        "codes": [
+          "emitted:E-ATTR-001=1",
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-STATE-UNDECLARED=1",
+          "missing:E-FILE-SCOPE-INIT-IN-CONSTRUCT"
+        ]
+      }
+    }
+  }
+}
