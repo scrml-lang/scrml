@@ -69,6 +69,7 @@ ${
     import { HEntry, surfaceInterfaces, isSurfaceIface, isDomElementIface, ifaceInherits, findEntry, accessesOf, sigParams, sigResult,
              slotType, slotOptional, isCallbackSlot, slotAlternatives, slotAdmitsNot, unWaiting, entryGuards, inertTagIface,
              dictKeys, attrNameVerdict, entryConflict, runtimeGuardsBuilt, brandChecksBuilt, inertElements, eventIfaceOf } from "./host-surface.scrml"
+    import { MetaRun, metaFiles } from "./meta.scrml"
 
     // =========================================================================
     // THE TABLES (exported — `lower` consumes them).
@@ -53246,14 +53247,31 @@ ${
     // `m.x` stays a member access on the namespace, refused (E-SCOPE-001 — fails closed).
     // s477 fix round 1 (F3): `routeBase` — the source root's own path (scrml-boot: absolute), which
     // a build with no `<program>` reads route files against (§40.8; routeFile).
-    export fn analyzeSources(files0: FileAst[], srcs: Source[], entry: string, keyBase: string, routeBase: string, nextId: int) -> TypedProgram {
+    // s481 (s481-boot-meta): the `^{}` meta blocks (§22) are replaced FIRST — a
+    // compile-time block by the markup its `emit()` output parses to — so that
+    // output is analyzed exactly as source is (§22.4.1: "Emitted output SHALL be
+    // held to every rule source is held to"). meta.scrml metaFiles; its
+    // diagnostics lead the program's.
+    export fn analyzeSources(files00: FileAst[], srcs: Source[], entry: string, keyBase: string, routeBase: string, nextId0: int) -> TypedProgram {
+        const mr: MetaRun = metaFiles(files00, nextId0)
+        const tp: TypedProgram = analyzeExpanded(mr.files, srcs, entry, keyBase, routeBase, mr.next)
+        if (mr.diags.length == 0) return tp
+        return { files: tp.files, tables: tp.tables, diags: mr.diags.concat(tp.diags), infos: tp.infos }
+    }
+
+    fn analyzeExpanded(files0: FileAst[], srcs: Source[], entry: string, keyBase: string, routeBase: string, nextId0: int) -> TypedProgram {
+        let nextId: int = nextId0
         const r0: ARun = analyzeRun(files0, entry, keyBase, routeBase, nextId >= 0, [])
         let files: FileAst[] = files0
         let r1: ARun = r0
         if (r0.nsAt.length > 0) {
             const rr: NsReread = nsReread(files0, srcs, r0.nsAt)
             if (rr.changed) {
-                files = rr.files
+                // s481: a re-read file is parsed from its source again, its `^{}` blocks
+                // with it — replaced again (their diagnostics were reported by the first pass)
+                const mr2: MetaRun = metaFiles(rr.files, nextId)
+                files = mr2.files
+                nextId = mr2.next
                 r1 = analyzeRun(files, entry, keyBase, routeBase, nextId >= 0, [])
             }
         }

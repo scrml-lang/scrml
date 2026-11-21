@@ -1,0 +1,3012 @@
+// =============================================================================
+// self-host-v2 / meta.scrml — `^{ … }` META blocks (SPEC §22), s481
+// (s481-boot-meta): phase 0 (the static checks) and phase 1 (compile-time
+// `emit` / `emit.raw` / `reflect`, evaluated and spliced).
+//
+// Rulings: ruling:user-voice-scrml.md S480 "⭐ RULED — bootstrap census build
+// order" item 2 ("**`^{}` meta in the bootstrap.** Rec: *"build it after Track
+// M"*. RULED yes.") and ruling:user-voice-scrml.md-S481-meta-four (all four
+// items): a literal `reflect(User)` in a RUNTIME block compiles (§22.4.2 — no
+// E-META-005 for it); `meta.get` / `meta.set` / `meta.subscribe` take literal
+// names only (phase 2); the `reflect` result shape is impl#1's (`kind`, `name`,
+// `fields` of `{ name, type }`, `variants` of name strings — PERMANENT); and
+// compile-time evaluation is a scrml INTERPRETER over the bootstrap's own tree,
+// deterministic, bounded by a step count and a recursion depth
+// (E-META-EVAL-001), no JS eval, no clock (PERMANENT).
+//
+// WHERE IT RUNS. analyze.scrml analyzeSources calls `metaFiles` FIRST, before
+// any other pass reads the tree, so emitted markup is held to every source rule
+// (§22.4.1: "Emitted output SHALL be held to every rule source is held to") by
+// construction — it is analyzed as source is. impl#1 evaluates after its type
+// system (meta-eval.ts, Stage 6.5) and so restricts emitted output; the
+// bootstrap keeps that restriction (plain markup only, E-META-EVAL-002) as an
+// INTERIM PA default (S481 design read Q2) for codes agreement with impl#1.
+//
+// THE TREE. The parser keeps each `^{ … }` where it stands as a call of the
+// reserved callee `^` (ast.scrml metaOf; parse.scrml parseMetaExpr), marked
+// when it stands where markup stands. `metaFiles` walks every file and replaces
+// every one: a compile-time block at a markup position by the nodes its `emit`
+// output parses to (spans rewritten to the block's span — §22.4.1's output has
+// no source of its own), any other block by nothing; each refusal is reported.
+// Nothing downstream ever sees the reserved call.
+//
+// PHASES (one block, in order — a block reports its own codes and is then
+// dropped; it is never ALSO refused as unsupported):
+//   1. A parse error inside the block (E-META-002, re-coded by the parser):
+//      nothing more is said.
+//   2. Static checks (§22.12 allow-list E-META-001, E-META-010 `compiler.*`,
+//      E-META-006 `lift`, E-META-009 nested in a compile-time block, E-META-005
+//      phase mix, E-META-007 `?{}` in a runtime block, E-META-003
+//      `reflect(Unknown)`). A block that fails one is not evaluated ("A `^{}`
+//      body that fails the allow-list SHALL NOT be evaluated", §22.12).
+//   3. A RUNTIME block (§22.5) is refused by name, E-BOOTSTRAP-UNSUPPORTED
+//      (phase 2 of the build — not in this module yet).
+//   4. A COMPILE-TIME block is interpreted (MInterp below). A form the
+//      interpreter does not evaluate, a host failure (`n.toFixed(-1)`), or the
+//      step / depth bound is E-META-EVAL-001, naming the form (§22.4: "A
+//      statement form an implementation cannot evaluate at compile time refuses
+//      the block … rather than evaluating the block without it").
+//   5. Its `emit()` output is re-read by the one markup reader (parse.scrml
+//      parseFragment) and judged (emit-gate.scrml); a failure is
+//      E-META-EVAL-002 (or E-SCRIPT-001 / E-STYLE-001, the source codes).
+// =============================================================================
+${
+    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, ARequest, AType, ATypeK,
+             ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
+             AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
+             AProgram, AItem, AItemK, AConst, FileAst, Diag, ASql,
+             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, ALift, AForeign, IfForm,
+             AMeta, metaOf, metaCallee, mkSpan, newDiag } from "./ast.scrml"
+    import { Fragment, parseFragment } from "./parse.scrml"
+    import { emitNsHtml, emitFoldName, emitStandardElement, emitAttrNameVerdict, emitAttrValueVerdict,
+             emitNamedValueVerdict, emitChildNs } from "./emit-gate.scrml"
+    import { isUrlAttr, urlValueAdmitted } from "./url.scrml"
+    import { Severity } from "./severity.scrml"
+
+    // =========================================================================
+    // The public face.
+    // =========================================================================
+    // `next`: the first unused node id of the linked program (spliced nodes take
+    // ids from it); -1 when the caller has none — a block whose output would be
+    // spliced is then refused by name (no ids to give its nodes).
+    export type MetaRun:struct = { files: FileAst[], next: int, diags: Diag[] }
+
+    export fn metaFiles(files: FileAst[], next0: int) -> MetaRun {
+        let next: int = next0
+        let out: FileAst[] = []
+        let diags: Diag[] = []
+        for (const f of files) {
+            const env: MEnv = envOf(f, files)
+            const c0: MC = { file: f.path, env: env, next: next, diags: [], errs: f.errs, hits: 0 }
+            const r: RItems = mItems(c0, f.items, "program", true)
+            next = r.c.next
+            diags = diags.concat(r.c.diags)
+            if (r.c.hits == 0) {
+                out = out.concat([f])
+            } else {
+                out = out.concat([{ path: f.path, items: r.items, errs: f.errs, lines: f.lines, dbFns: f.dbFns, hosts: f.hosts, pages: f.pages, eps: f.eps, first: f.first, tables: f.tables, chans: f.chans, onchs: f.onchs }])
+            }
+        }
+        return { files: out, next: next, diags: diags }
+    }
+
+    // =========================================================================
+    // What a block may capture (§22.3): the file's declarations, read from its
+    // items (and a `<program>` body's), and the types `reflect` reads.
+    //   kind 0 — a `const` (file scope / program body): compile-time evaluable;
+    //   kind 1 — a `function` / `fn` declared there (not `server`);
+    //   kind 2 — a runtime binding: a file-scope `let`, a `server` function;
+    //   kind 3 — an imported name (captured; evaluated only when it is this
+    //            file's own — an import is refused at evaluation, INTERIM).
+    // `cells`: the program's cell names — a cell is reached as `@name` only
+    // (§22.12), so a bare cell name is no capture.
+    // =========================================================================
+    type MDecl:struct = { name: string, kind: int, init: AExpr | not, fn: AFn | not }
+    type MField:struct = { name: string, ty: string }
+    type MType:struct = { name: string, kind: string, fields: MField[], variants: string[] }
+    type MEnv:struct = { decls: MDecl[], types: MType[], cells: string[] }
+
+    fn envOf(f: FileAst, all: FileAst[]) -> MEnv {
+        let e: MEnv = { decls: [], types: primitiveTypes(), cells: [] }
+        e = envItems(e, f.items)
+        // a type imported by name from another file of the program (its own declaration)
+        let imported: string[] = []
+        for (const d of e.decls) { if (d.kind == 3) imported = imported.concat([d.name]) }
+        if (imported.length > 0) {
+            for (const g of all) {
+                if (g.path != f.path) {
+                    const ts: MType[] = typesOfItems(g.items, true)
+                    for (const t of ts) {
+                        if (imported.indexOf(t.name) >= 0 && !hasType(e.types, t.name)) {
+                            e = { decls: e.decls, types: e.types.concat([t]), cells: e.cells }
+                        }
+                    }
+                }
+            }
+        }
+        return e
+    }
+
+    // impl#1 buildFileTypeRegistry seeds these (reflect of a primitive: `{ kind, name }`)
+    fn primitiveTypes() -> MType[] {
+        let out: MType[] = []
+        for (const n of ["number", "string", "boolean", "bool", "asIs"]) {
+            out = out.concat([{ name: n, kind: "primitive", fields: [], variants: [] }])
+        }
+        return out
+    }
+
+    fn hasType(ts: MType[], name: string) -> boolean {
+        for (const t of ts) { if (t.name == name) return true }
+        return false
+    }
+
+    fn envItems(e0: MEnv, items: AItem[]) -> MEnv {
+        let e: MEnv = e0
+        for (const it of items) {
+            const k: AItemK = it.k
+            match k {
+                .ConstItem(c: c) :> { e = envAdd(e, c.name, envConstKind(c.mutable), c.init, not) }
+                .FnItem(f: f) :> { e = envAdd(e, f.name, envFnKind(f.server), not, f) }
+                .ImportItem(i: i) :> { e = envImports(e, i) }
+                .DeclItem(d: d) :> { e = { decls: e.decls, types: e.types, cells: e.cells.concat([d.name]) } }
+                .TypeItem(t: t) :> { e = { decls: e.decls, types: e.types.concat([typeOf(t)]), cells: e.cells } }
+                .ProgramItem(p: p) :> { e = envItems(e, p.items) }
+                .MarkupItem(n: n) :> {}
+            }
+        }
+        return e
+    }
+
+    fn envConstKind(mutable: boolean) -> int {
+        if (mutable) return 2
+        return 0
+    }
+
+    fn envFnKind(server: boolean) -> int {
+        if (server) return 2
+        return 1
+    }
+
+    fn envAdd(e: MEnv, name: string, kind: int, init: AExpr | not, f: AFn | not) -> MEnv {
+        return { decls: e.decls.concat([{ name: name, kind: kind, init: init, fn: f }]), types: e.types, cells: e.cells }
+    }
+
+    fn envImports(e0: MEnv, i: AImport) -> MEnv {
+        let e: MEnv = e0
+        if (i.ns != "") e = envAdd(e, i.ns, 3, not, not)
+        for (const n of i.names) { e = envAdd(e, n.name, 3, not, not) }
+        return e
+    }
+
+    fn typesOfItems(items: AItem[], exportedOnly: boolean) -> MType[] {
+        let out: MType[] = []
+        for (const it of items) {
+            const k: AItemK = it.k
+            match k {
+                .TypeItem(t: t) :> { if (t.exported || !exportedOnly) out = out.concat([typeOf(t)]) }
+                .ProgramItem(p: p) :> { out = out.concat(typesOfItems(p.items, exportedOnly)) }
+                .ImportItem(i: i) :> {}
+                .FnItem(f: f) :> {}
+                .DeclItem(d: d) :> {}
+                .MarkupItem(n: n) :> {}
+                .ConstItem(c: c) :> {}
+            }
+        }
+        return out
+    }
+
+    // A declared type as `reflect` reads it (ruling:user-voice-scrml.md-S481-meta-four
+    // item 3 — impl#1's shape): an enum's variant NAMES, a struct's fields with
+    // their written type text; any other declared type `{ kind: "unknown", name }`.
+    fn typeOf(t: ATypeDecl) -> MType {
+        const b: ATypeBody = t.body
+        return match b {
+            .EnumBody(variants: vs) :> enumType(t.name, vs)
+            .StructBody(fields: fs) :> structType(t.name, fs)
+            .HostBody :> { name: t.name, kind: "unknown", fields: [], variants: [] }
+            .AliasBody(ty: a) :> { name: t.name, kind: "unknown", fields: [], variants: [] }
+        }
+    }
+
+    fn enumType(name: string, vs: AVariant[]) -> MType {
+        let names: string[] = []
+        for (const v of vs) { names = names.concat([v.name]) }
+        return { name: name, kind: "enum", fields: [], variants: names }
+    }
+
+    fn structType(name: string, fs: ATypeField[]) -> MType {
+        let out: MField[] = []
+        for (const f of fs) { out = out.concat([{ name: f.name, ty: typeText(f.ty) }]) }
+        return { name: name, kind: "struct", fields: out, variants: [] }
+    }
+
+    // A written type as text (the `type` of a reflected field).
+    fn typeText(t: AType) -> string {
+        const k: ATypeK = t.k
+        return match k {
+            .TName(name: n) :> n
+            .TSeq(elem: e, grants: gs) :> seqText(e, gs)
+            .TMaybe(inner: i) :> typeText(i) + " | not"
+            .TLife(pre: a, post: b) :> "(" + typeText(a) + " to " + typeText(b) + ")"
+            .TRefine(base: b, pred: p) :> typeText(b) + "(" + p + ")"
+            .TFn(params: ps, ret: r) :> fnTypeText(ps, r)
+        }
+    }
+
+    fn seqText(e: AType, gs: string[]) -> string {
+        if (gs.length == 0) return typeText(e) + "[]"
+        return typeText(e) + "[" + gs.join(", ") + "]"
+    }
+
+    fn fnTypeText(ps: AType[], r: AType | not) -> string {
+        let parts: string[] = []
+        for (const p of ps) { parts = parts.concat([typeText(p)]) }
+        let ret: string = "void"
+        if (r is given) ret = typeText(r)
+        return "(" + parts.join(", ") + ") => " + ret
+    }
+
+    fn findDecl(e: MEnv, name: string) -> MDecl | not {
+        let found: MDecl | not = not
+        for (const d of e.decls) { if (d.name == name) found = d }
+        return found
+    }
+
+    fn findType(e: MEnv, name: string) -> MType | not {
+        for (const t of e.types) { if (t.name == name) return t }
+        return not
+    }
+
+    // =========================================================================
+    // THE WALK — every place a node, a statement or an expression stands, so
+    // every reserved `^` call is reached wherever the parser kept it. `MC` is the
+    // walk's state: the diagnostics so far, the next node id, `hits` (blocks
+    // replaced — a file with none is returned as it was).
+    // =========================================================================
+    type MC:struct = { file: string, env: MEnv, next: int, diags: Diag[], errs: ASpan[], hits: int }
+
+    fn withDiag(c: MC, code: string, msg: string, span: ASpan) -> MC {
+        return { file: c.file, env: c.env, next: c.next, diags: c.diags.concat([newDiag(code, msg, c.file, span)]), errs: c.errs, hits: c.hits }
+    }
+
+    fn withDiags(c: MC, ds: Diag[]) -> MC {
+        return { file: c.file, env: c.env, next: c.next, diags: c.diags.concat(ds), errs: c.errs, hits: c.hits }
+    }
+
+    fn withNext(c: MC, next: int) -> MC {
+        return { file: c.file, env: c.env, next: next, diags: c.diags, errs: c.errs, hits: c.hits }
+    }
+
+    fn hit(c: MC) -> MC {
+        return { file: c.file, env: c.env, next: c.next, diags: c.diags, errs: c.errs, hits: c.hits + 1 }
+    }
+
+    type RItems:struct = { items: AItem[], c: MC }
+    type RNodes:struct = { nodes: ANode[], c: MC }
+    type RNode:struct = { n: ANode, c: MC }
+    type RExpr:struct = { e: AExpr, c: MC }
+    type RExprs:struct = { es: AExpr[], c: MC }
+    type RStmts:struct = { ss: AStmt[], c: MC }
+    type RBlock:struct = { b: ABlock, c: MC }
+    type RVal:struct = { v: AAttrValue, c: MC }
+    type RAttrs:struct = { attrs: AAttr[], c: MC }
+    type RDecl:struct = { d: ADecl, c: MC }
+    type RFn:struct = { f: AFn, c: MC }
+    type RFor:struct = { f: AFor, c: MC }
+    type RArms:struct = { arms: AArm[], c: MC }
+    type RElem:struct = { el: AElem, c: MC }
+
+    // `parent`: the tag of the element these items are the children of
+    // ("program" for a program body and the file top level); `bodyTop`: the
+    // items stand at a program body / the file top (a code-default body).
+    fn mItems(c0: MC, items: AItem[], parent: string, bodyTop: boolean) -> RItems {
+        let c: MC = c0
+        let out: AItem[] = []
+        for (const it of items) {
+            const k: AItemK = it.k
+            match k {
+                .MarkupItem(n: n) :> {
+                    const r: RNodes = mNode(c, n, parent, bodyTop)
+                    c = r.c
+                    for (const x of r.nodes) { out = out.concat([{ nid: it.nid, span: it.span, k: AItemK.MarkupItem(x) }]) }
+                }
+                .FnItem(f: f) :> {
+                    const r: RFn = mFn(c, f)
+                    c = r.c
+                    out = out.concat([{ nid: it.nid, span: it.span, k: AItemK.FnItem(r.f) }])
+                }
+                .DeclItem(d: d) :> {
+                    const r: RDecl = mDecl(c, d)
+                    c = r.c
+                    out = out.concat([{ nid: it.nid, span: it.span, k: AItemK.DeclItem(r.d) }])
+                }
+                .ProgramItem(p: p) :> {
+                    const ra: RAttrs = mAttrs(c, p.attrs)
+                    const ri: RItems = mItems(ra.c, p.items, "program", true)
+                    c = ri.c
+                    out = out.concat([{ nid: it.nid, span: it.span, k: AItemK.ProgramItem({ nid: p.nid, span: p.span, attrs: ra.attrs, items: ri.items }) }])
+                }
+                .ConstItem(c: x) :> {
+                    const r: RExpr = mExpr(c, x.init)
+                    c = r.c
+                    out = out.concat([{ nid: it.nid, span: it.span, k: AItemK.ConstItem({ nid: x.nid, span: x.span, exported: x.exported, name: x.name, ty: x.ty, init: r.e, mutable: x.mutable }) }])
+                }
+                .ImportItem(i: i) :> { out = out.concat([it]) }
+                .TypeItem(t: t) :> { out = out.concat([it]) }
+            }
+        }
+        return { items: out, c: c }
+    }
+
+    fn mNodes(c0: MC, ns: ANode[], parent: string, bodyTop: boolean) -> RNodes {
+        let c: MC = c0
+        let out: ANode[] = []
+        for (const n of ns) {
+            const r: RNodes = mNode(c, n, parent, bodyTop)
+            c = r.c
+            out = out.concat(r.nodes)
+        }
+        return { nodes: out, c: c }
+    }
+
+    // One node → the nodes that stand in its place (a meta block: its output).
+    fn mNode(c: MC, n: ANode, parent: string, bodyTop: boolean) -> RNodes {
+        const k: ANodeK = n.k
+        return match k {
+            .Interp(e: e) :> mInterp(c, n, e, parent, bodyTop)
+            .Elem(e: el) :> mElemNode(c, n, el)
+            .Text(text: t) :> { nodes: [n], c: c }
+            .Css(c: x) :> { nodes: [n], c: c }
+            .DeclNode(d: d) :> mDeclNode(c, n, d)
+            .Effect(w: w) :> mEffectNode(c, n, w)
+            .Request(r: r) :> mRequestNode(c, n, r)
+            .Gather(f: f) :> mGatherNode(c, n, f)
+            .Run(b: b) :> mRunNode(c, n, b)
+        }
+    }
+
+    fn one(n: ANode, c: MC) -> RNodes { return { nodes: [n], c: c } }
+
+    fn mInterp(c: MC, n: ANode, e: AExpr, parent: string, bodyTop: boolean) -> RNodes {
+        const m: AMeta | not = metaOf(e)
+        if (m is given) return metaBlock(hit(c), m, parent, bodyTop)
+        const r: RExpr = mExpr(c, e)
+        return one({ nid: n.nid, span: n.span, k: ANodeK.Interp(r.e) }, r.c)
+    }
+
+    fn mElemNode(c: MC, n: ANode, el: AElem) -> RNodes {
+        const r: RElem = mElem(c, el)
+        return one({ nid: n.nid, span: n.span, k: ANodeK.Elem(r.el) }, r.c)
+    }
+
+    fn mElem(c: MC, el: AElem) -> RElem {
+        const ra: RAttrs = mAttrs(c, el.attrs)
+        const rk: RNodes = mNodes(ra.c, el.kids, el.tag, false)
+        return { el: { nid: el.nid, span: el.span, star: el.star, tag: el.tag, attrs: ra.attrs, kids: rk.nodes, binds: el.binds, parens: el.parens }, c: rk.c }
+    }
+
+    fn mDeclNode(c: MC, n: ANode, d: ADecl) -> RNodes {
+        const r: RDecl = mDecl(c, d)
+        return one({ nid: n.nid, span: n.span, k: ANodeK.DeclNode(r.d) }, r.c)
+    }
+
+    fn mEffectNode(c: MC, n: ANode, w: AEffect) -> RNodes {
+        const r: AEffectR = mEffect(c, w)
+        return one({ nid: n.nid, span: n.span, k: ANodeK.Effect(r.w) }, r.c)
+    }
+
+    type AEffectR:struct = { w: AEffect, c: MC }
+
+    fn mEffect(c: MC, w: AEffect) -> AEffectR {
+        const rd: RExprs = mExprs(c, w.deps)
+        const rb: RBlock = mBlock(rd.c, w.body)
+        return { w: { nid: w.nid, span: w.span, deps: rd.es, body: rb.b, keyword: w.keyword }, c: rb.c }
+    }
+
+    fn mRequestNode(c: MC, n: ANode, r: ARequest) -> RNodes {
+        const ra: RAttrs = mAttrs(c, r.attrs)
+        const rb: RBlock = mBlock(ra.c, r.body)
+        return one({ nid: n.nid, span: n.span, k: ANodeK.Request({ nid: r.nid, span: r.span, attrs: ra.attrs, body: rb.b, opener: r.opener, pend: r.pend }) }, rb.c)
+    }
+
+    fn mGatherNode(c: MC, n: ANode, f: AFor) -> RNodes {
+        const r: RFor = mFor(c, f)
+        return one({ nid: n.nid, span: n.span, k: ANodeK.Gather(r.f) }, r.c)
+    }
+
+    fn mRunNode(c: MC, n: ANode, b: ABlock) -> RNodes {
+        const r: RBlock = mBlock(c, b)
+        return one({ nid: n.nid, span: n.span, k: ANodeK.Run(r.b) }, r.c)
+    }
+
+    fn mAttrs(c0: MC, attrs: AAttr[]) -> RAttrs {
+        let c: MC = c0
+        let out: AAttr[] = []
+        for (const a of attrs) {
+            const r: RVal = mVal(c, a.value)
+            c = r.c
+            out = out.concat([{ nid: a.nid, span: a.span, name: a.name, value: r.v }])
+        }
+        return { attrs: out, c: c }
+    }
+
+    fn mVal(c: MC, v: AAttrValue) -> RVal {
+        return match v {
+            .Bare(e: e) :> mValBare(c, e)
+            .Paren(e: e) :> mValParen(c, e)
+            .Braced(b: b, ev: ev) :> mValBraced(c, b, ev)
+            .NoValue :> { v: v, c: c }
+            .Quoted(v: s) :> { v: v, c: c }
+            .Dur(text: t) :> { v: v, c: c }
+        }
+    }
+
+    fn mValBare(c: MC, e: AExpr) -> RVal {
+        const r: RExpr = mExpr(c, e)
+        return { v: AAttrValue.Bare(r.e), c: r.c }
+    }
+
+    fn mValParen(c: MC, e: AExpr) -> RVal {
+        const r: RExpr = mExpr(c, e)
+        return { v: AAttrValue.Paren(r.e), c: r.c }
+    }
+
+    fn mValBraced(c: MC, b: ABlock, ev: string) -> RVal {
+        const r: RBlock = mBlock(c, b)
+        return { v: AAttrValue.Braced(r.b, ev), c: r.c }
+    }
+
+    fn mDecl(c0: MC, d: ADecl) -> RDecl {
+        const ro: RVal = mVal(c0, d.own)
+        let c: MC = ro.c
+        let attrs: ADeclAttr[] = []
+        for (const a of d.attrs) {
+            const r: RVal = mVal(c, a.dflt)
+            c = r.c
+            attrs = attrs.concat([{ nid: a.nid, span: a.span, exported: a.exported, isLet: a.isLet, name: a.name, ty: a.ty, dflt: r.v }])
+        }
+        const rm: RAttrs = mAttrs(c, d.mods)
+        c = rm.c
+        let body: ADeclChild[] = []
+        for (const ch of d.body) {
+            const chk: ADeclChild = ch
+            match chk {
+                .ChildField(d: f) :> {
+                    const r: RDecl = mDecl(c, f)
+                    c = r.c
+                    body = body.concat([ADeclChild.ChildField(r.d)])
+                }
+                .StateChild(s: s) :> {
+                    const r: RStateChild = mStateChild(c, s, d.name)
+                    c = r.c
+                    body = body.concat([ADeclChild.StateChild(r.s)])
+                }
+                .Idle(s: s) :> {
+                    const r: RStateChild = mStateChild(c, s, d.name)
+                    c = r.c
+                    body = body.concat([ADeclChild.Idle(r.s)])
+                }
+            }
+        }
+        let renders: AElem | not = not
+        const rd: AElem | not = d.renders
+        if (rd is given) {
+            const r: RElem = mElem(c, rd)
+            c = r.c
+            renders = r.el
+        }
+        let vals: AValidator[] = []
+        for (const v of d.validators) {
+            const r: RValArg = mValArg(c, v.arg)
+            c = r.c
+            vals = vals.concat([{ nid: v.nid, span: v.span, name: v.name, arg: r.a }])
+        }
+        return { d: { nid: d.nid, span: d.span, exported: d.exported, isLet: d.isLet, name: d.name, ty: d.ty, own: ro.v,
+                      attrs: attrs, mods: rm.attrs, body: body, renders: renders, validators: vals }, c: c }
+    }
+
+    type RStateChild:struct = { s: AStateChild, c: MC }
+    type RValArg:struct = { a: AValArg, c: MC }
+
+    fn mStateChild(c: MC, s: AStateChild, parent: string) -> RStateChild {
+        const ra: RAttrs = mAttrs(c, s.attrs)
+        const rb: RNodes = mNodes(ra.c, s.body, s.name, false)
+        return { s: { nid: s.nid, span: s.span, name: s.name, attrs: ra.attrs, body: rb.nodes }, c: rb.c }
+    }
+
+    fn mValArg(c: MC, a: AValArg) -> RValArg {
+        return match a {
+            .Cmp(op: op, e: e) :> mValCmp(c, op, e)
+            .Exprs(es: es) :> mValExprs(c, es)
+            .NoArgs :> { a: a, c: c }
+            .Regex(source: s) :> { a: a, c: c }
+        }
+    }
+
+    fn mValCmp(c: MC, op: string, e: AExpr) -> RValArg {
+        const r: RExpr = mExpr(c, e)
+        return { a: AValArg.Cmp(op, r.e), c: r.c }
+    }
+
+    fn mValExprs(c: MC, es: AExpr[]) -> RValArg {
+        const r: RExprs = mExprs(c, es)
+        return { a: AValArg.Exprs(r.es), c: r.c }
+    }
+
+    fn mFn(c: MC, f: AFn) -> RFn {
+        const r: RBlock = mBlock(c, f.body)
+        return { f: { nid: f.nid, span: f.span, exported: f.exported, pure: f.pure, name: f.name, params: f.params, ret: f.ret, body: r.b,
+                      server: f.server, failable: f.failable, err: f.err }, c: r.c }
+    }
+
+    fn mBlock(c: MC, b: ABlock) -> RBlock {
+        const r: RStmts = mStmts(c, b.stmts)
+        return { b: { nid: b.nid, span: b.span, stmts: r.ss }, c: r.c }
+    }
+
+    fn mStmts(c0: MC, ss: AStmt[]) -> RStmts {
+        let c: MC = c0
+        let out: AStmt[] = []
+        for (const s of ss) {
+            const r: RStmts = mStmt(c, s)
+            c = r.c
+            out = out.concat(r.ss)
+        }
+        return { ss: out, c: c }
+    }
+
+    fn st(s: AStmt, k: AStmtK) -> AStmt { return { nid: s.nid, span: s.span, k: k } }
+
+    // One statement → the statements in its place: a meta block standing as a
+    // statement (a logic position) is checked, reported and dropped.
+    fn mStmt(c: MC, s: AStmt) -> RStmts {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: e) :> mEvalStmt(c, s, e)
+            .Local(name: n, mutable: mu, ty: ty, init: init, lin: lin) :> mLocal(c, s, n, mu, ty, init, lin)
+            .Return(e: e) :> mReturn(c, s, e)
+            .If(cond: cond, thenB: tb, elseB: eb, form: form) :> mIf(c, s, cond, tb, eb, form)
+            .Given(name: n, subject: subj, body: b) :> mGiven(c, s, n, subj, b)
+            .EffectStmt(w: w) :> mEffectStmt(c, s, w)
+            .Defer(body: b, arrayLead: al, bare: bare) :> mDefer(c, s, b, al, bare)
+            .Fail(f: f) :> mFail(c, s, f)
+            .For(f: f) :> mForStmt(c, s, f)
+            .Break(label: l) :> { ss: [s], c: c }
+            .Continue(label: l) :> { ss: [s], c: c }
+            .Lift(what: w) :> mLift(c, s, w)
+            .LocalFn(f: f) :> mLocalFn(c, s, f)
+        }
+    }
+
+    fn mEvalStmt(c: MC, s: AStmt, e: AExpr) -> RStmts {
+        const m: AMeta | not = metaOf(e)
+        if (m is given) {
+            const r: RNodes = metaBlock(hit(c), m, "", false)
+            return { ss: [], c: r.c }
+        }
+        const r: RExpr = mExpr(c, e)
+        return { ss: [st(s, AStmtK.Eval(r.e))], c: r.c }
+    }
+
+    fn mLocal(c: MC, s: AStmt, n: string, mu: boolean, ty: AType | not, init: AExpr, lin: boolean) -> RStmts {
+        const r: RExpr = mExpr(c, init)
+        return { ss: [st(s, AStmtK.Local(n, mu, ty, r.e, lin))], c: r.c }
+    }
+
+    fn mReturn(c: MC, s: AStmt, e: AExpr | not) -> RStmts {
+        if (e is given) {
+            const r: RExpr = mExpr(c, e)
+            return { ss: [st(s, AStmtK.Return(r.e))], c: r.c }
+        }
+        return { ss: [s], c: c }
+    }
+
+    fn mIf(c: MC, s: AStmt, cond: AExpr, tb: ABlock, eb: ABlock | not, form: IfForm) -> RStmts {
+        const rc: RExpr = mExpr(c, cond)
+        const rt: RBlock = mBlock(rc.c, tb)
+        if (eb is given) {
+            const re: RBlock = mBlock(rt.c, eb)
+            return { ss: [st(s, AStmtK.If(rc.e, rt.b, re.b, form))], c: re.c }
+        }
+        return { ss: [st(s, AStmtK.If(rc.e, rt.b, not, form))], c: rt.c }
+    }
+
+    fn mGiven(c: MC, s: AStmt, n: string, subj: AExpr, b: ABlock) -> RStmts {
+        const rs: RExpr = mExpr(c, subj)
+        const rb: RBlock = mBlock(rs.c, b)
+        return { ss: [st(s, AStmtK.Given(n, rs.e, rb.b))], c: rb.c }
+    }
+
+    fn mEffectStmt(c: MC, s: AStmt, w: AEffect) -> RStmts {
+        const r: AEffectR = mEffect(c, w)
+        return { ss: [st(s, AStmtK.EffectStmt(r.w))], c: r.c }
+    }
+
+    fn mDefer(c: MC, s: AStmt, b: ABlock, al: boolean, bare: boolean) -> RStmts {
+        const r: RBlock = mBlock(c, b)
+        return { ss: [st(s, AStmtK.Defer(r.b, al, bare))], c: r.c }
+    }
+
+    fn mFail(c: MC, s: AStmt, f: AFail) -> RStmts {
+        const ra: RExprs = mExprs(c, f.args)
+        let cc: MC = ra.c
+        let target: AExpr | not = not
+        const t0: AExpr | not = f.target
+        if (t0 is given) {
+            const r: RExpr = mExpr(cc, t0)
+            cc = r.c
+            target = r.e
+        }
+        return { ss: [st(s, AStmtK.Fail({ enumName: f.enumName, variant: f.variant, args: ra.es, target: target, split: f.split }))], c: cc }
+    }
+
+    fn mForStmt(c: MC, s: AStmt, f: AFor) -> RStmts {
+        const r: RFor = mFor(c, f)
+        return { ss: [st(s, AStmtK.For(r.f))], c: r.c }
+    }
+
+    fn mFor(c: MC, f: AFor) -> RFor {
+        const rh: RHead = mHead(c, f.head)
+        const rb: RBlock = mBlock(rh.c, f.body)
+        return { f: { nid: f.nid, span: f.span, label: f.label, head: rh.h, body: rb.b, bound: f.bound }, c: rb.c }
+    }
+
+    type RHead:struct = { h: AForHead, c: MC }
+
+    fn mHead(c: MC, h: AForHead) -> RHead {
+        return match h {
+            .HForever :> { h: h, c: c }
+            .HCond(cond: e) :> mHeadCond(c, e)
+            .HCounted(init: ss, cond: e, step: es) :> mHeadCounted(c, ss, e, es)
+            .HIter(bind: b, mutable: mu, src: src, key: key) :> mHeadIter(c, b, mu, src, key)
+        }
+    }
+
+    fn mHeadCond(c: MC, e: AExpr) -> RHead {
+        const r: RExpr = mExpr(c, e)
+        return { h: AForHead.HCond(r.e), c: r.c }
+    }
+
+    fn mHeadCounted(c: MC, ss: AStmt[], e: AExpr | not, es: AExpr[]) -> RHead {
+        const ri: RStmts = mStmts(c, ss)
+        let cc: MC = ri.c
+        let cond: AExpr | not = not
+        if (e is given) {
+            const r: RExpr = mExpr(cc, e)
+            cc = r.c
+            cond = r.e
+        }
+        const rs: RExprs = mExprs(cc, es)
+        return { h: AForHead.HCounted(ri.ss, cond, rs.es), c: rs.c }
+    }
+
+    fn mHeadIter(c: MC, b: ABind, mu: boolean, src: AIterSrc, key: AExpr | not) -> RHead {
+        let cc: MC = c
+        let src2: AIterSrc = src
+        match src {
+            .IterOf(e: e) :> {
+                const r: RExpr = mExpr(cc, e)
+                cc = r.c
+                src2 = AIterSrc.IterOf(r.e)
+            }
+            .IterRange(lo: lo, hi: hi, inclusive: inc) :> {
+                const rl: RExpr = mExpr(cc, lo)
+                const rh: RExpr = mExpr(rl.c, hi)
+                cc = rh.c
+                src2 = AIterSrc.IterRange(rl.e, rh.e, inc)
+            }
+        }
+        let key2: AExpr | not = not
+        if (key is given) {
+            const r: RExpr = mExpr(cc, key)
+            cc = r.c
+            key2 = r.e
+        }
+        return { h: AForHead.HIter(b, mu, src2, key2), c: cc }
+    }
+
+    fn mLift(c: MC, s: AStmt, w: ALift) -> RStmts {
+        return match w {
+            .LiftExpr(e: e) :> mLiftExpr(c, s, e)
+            .LiftNode(n: n) :> mLiftNode(c, s, n)
+        }
+    }
+
+    fn mLiftExpr(c: MC, s: AStmt, e: AExpr) -> RStmts {
+        const r: RExpr = mExpr(c, e)
+        return { ss: [st(s, AStmtK.Lift(ALift.LiftExpr(r.e)))], c: r.c }
+    }
+
+    fn mLiftNode(c: MC, s: AStmt, n: ANode) -> RStmts {
+        const r: RNodes = mNode(c, n, "", false)
+        if (r.nodes.length == 1) return { ss: [st(s, AStmtK.Lift(ALift.LiftNode(r.nodes[0])))], c: r.c }
+        // (a lifted node is an element, never a meta block — kept as written)
+        return { ss: [s], c: r.c }
+    }
+
+    fn mLocalFn(c: MC, s: AStmt, f: AFn) -> RStmts {
+        const r: RFn = mFn(c, f)
+        return { ss: [st(s, AStmtK.LocalFn(r.f))], c: r.c }
+    }
+
+    fn mExprs(c0: MC, es: AExpr[]) -> RExprs {
+        let c: MC = c0
+        let out: AExpr[] = []
+        for (const e of es) {
+            const r: RExpr = mExpr(c, e)
+            c = r.c
+            out = out.concat([r.e])
+        }
+        return { es: out, c: c }
+    }
+
+    fn ex(e: AExpr, k: AExprK) -> AExpr { return { nid: e.nid, span: e.span, k: k } }
+
+    // One expression. A meta block standing as a VALUE (`const x = ^{ … }`) is
+    // checked and reported; it has no value (§22.4.1: compile-time output is
+    // markup, inlined where markup sits) — refused by name, left as a
+    // placeholder (AExprK.Recovered: reported, never typed).
+    fn mExpr(c: MC, e: AExpr) -> RExpr {
+        const m: AMeta | not = metaOf(e)
+        if (m is given) {
+            const r: RNodes = metaBlock(hit(c), m, "", false)
+            let c2: MC = r.c
+            if (c2.diags.length == c.diags.length) {
+                c2 = withDiag(c2, "E-BOOTSTRAP-UNSUPPORTED", "a `^{}` meta block used as a value is not in the bootstrap — a compile-time block's `emit()` output is markup, inlined where markup sits (§22.4.1); write the block where markup stands, or as a statement", m.span)
+            }
+            return { e: ex(e, AExprK.Recovered), c: c2 }
+        }
+        const k: AExprK = e.k
+        return match k {
+            .Member(obj: o, name: n) :> mMember(c, e, o, n)
+            .Call(callee: f, args: xs) :> mCall(c, e, f, xs)
+            .Unary(op: op, e: x) :> mUnary(c, e, op, x)
+            .Binary(op: op, l: l, r: r) :> mBinary(c, e, op, l, r)
+            .Ternary(test: t, yes: y, no: n, viaIf: vi, optChain: oc) :> mTernary(c, e, t, y, n, vi, oc)
+            .Assign(target: t, value: v, paren: p, kept: kp) :> mAssign(c, e, t, v, p, kp)
+            .ArrayLit(elems: xs) :> mArray(c, e, xs)
+            .ObjectLit(props: ps) :> mObject(c, e, ps)
+            .Spread(e: x) :> mSpread(c, e, x)
+            .Index(obj: o, idx: i) :> mIndex(c, e, o, i)
+            .Lambda(params: ps, body: b, typed: ty) :> mLambda(c, e, ps, b, ty)
+            .BlockLambda(params: ps, body: b, viaFunction: vf) :> mBlockLambda(c, e, ps, b, vf)
+            .Sql(q: q) :> mSql(c, e, q)
+            .Handled(h: h) :> mHandled(c, e, h)
+            .Template(quasis: qs, slots: xs) :> mTemplate(c, e, qs, xs)
+            .Foreign(f: f) :> mForeign(c, e, f)
+            .Name(name: n) :> { e: e, c: c }
+            .At(name: n) :> { e: e, c: c }
+            .AtItem :> { e: e, c: c }
+            .Num(raw: r) :> { e: e, c: c }
+            .Str(v: s) :> { e: e, c: c }
+            .Bool(v: b) :> { e: e, c: c }
+            .NotLit :> { e: e, c: c }
+            .Recovered :> { e: e, c: c }
+            .Variant(name: n) :> { e: e, c: c }
+            .HashRef(id: i) :> { e: e, c: c }
+        }
+    }
+
+    fn mMember(c: MC, e: AExpr, o: AExpr, n: string) -> RExpr {
+        const r: RExpr = mExpr(c, o)
+        return { e: ex(e, AExprK.Member(r.e, n)), c: r.c }
+    }
+
+    fn mCall(c: MC, e: AExpr, f: AExpr, xs: AExpr[]) -> RExpr {
+        const rf: RExpr = mExpr(c, f)
+        const ra: RExprs = mExprs(rf.c, xs)
+        return { e: ex(e, AExprK.Call(rf.e, ra.es)), c: ra.c }
+    }
+
+    fn mUnary(c: MC, e: AExpr, op: UnOp, x: AExpr) -> RExpr {
+        const r: RExpr = mExpr(c, x)
+        return { e: ex(e, AExprK.Unary(op, r.e)), c: r.c }
+    }
+
+    fn mBinary(c: MC, e: AExpr, op: BinOp, l: AExpr, r0: AExpr) -> RExpr {
+        const rl: RExpr = mExpr(c, l)
+        const rr: RExpr = mExpr(rl.c, r0)
+        return { e: ex(e, AExprK.Binary(op, rl.e, rr.e)), c: rr.c }
+    }
+
+    fn mTernary(c: MC, e: AExpr, t: AExpr, y: AExpr, n: AExpr, vi: boolean, oc: boolean) -> RExpr {
+        const rt: RExpr = mExpr(c, t)
+        const ry: RExpr = mExpr(rt.c, y)
+        const rn: RExpr = mExpr(ry.c, n)
+        return { e: ex(e, AExprK.Ternary(rt.e, ry.e, rn.e, vi, oc)), c: rn.c }
+    }
+
+    fn mAssign(c: MC, e: AExpr, t: AExpr, v: AExpr, p: boolean, kp: boolean) -> RExpr {
+        const rt: RExpr = mExpr(c, t)
+        const rv: RExpr = mExpr(rt.c, v)
+        return { e: ex(e, AExprK.Assign(rt.e, rv.e, p, kp)), c: rv.c }
+    }
+
+    fn mArray(c: MC, e: AExpr, xs: AExpr[]) -> RExpr {
+        const r: RExprs = mExprs(c, xs)
+        return { e: ex(e, AExprK.ArrayLit(r.es)), c: r.c }
+    }
+
+    fn mObject(c0: MC, e: AExpr, ps: AProp[]) -> RExpr {
+        let c: MC = c0
+        let out: AProp[] = []
+        for (const p of ps) {
+            const r: RExpr = mExpr(c, p.value)
+            c = r.c
+            out = out.concat([{ nid: p.nid, span: p.span, spread: p.spread, name: p.name, value: r.e }])
+        }
+        return { e: ex(e, AExprK.ObjectLit(out)), c: c }
+    }
+
+    fn mSpread(c: MC, e: AExpr, x: AExpr) -> RExpr {
+        const r: RExpr = mExpr(c, x)
+        return { e: ex(e, AExprK.Spread(r.e)), c: r.c }
+    }
+
+    fn mIndex(c: MC, e: AExpr, o: AExpr, i: AExpr) -> RExpr {
+        const ro: RExpr = mExpr(c, o)
+        const ri: RExpr = mExpr(ro.c, i)
+        return { e: ex(e, AExprK.Index(ro.e, ri.e)), c: ri.c }
+    }
+
+    fn mLambda(c: MC, e: AExpr, ps: string[], b: AExpr, ty: AParam[]) -> RExpr {
+        const r: RExpr = mExpr(c, b)
+        return { e: ex(e, AExprK.Lambda(ps, r.e, ty)), c: r.c }
+    }
+
+    fn mBlockLambda(c: MC, e: AExpr, ps: string[], b: ABlock, vf: boolean) -> RExpr {
+        const r: RBlock = mBlock(c, b)
+        return { e: ex(e, AExprK.BlockLambda(ps, r.b, vf)), c: r.c }
+    }
+
+    fn mSql(c: MC, e: AExpr, q: ASql) -> RExpr {
+        const r: RExprs = mExprs(c, q.params)
+        return { e: ex(e, AExprK.Sql({ chunks: q.chunks, params: r.es, mode: q.mode, nobatch: q.nobatch, handled: q.handled })), c: r.c }
+    }
+
+    fn mHandled(c: MC, e: AExpr, h: AHandled) -> RExpr {
+        const rs: RExpr = mExpr(c, h.subject)
+        const how: AHow = h.how
+        return match how {
+            .Propagate :> { e: ex(e, AExprK.Handled({ subject: rs.e, how: how })), c: rs.c }
+            .Guard(arms: ga) :> mHandledArms(rs.c, e, rs.e, ga, false)
+            .MatchOn(arms: ma) :> mHandledArms(rs.c, e, rs.e, ma, true)
+        }
+    }
+
+    fn mHandledArms(c: MC, e: AExpr, subj: AExpr, arms: AArm[], isMatch: boolean) -> RExpr {
+        const r: RArms = mArms(c, arms)
+        if (isMatch) return { e: ex(e, AExprK.Handled({ subject: subj, how: AHow.MatchOn(r.arms) })), c: r.c }
+        return { e: ex(e, AExprK.Handled({ subject: subj, how: AHow.Guard(r.arms) })), c: r.c }
+    }
+
+    fn mArms(c0: MC, arms: AArm[]) -> RArms {
+        let c: MC = c0
+        let out: AArm[] = []
+        for (const a of arms) {
+            let pat: APat = a.pat
+            match a.pat {
+                .PLit(e: x) :> {
+                    const r: RExpr = mExpr(c, x)
+                    c = r.c
+                    pat = APat.PLit(r.e)
+                }
+                .PName(name: n) :> {}
+                .PWild :> {}
+                .PWhole(bind: b) :> {}
+                .PBare(bind: b) :> {}
+                .PNot :> {}
+            }
+            let body: AArmBody = a.body
+            match a.body {
+                .ArmExpr(e: x) :> {
+                    const r: RExpr = mExpr(c, x)
+                    c = r.c
+                    body = AArmBody.ArmExpr(r.e)
+                }
+                .ArmBlock(b: b) :> {
+                    const r: RBlock = mBlock(c, b)
+                    c = r.c
+                    body = AArmBody.ArmBlock(r.b)
+                }
+            }
+            out = out.concat([{ nid: a.nid, span: a.span, pat: pat, body: body, legacy: a.legacy, lifted: a.lifted, bare: a.bare, test: a.test }])
+        }
+        return { arms: out, c: c }
+    }
+
+    fn mTemplate(c: MC, e: AExpr, qs: string[], xs: AExpr[]) -> RExpr {
+        const r: RExprs = mExprs(c, xs)
+        return { e: ex(e, AExprK.Template(qs, r.es)), c: r.c }
+    }
+
+    fn mForeign(c: MC, e: AExpr, f: AForeign) -> RExpr {
+        const r: RExprs = mExprs(c, f.crossings)
+        return { e: ex(e, AExprK.Foreign({ level: f.level, crossings: r.es, body: f.body })), c: r.c }
+    }
+
+    // =========================================================================
+    // ONE BLOCK. `parent`: the tag whose children it stands among ("" — a logic
+    // position, where §22.4.1 gives `emit()` output no place); `bodyTop`: it
+    // stands at a program body / the file top (code-default).
+    // =========================================================================
+    fn metaBlock(c: MC, m: AMeta, parent: string, bodyTop: boolean) -> RNodes {
+        // 1. a parse error inside the block (E-META-002): its own report stands
+        if (errWithin(c.errs, m.span)) return { nodes: [], c: c }
+        // 2. the static checks
+        const fx: FX = factsOf(c.env, m.body, [])
+        const ds: Diag[] = staticDiags(c, m, fx.f)
+        if (ds.length > 0) return { nodes: [], c: withDiags(c, ds) }
+        // 3. a runtime block (§22.5): phase 2, not built
+        if (!isCompileTime(fx.f)) {
+            return { nodes: [], c: withDiag(c, "E-BOOTSTRAP-UNSUPPORTED", "a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap builds compile-time `^{}` (§22.4) only (INTERIM, g-boot-meta-runtime-unbuilt-s481)", m.span) }
+        }
+        // 4. evaluate
+        const s: MS = runBlock(c.env, m.body)
+        if (s.err != "") return { nodes: [], c: withDiag(c, s.code, s.err, m.span) }
+        if (s.emits > 0 && !m.markup) {
+            return { nodes: [], c: withDiag(c, "E-META-EVAL-002", "this compile-time `^{}` emits markup from inside a logic body (a `" + "$" + "{…}` statement list, an `if` / `else` branch, a loop, a `match` arm or a function body): `emit()` output is inlined where markup sits, and a logic body has no markup position to receive it (§22.4.1 \"Where emitted output lands\"). Move the `^{}` into the markup, or — if the output depends on a run-time condition — use a runtime `^{}` with `meta.emit()` (§22.5.1)", m.span) }
+        }
+        if (s.out == "") return { nodes: [], c: c }
+        if (c.next < 0) {
+            return { nodes: [], c: withDiag(c, "E-BOOTSTRAP-UNSUPPORTED", "this compile-time `^{}` emits markup, and the caller gave the analysis no node ids to give it (a linked program does) — compile the program through the front end", m.span) }
+        }
+        // 5. re-read, judge, splice
+        let p: string = parent
+        if (bodyTop || p == "") p = "program"
+        return spliceOut(c, m, s.out, p, bodyTop)
+    }
+
+    fn errWithin(errs: ASpan[], sp: ASpan) -> boolean {
+        for (const e of errs) { if (e.start >= sp.start && e.end <= sp.end) return true }
+        return false
+    }
+
+    // =========================================================================
+    // THE STATIC CHECKS — one walk of the body (§22.12: "The allow-list SHALL be
+    // applied to a `^{}` body WHEREVER it sits"; the reader is the bootstrap's
+    // tree, so — unlike impl#1 — there is no second text reader). Lexical scopes:
+    // a block, a function, a lambda, a loop binder and a `match` arm open one.
+    //   bad      — E-META-001 (a free identifier, a refused member, a non-literal
+    //              computed key, a primitive used as a value or written);
+    //   emits    — an `emit(…)` / `emit.raw(…)` call (a compile-time API);
+    //   reflects — `reflect(T)` with a literal / PascalCase argument;
+    //   runtime  — a runtime-only value: `@cell`, `@.`, `<#id>`, the `meta`
+    //              object, a captured runtime binding;
+    //   nested / sqls / compiler / lifts — §22.9 / §22.4 / §22.9.
+    // =========================================================================
+    type MRef:struct = { name: string, span: ASpan }
+    type MBad:struct = { msg: string, span: ASpan }
+    type MFacts:struct = { emits: boolean, reflects: MRef[], runtime: boolean, nested: boolean, sqls: ASpan[], compiler: boolean, lifts: ASpan[], bad: MBad[] }
+    type FX:struct = { f: MFacts, scopes: string[][] }
+
+    fn noFacts() -> MFacts {
+        return { emits: false, reflects: [], runtime: false, nested: false, sqls: [], compiler: false, lifts: [], bad: [] }
+    }
+
+    fn isCompileTime(f: MFacts) -> boolean {
+        // ruling:user-voice-scrml.md-S481-meta-four item 1 — a literal `reflect(T)`
+        // beside a runtime value is a RUNTIME block (§22.4.2), not a phase mix
+        if (f.emits) return true
+        return f.reflects.length > 0 && !f.runtime
+    }
+
+    fn allowedSet() -> string {
+        return "A `^{}` body may reference only scrml constructs, its own local bindings, the bindings captured from the enclosing scope (§22.3), and the closed primitive set: emit / emit.raw / reflect (§22.4) and meta.get / meta.set / meta.subscribe / meta.emit / meta.cleanup / meta.scopeId / meta.bindings / meta.types / meta.interval / meta.timeout / meta.clearInterval / meta.clearTimeout (§22.5.1) (§22.12, closed allow-list)."
+    }
+
+    fn refusedMembers() -> string[] {
+        return ["constructor", "__proto__", "prototype", "__defineGetter__", "__defineSetter__", "__lookupGetter__", "__lookupSetter__", "caller", "arguments", "callee"]
+    }
+
+    fn metaMembers() -> string[] {
+        return ["get", "set", "subscribe", "emit", "cleanup", "scopeId", "bindings", "types", "interval", "timeout", "clearInterval", "clearTimeout"]
+    }
+
+    fn isPrimitive(n: string) -> boolean { return n == "emit" || n == "reflect" || n == "meta" || n == "compiler" }
+
+    fn fxBad(x: FX, msg: string, span: ASpan) -> FX {
+        const f: MFacts = x.f
+        return { f: { emits: f.emits, reflects: f.reflects, runtime: f.runtime, nested: f.nested, sqls: f.sqls, compiler: f.compiler, lifts: f.lifts, bad: f.bad.concat([{ msg: msg, span: span }]) }, scopes: x.scopes }
+    }
+
+    fn fxSet(x: FX, what: string, span: ASpan, name: string) -> FX {
+        const f: MFacts = x.f
+        let emits: boolean = f.emits
+        let reflects: MRef[] = f.reflects
+        let runtime: boolean = f.runtime
+        let nested: boolean = f.nested
+        let sqls: ASpan[] = f.sqls
+        let compiler: boolean = f.compiler
+        let lifts: ASpan[] = f.lifts
+        if (what == "emit") emits = true
+        if (what == "reflect") reflects = reflects.concat([{ name: name, span: span }])
+        if (what == "runtime") runtime = true
+        if (what == "nested") nested = true
+        if (what == "sql") sqls = sqls.concat([span])
+        if (what == "compiler") compiler = true
+        if (what == "lift") lifts = lifts.concat([span])
+        return { f: { emits: emits, reflects: reflects, runtime: runtime, nested: nested, sqls: sqls, compiler: compiler, lifts: lifts, bad: f.bad }, scopes: x.scopes }
+    }
+
+    fn fxPush(x: FX, names: string[]) -> FX { return { f: x.f, scopes: x.scopes.concat([names]) } }
+    fn fxPop(x: FX) -> FX { return { f: x.f, scopes: x.scopes.slice(0, x.scopes.length - 1) } }
+
+    fn fxDeclare(x: FX, n: string) -> FX {
+        if (x.scopes.length == 0) return fxPush(x, [n])
+        const top: string[] = x.scopes[x.scopes.length - 1]
+        return { f: x.f, scopes: x.scopes.slice(0, x.scopes.length - 1).concat([top.concat([n])]) }
+    }
+
+    fn inScope(x: FX, n: string) -> boolean {
+        for (const sc of x.scopes) { if (sc.indexOf(n) >= 0) return true }
+        return false
+    }
+
+    // The facts of a body; `params` its own parameters (a captured function's).
+    fn factsOf(env: MEnv, b: ABlock, params: string[]) -> FX {
+        const x0: FX = { f: noFacts(), scopes: [params] }
+        return fBlock(env, x0, b, [])
+    }
+
+    fn staticDiags(c: MC, m: AMeta, f: MFacts) -> Diag[] {
+        let out: Diag[] = []
+        let seen: string[] = []
+        for (const b of f.bad) {
+            if (seen.indexOf(b.msg) < 0) {
+                seen = seen.concat([b.msg])
+                out = out.concat([newDiag("E-META-001", b.msg, c.file, b.span)])
+            }
+        }
+        if (f.compiler) out = out.concat([newDiag("E-META-010", "the `compiler.*` namespace is reserved for future use and is not implemented (§22.4) — remove the reference, or use a compile-time primitive (reflect, emit, emit.raw)", c.file, m.span)])
+        for (const l of f.lifts) {
+            out = out.concat([newDiag("E-META-006", "`lift` cannot be used inside a `^{}` meta block — `lift` is a markup-context operation; a meta body is not markup context (§22.9)", c.file, l)])
+        }
+        const ct: boolean = isCompileTime(f)
+        if (ct && f.nested) out = out.concat([newDiag("E-META-009", "a nested `^{}` inside a compile-time meta block is not supported (§22.11) — flatten the logic into one compile-time block, or split it into sibling `^{}` blocks", c.file, m.span)])
+        if (f.emits && f.runtime) out = out.concat([newDiag("E-META-005", "phase separation violation — this `^{}` block uses a compile-time API (`emit` / `emit.raw`) and a runtime-only value (an `@cell`, the `meta` object, or a runtime binding) (§22.8); split it into a compile-time block and a runtime block", c.file, m.span)])
+        if (!ct) {
+            for (const q of f.sqls) {
+                out = out.concat([newDiag("E-META-007", "a `?{}` SQL context cannot be used inside a runtime `^{}` meta block (§22.9)", c.file, q)])
+            }
+        }
+        for (const r of f.reflects) {
+            if (findType(c.env, r.name) is not) {
+                out = out.concat([newDiag("E-META-003", "`reflect(" + r.name + ")` names no declared type — the type must be declared in this file or imported into it (§22.4.2)", c.file, r.span)])
+            }
+        }
+        return out
+    }
+
+    // ---- the walk ------------------------------------------------------------
+    fn fBlock(env: MEnv, x0: FX, b: ABlock, params: string[]) -> FX {
+        // a function declared in a block is bound for the whole block (hoisted)
+        let names: string[] = params
+        for (const s of b.stmts) {
+            match s.k {
+                .LocalFn(f: f) :> { names = names.concat([f.name]) }
+                // no-default-arm: only a nested function declaration hoists
+                _ :> {}
+            }
+        }
+        let x: FX = fxPush(x0, names)
+        for (const s of b.stmts) { x = fStmt(env, x, s) }
+        return fxPop(x)
+    }
+
+    fn fStmt(env: MEnv, x: FX, s: AStmt) -> FX {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: e) :> fExpr(env, x, e)
+            .Local(name: n, init: init) :> fxDeclare(fExpr(env, x, init), n)
+            .Return(e: e) :> fOpt(env, x, e)
+            .If(cond: cond, thenB: tb, elseB: eb) :> fIf(env, x, cond, tb, eb)
+            .Given(name: n, subject: subj, body: b) :> fBlock(env, fExpr(env, x, subj), b, [n])
+            .EffectStmt(w: w) :> fBlock(env, fExprs(env, x, w.deps), w.body, [])
+            .Defer(body: b) :> fBlock(env, x, b, [])
+            .Fail(f: f) :> fOpt(env, fExprs(env, x, f.args), f.target)
+            .For(f: f) :> fFor(env, x, f)
+            .Break(label: l) :> x
+            .Continue(label: l) :> x
+            .Lift(what: w) :> fxSet(fLift(env, x, w), "lift", s.span, "")
+            .LocalFn(f: f) :> fBlock(env, x, f.body, paramNames(f.params))
+        }
+    }
+
+    // A block-bodied arrow's parameters: the parser builds them as AParams (parse.scrml
+    // parseLambda — bareParams), as analyze.scrml lambdaAParams reads them.
+    fn blockParams(e: AExpr) -> AParam[] {
+        return match e.k {
+            .BlockLambda(params: ps) :> ps
+            // no-default-arm: only a block lambda carries AParams
+            _ :> []
+        }
+    }
+
+    fn paramNames(ps: AParam[]) -> string[] {
+        let out: string[] = []
+        for (const p of ps) { out = out.concat([p.name]) }
+        return out
+    }
+
+    fn fLift(env: MEnv, x: FX, w: ALift) -> FX {
+        return match w {
+            .LiftExpr(e: e) :> fExpr(env, x, e)
+            .LiftNode(n: n) :> x
+        }
+    }
+
+    fn fOpt(env: MEnv, x: FX, e: AExpr | not) -> FX {
+        if (e is given) return fExpr(env, x, e)
+        return x
+    }
+
+    fn fIf(env: MEnv, x: FX, cond: AExpr, tb: ABlock, eb: ABlock | not) -> FX {
+        const x1: FX = fBlock(env, fExpr(env, x, cond), tb, [])
+        if (eb is given) return fBlock(env, x1, eb, [])
+        return x1
+    }
+
+    fn fFor(env: MEnv, x0: FX, f: AFor) -> FX {
+        const h: AForHead = f.head
+        return match h {
+            .HForever :> fBlock(env, x0, f.body, [])
+            .HCond(cond: e) :> fBlock(env, fExpr(env, x0, e), f.body, [])
+            .HCounted(init: ss, cond: e, step: es) :> fCounted(env, x0, ss, e, es, f.body)
+            .HIter(bind: b, src: src, key: key) :> fIter(env, x0, b.name, src, key, f.body)
+        }
+    }
+
+    fn fCounted(env: MEnv, x0: FX, ss: AStmt[], e: AExpr | not, es: AExpr[], body: ABlock) -> FX {
+        let x: FX = fxPush(x0, [])
+        for (const s of ss) { x = fStmt(env, x, s) }
+        x = fOpt(env, x, e)
+        x = fExprs(env, x, es)
+        x = fBlock(env, x, body, [])
+        return fxPop(x)
+    }
+
+    fn fIter(env: MEnv, x0: FX, bind: string, src: AIterSrc, key: AExpr | not, body: ABlock) -> FX {
+        let x: FX = x0
+        match src {
+            .IterOf(e: e) :> { x = fExpr(env, x, e) }
+            .IterRange(lo: lo, hi: hi) :> { x = fExpr(env, fExpr(env, x, lo), hi) }
+        }
+        x = fxPush(x, [bind])
+        x = fOpt(env, x, key)
+        x = fBlock(env, x, body, [])
+        return fxPop(x)
+    }
+
+    fn fExprs(env: MEnv, x0: FX, es: AExpr[]) -> FX {
+        let x: FX = x0
+        for (const e of es) { x = fExpr(env, x, e) }
+        return x
+    }
+
+    fn fExpr(env: MEnv, x: FX, e: AExpr) -> FX {
+        const m: AMeta | not = metaOf(e)
+        if (m is given) {
+            // a nested block: walked as part of this one (it sees this body's locals)
+            return fBlock(env, fxSet(x, "nested", e.span, ""), m.body, [])
+        }
+        const k: AExprK = e.k
+        return match k {
+            .Name(name: n) :> fName(env, x, n, e.span)
+            .At(name: n) :> fxSet(x, "runtime", e.span, "")
+            .AtItem :> fxSet(x, "runtime", e.span, "")
+            .HashRef(id: i) :> fxSet(x, "runtime", e.span, "")
+            .Num(raw: r) :> x
+            .Str(v: s) :> x
+            .Bool(v: b) :> x
+            .NotLit :> x
+            .Recovered :> x
+            .Variant(name: n) :> x
+            .Member(obj: o, name: n) :> fMember(env, x, e, o, n)
+            .Call(callee: f, args: xs) :> fCall(env, x, f, xs)
+            .Unary(op: op, e: y) :> fExpr(env, x, y)
+            .Binary(op: op, l: l, r: r) :> fExpr(env, fExpr(env, x, l), r)
+            .Ternary(test: t, yes: y, no: n) :> fExpr(env, fExpr(env, fExpr(env, x, t), y), n)
+            .Assign(target: t, value: v) :> fAssign(env, x, e, t, v)
+            .ArrayLit(elems: xs) :> fExprs(env, x, xs)
+            .ObjectLit(props: ps) :> fProps(env, x, ps)
+            .Spread(e: y) :> fExpr(env, x, y)
+            .Index(obj: o, idx: i) :> fIndex(env, x, e, o, i)
+            .Lambda(params: ps, body: b) :> fxPop(fExpr(env, fxPush(x, ps), b))
+            .BlockLambda(params: ps, body: b) :> fBlock(env, x, b, paramNames(blockParams(e)))
+            .Sql(q: q) :> fExprs(env, fxSet(x, "sql", e.span, ""), q.params)
+            .Handled(h: h) :> fHandled(env, x, h)
+            .Template(quasis: qs, slots: xs) :> fExprs(env, x, xs)
+            .Foreign(f: f) :> fxBad(x, "a `_={ … }=` foreign code block is not available inside `^{}` meta blocks — foreign code is host code, never a scrml construct. " + allowedSet(), e.span)
+        }
+    }
+
+    fn fProps(env: MEnv, x0: FX, ps: AProp[]) -> FX {
+        let x: FX = x0
+        for (const p of ps) { x = fExpr(env, x, p.value) }
+        return x
+    }
+
+    // A bare name: a local, a captured binding, a declared type — or refused.
+    fn fName(env: MEnv, x: FX, n: string, span: ASpan) -> FX {
+        if (inScope(x, n)) return x
+        if (n == "compiler") return fxSet(x, "compiler", span, "")
+        if (n == "meta") return fxBad(fxSet(x, "runtime", span, ""), "the `meta` object is used as a value here — its members are reached as `meta.<member>` only. " + allowedSet(), span)
+        if (n == "emit" || n == "reflect") return fxBad(x, "`" + n + "` is used as a value here — the meta primitives are reached only as direct callees (`" + n + "(…)`). " + allowedSet(), span)
+        if (findType(env, n) is given) return x
+        const d: MDecl | not = findDecl(env, n)
+        if (d is given) {
+            if (d.kind == 2) return fxSet(x, "runtime", span, "")
+            return x
+        }
+        if (env.cells.indexOf(n) >= 0) return fxBad(x, "`" + n + "` is a cell of the program, read here as a bare name — a `^{}` body reaches a cell as `@" + n + "` (or, in a runtime block, `meta.get(\"" + n + "\")`), never as a captured binding (§22.12). " + allowedSet(), span)
+        return fxBad(x, "`" + n + "` is not available inside `^{}` meta blocks — it is not a scrml construct, a local or captured binding, or a meta primitive. " + allowedSet() + hostHint(n), span)
+    }
+
+    fn hostHint(n: string) -> string {
+        if (n == "setInterval" || n == "setTimeout" || n == "clearInterval" || n == "clearTimeout") return " Hint: use meta.interval / meta.timeout / meta.clearInterval / meta.clearTimeout (§22.5.1)."
+        if (n == "fetch") return " Hint: move network calls behind a server-fn boundary."
+        return ""
+    }
+
+    fn refusedMemberMsg(n: string) -> string {
+        let reach: string = "it reaches a constructor or prototype chain"
+        if (n == "caller" || n == "arguments" || n == "callee") reach = "it reaches a function's caller or its live arguments"
+        return "member `" + n + "` is refused inside `^{}` meta blocks on every value — " + reach + ". " + allowedSet()
+    }
+
+    fn primName(e: AExpr) -> string {
+        return match e.k {
+            .Name(name: n) :> n
+            // no-default-arm: one question of an expression — is it a bare name
+            _ :> ""
+        }
+    }
+
+    fn fMember(env: MEnv, x: FX, e: AExpr, o: AExpr, n: string) -> FX {
+        if (refusedMembers().indexOf(n) >= 0) return fxBad(fRoot(env, x, o), refusedMemberMsg(n), e.span)
+        const p: string = primName(o)
+        if (p != "" && !inScope(x, p) && isPrimitive(p)) {
+            if (p == "compiler") return fxSet(x, "compiler", e.span, "")
+            if (p == "meta") {
+                const x1: FX = fxSet(x, "runtime", e.span, "")
+                if (metaMembers().indexOf(n) >= 0) return x1
+                return fxBad(x1, "`meta." + n + "` is not a member of the runtime `meta` object — its members are the closed list of §22.5.1. " + allowedSet(), e.span)
+            }
+            if (p == "emit" && n == "raw") return x
+            return fxBad(x, "`" + p + "." + n + "` reaches a member of the meta primitive `" + p + "` outside its closed list. " + allowedSet(), e.span)
+        }
+        return fExpr(env, x, o)
+    }
+
+    // The root of a refused member: walked unless it is a primitive (no second report).
+    fn fRoot(env: MEnv, x: FX, o: AExpr) -> FX {
+        const p: string = primName(o)
+        if (p != "" && !inScope(x, p) && isPrimitive(p)) return x
+        return fExpr(env, x, o)
+    }
+
+    fn fIndex(env: MEnv, x: FX, e: AExpr, o: AExpr, i: AExpr) -> FX {
+        if (!isLiteralKey(i)) return fxBad(fRoot(env, x, o), "a computed member key that is not a literal (`x[k]`) is refused inside `^{}` meta blocks — `k` could hold `constructor`; write the member by name, or use `.at(i)` on a list. " + allowedSet(), e.span)
+        const lit: string = literalKey(i)
+        if (refusedMembers().indexOf(lit) >= 0) return fxBad(fRoot(env, x, o), refusedMemberMsg(lit), e.span)
+        const p: string = primName(o)
+        if (p != "" && !inScope(x, p) && isPrimitive(p)) return fxBad(x, "`" + p + "[…]` reaches a member of the meta primitive `" + p + "` by a computed key. " + allowedSet(), e.span)
+        return fExpr(env, x, o)
+    }
+
+    // A literal key (a string or a number literal) and its text.
+    fn isLiteralKey(i: AExpr) -> boolean {
+        return match i.k {
+            .Str(v: s) :> true
+            .Num(raw: r) :> true
+            // no-default-arm: one question of an index — is it a literal
+            _ :> false
+        }
+    }
+
+    fn literalKey(i: AExpr) -> string {
+        return match i.k {
+            .Str(v: s) :> s
+            .Num(raw: r) :> r
+            // no-default-arm: one question of an index — its literal text
+            _ :> ""
+        }
+    }
+
+    fn fAssign(env: MEnv, x: FX, e: AExpr, t: AExpr, v: AExpr) -> FX {
+        const root: string = rootName(t)
+        if (root != "" && !inScope(x, root) && isPrimitive(root)) return fxBad(fExpr(env, x, v), "a write to the meta primitive `" + root + "` (or a member of it) is refused inside `^{}` meta blocks. " + allowedSet(), e.span)
+        return fExpr(env, fExpr(env, x, t), v)
+    }
+
+    fn rootName(t: AExpr) -> string {
+        return match t.k {
+            .Name(name: n) :> n
+            .Member(obj: o) :> rootName(o)
+            .Index(obj: o) :> rootName(o)
+            // no-default-arm: one question of a write target — the name it is rooted at
+            _ :> ""
+        }
+    }
+
+    // A call: the compile-time APIs are recognized at the callee.
+    fn fCall(env: MEnv, x: FX, f: AExpr, xs: AExpr[]) -> FX {
+        const p: string = primName(f)
+        if (p == "emit" && !inScope(x, p)) return fExprs(env, fxSet(x, "emit", f.span, ""), xs)
+        if (p == "reflect" && !inScope(x, p)) return fReflect(env, x, f, xs)
+        if (isEmitRaw(f) && !inScope(x, "emit")) return fExprs(env, fxSet(x, "emit", f.span, ""), xs)
+        return fExprs(env, fExpr(env, x, f), xs)
+    }
+
+    fn isEmitRaw(f: AExpr) -> boolean {
+        return match f.k {
+            .Member(obj: o, name: n) :> n == "raw" && primName(o) == "emit"
+            // no-default-arm: one question of a callee — is it `emit.raw`
+            _ :> false
+        }
+    }
+
+    // `reflect(T)`: a PascalCase name or a string literal is a compile-time
+    // reflect (impl#1 REFLECT_COMPILE_TIME_RE) — the argument is a TYPE name, not
+    // a binding (no allow-list question about it); anything else is an ordinary
+    // argument (a runtime reflect, §22.4.2).
+    fn fReflect(env: MEnv, x: FX, f: AExpr, xs: AExpr[]) -> FX {
+        if (xs.length == 1) {
+            const a: AExpr = xs[0]
+            const lit: string = reflectLiteral(x, a)
+            if (lit != "") return fxSet(x, "reflect", a.span, lit)
+        }
+        return fExprs(env, x, xs)
+    }
+
+    fn reflectLiteral(x: FX, a: AExpr) -> string {
+        return match a.k {
+            .Str(v: s) :> s
+            .Name(name: n) :> pascalName(x, n)
+            // no-default-arm: only a name or a string literal is a type literal
+            _ :> ""
+        }
+    }
+
+    fn pascalName(x: FX, n: string) -> string {
+        if (inScope(x, n)) return ""
+        const c0: string = n.substring(0, 1)
+        if (c0 >= "A" && c0 <= "Z") return n
+        return ""
+    }
+
+    fn fHandled(env: MEnv, x0: FX, h: AHandled) -> FX {
+        const x: FX = fExpr(env, x0, h.subject)
+        const how: AHow = h.how
+        return match how {
+            .Propagate :> x
+            .Guard(arms: ga) :> fArms(env, x, ga)
+            .MatchOn(arms: ma) :> fArms(env, x, ma)
+        }
+    }
+
+    fn fArms(env: MEnv, x0: FX, arms: AArm[]) -> FX {
+        let x: FX = x0
+        for (const a of arms) {
+            let binds: string[] = []
+            match a.pat {
+                .PLit(e: e) :> { x = fExpr(env, x, e) }
+                .PName(binds: bs) :> { for (const b of bs) { binds = binds.concat([b.name]) } }
+                .PWhole(bind: b) :> { binds = [b.name] }
+                .PBare(bind: b) :> { binds = [b.name] }
+                .PWild :> {}
+                .PNot :> {}
+            }
+            match a.body {
+                .ArmExpr(e: e) :> { x = fxPop(fExpr(env, fxPush(x, binds), e)) }
+                .ArmBlock(b: b) :> { x = fBlock(env, x, b, binds) }
+            }
+        }
+        return x
+    }
+
+    // =========================================================================
+    // THE INTERPRETER (ruling:user-voice-scrml.md-S481-meta-four item 4: "a
+    // scrml interpreter over the bootstrap's own syntax tree … deterministic and
+    // in scrml (S114, S452), bounded by a step count rather than a clock").
+    // Values are scrml values; there is no host in reach — the only effects are
+    // `emit` / `emit.raw` (appending to the output) and the bindings of the body.
+    // A form, a method or a value it does not evaluate refuses the block
+    // (E-META-EVAL-001, naming it — §22.4); so does a failure the language
+    // defines (`n.toFixed(-1)`'s RangeError, a read of a member of `not`), and
+    // the bounds: STEPS evaluation steps, DEPTH nested calls.
+    // Semantics follow the JavaScript a compile-time body ran as in impl#1 for
+    // the forms it evaluates (string conversion, `+`, truthiness, the methods),
+    // so the two agree on the corpus (slice-m2/meta-s481.test.js, the
+    // differential test). Captured values are read by value: a closure sees a
+    // binding's value when it was made (no body in the corpus writes a captured
+    // binding — design read §3.3).
+    // =========================================================================
+    type MV:enum = {
+        VStr(s: string),
+        VNum(n: number),
+        VBool(b: boolean),
+        VNot,
+        VUndef,
+        VTape(xs: MV[]),
+        VRec(keys: string[], vals: MV[]),
+        VFn(f: MFn),
+        VVariant(name: string),
+    }
+    type MFn:struct = { name: string, params: string[], body: ABlock | not, expr: AExpr | not, env: MFrame[] }
+    type MFrame:struct = { names: string[], vals: MV[], muts: boolean[] }
+    // `ctl`: 0 normal, 1 break, 2 continue, 3 return (with `ret`); `label` the
+    // break / continue label. `cNames` / `cVals`: the captured declarations
+    // evaluated so far; `busy`: the ones being evaluated (a cycle is refused).
+    type MS:struct = { frames: MFrame[], out: string, emits: int, steps: int, depth: int, err: string, code: string,
+                       ctl: int, label: string, ret: MV, cNames: string[], cVals: MV[], busy: string[] }
+    type MR:struct = { v: MV, s: MS }
+
+    fn maxSteps() -> int { return 1000000 }
+    fn maxDepth() -> int { return 64 }
+
+    fn runBlock(env: MEnv, b: ABlock) -> MS {
+        const s0: MS = { frames: [], out: "", emits: 0, steps: 0, depth: 0, err: "", code: "", ctl: 0, label: "", ret: MV.VUndef, cNames: [], cVals: [], busy: [] }
+        const s: MS = execBlock(env, b, s0)
+        if (s.err == "" && s.ctl == 3) return failS(s, "a `return` at the top level of a `^{}` body leaves no function")
+        if (s.err == "" && (s.ctl == 1 || s.ctl == 2)) return failS(s, "a `break` / `continue` outside a loop")
+        return s
+    }
+
+    // ---- state ---------------------------------------------------------------
+    fn failS(s: MS, msg: string) -> MS { return failCode(s, "E-META-EVAL-001", msg) }
+
+    fn failCode(s: MS, code: string, msg: string) -> MS {
+        if (s.err != "") return s
+        let m: string = msg
+        if (code == "E-META-EVAL-001") m = "compile-time `^{}` evaluation failed: " + msg + " (§22.4: a block the compile-time evaluator cannot finish is refused, never evaluated without the failing statement)"
+        return { frames: s.frames, out: s.out, emits: s.emits, steps: s.steps, depth: s.depth, err: m, code: code, ctl: s.ctl, label: s.label, ret: s.ret, cNames: s.cNames, cVals: s.cVals, busy: s.busy }
+    }
+
+    fn bad(s: MS, msg: string) -> MR { return { v: MV.VUndef, s: failS(s, msg) } }
+
+    fn tick(s: MS) -> MS {
+        if (s.steps >= maxSteps()) return failS(s, "it ran past the evaluator's step bound (" + String(maxSteps()) + " steps) — a compile-time body must finish; the bound is a step count, not a clock, so the result is the same on every machine")
+        return { frames: s.frames, out: s.out, emits: s.emits, steps: s.steps + 1, depth: s.depth, err: s.err, code: s.code, ctl: s.ctl, label: s.label, ret: s.ret, cNames: s.cNames, cVals: s.cVals, busy: s.busy }
+    }
+
+    fn withFrames(s: MS, fs: MFrame[]) -> MS {
+        return { frames: fs, out: s.out, emits: s.emits, steps: s.steps, depth: s.depth, err: s.err, code: s.code, ctl: s.ctl, label: s.label, ret: s.ret, cNames: s.cNames, cVals: s.cVals, busy: s.busy }
+    }
+
+    fn withCtl(s: MS, ctl: int, label: string, ret: MV) -> MS {
+        return { frames: s.frames, out: s.out, emits: s.emits, steps: s.steps, depth: s.depth, err: s.err, code: s.code, ctl: ctl, label: label, ret: ret, cNames: s.cNames, cVals: s.cVals, busy: s.busy }
+    }
+
+    fn withOut(s: MS, text: string) -> MS {
+        return { frames: s.frames, out: s.out + text, emits: s.emits + 1, steps: s.steps, depth: s.depth, err: s.err, code: s.code, ctl: s.ctl, label: s.label, ret: s.ret, cNames: s.cNames, cVals: s.cVals, busy: s.busy }
+    }
+
+    fn pushFrame(s: MS) -> MS { return withFrames(s, s.frames.concat([{ names: [], vals: [], muts: [] }])) }
+    fn popFrame(s: MS) -> MS { return withFrames(s, s.frames.slice(0, s.frames.length - 1)) }
+
+    fn declare(s: MS, n: string, v: MV, mu: boolean) -> MS {
+        if (s.frames.length == 0) return withFrames(s, [{ names: [n], vals: [v], muts: [mu] }])
+        const top: MFrame = s.frames[s.frames.length - 1]
+        const f: MFrame = { names: top.names.concat([n]), vals: top.vals.concat([v]), muts: top.muts.concat([mu]) }
+        return withFrames(s, s.frames.slice(0, s.frames.length - 1).concat([f]))
+    }
+
+    fn lookup(s: MS, n: string) -> MV | not {
+        let i: int = s.frames.length - 1
+        while (i >= 0) {
+            const f: MFrame = s.frames[i]
+            const j: int = f.names.lastIndexOf(n)
+            if (j >= 0) return f.vals[j]
+            i = i - 1
+        }
+        return not
+    }
+
+    fn assign(s: MS, n: string, v: MV) -> MS {
+        let i: int = s.frames.length - 1
+        while (i >= 0) {
+            const f: MFrame = s.frames[i]
+            const j: int = f.names.lastIndexOf(n)
+            if (j >= 0) {
+                if (!f.muts[j]) return failS(s, "`" + n + "` is a `const` and is written here")
+                const vals: MV[] = f.vals.slice(0, j).concat([v]).concat(f.vals.slice(j + 1, f.vals.length))
+                const g: MFrame = { names: f.names, vals: vals, muts: f.muts }
+                return withFrames(s, s.frames.slice(0, i).concat([g]).concat(s.frames.slice(i + 1, s.frames.length)))
+            }
+            i = i - 1
+        }
+        return failS(s, "`" + n + "` is written here, and it is no local binding of the body — a compile-time body writes only its own bindings")
+    }
+
+    // ---- statements ----------------------------------------------------------
+    fn execBlock(env: MEnv, b: ABlock, s0: MS) -> MS {
+        let s: MS = pushFrame(s0)
+        for (const st of b.stmts) {
+            if (s.err == "" && s.ctl == 0) s = execStmt(env, st, s)
+        }
+        return popFrame(s)
+    }
+
+    fn execStmts(env: MEnv, ss: AStmt[], s0: MS) -> MS {
+        let s: MS = s0
+        for (const st of ss) {
+            if (s.err == "" && s.ctl == 0) s = execStmt(env, st, s)
+        }
+        return s
+    }
+
+    fn execStmt(env: MEnv, st: AStmt, s0: MS) -> MS {
+        const s: MS = tick(s0)
+        if (s.err != "") return s
+        const k: AStmtK = st.k
+        return match k {
+            .Eval(e: e) :> evalE(env, e, s).s
+            .Local(name: n, mutable: mu, init: init) :> execLocal(env, n, mu, init, s)
+            .Return(e: e) :> execReturn(env, e, s)
+            .If(cond: cond, thenB: tb, elseB: eb) :> execIf(env, cond, tb, eb, s)
+            .For(f: f) :> execFor(env, f, s)
+            .Break(label: l) :> withCtl(s, 1, l, MV.VUndef)
+            .Continue(label: l) :> withCtl(s, 2, l, MV.VUndef)
+            .LocalFn(f: f) :> declare(s, f.name, MV.VFn({ name: f.name, params: paramNames(f.params), body: f.body, expr: not, env: s.frames }), false)
+            .Given(name: n) :> failS(s, "a `given` statement is not a form the compile-time evaluator evaluates")
+            .EffectStmt(w: w) :> failS(s, "an effect (`when … changes`) is not a form the compile-time evaluator evaluates — it is a runtime construct")
+            .Defer(body: b) :> failS(s, "a `defer` statement is not a form the compile-time evaluator evaluates")
+            .Fail(f: f) :> failS(s, "a `fail` statement is not a form the compile-time evaluator evaluates")
+            .Lift(what: w) :> failS(s, "`lift` is not a form a `^{}` body evaluates")
+        }
+    }
+
+    fn execLocal(env: MEnv, n: string, mu: boolean, init: AExpr, s: MS) -> MS {
+        const r: MR = evalE(env, init, s)
+        if (r.s.err != "") return r.s
+        return declare(r.s, n, r.v, mu)
+    }
+
+    fn execReturn(env: MEnv, e: AExpr | not, s: MS) -> MS {
+        if (e is given) {
+            const r: MR = evalE(env, e, s)
+            return withCtl(r.s, 3, "", r.v)
+        }
+        return withCtl(s, 3, "", MV.VUndef)
+    }
+
+    fn execIf(env: MEnv, cond: AExpr, tb: ABlock, eb: ABlock | not, s: MS) -> MS {
+        const r: MR = evalE(env, cond, s)
+        if (r.s.err != "") return r.s
+        if (truthy(r.v)) return execBlock(env, tb, r.s)
+        if (eb is given) return execBlock(env, eb, r.s)
+        return r.s
+    }
+
+    // One pass of a loop body, then what the loop does next: 0 go on, 1 stop
+    // (break / an error / a return or a labelled jump out of this loop).
+    type LoopStep:struct = { s: MS, stop: boolean }
+
+    fn loopBody(env: MEnv, f: AFor, s0: MS) -> LoopStep {
+        const s: MS = execBlock(env, f.body, s0)
+        if (s.err != "") return { s: s, stop: true }
+        if (s.ctl == 1) {
+            if (s.label == "" || s.label == f.label) return { s: withCtl(s, 0, "", MV.VUndef), stop: true }
+            return { s: s, stop: true }
+        }
+        if (s.ctl == 2) {
+            if (s.label == "" || s.label == f.label) return { s: withCtl(s, 0, "", MV.VUndef), stop: false }
+            return { s: s, stop: true }
+        }
+        if (s.ctl == 3) return { s: s, stop: true }
+        return { s: s, stop: false }
+    }
+
+    fn execFor(env: MEnv, f: AFor, s: MS) -> MS {
+        if (f.bound is given) return failS(s, "a `for` loop bound as a value is not a form the compile-time evaluator evaluates")
+        const h: AForHead = f.head
+        return match h {
+            .HForever :> loopCond(env, f, not, s)
+            .HCond(cond: e) :> loopCond(env, f, e, s)
+            .HCounted(init: ss, cond: e, step: es) :> loopCounted(env, f, ss, e, es, s)
+            .HIter(bind: b, mutable: mu, src: src) :> loopIter(env, f, b.name, mu, src, s)
+        }
+    }
+
+    fn loopCond(env: MEnv, f: AFor, cond: AExpr | not, s0: MS) -> MS {
+        let s: MS = s0
+        let going = true
+        while (going) {
+            if (cond is given) {
+                const r: MR = evalE(env, cond, tick(s))
+                s = r.s
+                if (s.err != "" || !truthy(r.v)) going = false
+            } else {
+                s = tick(s)
+                if (s.err != "") going = false
+            }
+            if (going) {
+                const ls: LoopStep = loopBody(env, f, s)
+                s = ls.s
+                if (ls.stop) going = false
+            }
+        }
+        return s
+    }
+
+    fn loopCounted(env: MEnv, f: AFor, init: AStmt[], cond: AExpr | not, step: AExpr[], s0: MS) -> MS {
+        let s: MS = execStmts(env, init, pushFrame(s0))
+        let going: boolean = s.err == ""
+        while (going) {
+            if (cond is given) {
+                const r: MR = evalE(env, cond, tick(s))
+                s = r.s
+                if (s.err != "" || !truthy(r.v)) going = false
+            }
+            if (going) {
+                const ls: LoopStep = loopBody(env, f, s)
+                s = ls.s
+                if (ls.stop) going = false
+            }
+            if (going) {
+                for (const e of step) { if (s.err == "") s = evalE(env, e, s).s }
+                if (s.err != "") going = false
+            }
+        }
+        return popFrame(s)
+    }
+
+    fn loopIter(env: MEnv, f: AFor, bind: string, mu: boolean, src: AIterSrc, s0: MS) -> MS {
+        let s: MS = s0
+        let items: MV[] = []
+        match src {
+            .IterOf(e: e) :> {
+                const r: MR = evalE(env, e, s)
+                s = r.s
+                const it: MV = r.v
+                match it {
+                    .VTape(xs: xs) :> { items = xs }
+                    .VStr(s: str) :> { items = charsOf(str) }
+                    // no-default-arm: a `for … of` iterates a list or a string
+                    _ :> { s = failS(s, "`for … of` over " + kindName(it) + ", which is not a list or a string") }
+                }
+            }
+            .IterRange(lo: lo, hi: hi, inclusive: inc) :> {
+                const rl: MR = evalE(env, lo, s)
+                const rh: MR = evalE(env, hi, rl.s)
+                s = rh.s
+                let i: number = toNum(rl.v)
+                let top: number = toNum(rh.v)
+                if (inc) top = top + 1
+                while (i < top && s.err == "") {
+                    items = items.concat([MV.VNum(i)])
+                    s = tick(s)
+                    i = i + 1
+                }
+            }
+        }
+        for (const v of items) {
+            if (s.err == "" && s.ctl == 0) {
+                const ls: LoopStep = loopBody(env, f, declare(pushFrame(tick(s)), bind, v, mu))
+                s = popFrame(ls.s)
+                if (ls.stop) return s
+            }
+        }
+        return s
+    }
+
+    fn charsOf(str: string) -> MV[] {
+        let out: MV[] = []
+        for (const ch of str.split("")) { out = out.concat([MV.VStr(ch)]) }
+        return out
+    }
+
+    // ---- values ----------------------------------------------------------------
+    fn kindName(v: MV) -> string {
+        return match v {
+            .VStr(s: x) :> "a string"
+            .VNum(n: x) :> "a number"
+            .VBool(b: x) :> "a boolean"
+            .VNot :> "`not`"
+            .VUndef :> "an absent value"
+            .VTape(xs: x) :> "a list"
+            .VRec(keys: x) :> "a record"
+            .VFn(f: x) :> "a function"
+            .VVariant(name: x) :> "an enum variant"
+        }
+    }
+
+    fn truthy(v: MV) -> boolean {
+        return match v {
+            .VStr(s: x) :> x != ""
+            .VNum(n: x) :> x != 0 && x == x
+            .VBool(b: x) :> x
+            .VNot :> false
+            .VUndef :> false
+            .VTape(xs: x) :> true
+            .VRec(keys: x) :> true
+            .VFn(f: x) :> true
+            .VVariant(name: x) :> true
+        }
+    }
+
+    fn isAbsent(v: MV) -> boolean {
+        return match v {
+            .VNot :> true
+            .VUndef :> true
+            // no-default-arm: one question of a value — is it absent
+            _ :> false
+        }
+    }
+
+    // JavaScript's String(v) for the values a body holds.
+    fn jsStr(v: MV) -> string {
+        return match v {
+            .VStr(s: x) :> x
+            .VNum(n: x) :> String(x)
+            .VBool(b: x) :> boolWord(x)
+            .VNot :> "null"
+            .VUndef :> "undefined"
+            .VTape(xs: xs) :> tapeStr(xs)
+            .VRec(keys: k) :> "[object Object]"
+            .VFn(f: f) :> "[function " + f.name + "]"
+            .VVariant(name: n) :> n
+        }
+    }
+
+    fn boolWord(b: boolean) -> string {
+        if (b) return "true"
+        return "false"
+    }
+
+    fn tapeStr(xs: MV[]) -> string {
+        let parts: string[] = []
+        for (const x of xs) {
+            if (isAbsent(x)) {
+                parts = parts.concat([""])
+            } else {
+                parts = parts.concat([jsStr(x)])
+            }
+        }
+        return parts.join(",")
+    }
+
+    // JavaScript's Number(v) for the values a body holds.
+    fn toNum(v: MV) -> number {
+        return match v {
+            .VNum(n: x) :> x
+            .VStr(s: x) :> strNum(x)
+            .VBool(b: x) :> boolNum(x)
+            .VNot :> 0
+            // no-default-arm: every other value is NaN as a number
+            _ :> 0 / 0
+        }
+    }
+
+    fn strNum(s: string) -> number {
+        if (s.trim() == "") return 0
+        return Number(s)
+    }
+
+    fn boolNum(b: boolean) -> number {
+        if (b) return 1
+        return 0
+    }
+
+    fn numOf(raw: string) -> number { return Number(raw.split("_").join("")) }
+
+    fn sameValue(a: MV, b: MV) -> boolean {
+        if (isAbsent(a) && isAbsent(b)) return true
+        return match a {
+            .VStr(s: x) :> sameStr(b, x)
+            .VNum(n: x) :> sameNum(b, x)
+            .VBool(b: x) :> sameBool(b, x)
+            .VVariant(name: x) :> sameVariant(b, x)
+            .VTape(xs: xs) :> sameTape(b, xs)
+            .VRec(keys: ks, vals: vs) :> sameRec(b, ks, vs)
+            .VNot :> false
+            .VUndef :> false
+            .VFn(f: f) :> false
+        }
+    }
+
+    fn sameStr(b: MV, x: string) -> boolean {
+        return match b {
+            .VStr(s: y) :> x == y
+            // no-default-arm: a string equals only a string
+            _ :> false
+        }
+    }
+
+    fn sameNum(b: MV, x: number) -> boolean {
+        return match b {
+            .VNum(n: y) :> x == y
+            // no-default-arm: a number equals only a number
+            _ :> false
+        }
+    }
+
+    fn sameBool(b: MV, x: boolean) -> boolean {
+        return match b {
+            .VBool(b: y) :> x == y
+            // no-default-arm: a boolean equals only a boolean
+            _ :> false
+        }
+    }
+
+    fn sameVariant(b: MV, x: string) -> boolean {
+        return match b {
+            .VVariant(name: y) :> x == y
+            // no-default-arm: a variant equals only a variant
+            _ :> false
+        }
+    }
+
+    fn sameTape(b: MV, xs: MV[]) -> boolean {
+        return match b {
+            .VTape(xs: ys) :> sameList(xs, ys)
+            // no-default-arm: a list equals only a list
+            _ :> false
+        }
+    }
+
+    fn sameList(xs: MV[], ys: MV[]) -> boolean {
+        if (xs.length != ys.length) return false
+        let i: int = 0
+        while (i < xs.length) {
+            if (!sameValue(xs[i], ys[i])) return false
+            i = i + 1
+        }
+        return true
+    }
+
+    fn sameRec(b: MV, ks: string[], vs: MV[]) -> boolean {
+        return match b {
+            .VRec(keys: ks2, vals: vs2) :> ks.join("\n") == ks2.join("\n") && sameList(vs, vs2)
+            // no-default-arm: a record equals only a record
+            _ :> false
+        }
+    }
+
+    // ---- expressions ---------------------------------------------------------------
+    fn vr(v: MV, s: MS) -> MR { return { v: v, s: s } }
+
+    fn evalE(env: MEnv, e: AExpr, s0: MS) -> MR {
+        if (s0.err != "") return vr(MV.VUndef, s0)
+        const s: MS = tick(s0)
+        const k: AExprK = e.k
+        return match k {
+            .Num(raw: r) :> vr(MV.VNum(numOf(r)), s)
+            .Str(v: x) :> vr(MV.VStr(x), s)
+            .Bool(v: b) :> vr(MV.VBool(b), s)
+            .NotLit :> vr(MV.VNot, s)
+            .Variant(name: n) :> vr(MV.VVariant(n), s)
+            .Name(name: n) :> evalName(env, n, s)
+            .At(name: n) :> bad(s, "`@" + n + "` is a cell — a runtime value, which a compile-time body cannot read (§22.4)")
+            .AtItem :> bad(s, "`@.` is the current `<each>` item — a runtime value, which a compile-time body cannot read (§22.4)")
+            .HashRef(id: i) :> bad(s, "`<#" + i + ">` is a runtime value, which a compile-time body cannot read (§22.4)")
+            .Member(obj: o, name: n) :> evalMember(env, o, n, s)
+            .Call(callee: f, args: xs) :> evalCall(env, f, xs, s)
+            .Unary(op: op, e: x) :> evalUnary(env, op, x, s)
+            .Binary(op: op, l: l, r: r) :> evalBinary(env, op, l, r, s)
+            .Ternary(test: t, yes: y, no: n) :> evalTernary(env, t, y, n, s)
+            .Assign(target: t, value: v) :> evalAssign(env, t, v, s)
+            .ArrayLit(elems: xs) :> evalArray(env, xs, s)
+            .ObjectLit(props: ps) :> evalObject(env, ps, s)
+            .Spread(e: x) :> bad(s, "a spread `...` outside a list or object literal")
+            .Index(obj: o, idx: i) :> evalIndex(env, o, i, s)
+            .Lambda(params: ps, body: b) :> vr(MV.VFn({ name: "", params: ps, body: not, expr: b, env: s.frames }), s)
+            .BlockLambda(params: ps, body: b) :> vr(MV.VFn({ name: "", params: paramNames(blockParams(e)), body: b, expr: not, env: s.frames }), s)
+            .Sql(q: q) :> bad(s, "a `?{}` query cannot run at compile time — the bootstrap compile reads no database (§22.9 admits it; the bootstrap refuses it, INTERIM, as impl#1 does)")
+            .Handled(h: h) :> evalHandled(env, h, s)
+            .Template(quasis: qs, slots: xs) :> evalTemplate(env, qs, xs, s)
+            .Foreign(f: f) :> bad(s, "a foreign code block is not a form the compile-time evaluator evaluates")
+            .Recovered :> bad(s, "a statement the parser could not read")
+        }
+    }
+
+    fn evalName(env: MEnv, n: string, s: MS) -> MR {
+        const l: MV | not = lookup(s, n)
+        if (l is given) return vr(l, s)
+        const d: MDecl | not = findDecl(env, n)
+        if (d is given) return evalCaptured(env, d, s)
+        if (findType(env, n) is given) return bad(s, "`" + n + "` is a type, read here as a value")
+        return bad(s, "`" + n + "` is not defined at this point of the body")
+    }
+
+    // A captured declaration (§22.3), evaluated once on its first read. Its own
+    // text is held to the allow-list first (§22.12: "The allow-list SHALL be
+    // applied … WHEREVER it sits" — the text that runs is the text checked).
+    fn evalCaptured(env: MEnv, d: MDecl, s: MS) -> MR {
+        const at: int = s.cNames.indexOf(d.name)
+        if (at >= 0) return vr(s.cVals[at], s)
+        if (s.busy.indexOf(d.name) >= 0) return bad(s, "the captured declaration `" + d.name + "` reads itself while it is evaluated")
+        if (d.kind == 2) return bad(s, "`" + d.name + "` is a runtime binding (a file-scope `let` or a `server` function), which a compile-time body cannot read (§22.4)")
+        if (d.kind == 3) return bad(s, "`" + d.name + "` is imported — the bootstrap evaluates only this file's own declarations at compile time (INTERIM, g-boot-meta-imported-capture-s481)")
+        let v: MV = MV.VUndef
+        let s2: MS = s
+        const f: AFn | not = d.fn
+        const init: AExpr | not = d.init
+        if (f is given) {
+            const fx: FX = factsOf(env, f.body, paramNames(f.params))
+            if (fx.f.bad.length > 0) return { v: MV.VUndef, s: failCode(s, "E-META-001", "the captured function `" + d.name + "`: " + fx.f.bad[0].msg) }
+            v = MV.VFn({ name: d.name, params: paramNames(f.params), body: f.body, expr: not, env: [] })
+        } else if (init is given) {
+            const x0: FX = { f: noFacts(), scopes: [] }
+            const fx: FX = fExpr(env, x0, init)
+            if (fx.f.bad.length > 0) return { v: MV.VUndef, s: failCode(s, "E-META-001", "the captured declaration `" + d.name + "`: " + fx.f.bad[0].msg) }
+            const inner: MS = { frames: [], out: s.out, emits: s.emits, steps: s.steps, depth: s.depth + 1, err: "", code: "", ctl: 0, label: "", ret: MV.VUndef, cNames: s.cNames, cVals: s.cVals, busy: s.busy.concat([d.name]) }
+            if (inner.depth > maxDepth()) return bad(s, "captured declarations nested past the evaluator's depth bound")
+            const r: MR = evalE(env, init, inner)
+            if (r.s.err != "") return { v: MV.VUndef, s: failCode(s, r.s.code, r.s.err) }
+            v = r.v
+            s2 = { frames: s.frames, out: r.s.out, emits: r.s.emits, steps: r.s.steps, depth: s.depth, err: "", code: "", ctl: s.ctl, label: s.label, ret: s.ret, cNames: r.s.cNames, cVals: r.s.cVals, busy: s.busy }
+        }
+        const s3: MS = { frames: s2.frames, out: s2.out, emits: s2.emits, steps: s2.steps, depth: s2.depth, err: s2.err, code: s2.code, ctl: s2.ctl, label: s2.label, ret: s2.ret, cNames: s2.cNames.concat([d.name]), cVals: s2.cVals.concat([v]), busy: s2.busy }
+        return vr(v, s3)
+    }
+
+    fn evalMember(env: MEnv, o: AExpr, n: string, s: MS) -> MR {
+        const r: MR = evalE(env, o, s)
+        if (r.s.err != "") return r
+        return memberOf(r.v, n, r.s)
+    }
+
+    fn memberOf(v: MV, n: string, s: MS) -> MR {
+        return match v {
+            .VStr(s: x) :> strMember(x, n, s)
+            .VTape(xs: xs) :> tapeMember(xs, n, s)
+            .VRec(keys: ks, vals: vs) :> vr(recGet(ks, vs, n), s)
+            .VNot :> bad(s, "reads `." + n + "` of `not` (a TypeError)")
+            .VUndef :> bad(s, "reads `." + n + "` of an absent value (a TypeError)")
+            // no-default-arm: a number, a boolean, a function, a variant — no member a body reads
+            _ :> vr(MV.VUndef, s)
+        }
+    }
+
+    fn strMember(x: string, n: string, s: MS) -> MR {
+        if (n == "length") return vr(MV.VNum(x.length), s)
+        return vr(MV.VUndef, s)
+    }
+
+    fn tapeMember(xs: MV[], n: string, s: MS) -> MR {
+        if (n == "length") return vr(MV.VNum(xs.length), s)
+        return vr(MV.VUndef, s)
+    }
+
+    fn recGet(ks: string[], vs: MV[], n: string) -> MV {
+        const i: int = ks.indexOf(n)
+        if (i >= 0) return vs[i]
+        return MV.VUndef
+    }
+
+    fn evalUnary(env: MEnv, op: UnOp, x: AExpr, s: MS) -> MR {
+        const r: MR = evalE(env, x, s)
+        if (r.s.err != "") return r
+        return match op {
+            .Not :> vr(MV.VBool(!truthy(r.v)), r.s)
+            .Neg :> vr(MV.VNum(0 - toNum(r.v)), r.s)
+            .IsGiven :> vr(MV.VBool(!isAbsent(r.v)), r.s)
+            .IsNot :> vr(MV.VBool(isAbsent(r.v)), r.s)
+        }
+    }
+
+    fn evalTernary(env: MEnv, t: AExpr, y: AExpr, n: AExpr, s: MS) -> MR {
+        const r: MR = evalE(env, t, s)
+        if (r.s.err != "") return r
+        if (truthy(r.v)) return evalE(env, y, r.s)
+        return evalE(env, n, r.s)
+    }
+
+    fn evalBinary(env: MEnv, op: BinOp, l: AExpr, r0: AExpr, s: MS) -> MR {
+        const rl: MR = evalE(env, l, s)
+        if (rl.s.err != "") return rl
+        // the short-circuit operators return an operand (JavaScript `&&` / `||` / `??`)
+        if (op == BinOp.And) {
+            if (!truthy(rl.v)) return rl
+            return evalE(env, r0, rl.s)
+        }
+        if (op == BinOp.Or) {
+            if (truthy(rl.v)) return rl
+            return evalE(env, r0, rl.s)
+        }
+        if (op == BinOp.Nullish) {
+            if (!isAbsent(rl.v)) return rl
+            return evalE(env, r0, rl.s)
+        }
+        const rr: MR = evalE(env, r0, rl.s)
+        if (rr.s.err != "") return rr
+        const a: MV = rl.v
+        const b: MV = rr.v
+        const st: MS = rr.s
+        return match op {
+            .Add :> vr(addValues(a, b), st)
+            .Sub :> vr(MV.VNum(toNum(a) - toNum(b)), st)
+            .Mul :> vr(MV.VNum(toNum(a) * toNum(b)), st)
+            .Div :> vr(MV.VNum(toNum(a) / toNum(b)), st)
+            .Mod :> vr(MV.VNum(toNum(a) % toNum(b)), st)
+            .Lt :> vr(MV.VBool(lessThan(a, b)), st)
+            .Gt :> vr(MV.VBool(lessThan(b, a)), st)
+            .Le :> vr(MV.VBool(notGreater(a, b)), st)
+            .Ge :> vr(MV.VBool(notGreater(b, a)), st)
+            .Eq :> vr(MV.VBool(sameValue(a, b)), st)
+            .Ne :> vr(MV.VBool(!sameValue(a, b)), st)
+            .Pipe :> bad(st, "the pipe operator `|` is not a form the compile-time evaluator evaluates")
+            .And :> vr(b, st)
+            .Or :> vr(b, st)
+            .Nullish :> vr(b, st)
+        }
+    }
+
+    fn isStrV(v: MV) -> boolean {
+        return match v {
+            .VStr(s: x) :> true
+            // no-default-arm: one question of a value — is it a string
+            _ :> false
+        }
+    }
+
+    fn isNumericV(v: MV) -> boolean {
+        return match v {
+            .VNum(n: x) :> true
+            .VBool(b: x) :> true
+            .VNot :> true
+            .VUndef :> true
+            // no-default-arm: a string, a list, a record or a function `+` joins as text
+            _ :> false
+        }
+    }
+
+    // JavaScript `+`: text when either side is not a number-like primitive.
+    fn addValues(a: MV, b: MV) -> MV {
+        if (isNumericV(a) && isNumericV(b)) return MV.VNum(toNum(a) + toNum(b))
+        return MV.VStr(jsStr(a) + jsStr(b))
+    }
+
+    fn strOf(v: MV) -> string {
+        return match v {
+            .VStr(s: x) :> x
+            // no-default-arm: only a string has its own text here
+            _ :> ""
+        }
+    }
+
+    fn lessThan(a: MV, b: MV) -> boolean {
+        if (isStrV(a) && isStrV(b)) return strOf(a) < strOf(b)
+        return toNum(a) < toNum(b)
+    }
+
+    fn notGreater(a: MV, b: MV) -> boolean {
+        if (isStrV(a) && isStrV(b)) return strOf(a) <= strOf(b)
+        return toNum(a) <= toNum(b)
+    }
+
+    fn evalAssign(env: MEnv, t: AExpr, v: AExpr, s: MS) -> MR {
+        const rv: MR = evalE(env, v, s)
+        if (rv.s.err != "") return rv
+        const tk: AExprK = t.k
+        return match tk {
+            .Name(name: n) :> vr(rv.v, assign(rv.s, n, rv.v))
+            .Member(obj: o, name: n) :> assignMember(env, o, n, rv.v, rv.s)
+            // no-default-arm: a compile-time body writes a binding or a binding's field
+            _ :> bad(rv.s, "a write to this target is not a form the compile-time evaluator evaluates (it writes a binding, or a field of a binding)")
+        }
+    }
+
+    fn assignMember(env: MEnv, o: AExpr, n: string, v: MV, s: MS) -> MR {
+        const root: string = primName(o)
+        if (root == "") return bad(s, "a field write through `" + n + "` is evaluated only on a binding (`x." + n + " = …`)")
+        const cur: MV | not = lookup(s, root)
+        if (cur is not) return bad(s, "`" + root + "` is written here, and it is no local binding of the body")
+        const r: MV | not = withField(cur, n, v)
+        if (r is not) return bad(s, "`" + root + "." + n + " = …` writes a field of " + kindName(cur) + ", which has no fields")
+        return vr(v, assignAny(s, root, r))
+    }
+
+    // A field write mutates the record the binding holds (even a `const` one, as
+    // in JavaScript): the binding is rebound to the updated record.
+    fn assignAny(s: MS, n: string, v: MV) -> MS {
+        let i: int = s.frames.length - 1
+        while (i >= 0) {
+            const f: MFrame = s.frames[i]
+            const j: int = f.names.lastIndexOf(n)
+            if (j >= 0) {
+                const vals: MV[] = f.vals.slice(0, j).concat([v]).concat(f.vals.slice(j + 1, f.vals.length))
+                const g: MFrame = { names: f.names, vals: vals, muts: f.muts }
+                return withFrames(s, s.frames.slice(0, i).concat([g]).concat(s.frames.slice(i + 1, s.frames.length)))
+            }
+            i = i - 1
+        }
+        return s
+    }
+
+    fn withField(cur: MV, n: string, v: MV) -> MV | not {
+        return match cur {
+            .VRec(keys: ks, vals: vs) :> recSet(ks, vs, n, v)
+            // no-default-arm: only a record has fields to write
+            _ :> not
+        }
+    }
+
+    fn recSet(ks: string[], vs: MV[], n: string, v: MV) -> MV {
+        const i: int = ks.indexOf(n)
+        if (i < 0) return MV.VRec(ks.concat([n]), vs.concat([v]))
+        return MV.VRec(ks, vs.slice(0, i).concat([v]).concat(vs.slice(i + 1, vs.length)))
+    }
+
+    fn evalArray(env: MEnv, xs: AExpr[], s0: MS) -> MR {
+        let s: MS = s0
+        let out: MV[] = []
+        for (const x of xs) {
+            if (s.err == "") {
+                const sp: AExpr | not = spreadOf(x)
+                if (sp is given) {
+                    const r: MR = evalE(env, sp, s)
+                    s = r.s
+                    const v: MV = r.v
+                    match v {
+                        .VTape(xs: ys) :> { out = out.concat(ys) }
+                        .VStr(s: str) :> { out = out.concat(charsOf(str)) }
+                        // no-default-arm: a list spreads a list or a string
+                        _ :> { s = failS(s, "a spread `...` of " + kindName(v) + " in a list") }
+                    }
+                } else {
+                    const r: MR = evalE(env, x, s)
+                    s = r.s
+                    out = out.concat([r.v])
+                }
+            }
+        }
+        return vr(MV.VTape(out), s)
+    }
+
+    fn spreadOf(x: AExpr) -> AExpr | not {
+        return match x.k {
+            .Spread(e: e) :> e
+            // no-default-arm: one question of a list element — is it a spread
+            _ :> not
+        }
+    }
+
+    fn evalObject(env: MEnv, ps: AProp[], s0: MS) -> MR {
+        let s: MS = s0
+        let ks: string[] = []
+        let vs: MV[] = []
+        for (const p of ps) {
+            if (s.err == "") {
+                const r: MR = evalE(env, p.value, s)
+                s = r.s
+                if (p.spread) {
+                    const v: MV = r.v
+                    match v {
+                        .VRec(keys: k2, vals: v2) :> {
+                            let i: int = 0
+                            while (i < k2.length) {
+                                const merged: MV = recSet(ks, vs, k2[i], v2[i])
+                                match merged {
+                                    .VRec(keys: k3, vals: v3) :> {
+                                        ks = k3
+                                        vs = v3
+                                    }
+                                    // no-default-arm: recSet builds a record
+                                    _ :> {}
+                                }
+                                i = i + 1
+                            }
+                        }
+                        // no-default-arm: an object spreads a record (`not` spreads nothing)
+                        _ :> { if (!isAbsent(v)) s = failS(s, "a spread `...` of " + kindName(v) + " in an object") }
+                    }
+                } else {
+                    const merged: MV = recSet(ks, vs, p.name, r.v)
+                    match merged {
+                        .VRec(keys: k3, vals: v3) :> {
+                            ks = k3
+                            vs = v3
+                        }
+                        // no-default-arm: recSet builds a record
+                        _ :> {}
+                    }
+                }
+            }
+        }
+        return vr(MV.VRec(ks, vs), s)
+    }
+
+    fn evalIndex(env: MEnv, o: AExpr, i: AExpr, s: MS) -> MR {
+        const ro: MR = evalE(env, o, s)
+        if (ro.s.err != "") return ro
+        const ri: MR = evalE(env, i, ro.s)
+        if (ri.s.err != "") return ri
+        const v: MV = ro.v
+        return match v {
+            .VTape(xs: xs) :> vr(atIndex(xs, toNum(ri.v)), ri.s)
+            .VStr(s: x) :> vr(charAtV(x, toNum(ri.v)), ri.s)
+            .VRec(keys: ks, vals: vs) :> vr(recGet(ks, vs, jsStr(ri.v)), ri.s)
+            .VNot :> bad(ri.s, "indexes `not` (a TypeError)")
+            .VUndef :> bad(ri.s, "indexes an absent value (a TypeError)")
+            // no-default-arm: a number, a boolean, a function, a variant has no index
+            _ :> vr(MV.VUndef, ri.s)
+        }
+    }
+
+    fn atIndex(xs: MV[], n: number) -> MV {
+        if (n != Math.floor(n) || n < 0 || n >= xs.length) return MV.VUndef
+        return xs[n]
+    }
+
+    fn charAtV(x: string, n: number) -> MV {
+        if (n != Math.floor(n) || n < 0 || n >= x.length) return MV.VUndef
+        return MV.VStr(x.substring(n, n + 1))
+    }
+
+    fn evalTemplate(env: MEnv, qs: string[], xs: AExpr[], s0: MS) -> MR {
+        let s: MS = s0
+        let out: string = ""
+        let i: int = 0
+        while (i < qs.length) {
+            out = out + qs[i]
+            if (i < xs.length && s.err == "") {
+                const r: MR = evalE(env, xs[i], s)
+                s = r.s
+                out = out + jsStr(r.v)
+            }
+            i = i + 1
+        }
+        return vr(MV.VStr(out), s)
+    }
+
+    // ---- match -------------------------------------------------------------
+    fn evalHandled(env: MEnv, h: AHandled, s: MS) -> MR {
+        const how: AHow = h.how
+        return match how {
+            .MatchOn(arms: arms) :> evalMatch(env, h.subject, arms, s)
+            .Propagate :> bad(s, "a failure propagation `?` is not a form the compile-time evaluator evaluates")
+            .Guard(arms: ga) :> bad(s, "a `!{}` handler is not a form the compile-time evaluator evaluates")
+        }
+    }
+
+    fn evalMatch(env: MEnv, subject: AExpr, arms: AArm[], s0: MS) -> MR {
+        const rs: MR = evalE(env, subject, s0)
+        if (rs.s.err != "") return rs
+        let s: MS = rs.s
+        for (const a of arms) {
+            const t: ArmTest = armTest(env, a.pat, rs.v, s)
+            s = t.s
+            if (s.err != "") return vr(MV.VUndef, s)
+            if (t.hit) return armValue(env, a, s)
+        }
+        return bad(s, "no arm of the `match` matches " + jsStr(rs.v))
+    }
+
+    type ArmTest:struct = { hit: boolean, s: MS }
+
+    fn armTest(env: MEnv, p: APat, v: MV, s: MS) -> ArmTest {
+        return match p {
+            .PWild :> { hit: true, s: s }
+            .PNot :> { hit: isAbsent(v), s: s }
+            .PLit(e: e) :> litTest(env, e, v, s)
+            .PName(name: n, binds: bs) :> nameTest(n, bs, v, s)
+            .PWhole(bind: b) :> { hit: false, s: failS(s, "a `match` arm that binds the whole value is not a form the compile-time evaluator evaluates") }
+            .PBare(bind: b) :> { hit: false, s: failS(s, "a `match` arm that is a bare binder is not a form the compile-time evaluator evaluates") }
+        }
+    }
+
+    fn litTest(env: MEnv, e: AExpr, v: MV, s: MS) -> ArmTest {
+        const r: MR = evalE(env, e, s)
+        return { hit: sameValue(r.v, v), s: r.s }
+    }
+
+    fn nameTest(n: string, bs: ABind[], v: MV, s: MS) -> ArmTest {
+        if (bs.length > 0) return { hit: false, s: failS(s, "a `match` arm that binds a variant's payload is not a form the compile-time evaluator evaluates (impl#1 refuses it too)") }
+        return { hit: sameValue(MV.VVariant(n), v) || sameValue(MV.VStr(n), v), s: s }
+    }
+
+    fn armValue(env: MEnv, a: AArm, s: MS) -> MR {
+        const body: AArmBody = a.body
+        return match body {
+            .ArmExpr(e: e) :> evalE(env, e, s)
+            .ArmBlock(b: b) :> armBlockValue(env, b, s)
+        }
+    }
+
+    // An arm block: its statements run; the value is its last statement's when that
+    // is an expression (a lifted / one-expression arm, §18.5).
+    fn armBlockValue(env: MEnv, b: ABlock, s0: MS) -> MR {
+        let s: MS = pushFrame(s0)
+        const n: int = b.stmts.length
+        let v: MV = MV.VUndef
+        let i: int = 0
+        while (i < n && s.err == "" && s.ctl == 0) {
+            const st: AStmt = b.stmts[i]
+            const last: AExpr | not = evalStmtExpr(st)
+            if (i == n - 1 && last is given) {
+                const r: MR = evalE(env, last, s)
+                s = r.s
+                v = r.v
+            } else {
+                s = execStmt(env, st, s)
+            }
+            i = i + 1
+        }
+        return vr(v, popFrame(s))
+    }
+
+    fn evalStmtExpr(st: AStmt) -> AExpr | not {
+        return match st.k {
+            .Eval(e: e) :> e
+            // no-default-arm: one question of a statement — is it an expression
+            _ :> not
+        }
+    }
+
+    // ---- calls -------------------------------------------------------------
+    fn evalArgs(env: MEnv, xs: AExpr[], s0: MS) -> MArgs {
+        let s: MS = s0
+        let out: MV[] = []
+        for (const x of xs) {
+            if (s.err == "") {
+                const sp: AExpr | not = spreadOf(x)
+                if (sp is given) {
+                    const r: MR = evalE(env, sp, s)
+                    s = r.s
+                    const v: MV = r.v
+                    match v {
+                        .VTape(xs: ys) :> { out = out.concat(ys) }
+                        // no-default-arm: arguments spread a list
+                        _ :> { s = failS(s, "a spread `...` of " + kindName(v) + " in a call") }
+                    }
+                } else {
+                    const r: MR = evalE(env, x, s)
+                    s = r.s
+                    out = out.concat([r.v])
+                }
+            }
+        }
+        return { vs: out, s: s }
+    }
+
+    type MArgs:struct = { vs: MV[], s: MS }
+
+    fn evalCall(env: MEnv, f: AExpr, xs: AExpr[], s: MS) -> MR {
+        const p: string = primName(f)
+        if (p == "emit" && lookup(s, p) is not) return callEmit(env, xs, true, s)
+        if (p == "reflect" && lookup(s, p) is not) return callReflect(env, xs, s)
+        if (isEmitRaw(f) && lookup(s, "emit") is not) return callEmit(env, xs, false, s)
+        const fk: AExprK = f.k
+        return match fk {
+            .Member(obj: o, name: m) :> callMethodOn(env, o, m, xs, s)
+            // no-default-arm: any other callee is evaluated to a function value
+            _ :> callValue(env, f, xs, s)
+        }
+    }
+
+    fn callValue(env: MEnv, f: AExpr, xs: AExpr[], s: MS) -> MR {
+        const rf: MR = evalE(env, f, s)
+        if (rf.s.err != "") return rf
+        const ra: MArgs = evalArgs(env, xs, rf.s)
+        if (ra.s.err != "") return vr(MV.VUndef, ra.s)
+        return applyV(env, rf.v, ra.vs, ra.s)
+    }
+
+    fn applyV(env: MEnv, fv: MV, args: MV[], s: MS) -> MR {
+        return match fv {
+            .VFn(f: f) :> callFn(env, f, args, s)
+            // no-default-arm: only a function value is called
+            _ :> bad(s, "calls " + kindName(fv) + ", which is not a function")
+        }
+    }
+
+    fn callFn(env: MEnv, f: MFn, args: MV[], s: MS) -> MR {
+        if (s.depth >= maxDepth()) return bad(s, "calls nested deeper than the evaluator's depth bound (" + String(maxDepth()) + ") — a compile-time body must finish")
+        let names: string[] = []
+        let vals: MV[] = []
+        let muts: boolean[] = []
+        if (f.name != "") {
+            names = [f.name]
+            vals = [MV.VFn(f)]
+            muts = [false]
+        }
+        let i: int = 0
+        while (i < f.params.length) {
+            names = names.concat([f.params[i]])
+            if (i < args.length) {
+                vals = vals.concat([args[i]])
+            } else {
+                vals = vals.concat([MV.VUndef])
+            }
+            muts = muts.concat([true])
+            i = i + 1
+        }
+        const frame: MFrame = { names: names, vals: vals, muts: muts }
+        const inner: MS = { frames: f.env.concat([frame]), out: s.out, emits: s.emits, steps: s.steps, depth: s.depth + 1, err: "", code: "", ctl: 0, label: "", ret: MV.VUndef, cNames: s.cNames, cVals: s.cVals, busy: s.busy }
+        let v: MV = MV.VUndef
+        let after: MS = inner
+        const ex1: AExpr | not = f.expr
+        const bd: ABlock | not = f.body
+        if (ex1 is given) {
+            const r: MR = evalE(env, ex1, inner)
+            after = r.s
+            v = r.v
+        } else if (bd is given) {
+            after = execBlock(env, bd, inner)
+            if (after.ctl == 3) v = after.ret
+            if (after.err == "" && (after.ctl == 1 || after.ctl == 2)) after = failS(after, "a `break` / `continue` outside a loop")
+        }
+        const back: MS = { frames: s.frames, out: after.out, emits: after.emits, steps: after.steps, depth: s.depth, err: after.err, code: after.code, ctl: 0, label: "", ret: MV.VUndef, cNames: after.cNames, cVals: after.cVals, busy: s.busy }
+        if (back.err != "") return vr(MV.VUndef, back)
+        return vr(v, back)
+    }
+
+    // `emit(html)` / `emit.raw(html)` (§22.4.1): the argument as text (JavaScript
+    // String), escape-normalized for `emit()`.
+    fn callEmit(env: MEnv, xs: AExpr[], normalize: boolean, s: MS) -> MR {
+        const ra: MArgs = evalArgs(env, xs, s)
+        if (ra.s.err != "") return vr(MV.VUndef, ra.s)
+        let text: string = "undefined"
+        if (ra.vs.length > 0) text = jsStr(ra.vs[0])
+        if (normalize) text = normalizeEmit(text)
+        return vr(MV.VUndef, withOut(ra.s, text))
+    }
+
+    // §22.4.1 — `\\` protected first, then `\n`, `\"`, `\t` (impl#1 normalizeEmitCode,
+    // one left-to-right pass: a backslash pair is consumed before any letter after it).
+    export fn normalizeEmit(t: string) -> string {
+        let out: string = ""
+        let i: int = 0
+        while (i < t.length) {
+            const c: string = t.substring(i, i + 1)
+            const d: string = t.substring(i + 1, i + 2)
+            if (c == "\\" && d == "\\") {
+                out = out + "\\"
+                i = i + 2
+            } else if (c == "\\" && d == "n") {
+                out = out + "\n"
+                i = i + 2
+            } else if (c == "\\" && d == "\"") {
+                out = out + "\""
+                i = i + 2
+            } else if (c == "\\" && d == "t") {
+                out = out + "\t"
+                i = i + 2
+            } else {
+                out = out + c
+                i = i + 1
+            }
+        }
+        return out
+    }
+
+    // `reflect(T)` (§22.4.2; ruling:user-voice-scrml.md-S481-meta-four item 3 — impl#1's
+    // shape): `{ kind: "enum", name, variants: [names] }`, `{ kind: "struct", name,
+    // fields: [{ name, type }] }`, otherwise `{ kind, name }`. A literal / type-name
+    // argument is the type's name; a binding holding a string looks that name up
+    // (`not` when it names no type — "reflect(variable) … SHALL return not").
+    fn callReflect(env: MEnv, xs: AExpr[], s: MS) -> MR {
+        if (xs.length != 1) return bad(s, "`reflect` takes one argument, a type name")
+        const a: AExpr = xs[0]
+        let name: string = ""
+        let lit: boolean = false
+        match a.k {
+            .Str(v: x) :> {
+                name = x
+                lit = true
+            }
+            .Name(name: n) :> {
+                if (lookup(s, n) is not) {
+                    name = n
+                    lit = true
+                }
+            }
+            // no-default-arm: any other argument is a value naming a type
+            _ :> {}
+        }
+        let s2: MS = s
+        if (!lit) {
+            const r: MR = evalE(env, a, s)
+            if (r.s.err != "") return r
+            s2 = r.s
+            if (!isStrV(r.v)) return vr(MV.VNot, s2)
+            name = strOf(r.v)
+        }
+        const t: MType | not = findType(env, name)
+        if (t is not) {
+            if (lit) return bad(s2, "`reflect(" + name + ")` names no declared type")
+            return vr(MV.VNot, s2)
+        }
+        return vr(typeInfo(t), s2)
+    }
+
+    fn typeInfo(t: MType) -> MV {
+        if (t.kind == "enum") {
+            let vs: MV[] = []
+            for (const v of t.variants) { vs = vs.concat([MV.VStr(v)]) }
+            return MV.VRec(["kind", "name", "variants"], [MV.VStr("enum"), MV.VStr(t.name), MV.VTape(vs)])
+        }
+        if (t.kind == "struct") {
+            let fs: MV[] = []
+            for (const f of t.fields) { fs = fs.concat([MV.VRec(["name", "type"], [MV.VStr(f.name), MV.VStr(f.ty)])]) }
+            return MV.VRec(["kind", "name", "fields"], [MV.VStr("struct"), MV.VStr(t.name), MV.VTape(fs)])
+        }
+        return MV.VRec(["kind", "name"], [MV.VStr(t.kind), MV.VStr(t.name)])
+    }
+
+    // ---- methods -------------------------------------------------------------
+    // §22.12: "Methods on values (`s.toUpperCase()`, `xs.map(f)`, `xs.at(i)`,
+    // `info.fields.length`) … remain available". The evaluator's set is the
+    // corpus's (S481 design read §3.4) and the plain neighbours of it; any other
+    // method refuses the block by name (E-META-EVAL-001). A list method that
+    // changes the list in JavaScript (`push`, `pop`, `sort`, `reverse`) is
+    // evaluated on a binding only, which is rebound to the changed list.
+    fn callMethodOn(env: MEnv, o: AExpr, m: string, xs: AExpr[], s: MS) -> MR {
+        const ro: MR = evalE(env, o, s)
+        if (ro.s.err != "") return ro
+        const ra: MArgs = evalArgs(env, xs, ro.s)
+        if (ra.s.err != "") return vr(MV.VUndef, ra.s)
+        const recv: MV = ro.v
+        return match recv {
+            .VStr(s: x) :> strMethod(x, m, ra.vs, ra.s)
+            .VNum(n: x) :> numMethod(x, m, ra.vs, ra.s)
+            .VBool(b: x) :> boolMethod(x, m, ra.s)
+            .VTape(xs: ys) :> tapeMethod(env, o, ys, m, ra.vs, ra.s)
+            .VRec(keys: ks, vals: vs) :> recMethod(env, ks, vs, m, ra.vs, ra.s)
+            .VNot :> bad(ra.s, "calls `." + m + "()` on `not` (a TypeError)")
+            .VUndef :> bad(ra.s, "calls `." + m + "()` on an absent value (a TypeError)")
+            .VFn(f: f) :> bad(ra.s, "calls `." + m + "()` on a function, which the compile-time evaluator does not evaluate")
+            .VVariant(name: n) :> bad(ra.s, "calls `." + m + "()` on the enum variant `." + n + "`, which has no methods")
+        }
+    }
+
+    fn noMethod(kind: string, m: string, s: MS) -> MR {
+        return bad(s, "`." + m + "()` on " + kind + " is not a method the compile-time evaluator knows (it evaluates the methods §22.12 names and their plain neighbours)")
+    }
+
+    fn argStr(args: MV[], i: int, dflt: string) -> string {
+        if (i < args.length && !isAbsent(args[i])) return jsStr(args[i])
+        return dflt
+    }
+
+    fn argNum(args: MV[], i: int, dflt: number) -> number {
+        if (i < args.length && !isAbsent(args[i])) return toNum(args[i])
+        return dflt
+    }
+
+    // JavaScript's relative index (`slice`, `at`): negative from the end, clamped.
+    fn relIndex(i: number, len: int) -> int {
+        let n: number = i
+        if (n != n) n = 0
+        n = Math.trunc(n)
+        if (n < 0) n = n + len
+        if (n < 0) n = 0
+        if (n > len) n = len
+        return n
+    }
+
+    fn strMethod(x: string, m: string, args: MV[], s: MS) -> MR {
+        if (m == "toLowerCase") return vr(MV.VStr(x.toLowerCase()), s)
+        if (m == "toUpperCase") return vr(MV.VStr(x.toUpperCase()), s)
+        if (m == "trim") return vr(MV.VStr(x.trim()), s)
+        if (m == "toString") return vr(MV.VStr(x), s)
+        if (m == "includes") return vr(MV.VBool(x.indexOf(argStr(args, 0, "undefined")) >= 0), s)
+        if (m == "startsWith") {
+            const p: string = argStr(args, 0, "undefined")
+            return vr(MV.VBool(x.substring(0, p.length) == p), s)
+        }
+        if (m == "endsWith") {
+            const p: string = argStr(args, 0, "undefined")
+            return vr(MV.VBool(p.length <= x.length && x.substring(x.length - p.length, x.length) == p), s)
+        }
+        if (m == "indexOf") return vr(MV.VNum(x.indexOf(argStr(args, 0, "undefined"))), s)
+        if (m == "slice") {
+            const a: int = relIndex(argNum(args, 0, 0), x.length)
+            const b: int = relIndex(argNum(args, 1, x.length), x.length)
+            if (b <= a) return vr(MV.VStr(""), s)
+            return vr(MV.VStr(x.substring(a, b)), s)
+        }
+        if (m == "split") {
+            if (args.length == 0 || isAbsent(args[0])) return vr(MV.VTape([MV.VStr(x)]), s)
+            if (!isStrV(args[0])) return noMethod("a string, with a pattern that is not a string,", m, s)
+            let out: MV[] = []
+            for (const part of x.split(strOf(args[0]))) { out = out.concat([MV.VStr(part)]) }
+            return vr(MV.VTape(out), s)
+        }
+        if (m == "repeat") {
+            const n: number = argNum(args, 0, 0)
+            if (n < 0 || n != Math.floor(n) || n > 100000) return bad(s, "`.repeat(" + String(n) + ")` — a count that is negative, fractional or past 100000 (a RangeError)")
+            let out: string = ""
+            let i: int = 0
+            while (i < n) {
+                out = out + x
+                i = i + 1
+            }
+            return vr(MV.VStr(out), tick(s))
+        }
+        if (m == "replace" || m == "replaceAll") {
+            if (args.length < 2 || !isStrV(args[0]) || !isStrV(args[1])) return noMethod("a string, with arguments that are not two strings,", m, s)
+            const a: string = strOf(args[0])
+            const b: string = strOf(args[1])
+            if (b.indexOf("$") >= 0) return noMethod("a string, with a replacement holding `$`,", m, s)
+            if (m == "replaceAll") return vr(MV.VStr(x.split(a).join(b)), s)
+            const at: int = x.indexOf(a)
+            if (at < 0) return vr(MV.VStr(x), s)
+            return vr(MV.VStr(x.substring(0, at) + b + x.substring(at + a.length, x.length)), s)
+        }
+        if (m == "padStart" || m == "padEnd") {
+            const n: number = argNum(args, 0, 0)
+            const fill: string = argStr(args, 1, " ")
+            if (n <= x.length || fill == "") return vr(MV.VStr(x), s)
+            let pad: string = ""
+            while (pad.length < n - x.length) { pad = pad + fill }
+            pad = pad.substring(0, n - x.length)
+            if (m == "padStart") return vr(MV.VStr(pad + x), s)
+            return vr(MV.VStr(x + pad), s)
+        }
+        if (m == "charAt") return vr(MV.VStr(strOf(charAtOr(x, argNum(args, 0, 0)))), s)
+        if (m == "at") return vr(charAtV(x, relAt(argNum(args, 0, 0), x.length)), s)
+        if (m == "concat") {
+            let out: string = x
+            for (const a of args) { out = out + jsStr(a) }
+            return vr(MV.VStr(out), s)
+        }
+        return noMethod("a string", m, s)
+    }
+
+    fn charAtOr(x: string, n: number) -> MV {
+        const v: MV = charAtV(x, n)
+        if (isAbsent(v)) return MV.VStr("")
+        return v
+    }
+
+    // `.at(i)`: negative from the end; out of range → absent (not clamped).
+    fn relAt(i: number, len: int) -> number {
+        let n: number = Math.trunc(i)
+        if (n != n) n = 0
+        if (n < 0) n = n + len
+        return n
+    }
+
+    fn numMethod(x: number, m: string, args: MV[], s: MS) -> MR {
+        if (m == "toFixed") {
+            const d: number = argNum(args, 0, 0)
+            // JavaScript Number.prototype.toFixed: RangeError outside 0…100
+            if (d != d || d < 0 || d > 100) return bad(s, "`.toFixed(" + jsStr(MV.VNum(d)) + ")` — toFixed() digits argument must be between 0 and 100 (a RangeError)")
+            return vr(MV.VStr(x.toFixed(Math.trunc(d))), s)
+        }
+        if (m == "toString") return vr(MV.VStr(String(x)), s)
+        return noMethod("a number", m, s)
+    }
+
+    fn boolMethod(x: boolean, m: string, s: MS) -> MR {
+        if (m == "toString") return vr(MV.VStr(boolWord(x)), s)
+        return noMethod("a boolean", m, s)
+    }
+
+    fn recMethod(env: MEnv, ks: string[], vs: MV[], m: string, args: MV[], s: MS) -> MR {
+        const f: MV = recGet(ks, vs, m)
+        return match f {
+            .VFn(f: fn0) :> callFn(env, fn0, args, s)
+            // no-default-arm: a record's method is a field holding a function
+            _ :> noMethod("a record", m, s)
+        }
+    }
+
+    // A callback's arguments: the element and its index (JavaScript passes the list too).
+    fn cb(env: MEnv, f: MV, a: MV, i: int, s: MS) -> MR { return applyV(env, f, [a, MV.VNum(i)], s) }
+
+    fn tapeMethod(env: MEnv, o: AExpr, xs: MV[], m: string, args: MV[], s0: MS) -> MR {
+        let s: MS = s0
+        if (m == "join") {
+            return vr(MV.VStr(joinWith(xs, argStr(args, 0, ","))), s)
+        }
+        if (m == "includes") {
+            for (const x of xs) { if (sameValue(x, argOr(args, 0))) return vr(MV.VBool(true), s) }
+            return vr(MV.VBool(false), s)
+        }
+        if (m == "indexOf") {
+            let i: int = 0
+            while (i < xs.length) {
+                if (sameValue(xs[i], argOr(args, 0))) return vr(MV.VNum(i), s)
+                i = i + 1
+            }
+            return vr(MV.VNum(-1), s)
+        }
+        if (m == "at") return vr(atIndex(xs, relAt(argNum(args, 0, 0), xs.length)), s)
+        if (m == "slice") {
+            const a: int = relIndex(argNum(args, 0, 0), xs.length)
+            const b: int = relIndex(argNum(args, 1, xs.length), xs.length)
+            if (b <= a) return vr(MV.VTape([]), s)
+            return vr(MV.VTape(xs.slice(a, b)), s)
+        }
+        if (m == "concat") {
+            let out: MV[] = xs
+            for (const a of args) {
+                const av: MV = a
+                match av {
+                    .VTape(xs: ys) :> { out = out.concat(ys) }
+                    // no-default-arm: a non-list argument is appended as one element
+                    _ :> { out = out.concat([av]) }
+                }
+            }
+            return vr(MV.VTape(out), s)
+        }
+        if (m == "toString") return vr(MV.VStr(tapeStr(xs)), s)
+        if (m == "push" || m == "pop" || m == "sort" || m == "reverse") return tapeMutate(env, o, xs, m, args, s)
+        const f: MV = argOr(args, 0)
+        if (m == "map" || m == "filter" || m == "forEach" || m == "some" || m == "every" || m == "find" || m == "findIndex") {
+            if (!isFnV(f)) return bad(s, "`." + m + "()` takes a function, and is given " + kindName(f) + " (a TypeError)")
+            let out: MV[] = []
+            let i: int = 0
+            while (i < xs.length) {
+                const r: MR = cb(env, f, xs[i], i, s)
+                s = r.s
+                if (s.err != "") return vr(MV.VUndef, s)
+                const t: boolean = truthy(r.v)
+                if (m == "map") out = out.concat([r.v])
+                if (m == "filter" && t) out = out.concat([xs[i]])
+                if (m == "some" && t) return vr(MV.VBool(true), s)
+                if (m == "every" && !t) return vr(MV.VBool(false), s)
+                if (m == "find" && t) return vr(xs[i], s)
+                if (m == "findIndex" && t) return vr(MV.VNum(i), s)
+                i = i + 1
+            }
+            if (m == "map" || m == "filter") return vr(MV.VTape(out), s)
+            if (m == "some") return vr(MV.VBool(false), s)
+            if (m == "every") return vr(MV.VBool(true), s)
+            if (m == "findIndex") return vr(MV.VNum(-1), s)
+            return vr(MV.VUndef, s)
+        }
+        if (m == "reduce") {
+            if (!isFnV(f)) return bad(s, "`.reduce()` takes a function, and is given " + kindName(f) + " (a TypeError)")
+            let acc: MV = MV.VUndef
+            let i: int = 0
+            if (args.length >= 2) {
+                acc = args[1]
+            } else {
+                if (xs.length == 0) return bad(s, "`.reduce()` of an empty list with no initial value (a TypeError)")
+                acc = xs[0]
+                i = 1
+            }
+            while (i < xs.length) {
+                const r: MR = applyV(env, f, [acc, xs[i], MV.VNum(i)], s)
+                s = r.s
+                if (s.err != "") return vr(MV.VUndef, s)
+                acc = r.v
+                i = i + 1
+            }
+            return vr(acc, s)
+        }
+        return noMethod("a list", m, s)
+    }
+
+    fn argOr(args: MV[], i: int) -> MV {
+        if (i < args.length) return args[i]
+        return MV.VUndef
+    }
+
+    fn isFnV(v: MV) -> boolean {
+        return match v {
+            .VFn(f: f) :> true
+            // no-default-arm: one question of a value — is it a function
+            _ :> false
+        }
+    }
+
+    fn joinWith(xs: MV[], sep: string) -> string {
+        let parts: string[] = []
+        for (const x of xs) {
+            if (isAbsent(x)) {
+                parts = parts.concat([""])
+            } else {
+                parts = parts.concat([jsStr(x)])
+            }
+        }
+        return parts.join(sep)
+    }
+
+    // `push` / `pop` / `sort` / `reverse` change the list: on a binding only.
+    fn tapeMutate(env: MEnv, o: AExpr, xs: MV[], m: string, args: MV[], s0: MS) -> MR {
+        const root: string = primName(o)
+        if (root == "" || lookup(s0, root) is not) return bad(s0, "`." + m + "()` changes the list it is called on; the compile-time evaluator evaluates it on a binding of the body only (`xs." + m + "(…)`)")
+        if (m == "push") {
+            const ys: MV[] = xs.concat(args)
+            return vr(MV.VNum(ys.length), assignAny(s0, root, MV.VTape(ys)))
+        }
+        if (m == "pop") {
+            if (xs.length == 0) return vr(MV.VUndef, s0)
+            return vr(xs[xs.length - 1], assignAny(s0, root, MV.VTape(xs.slice(0, xs.length - 1))))
+        }
+        if (m == "reverse") {
+            let ys: MV[] = []
+            let i: int = xs.length - 1
+            while (i >= 0) {
+                ys = ys.concat([xs[i]])
+                i = i - 1
+            }
+            return vr(MV.VTape(ys), assignAny(s0, root, MV.VTape(ys)))
+        }
+        // sort: stable (an insertion sort — JavaScript's sort is stable), by the
+        // comparator, or by the elements' text (JavaScript's default order; absent
+        // values last)
+        let s: MS = s0
+        const cmp: MV = argOr(args, 0)
+        let ys: MV[] = []
+        for (const x of xs) {
+            let at: int = ys.length
+            let going = true
+            while (going && at > 0) {
+                const r: SortCmp = sortBefore(env, cmp, x, ys[at - 1], s)
+                s = r.s
+                if (s.err != "") return vr(MV.VUndef, s)
+                if (r.before) {
+                    at = at - 1
+                } else {
+                    going = false
+                }
+            }
+            ys = ys.slice(0, at).concat([x]).concat(ys.slice(at, ys.length))
+        }
+        return vr(MV.VTape(ys), assignAny(s, root, MV.VTape(ys)))
+    }
+
+    type SortCmp:struct = { before: boolean, s: MS }
+
+    // Does `a` sort strictly before `b`?
+    fn sortBefore(env: MEnv, cmp: MV, a: MV, b: MV, s: MS) -> SortCmp {
+        if (isAbsent(cmp)) {
+            if (isAbsent(a)) return { before: false, s: tick(s) }
+            if (isAbsent(b)) return { before: true, s: tick(s) }
+            return { before: jsStr(a) < jsStr(b), s: tick(s) }
+        }
+        const r: MR = applyV(env, cmp, [a, b], s)
+        return { before: toNum(r.v) < 0, s: r.s }
+    }
+
+    // =========================================================================
+    // THE SPLICE (§22.4.1: "Both `emit(html)` and `emit.raw(html)` output SHALL
+    // pass through the block splitter and AST builder"). The output is read by
+    // the ONE markup reader (parse.scrml parseFragment) as the children of
+    // `parent`; a parse error is E-META-EVAL-002 naming it (E-SCRIPT-001 /
+    // E-STYLE-001 stand as their own codes — "a `<script>` element in emitted
+    // output is `E-SCRIPT-001`"). The nodes are then judged (the gate), every span
+    // in them is rewritten to the block's (the output has no source of its own —
+    // impl#1 anchors the same way, `_metaEmitSiteSpan`), and at a code-default body
+    // top a whitespace-only text node is dropped (whitespace there is no content).
+    // =========================================================================
+    fn spliceOut(c0: MC, m: AMeta, text: string, parent: string, bodyTop: boolean) -> RNodes {
+        const fr: Fragment = parseFragment(c0.file, text, parent, c0.next)
+        let c: MC = withNext(c0, fr.nextId)
+        const d0: int = c.diags.length
+        for (const d of fr.diags) {
+            if (d.code == "E-SCRIPT-001" || d.code == "E-STYLE-001") {
+                c = withDiag(c, d.code, d.message + " (in `^{}` emit() output — emitted markup is held to the rules source is, §22.4.1)", m.span)
+            } else if (isErrorDiag(d) && c.diags.length == d0) {
+                // the first parse error names the fault; the reader's later ones are its cascade
+                c = withDiag(c, "E-META-EVAL-002", "the `^{}` block's emit() output does not parse as markup: [" + d.code + "] " + d.message + " (§22.4.1)", m.span)
+            }
+        }
+        if (c.diags.length == d0 && !fr.whole) {
+            c = withDiag(c, "E-META-EVAL-002", "the `^{}` block's emit() output closes an element it did not open (`</…>`) — emitted markup is a whole run of nodes (§22.4.1)", m.span)
+        }
+        if (c.diags.length > d0) return { nodes: [], c: c }
+        const reasons: string[] = gateNodes(fr.nodes, emitNsHtml(), "")
+        let seen: string[] = []
+        for (const r of reasons) {
+            if (seen.indexOf(r) < 0) {
+                seen = seen.concat([r])
+                c = withDiag(c, "E-META-EVAL-002", r, m.span)
+            }
+        }
+        if (c.diags.length > d0) return { nodes: [], c: c }
+        let out: ANode[] = []
+        for (const n of fr.nodes) {
+            if (!(bodyTop && isBlankText(n))) out = out.concat([respan(n, m.span)])
+        }
+        return { nodes: out, c: c }
+    }
+
+    fn isErrorDiag(d: Diag) -> boolean { return d.severity == Severity.Error }
+
+    fn isBlankText(n: ANode) -> boolean {
+        return match n.k {
+            .Text(text: t) :> t.trim() == ""
+            // no-default-arm: one question of a node — is it whitespace text
+            _ :> false
+        }
+    }
+
+    // Every span of a spliced node (the gate admitted only elements and text).
+    fn respan(n: ANode, sp: ASpan) -> ANode {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: el) :> { nid: n.nid, span: sp, k: ANodeK.Elem(respanElem(el, sp)) }
+            // no-default-arm: text (and nothing else) passes the gate besides elements
+            _ :> { nid: n.nid, span: sp, k: k }
+        }
+    }
+
+    fn respanElem(el: AElem, sp: ASpan) -> AElem {
+        let attrs: AAttr[] = []
+        for (const a of el.attrs) { attrs = attrs.concat([{ nid: a.nid, span: sp, name: a.name, value: a.value }]) }
+        let kids: ANode[] = []
+        for (const k of el.kids) { kids = kids.concat([respan(k, sp)]) }
+        return { nid: el.nid, span: sp, star: el.star, tag: el.tag, attrs: attrs, kids: kids, binds: el.binds, parens: el.parens }
+    }
+
+    // ---- the gate (§22.4.1; impl#1 meta-eval.ts checkEmittedNodes) -------------
+    // INTERIM (S481 design read Q2, PA default): emitted output is plain markup —
+    // standard elements, text, comments, literal attribute values. The capable
+    // alternative (emitted logic, checked as source is — the bootstrap splices
+    // before analysis, so it could) is newly-accepting against impl#1.
+    fn gateNodes(ns: ANode[], parentNs: string, parentTag: string) -> string[] {
+        let out: string[] = []
+        for (const n of ns) {
+            const k: ANodeK = n.k
+            match k {
+                .Text(text: t) :> {}
+                .Elem(e: el) :> { out = out.concat(gateElem(el, parentNs, parentTag)) }
+                .Interp(e: e) :> { out = out.concat([notPlain("a `" + "$" + "{…}` logic block")]) }
+                .DeclNode(d: d) :> { out = out.concat([notPlain("a declaration")]) }
+                .Effect(w: w) :> { out = out.concat([notPlain("an `<effect>`")]) }
+                .Request(r: r) :> { out = out.concat([notPlain("a `<request>`")]) }
+                .Css(c: x) :> { out = out.concat([notPlain("a `#{…}` CSS block")]) }
+                .Gather(f: f) :> { out = out.concat([notPlain("a `for` loop")]) }
+                .Run(b: b) :> { out = out.concat([notPlain("statements")]) }
+            }
+        }
+        return out
+    }
+
+    fn notPlain(what: string) -> string {
+        return "the `^{}` block's emit() output contains " + what + " — emitted markup is plain markup only (standard elements, text and comments, with literal attribute values): logic, `?{}`, functions and declarations are refused rather than compiled unchecked (§22.4.1; INTERIM, as impl#1 does)"
+    }
+
+    fn gateElem(el: AElem, parentNs: string, parentTag: string) -> string[] {
+        const tag: string = el.tag
+        if (el.star || el.binds.length > 0 || el.parens) return ["the `^{}` block's emit() output contains `<" + tag + ">` with binders or an instance mark — emitted markup is plain markup only (§22.4.1)"]
+        if (!emitStandardElement(tag)) return ["the `^{}` block's emit() output contains `<" + tag + ">` — emitted markup admits only standard markup elements (HTML / SVG / MathML / custom elements), text and comments (§22.4.1): a component or a scrml structural element would be compiled from text no source declares"]
+        const lowerTag: string = emitFoldName(tag)
+        const ns: string = emitChildNs(parentNs, parentTag, lowerTag)
+        let hasName = false
+        for (const a of el.attrs) { if (emitFoldName(a.name) == "name") hasName = true }
+        let out: string[] = []
+        for (const a of el.attrs) {
+            const r: string = gateAttr(a, ns, lowerTag, tag, hasName)
+            if (r != "") out = out.concat([r])
+        }
+        return out.concat(gateNodes(el.kids, ns, lowerTag))
+    }
+
+    fn gateAttr(a: AAttr, ns: string, lowerTag: string, tag: string, hasName: boolean) -> string {
+        const nameVerdict: string = emitAttrNameVerdict(ns, lowerTag, a.name)
+        if (nameVerdict != "") {
+            return "the `^{}` block's emit() output gives `<" + tag + ">` the attribute `" + a.name + "` — " + nameVerdict + ". Emitted markup admits a closed list of attributes — global and per-element presentation, structure, accessibility and form-value attributes, `data-*` and `aria-*` — and refuses every other name (§22.4.1, §22.12)"
+        }
+        const v: AAttrValue = a.value
+        return match v {
+            .NoValue :> ""
+            .Quoted(v: lit, sq: sq) :> gateLiteral(a.name, lit, sq, ns, lowerTag, tag, hasName)
+            .Bare(e: e) :> attrNotPlain(tag, a.name, "an unquoted value — quote the attribute value")
+            .Paren(e: e) :> attrNotPlain(tag, a.name, "an expression value")
+            .Braced(b: b) :> attrNotPlain(tag, a.name, "a `{ … }` value")
+            .Dur(text: t) :> attrNotPlain(tag, a.name, "a duration value")
+        }
+    }
+
+    fn attrNotPlain(tag: string, name: string, what: string) -> string {
+        return "the `^{}` block's emit() output gives `<" + tag + ">` attribute `" + name + "` " + what + " (`" + name + "=\"…\"`) — emitted markup admits only plain attribute values, a literal string or no value (§22.4.1)"
+    }
+
+    fn gateLiteral(name: string, lit: string, sq: boolean, ns: string, lowerTag: string, tag: string, hasName: boolean) -> string {
+        // SPEC §5: "The attribute quoted-string form is `\"`-only (double-quote;
+        // single-quote is not an attribute-string delimiter)"
+        if (sq) return "the `^{}` block's emit() output writes `<" + tag + ">` attribute `" + name + "` single-quoted (`" + name + "='…'`) — the attribute string form is `\"`-only (§5); emitted markup is held to the rules source is (§22.4.1)"
+        const vv: string = emitAttrValueVerdict(name, lit, lowerTag)
+        if (vv != "") return "the `^{}` block's emit() output gives `<" + tag + ">` " + vv + " (§22.4.1)"
+        const lowerName: string = emitFoldName(name)
+        const nv: string = emitNamedValueVerdict(ns, lowerTag, lowerName, lit, hasName)
+        if (nv != "") return "the `^{}` block's emit() output gives " + nv + " (§22.12) — rename it: on these elements an `id` / `name` becomes a named property of `document`, and one spelled like a member hides that member from every script that reads it"
+        if (isUrlAttr("", lowerName) && !urlValueAdmitted(lowerName, lit)) {
+            return "the `^{}` block's emit() output gives `<" + tag + ">` a " + lowerName + "= URL whose scheme is not admitted (§22.4.1, §5.2): emitted markup admits http:, https:, ftp:, mailto:, tel:, sms:, a relative URL, or a raster data:image on an image source — the same rule runtime meta.emit() output is held to"
+        }
+        if (lit.indexOf("$" + "{") >= 0) return attrNotPlain(tag, name, "a quoted value carrying `" + "$" + "{`")
+        return ""
+    }
+}

@@ -28,7 +28,8 @@ const B4 = "````";
 const fence = (...body) => [`${B3}scrml`, ...body, B3];
 const GOOD = ["<program>", "    let <count:int=0/>", "    <p>${@count}</p>", "</program>"];
 // s469-boot-css: a `^{}` meta context (was `#{}`, which the bootstrap now compiles)
-const AHEAD = ["<program>", "    <main>", "        <p>hi</p>", "        ^{ 1 }", "    </main>", "</program>"];
+// s481-boot-meta: a RUNTIME `^{}` (compile-time `^{}` is built; runtime meta is not yet)
+const AHEAD = ["<program>", "    <main>", "        <p>hi</p>", "        ^{ meta.emit(\"<b>x</b>\"); }", "    </main>", "</program>"];
 
 describe("A1 — fence lengths and characters", () => {
   test("a 4-backtick fence that shows ```scrml text opens no block and swallows nothing", () => {

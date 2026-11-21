@@ -1,0 +1,362 @@
+// =============================================================================
+// self-host-v2 / emit-gate.scrml — the attribute judge for markup a compile-time
+// `^{}` block emits (SPEC §22.4.1, §22.12), s481 (s481-boot-meta).
+//
+// SPEC §22.4.1: "An attribute in `emit()` / `emit.raw()` output SHALL carry a
+// name on the CLOSED attribute list of §22.12 … for its element's namespace —
+// the same list, read by the same judge, that runtime `meta.emit` output is held
+// to; any other name is `E-META-EVAL-002`. An `id` / `name` value in the
+// `_scrml` / `__scrml` namespace is `E-META-EVAL-002`, and so is an `id` /
+// `name` value that the `document` half of §22.12's *Named properties* rule
+// refuses". The form half is NOT applied at compile time (ruling S460 "n4 b").
+//
+// impl#1's one definition is compiler/src/markup-attr-allow-list.js (the judge
+// and its lists) and compiler/src/dom-named-property-members.js (the generated
+// `document` member table). The bootstrap COMPILER is scrml, so it cannot import
+// the JS — this module is that file's lists and judge written in scrml, function
+// for function (`_scrml_emit_attr_name_verdict` → emitAttrNameVerdict, …), as
+// url.scrml is runtime-url-guard.js's. compiler/self-host-v2/slice-m2/
+// meta-s481.test.js runs both over the same inputs and requires the same answer
+// on every one: a drift between the two is a failing test, not a second list.
+// The lists were generated from the JS (not typed by hand).
+//
+// Namespaces are the URIs the JS uses. Names are compared as the HTML tokenizer
+// leaves them: ASCII upper case folded to lower case (emitFoldName).
+// =============================================================================
+${
+    import { htmlElementNames, svgElementNames, mathmlElementNames, isCustomElementName } from "./elements.scrml"
+
+    export fn emitNsHtml() -> string { return "http://www.w3.org/1999/xhtml" }
+    export fn emitNsSvg() -> string { return "http://www.w3.org/2000/svg" }
+    export fn emitNsMathml() -> string { return "http://www.w3.org/1998/Math/MathML" }
+
+    // Fold ASCII upper case to lower case — the HTML tokenizer's only change to an
+    // attribute name. `_scrml_emit_fold_name`.
+    export fn emitFoldName(name: string) -> string {
+        let out: string = ""
+        let i: int = 0
+        while (i < name.length) {
+            const c: string = name.substring(i, i + 1)
+            if (c >= "A" && c <= "Z") {
+                out = out + c.toLowerCase()
+            } else {
+                out = out + c
+            }
+            i = i + 1
+        }
+        return out
+    }
+
+    // The compiler-owned namespace: `data-scrml` itself and every `data-scrml-*`
+    // name. `lowerName` is already folded. `_scrml_emit_reserved_attr_name`.
+    export fn emitReservedAttrName(lowerName: string) -> boolean {
+        return lowerName == "data-scrml" || lowerName.substring(0, 11) == "data-scrml-"
+    }
+
+    // A standard markup element name — WHATWG HTML, SVG or MathML (as the lists
+    // spell them) or a custom element. impl#1 html-elements.js
+    // `isStandardMarkupElementName` (case-sensitive: `<Div>` is not `<div>` here).
+    export fn emitStandardElement(name: string) -> boolean {
+        if (name == "") return false
+        if (isCustomElementName(name)) return true
+        if (htmlElementNames().indexOf(name) >= 0) return true
+        if (svgElementNames().indexOf(name) >= 0) return true
+        return mathmlElementNames().indexOf(name) >= 0
+    }
+
+    fn startsVowel(s: string) -> boolean {
+        const c: string = s.substring(0, 1)
+        return c == "a" || c == "e" || c == "i" || c == "o" || c == "u"
+    }
+
+    // THE attribute judge. `ns` the element's namespace URI (anything else is
+    // judged as HTML), `tag` its lowercased local name, `name` the attribute name
+    // as written. "" when admitted, else a short reason naming the attribute.
+    // `_scrml_emit_attr_name_verdict`.
+    export fn emitAttrNameVerdict(ns: string, tag: string, name: string) -> string {
+        const lowerName: string = emitFoldName(name)
+        if (emitReservedAttrName(lowerName)) {
+            return "a " + lowerName + "= attribute on <" + tag + "> (the data-scrml attribute namespace is reserved for the compiler's own markers)"
+        }
+        if (lowerName == "id" && tag.toLowerCase() == "map" && ns != emitNsSvg() && ns != emitNsMathml()) {
+            return "an id= attribute on <map> (an <img usemap> anywhere in the page resolves to a map by its id or name)"
+        }
+        if (lowerName.substring(0, 5) == "data-" && lowerName.length > 5) return ""
+        if (lowerName.substring(0, 5) == "aria-" && lowerName.length > 5) return ""
+        if (emitGlobalAttrs().indexOf(lowerName) >= 0) return ""
+        if (ns == emitNsSvg()) {
+            if (emitSvgAttrs().indexOf(lowerName) >= 0) return ""
+        } else if (ns == emitNsMathml()) {
+            if (emitMathmlAttrs().indexOf(lowerName) >= 0) return ""
+        } else if (emitHtmlAttrElements(lowerName).indexOf(tag.toLowerCase()) >= 0) {
+            return ""
+        }
+        if (lowerName.substring(0, 2) == "on") return "an event-handler attribute " + lowerName + "= on <" + tag + ">"
+        let article: string = "a "
+        if (startsVowel(lowerName)) article = "an "
+        return article + lowerName + "= attribute on <" + tag + "> (not on the admitted attribute list for emitted markup)"
+    }
+
+    // The value half (names already admitted): an `id` / `name` value in the
+    // compiler-reserved `_scrml` / `__scrml` namespace, on every element.
+    // `_scrml_emit_attr_value_verdict` (`/^_{1,2}scrml/i` on the trimmed value).
+    export fn emitAttrValueVerdict(name: string, value: string, tag: string) -> string {
+        const lowerName: string = emitFoldName(name)
+        if (lowerName != "id" && lowerName != "name") return ""
+        const v: string = value.trim().toLowerCase()
+        if (v.substring(0, 6) == "_scrml" || v.substring(0, 7) == "__scrml") {
+            let article: string = "a "
+            if (lowerName == "id") article = "an "
+            return article + lowerName + "= value in the compiler-reserved _scrml / __scrml namespace"
+        }
+        return ""
+    }
+
+    // The NAMED-PROPERTY judge, `document` half only (compile time — ruling S460
+    // "n4 b": `form: null`, `inForm` false). `_scrml_emit_named_value_verdict`.
+    export fn emitNamedValueVerdict(ns: string, tag: string, lowerName: string, value: string, hasNameAttr: boolean) -> string {
+        if (lowerName != "id" && lowerName != "name") return ""
+        if (ns != "" && ns != emitNsHtml()) return ""
+        if (value == "") return ""
+        const byName: boolean = lowerName == "name" && (tag == "embed" || tag == "form" || tag == "iframe" || tag == "img" || tag == "object")
+        const byId: boolean = lowerName == "id" && (tag == "object" || (tag == "img" && hasNameAttr))
+        if ((byName || byId) && emitDocumentMembers().indexOf(value) >= 0) {
+            let article: string = "a "
+            if (lowerName == "id") article = "an "
+            return article + lowerName + "= value on <" + tag + "> that names a member of document (the element would shadow that member)"
+        }
+        return ""
+    }
+
+    // The namespace of a child element `childTag` (lowercased) whose parent is in
+    // `parentNs` with local name `parentTag` — the HTML tree builder's rule.
+    // `_scrml_emit_child_ns`.
+    export fn emitChildNs(parentNs: string, parentTag: string, childTag: string) -> string {
+        if (parentNs == emitNsSvg()) {
+            if (parentTag == "foreignobject" || parentTag == "desc" || parentTag == "title") return openNs(childTag)
+            return emitNsSvg()
+        }
+        if (parentNs == emitNsMathml()) {
+            if (parentTag == "annotation-xml" || parentTag == "mi" || parentTag == "mo" || parentTag == "mn" || parentTag == "ms" || parentTag == "mtext") return openNs(childTag)
+            return emitNsMathml()
+        }
+        return openNs(childTag)
+    }
+
+    fn openNs(childTag: string) -> string {
+        if (childTag == "svg") return emitNsSvg()
+        if (childTag == "math") return emitNsMathml()
+        return emitNsHtml()
+    }
+
+    // -------------------------------------------------------------------------
+    // The lists — generated from markup-attr-allow-list.js and
+    // dom-named-property-members.js (`_SCRML_EMIT_*`); the drift test holds them.
+    // -------------------------------------------------------------------------
+    export fn emitGlobalAttrs() -> string[] {
+        return [
+            "accesskey", "autocapitalize", "autocorrect", "autofocus", "class", "contenteditable", "dir",
+            "draggable", "enterkeyhint", "exportparts", "hidden", "id", "inert", "inputmode", "itemid",
+            "itemprop", "itemref", "itemscope", "itemtype", "lang", "part", "popover", "role", "slot",
+            "spellcheck", "style", "tabindex", "title", "translate", "writingsuggestions", "xml:lang",
+            "xml:space", "xmlns", "xmlns:xlink"
+        ]
+    }
+
+    export fn emitHtmlAttrNames() -> string[] {
+        return [
+            "abbr", "accept", "accept-charset", "charset", "content", "property", "alt", "autocomplete",
+            "autoplay", "checked", "cite", "cols", "colspan", "controls", "coords", "crossorigin", "datetime",
+            "decoding", "default", "dirname", "disabled", "download", "fetchpriority", "for", "headers",
+            "height", "high", "href", "hreflang", "ismap", "kind", "label", "list", "loading", "loop", "low",
+            "max", "maxlength", "media", "min", "minlength", "multiple", "muted", "name", "novalidate", "open",
+            "optimum", "pattern", "placeholder", "playsinline", "poster", "preload", "readonly",
+            "referrerpolicy", "rel", "required", "reversed", "rows", "rowspan", "scope", "selected", "shape",
+            "size", "sizes", "span", "src", "srclang", "srcset", "start", "step", "type", "value", "width",
+            "wrap"
+        ]
+    }
+
+    export fn emitHtmlAttrElements(lowerName: string) -> string[] {
+        return match lowerName {
+            "abbr" :> ["td", "th"]
+            "accept" :> ["input"]
+            "accept-charset" :> ["form"]
+            "charset" :> ["meta"]
+            "content" :> ["meta"]
+            "property" :> ["meta"]
+            "alt" :> ["img", "area", "input"]
+            "autocomplete" :> ["form", "input", "select", "textarea"]
+            "autoplay" :> ["audio", "video"]
+            "checked" :> ["input"]
+            "cite" :> ["blockquote", "q", "del", "ins"]
+            "cols" :> ["textarea"]
+            "colspan" :> ["td", "th"]
+            "controls" :> ["audio", "video"]
+            "coords" :> ["area"]
+            "crossorigin" :> ["img", "audio", "video"]
+            "datetime" :> ["time", "del", "ins"]
+            "decoding" :> ["img"]
+            "default" :> ["track"]
+            "dirname" :> ["input", "textarea"]
+            "disabled" :> ["button", "fieldset", "input", "optgroup", "option", "select", "textarea"]
+            "download" :> ["a", "area"]
+            "fetchpriority" :> ["img"]
+            "for" :> ["output"]
+            "headers" :> ["td", "th"]
+            "height" :> ["img", "video", "canvas", "input", "source"]
+            "high" :> ["meter"]
+            "href" :> ["a", "area"]
+            "hreflang" :> ["a", "area"]
+            "ismap" :> ["img"]
+            "kind" :> ["track"]
+            "label" :> ["option", "optgroup", "track"]
+            "list" :> ["input"]
+            "loading" :> ["img"]
+            "loop" :> ["audio", "video"]
+            "low" :> ["meter"]
+            "max" :> ["input", "meter", "progress"]
+            "maxlength" :> ["input", "textarea"]
+            "media" :> ["source", "meta"]
+            "min" :> ["input", "meter"]
+            "minlength" :> ["input", "textarea"]
+            "multiple" :> ["input", "select"]
+            "muted" :> ["audio", "video"]
+            "name" :> ["button", "fieldset", "input", "output", "select", "textarea", "details", "meta"]
+            "novalidate" :> ["form"]
+            "open" :> ["details", "dialog"]
+            "optimum" :> ["meter"]
+            "pattern" :> ["input"]
+            "placeholder" :> ["input", "textarea"]
+            "playsinline" :> ["video"]
+            "poster" :> ["video"]
+            "preload" :> ["audio", "video"]
+            "readonly" :> ["input", "textarea"]
+            "referrerpolicy" :> ["a", "area", "img"]
+            "rel" :> ["a", "area"]
+            "required" :> ["input", "select", "textarea"]
+            "reversed" :> ["ol"]
+            "rows" :> ["textarea"]
+            "rowspan" :> ["td", "th"]
+            "scope" :> ["th"]
+            "selected" :> ["option"]
+            "shape" :> ["area"]
+            "size" :> ["input", "select"]
+            "sizes" :> ["img", "source"]
+            "span" :> ["col", "colgroup"]
+            "src" :> ["img", "audio", "video", "source", "track", "input"]
+            "srclang" :> ["track"]
+            "srcset" :> ["img", "source"]
+            "start" :> ["ol"]
+            "step" :> ["input"]
+            "type" :> ["a", "button", "input", "ol", "source", "menu"]
+            "value" :> ["button", "data", "input", "li", "meter", "option", "progress"]
+            "width" :> ["img", "video", "canvas", "input", "source", "col", "colgroup"]
+            "wrap" :> ["textarea"]
+            // no-default-arm: a name on no per-element list
+            _ :> []
+        }
+    }
+
+    export fn emitSvgAttrs() -> string[] {
+        return [
+            "alignment-baseline", "baseline-shift", "baseprofile", "clip", "clip-path", "clip-rule",
+            "clippathunits", "color", "color-interpolation", "color-interpolation-filters", "cursor", "cx",
+            "cy", "d", "diffuseconstant", "direction", "display", "divisor", "dominant-baseline", "dx", "dy",
+            "edgemode", "elevation", "fill", "fill-opacity", "fill-rule", "filter", "filterunits",
+            "flood-color", "flood-opacity", "focusable", "font-family", "font-size", "font-size-adjust",
+            "font-stretch", "font-style", "font-variant", "font-weight", "fr", "fx", "fy", "gradienttransform",
+            "gradientunits", "height", "href", "image-rendering", "in", "in2", "k", "k1", "k2", "k3", "k4",
+            "kernelmatrix", "kernelunitlength", "lengthadjust", "letter-spacing", "lighting-color",
+            "limitingconeangle", "marker-end", "marker-mid", "marker-start", "markerheight", "markerunits",
+            "markerwidth", "mask", "maskcontentunits", "maskunits", "mode", "numoctaves", "offset", "opacity",
+            "operator", "order", "orient", "overflow", "paint-order", "pathlength", "patterncontentunits",
+            "patterntransform", "patternunits", "pointer-events", "points", "pointsatx", "pointsaty",
+            "pointsatz", "preservealpha", "preserveaspectratio", "primitiveunits", "r", "radius", "refx",
+            "refy", "result", "rotate", "rx", "ry", "scale", "seed", "shape-rendering", "spacing",
+            "specularconstant", "specularexponent", "spreadmethod", "startoffset", "stddeviation",
+            "stitchtiles", "stop-color", "stop-opacity", "stroke", "stroke-dasharray", "stroke-dashoffset",
+            "stroke-linecap", "stroke-linejoin", "stroke-miterlimit", "stroke-opacity", "stroke-width",
+            "surfacescale", "systemlanguage", "tablevalues", "targetx", "targety", "text-anchor",
+            "text-decoration", "text-rendering", "textlength", "transform", "transform-origin", "type",
+            "unicode-bidi", "values", "vector-effect", "version", "viewbox", "visibility", "width",
+            "word-spacing", "writing-mode", "x", "x1", "x2", "xchannelselector", "xlink:href", "xlink:title",
+            "y", "y1", "y2", "ychannelselector", "z"
+        ]
+    }
+
+    export fn emitMathmlAttrs() -> string[] {
+        return [
+            "accent", "accentunder", "align", "arg", "close", "columnalign", "columnlines", "columnspacing",
+            "columnspan", "depth", "display", "displaystyle", "encoding", "equalcolumns", "equalrows", "fence",
+            "form", "frame", "framespacing", "height", "href", "intent", "largeop", "linethickness", "lspace",
+            "mathbackground", "mathcolor", "mathsize", "mathvariant", "maxsize", "minsize", "movablelimits",
+            "notation", "open", "rowalign", "rowlines", "rowspacing", "rowspan", "rspace", "scriptlevel",
+            "separator", "separators", "side", "stretchy", "symmetric", "voffset", "width"
+        ]
+    }
+
+    export fn emitDocumentMembers() -> string[] {
+        return [
+            "ATTRIBUTE_NODE", "CDATA_SECTION_NODE", "COMMENT_NODE", "DOCUMENT_FRAGMENT_NODE", "DOCUMENT_NODE",
+            "DOCUMENT_POSITION_CONTAINED_BY", "DOCUMENT_POSITION_CONTAINS", "DOCUMENT_POSITION_DISCONNECTED",
+            "DOCUMENT_POSITION_FOLLOWING", "DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC",
+            "DOCUMENT_POSITION_PRECEDING", "DOCUMENT_TYPE_NODE", "ELEMENT_NODE", "ENTITY_NODE",
+            "ENTITY_REFERENCE_NODE", "NOTATION_NODE", "PROCESSING_INSTRUCTION_NODE", "TEXT_NODE", "URL",
+            "__defineGetter__", "__defineSetter__", "__lookupGetter__", "__lookupSetter__", "__proto__",
+            "activeElement", "activeViewTransition", "addEventListener", "adoptNode", "adoptedStyleSheets",
+            "alinkColor", "all", "anchors", "append", "appendChild", "applets", "ariaNotify", "baseURI",
+            "bgColor", "body", "captureEvents", "caretPositionFromPoint", "caretRangeFromPoint",
+            "characterSet", "charset", "childElementCount", "childNodes", "children", "clear", "cloneNode",
+            "close", "compareDocumentPosition", "compatMode", "constructor", "contains", "contentType",
+            "cookie", "createAttribute", "createAttributeNS", "createCDATASection", "createComment",
+            "createDocumentFragment", "createElement", "createElementNS", "createEvent", "createExpression",
+            "createNSResolver", "createNodeIterator", "createProcessingInstruction", "createRange",
+            "createTextNode", "createTreeWalker", "currentScript", "customElementRegistry", "defaultView",
+            "designMode", "dir", "dispatchEvent", "doctype", "documentElement", "documentURI", "domain",
+            "elementFromPoint", "elementsFromPoint", "embeds", "evaluate", "execCommand", "exitFullscreen",
+            "exitPictureInPicture", "exitPointerLock", "featurePolicy", "fgColor", "firstChild",
+            "firstElementChild", "fonts", "forms", "fragmentDirective", "fullscreen", "fullscreenElement",
+            "fullscreenEnabled", "getAnimations", "getElementById", "getElementsByClassName",
+            "getElementsByName", "getElementsByTagName", "getElementsByTagNameNS", "getRootNode",
+            "getSelection", "hasChildNodes", "hasFocus", "hasOwnProperty", "hasStorageAccess",
+            "hasUnpartitionedCookieAccess", "head", "hidden", "images", "implementation", "importNode",
+            "inputEncoding", "insertBefore", "isConnected", "isDefaultNamespace", "isEqualNode",
+            "isPrototypeOf", "isSameNode", "lastChild", "lastElementChild", "lastModified", "linkColor",
+            "links", "location", "lookupNamespaceURI", "lookupPrefix", "moveBefore", "nextSibling", "nodeName",
+            "nodeType", "nodeValue", "normalize", "onabort", "onanimationcancel", "onanimationend",
+            "onanimationiteration", "onanimationstart", "onauxclick", "onbeforecopy", "onbeforecut",
+            "onbeforeinput", "onbeforematch", "onbeforepaste", "onbeforetoggle", "onbeforexrselect", "onblur",
+            "oncancel", "oncanplay", "oncanplaythrough", "onchange", "onclick", "onclose", "oncommand",
+            "oncontentvisibilityautostatechange", "oncontextlost", "oncontextmenu", "oncontextrestored",
+            "oncopy", "oncuechange", "oncut", "ondblclick", "ondrag", "ondragend", "ondragenter",
+            "ondragleave", "ondragover", "ondragstart", "ondrop", "ondurationchange", "onemptied", "onended",
+            "onerror", "onfocus", "onformdata", "onfreeze", "onfullscreenchange", "onfullscreenerror",
+            "ongotpointercapture", "oninput", "oninvalid", "onkeydown", "onkeypress", "onkeyup", "onload",
+            "onloadeddata", "onloadedmetadata", "onloadstart", "onlostpointercapture", "onmousedown",
+            "onmouseenter", "onmouseleave", "onmousemove", "onmouseout", "onmouseover", "onmouseup",
+            "onmousewheel", "onpaste", "onpause", "onplay", "onplaying", "onpointercancel", "onpointerdown",
+            "onpointerenter", "onpointerleave", "onpointerlockchange", "onpointerlockerror", "onpointermove",
+            "onpointerout", "onpointerover", "onpointerup", "onprerenderingchange", "onprogress",
+            "onratechange", "onreadystatechange", "onreset", "onresize", "onresume", "onscroll", "onscrollend",
+            "onscrollsnapchange", "onscrollsnapchanging", "onsearch", "onsecuritypolicyviolation", "onseeked",
+            "onseeking", "onselect", "onselectionchange", "onselectstart", "onslotchange", "onstalled",
+            "onsubmit", "onsuspend", "ontimeupdate", "ontoggle", "ontransitioncancel", "ontransitionend",
+            "ontransitionrun", "ontransitionstart", "onvisibilitychange", "onvolumechange", "onwaiting",
+            "onwebkitanimationend", "onwebkitanimationiteration", "onwebkitanimationstart",
+            "onwebkitfullscreenchange", "onwebkitfullscreenerror", "onwebkittransitionend", "onwheel", "open",
+            "ownerDocument", "parentElement", "parentNode", "pictureInPictureElement",
+            "pictureInPictureEnabled", "plugins", "pointerLockElement", "prepend", "prerendering",
+            "previousSibling", "propertyIsEnumerable", "queryCommandEnabled", "queryCommandIndeterm",
+            "queryCommandState", "queryCommandSupported", "queryCommandValue", "querySelector",
+            "querySelectorAll", "readyState", "referrer", "releaseEvents", "removeChild",
+            "removeEventListener", "replaceChild", "replaceChildren", "requestStorageAccess",
+            "requestStorageAccessFor", "rootElement", "scripts", "scrollingElement", "startViewTransition",
+            "styleSheets", "textContent", "timeline", "title", "toLocaleString", "toString", "valueOf",
+            "visibilityState", "vlinkColor", "wasDiscarded", "webkitCancelFullScreen",
+            "webkitCurrentFullScreenElement", "webkitExitFullscreen", "webkitFullscreenElement",
+            "webkitFullscreenEnabled", "webkitHidden", "webkitIsFullScreen", "webkitVisibilityState", "when",
+            "write", "writeln", "xmlEncoding", "xmlStandalone", "xmlVersion"
+        ]
+    }
+}

@@ -2,6 +2,6 @@
     let <count:int=0/>
     <main>
         <p>${@count}</p>
-        ^{ 1 }
+        ^{ meta.emit("<b>x</b>"); }
     </main>
 </program>

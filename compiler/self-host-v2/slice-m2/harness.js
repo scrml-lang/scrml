@@ -17,6 +17,8 @@ export const M2_MODULES = [
   "sql.scrml",
   "parse.scrml",
   "link.scrml",
+  "emit-gate.scrml",
+  "meta.scrml",
   "effects.scrml",
   "analyze.scrml",
   "lower.scrml",
