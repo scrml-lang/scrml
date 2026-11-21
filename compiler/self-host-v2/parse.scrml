@@ -2704,12 +2704,21 @@ ${
         return code == "E-PARSE-EXPR" || code == "E-PARSE-EXPECTED" || code == "E-PARSE-TRAILING" || code == "E-PARSE-ITEM" || code == "E-PARSE-UNCLOSED"
     }
 
+    // One fault, one code (S473 D29; S481 r1, LOW-2): the body's FIRST report names
+    // the fault, and the reader's later ones are its cascade — kept out, as
+    // meta.scrml spliceOut does for emitted output.
     fn metaBodyErrors(tp: TP, d0: int) -> TP {
         let ds: Diag[] = tp.diags.slice(0, d0)
+        let faulted: boolean = false
         for (const d of tp.diags.slice(d0, tp.diags.length)) {
-            if (metaTokenCode(d.code)) {
+            const isErr: boolean = d.severity == Severity.Error
+            if (faulted && isErr) {
+                // a cascade report of the first fault: dropped
+            } else if (metaTokenCode(d.code)) {
+                faulted = true
                 ds = ds.concat([newDiag("E-META-002", "invalid token in a `^{}` meta block (§22.11): " + d.message, d.file, d.span)])
             } else {
+                if (isErr) faulted = true
                 ds = ds.concat([d])
             }
         }
@@ -13562,7 +13571,10 @@ ${
     fn parseMetaNode(mp: MP) -> RNodeOne {
         const start: int = mp.pos
         const re: RExpr = parseMetaExpr(regionTP(mAdv(mp, 1), LexStop.Balanced), start, true)
-        let m: MP = backToMarkup(mp, expectRegionEnd(re.tp))
+        // a body that already reported its fault: the region's trailing report is its cascade (D29)
+        let after: TP = expectRegionEnd(re.tp)
+        if (re.tp.diags.length > mp.diags.length) after = re.tp
+        let m: MP = backToMarkup(mp, after)
         // recovery: a body the reader stopped inside (a stray `)` ends the balanced
         // region early) resumes after the block's own `}` — its E-META-002 stands, and
         // the rest of the block is not read again as markup

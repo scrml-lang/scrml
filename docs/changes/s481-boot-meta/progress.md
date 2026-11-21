@@ -22,3 +22,10 @@ Rulings: user-voice-scrml.md S480 census build order item 2; ruling:user-voice-s
 ## Notes
 - Scratch: ~/.cache/scrml/review/s481-boot-meta/ (tools/, cases/ migrated copy, t1/ probes).
 - BlockLambda params are AParam at runtime (parse.scrml parseLambda) despite the `string[]` field type.
+
+## r1 (review of #2045 — ~/.cache/scrml/review/s481-2045/review.md)
+- [x] MED-1 budget: work charged to the step count (copyUnit 1024 chars / copied elements, walkUnit 16 walked elements), size bounds (16 Mi per value counted with all it holds, 1 Mi elements per list, 256 nesting), checked before building; repeat 100000 cap removed; SPEC §22.4 "The evaluation bound (S481)".
+- [x] MED-2 closures fail closed (floor + pins); gap g-boot-meta-closure-by-value-s481 → MED, text rewritten. Aliasing: §66.10 item 1 value semantics — interpreter right.
+- [x] LOW-1 attribute-position block (one E-META-EVAL-002, placeholder span recorded as an error span), LOW-2 first body fault only, LOW-3 type name → E-META-001 static, LOW-4 namespaced-attribute reason, LOW-5 non-number sort comparator refused.
+- [x] tests: meta-s481.test.js "s481 r1" (20 tests).
+- [ ] final gates, PR body r1 section

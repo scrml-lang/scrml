@@ -27846,6 +27846,48 @@ the form) rather than evaluating the block without it.
 >
 > **Provenance:** ruling:user-voice-scrml.md S458 "1a" (the allow-list landing) — S459 PA review nit 1 of PR #1359; governing text §22.2 (meta-body), §22.4 (evaluate and inline), §22.9 ("`^{}` blocks MAY contain `match` expressions"). **Direction of change: newly-accepting** (`while`, `function`, `break` / `continue`, `match` now evaluate) **and newly-rejecting** (the refused forms above were silently dropped, now `E-META-EVAL-001`).
 
+**The evaluation bound (S481).** Compile-time evaluation is deterministic and bounded by a STEP COUNT,
+never a clock, so a body is accepted or refused the same way on every machine. A body that runs past
+the bound is refused with `E-META-EVAL-001`, naming the bound; it is never evaluated in part. The
+bound covers work and size as well as statements, so a short body cannot take the compiler's memory:
+
+- **Steps.** At most 1,000,000 evaluation steps per block, and calls nested at most 64 deep. A
+  built-in's work counts toward the same step count: one step per 1,024 characters a built-in
+  produces or reads, or list elements it copies (`+` and templates by the length of the text they
+  build, `repeat`, `padStart` / `padEnd`, `concat`, `slice`, `split`, `join`, `push`, `sort`,
+  `emit`), and one step per 16 elements of a list or record it walks (`==` on lists and records, a
+  list turned to text, `includes`, `map` / `filter`).
+- **Size.** No single value may exceed 16 Mi (16,777,216): the characters of a string, or a list or
+  record counted with everything it holds (a list holding the same list twice counts it twice). No
+  list may hold more than 1 Mi (1,048,576) elements, and values nest at most 256 levels deep. The
+  output of `emit()` / `emit.raw()` in one block is a string under the same bound. Each size is
+  checked before the value is built.
+
+Building a long string by repeated `+` costs its length at each step; `.map(…).join("")` or one
+`emit()` per piece builds it at the cost of its length once.
+
+> **Provenance:** ruling:user-voice-scrml.md S481 "⭐ RULED — `^{}` meta in the bootstrap: four design
+> questions" item 4 (*"a scrml interpreter over the bootstrap's own syntax tree, as the permanent design,
+> not impl#1's run-JS-in-a-sandbox. It stays deterministic and in scrml (S114, S452), bounded by a step
+> count rather than a clock."* — PERMANENT; ruling:user-voice-scrml.md-S481-meta-four). The numbers are
+> the S481 PA default (PR #2045 r1, review MED-1: a three-line body doubling a list reached 24 GB RSS,
+> and a doubled string ended in a host `RangeError`). Emitted by the bootstrap at
+> `compiler/self-host-v2/meta.scrml` (`tick`, `charge`, `made`, `maxSize` / `maxElems` / `maxNest`).
+> **impl#1 status:** impl#1 bounds a compile-time body by a 5-second `node:vm` timeout (a clock) and
+> does not bound a single allocation; a host `RangeError` there is reported as `E-META-EVAL-001`.
+> **Direction of change: newly-rejecting** only for bodies past the bound (none in the corpus or the
+> conformance cases); newly-accepting for `repeat` counts past 100,000 (an S481 bootstrap cap, removed).
+
+> **Bootstrap status (S481 r1, INTERIM — `g-boot-meta-closure-by-value-s481`).** The bootstrap's
+> evaluator keeps the bindings a function or lambda captures BY VALUE. It refuses, with
+> `E-META-EVAL-001` naming the binding, the two cases where that would differ from reading the binding
+> itself: a write from inside a function or lambda to a binding outside it, and a write to a binding
+> after a function or lambda that reads it was made (a lambda written directly as the argument of a
+> list method that calls it — `map`, `filter`, `forEach`, `some`, `every`, `find`, `findIndex`,
+> `reduce`, `sort` — is kept by nobody and is exempt). Aliasing is not one of them: a binding taken
+> from another is a snapshot (§66.10 item 1), so `const b = a; b.push(2)` leaves `a` unchanged. The
+> capable alternative is a binding store threaded through the evaluator, closures holding binding ids.
+
 Compile-time meta blocks have access to the type registry via `reflect()` (see §22.4.2).
 Phase-separation rules (§22.8) apply to compile-time meta.
 

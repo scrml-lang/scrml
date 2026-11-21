@@ -167,6 +167,116 @@ describe("s481 — compile-time emit / emit.raw / reflect (§22.4)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// 2b. S481 r1 (review of #2045) — THE BUDGET (MED-1), CLOSURES (MED-2), LOW-1..5
+// ---------------------------------------------------------------------------
+const D = (body) => P(`<div id="m">^{ ${body} }</div>`);
+const evalErr = (src) => {
+  const r = run(src);
+  expect(errs(r)).toEqual(["E-META-EVAL-001"]);
+  return r.diags.find((d) => d.code === "E-META-EVAL-001").message;
+};
+
+describe("s481 r1 — the budget: size and work bounded by the step count (MED-1, SPEC §22.4)", () => {
+  // each of these took the machine's memory or crashed before r1 (review MED-1: 24 GB RSS / RangeError)
+  test("list doubling (`t = t.concat(t)`) stops at the list bound, before it is built", () => {
+    expect(evalErr(D(`let t = [1]; for (let i = 0; i < 30; i = i + 1) { t = t.concat(t); } emit("<p>" + t.length + "</p>");`))).toContain("size bound (1048576 elements)");
+  }, 60000);
+  test("string doubling (`s = s + s`) stops at the size bound — E-META-EVAL-001, never a RangeError", () => {
+    expect(evalErr(D(`let s = "xxxxxxxxxxxxxxxx"; for (let i = 0; i < 40; i = i + 1) { s = s + s; } emit("<p>" + s.length + "</p>");`))).toContain("size bound (16777216 characters)");
+  }, 60000);
+  test("padStart / repeat / padEnd past the size bound are refused before the string is built", () => {
+    expect(evalErr(D(`emit("<p>" + "x".padStart(1000000000).length + "</p>");`))).toContain("1000000000 characters");
+    expect(evalErr(D(`emit("<p>" + "x".repeat(2000000000).length + "</p>");`))).toContain("2000000000 characters");
+    expect(evalErr(D(`emit("<p>" + "ab".padEnd(20000000, "cd").length + "</p>");`))).toContain("size bound");
+  }, 60000);
+  test("the arbitrary repeat cap is gone: repeat(200000) evaluates; a fractional count truncates, as JavaScript's", () => {
+    expect(html(D(`emit("<p>" + "x".repeat(200000).length + "|" + "ab".repeat(2.5) + "|" + "x".padStart(5, "ab") + "</p>");`))).toContain("<p>200000|abab|ababx</p>");
+    expect(evalErr(D(`emit("x".repeat(-1));`))).toContain("RangeError");
+  }, 60000);
+  test("a shared value counted with everything it holds: `t = [t, t]` and `{ l: r, r: r }` stop at the size bound", () => {
+    expect(evalErr(D(`let t = [1]; for (let i = 0; i < 30; i = i + 1) { t = [t, t]; } emit("<p>" + ("" + t).length + "</p>");`))).toContain("counted with everything it holds");
+    expect(evalErr(D(`let r = { a: 1 }; for (let i = 0; i < 40; i = i + 1) { r = { l: r, r: r }; } emit("<p>" + (r == r) + "</p>");`))).toContain("counted with everything it holds");
+  }, 60000);
+  test("nesting is bounded (a walk of a value never overflows the stack)", () => {
+    expect(evalErr(D(`let t = [1]; for (let i = 0; i < 100000; i = i + 1) { t = [t]; } emit("<p>" + (t == t) + "</p>");`))).toContain("256 levels of nesting");
+  }, 60000);
+  test("a built-in's work is charged: a quadratic push loop and a re-read of a long string run out of steps", () => {
+    expect(evalErr(D(`let t = []; for (let i = 0; i < 200000; i = i + 1) { t.push(i); } emit("<p>" + t.length + "</p>");`))).toContain("step bound");
+    expect(evalErr(D(`const s = "x".repeat(10000000); let n = 0; for (let i = 0; i < 100000; i = i + 1) { if ((s + i).charAt(0) == "x") n = n + 1; } emit("<p>" + n + "</p>");`))).toContain("step bound");
+    expect(evalErr(D(`let t = [1]; for (let i = 0; i < 20; i = i + 1) { t = t.concat(t); } let n = 0; for (let i = 0; i < 100000; i = i + 1) { if (t.includes(2)) n = n + 1; } emit("<p>" + n + "</p>");`))).toContain("step bound");
+  }, 60000);
+  test("the bounds are deterministic: the same body fails with the same message", () => {
+    const b = D(`let t = []; for (let i = 0; i < 200000; i = i + 1) { t.push(i); } emit("<p>" + t.length + "</p>");`);
+    expect(evalErr(b)).toBe(evalErr(b));
+  }, 60000);
+  test("ordinary bodies stay well inside the budget (building 20000 items, a 30000-element map, sort, split)", () => {
+    expect(html(D(`let xs = []; for (const i of 0..20000) { xs.push(i); } emit("<p>" + xs.map((i) => "<li>" + i + "</li>").join("").length + "</p>");`))).toContain("<p>268890</p>");
+    expect(html(D(`let t = [1]; for (let i = 0; i < 15; i = i + 1) { t = t.concat(t); } const u = t.map((x, i) => i); emit("<p>" + u.length + "," + u.at(-1) + "</p>");`))).toContain("<p>32768,32767</p>");
+    expect(html(D(`let s = ""; for (let i = 0; i < 2000; i = i + 1) { s = s + "<i>" + i + "</i>"; } emit("<p>" + s.length + "</p>");`))).toContain("<p>20890</p>");
+    expect(html(D(`const p = "ab,".repeat(100000).split(","); let t = [3, 1, 2]; t.sort((a, b) => a - b); emit("<p>" + p.length + t.join("") + "</p>");`))).toContain("<p>100001123</p>");
+  }, 60000);
+});
+
+describe("s481 r1 — closures fail closed (MED-2, INTERIM, g-boot-meta-closure-by-value-s481)", () => {
+  // the review's probes (cases-st4/): each computed a silently wrong value before r1
+  test("a write from inside a lambda to an outer binding is refused by name (forEach accumulation)", () => {
+    const m = evalErr(D(`let n = 0; const xs = [1, 2, 3]; xs.forEach((x) => { n = n + x; }); emit("<p>sum=" + n + "</p>");`));
+    expect(m).toContain("`n` is written from inside a function or lambda");
+    expect(m).toContain("g-boot-meta-closure-by-value-s481");
+  });
+  test("a write from inside a local fn to an outer binding is refused by name", () => {
+    expect(evalErr(D(`let n = 0; fn bump() { n = n + 1; } bump(); bump(); emit("<p>n=" + n + "</p>");`))).toContain("`n` is written from inside a function or lambda");
+  });
+  test("a write to a binding after a function that reads it was made is refused by name", () => {
+    expect(evalErr(D(`let n = 1; const f = () => n; n = 5; emit("<p>f=" + f() + "</p>");`))).toContain("`n` is written after a function or lambda that reads it was made");
+    expect(evalErr(D(`const a = { k: 1 }; const g = () => a.k; a.k = 2; emit("<p>" + g() + "</p>");`))).toContain("`a` is written after");
+    expect(evalErr(D(`const xs = [1]; const f = () => xs.length; xs.push(2); emit("<p>" + f() + "</p>");`))).toContain("`xs` is written after");
+    expect(evalErr(D(`let fs = []; for (let i = 0; i < 3; i = i + 1) { fs.push(() => i); } emit("<p>" + fs.length + "</p>");`))).toContain("`i` is written after");
+  });
+  test("a list edit from inside a callback is refused too", () => {
+    expect(evalErr(D(`const xs = [1]; [1, 2].forEach((x) => { xs.push(x); }); emit("<p>" + xs.length + "</p>");`))).toContain("`xs` is written from inside");
+  });
+  test("what is exact by value still evaluates: a callback written in a list method, a helper reading a const, reduce", () => {
+    expect(html(D(`const xs = [1, 2, 3]; let out = []; for (let i = 0; i < 3; i = i + 1) { out.push(xs.map((x) => x + i).join("-")); } emit("<p>" + out.join(",") + "</p>");`))).toContain("<p>1-2-3,2-3-4,3-4-5</p>");
+    expect(html(D(`const base = 5; fn add(x) { return x + base; } let t = 0; t = add(1); t = add(t); emit("<p>" + t + "</p>");`))).toContain("<p>11</p>");
+    expect(html(D(`const k = 10; let acc = 0; const ys = [1, 2, 3].map((x) => x * k); acc = acc + 1; emit("<p>" + ys.join(",") + acc + "</p>");`))).toContain("<p>10,20,301</p>");
+    expect(html(D(`const sum = [1, 2, 3].reduce((a, b) => a + b, 0); emit("<p>sum=" + sum + "</p>");`))).toContain("<p>sum=6</p>");
+  });
+  test("value semantics (§66.10 item 1): a binding taken from another is a snapshot — the interpreter is right", () => {
+    expect(html(D(`const a = [1]; const b = a; b.push(2); emit("<p>" + a.length + "</p>");`))).toContain("<p>1</p>");
+    expect(html(D(`const a = { k: 1 }; const b = a; b.k = 2; emit("<p>" + a.k + "</p>");`))).toContain("<p>1</p>");
+  });
+});
+
+describe("s481 r1 — one fault, one correct code (LOW-1..5)", () => {
+  test("LOW-1: `^{}` as an attribute value that emits — one E-META-EVAL-002 naming the attribute, no internal error", () => {
+    const r = run(`<program><div class=^{ emit("x"); }>y</div></program>\n`);
+    expect(errs(r)).toEqual(["E-META-EVAL-002"]);
+    expect(r.diags.find((d) => d.code === "E-META-EVAL-002").message).toContain("the value of the attribute `class=`");
+  });
+  test("LOW-2: a body parse fault reports one code (D29)", () => {
+    expect(errs(run(D(`const = 3;`)))).toEqual(["E-PARSE-LOCAL"]);
+    expect(errs(run(D(`emit("a" +);`)))).toEqual(["E-META-002"]);
+  });
+  test("LOW-3: a type name read as a value is E-META-001 in the static check (§22.12 item 1), as impl#1", () => {
+    const T = (b) => P(`    type C:enum = { A, B }\n<div>^{ ${b} }</div>`);
+    expect(errs(run(T(`const c = C; emit("<p>x</p>");`)))).toEqual(["E-META-001"]);
+    expect(errs(run(T(`const c = C.B; emit("<p>x</p>");`)))).toEqual(["E-META-001"]);
+    expect(html(T(`const c = reflect(C); emit("<p>" + c.name + "</p>");`))).toContain("<p>C</p>");
+  });
+  test("LOW-4: an emitted namespaced attribute is refused for what it is, not as a declaration", () => {
+    const r = run(D(`emit("<svg><a xlink:href=\\"https://x.example/\\"><text>x</text></a></svg>");`));
+    expect(errs(r)).toEqual(["E-META-EVAL-002"]);
+    expect(r.diags[0].message).toContain("namespaced attribute");
+    expect(r.diags[0].message).not.toContain("contains a declaration");
+  });
+  test("LOW-5: a sort comparator that returns a boolean is refused by name (its order is engine-defined)", () => {
+    expect(evalErr(D(`let xs = [3, 1, 2]; xs.sort((a, b) => a > b); emit("<p>" + xs.join(",") + "</p>");`))).toContain("comparator returned a boolean");
+    expect(html(D(`let xs = [3, 1, 2]; xs.sort((a, b) => a - b); emit("<p>" + xs.join(",") + "</p>");`))).toContain("<p>1,2,3</p>");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 5. drift — emit-gate.scrml is impl#1's judge
 // ---------------------------------------------------------------------------
 describe("s481 — emit-gate.scrml is markup-attr-allow-list.js (drift)", () => {
