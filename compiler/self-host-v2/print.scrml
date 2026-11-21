@@ -32,7 +32,7 @@ ${
              Decl, Fn, HostFn, HostBind, HostSrc, HostArg, HostProp, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator, Persist, PersistStore, Timing, IdleWatch,
              Failable, OkArm, ErrArm, ServerFn, SqlQuery, SqlMode, Param, LoopHead, EachHead, RangeHead, CssUnit, CoreCss, CssVar,
              Gather, Lifted, GatherRow, PathStep, CoreConst, HeadTitle, CoreMeta, ForeignSlice, CoreChannel,
-             findDecl, findTypeDef, typeDefSym, capOwner, findFn, findServerFn, mountedInstances } from "./core.scrml";
+             findDecl, findTypeDef, typeDefSym, capOwner, findFn, findServerFn, mountedInstances, block } from "./core.scrml";
     import { Node, nodeKids, allNodes, sharedRefs, boundSyms, assignedSyms, requestHandles } from "./walk.scrml";
     import { JsOp, JsUnOp, JsExpr, JsProp, JsStmt, JsLoopHead, JsForInit,
              jid, jstr, jnum, jmember, jcall, jmcall, jthunk, sexpr, printModule } from "./js.scrml";
@@ -265,10 +265,20 @@ ${
     // (§7.6 S478 rule (b) — this artifact's own copy). A `let` is printed `let` (rule (c):
     // per-artifact state).
     export fn constStmts(ctx: Ctx, ks: CoreConst[]) -> JsStmt[] {
+        return seqConstStmts(ctx, ks, []);
+    }
+
+    // s481 — `seq`: the bindings whose initializer runs in its PLACE in the program body
+    // (§7.6 S481; bodyInits): declared here, assigned where their `${ }` stood.
+    fn seqConstStmts(ctx: Ctx, ks: CoreConst[], seq: int[]) -> JsStmt[] {
         if (ks.length == 0) return [];
-        let out: JsStmt[] = [JsStmt.SBlank, JsStmt.SComment("file-scope bindings (§7.6) — evaluated once, at module initialization, in this artifact")];
+        let note: string = "file-scope bindings (§7.6) — evaluated once, at module initialization, in this artifact";
+        if (seq.length > 0) note = "file-scope bindings (§7.6) — each evaluated once: here, or (declared only) in its place in the program body (§7.6 S481)";
+        let out: JsStmt[] = [JsStmt.SBlank, JsStmt.SComment(note)];
         for (const k of ks) {
-            if (k.mutable) {
+            if (hasInt(seq, k.sym.id)) {
+                out = out.concat([JsStmt.SDecl(symName(ctx, k.sym))]);
+            } else if (k.mutable) {
                 out = out.concat([JsStmt.SLet(symName(ctx, k.sym), exprJs(ctx, k.init))]);
             } else {
                 out = out.concat([JsStmt.SConst(symName(ctx, k.sym), exprJs(ctx, k.init))]);
@@ -1673,6 +1683,7 @@ ${
             .Dyn :> [],
             .Effect :> [],
             .Run :> [],
+            .Init :> [],
             .Request :> [],
             .ResetOn :> [],
             .Errors :> [],
@@ -2924,6 +2935,7 @@ ${
             // s449: an `<effect>` renders no DOM; its comment keeps child-index paths positional
             .Effect :> hole(HNode.HComment("effect"), path, v, ns),
             .Run :> hole(HNode.HComment("run"), path, v, ns),          // s478: body-top statements render no DOM
+            .Init :> hole(HNode.HComment("init"), path, v, ns),        // s481: never reached — bodyInits rewrites every Init first
             // s475: a request renders no DOM either (its signals are read where the author reads them)
             .Request :> hole(HNode.HComment("request"), path, v, ns),
             .ResetOn :> hole(HNode.HComment("reset-on"), path, v, ns),
@@ -2966,6 +2978,7 @@ ${
             .Star :> ks,
             .Effect :> ks,
             .Run :> ks,
+            .Init :> ks,
             .Request :> ks,
             .ResetOn :> ks,
             .Errors :> ks,
@@ -3079,6 +3092,7 @@ ${
             .Star :> false,
             .Effect :> false,
             .Run :> false,
+            .Init :> false,
             .Request :> false,
             .ResetOn :> false,
             .Errors :> false,
@@ -3092,6 +3106,7 @@ ${
         return match v {
             .Effect(deps: ds) :> false,
             .Run(body: x) :> false,
+            .Init(k: x) :> false,
             .Request(deps: ds) :> false,
             .ResetOn(triggers: ds) :> false,
             .El(tag: t) :> true,
@@ -3127,6 +3142,7 @@ ${
             .Star(decl: d, inst: i) :> starJs(ctx, d, i, node),
             .Effect(deps: ds, body: b) :> effectJs(ctx, ds, b),
             .Run(body: b, hoist: hs) :> runJs(ctx, b, hs),
+            .Init(k: x) :> only([]),                                       // s481: never reached (bodyInits)
             .Request(target: t, deps: ds, body: b, mount: m, state: st, handle: h, cls: k) :> requestJs(ctx, t, ds, b, m, st, h, k),
             .ResetOn(triggers: ds, reset: b, rank: r) :> resetOnJs(ctx, ds, b, r),
             .Errors(of: x, all: a) :> only([sexpr(rtCall(ctx, "errors", [scopeVar(), node, jthunk(jmcall(surfaceJs(ctx, x), "messages", [])), JsExpr.JBool(a)]))]),
@@ -3844,6 +3860,7 @@ ${
             .Star(decl: d) :> [],
             .Effect(deps: ds) :> [],
             .Run(body: x) :> [],
+            .Init(k: x) :> [],
             .Request(deps: ds) :> [],
             .ResetOn(triggers: ds) :> [],
             .Errors(of: x) :> [],
@@ -4216,6 +4233,7 @@ ${
             .Star :> [],
             .Effect :> [],
             .Run :> [],
+            .Init :> [],
             .Request :> [],
             .ResetOn :> [],
             .Errors :> [],
@@ -4988,6 +5006,7 @@ ${
     fn viewRunBody(v: View) -> Block[] {
         return match v {
             .Run(body: b) :> [b],
+            .Init :> [],
             .El :> [],
             .Text :> [],
             .RawText :> [],
@@ -5040,6 +5059,7 @@ ${
             .Star :> "",
             .Effect :> "",
             .Run :> "",
+            .Init :> "",
             .Errors :> "",
             .Reach :> "",
             .Gather :> ""
@@ -5099,6 +5119,7 @@ ${
             .Star :> [],
             .Effect :> [],
             .Run :> [],
+            .Init :> [],
             .Request :> [],
             .Errors :> [],
             .Reach :> [],
@@ -5377,9 +5398,547 @@ ${
         return out;
     }
 
-    export fn printProgram(p: CoreProgram, jsFile: string, runtimeFile: string) -> Output {
-        const ill: string[] = coreRefusal(p);
+    // =========================================================================
+    // s481 — the program body runs once, in source order (§7.6 S481; ruling:user-voice-
+    // scrml.md-S481-body-run-order: "The program body runs once, top to bottom, in source
+    // order, and that sequence is the module initialization. Every file-scope initializer
+    // runs whether or not anything reads it"). lower put a View.Init where each of the
+    // program body's file-scope bindings was declared; here each becomes, in the client:
+    //  - IN SEQUENCE: a body-top statement assigning the binding (`k = init`), run in its
+    //    place among the body's statements and displays; the binding is declared (only) at
+    //    module level. Unless code that runs BEFORE the place reaches it:
+    //  - EARLY: cell construction (§66.7.6 — the program's field initializers, every other
+    //    declaration the program constructs (constructedDecls: one no instance mounts, which
+    //    never runs, does not count — r1 M2), the use-site values of the instances the body
+    //    mounts unconditionally),
+    //    a §25.7 CSS bridge, an earlier view, or a function any of those
+    //    calls, reaches the binding. Its initializer runs at module initialization, before
+    //    construction, as before S481, so it is never read before it is set. (INTERIM:
+    //    when an earlier body-top statement writes what it reads, that order is not the
+    //    source's; the seed-place question is the owner's — §66.7.6 rule 5.) Whatever an
+    //    early binding's initializer reaches is early too.
+    //  - SERVER ONLY: no client code reads it and server code does — it stays out of the
+    //    client artifact (the server artifact evaluates what it reads, rule (b)). So does one
+    //    no code reads whose initializer reaches server-only code (serverInits, r1 H1): the
+    //    server artifact runs it.
+    // Any other binding no artifact reads is IN SEQUENCE: its initializer runs (S481, P1).
+    // As-if: an initializer that does nothing (initActs) and reads no `let` and no in-sequence
+    // binding (staticInits) runs at module initialization, as before S481 — nothing can observe
+    // the difference — and one that does nothing and that no code reads is left out.
+    // =========================================================================
+    type InitPlan:struct = { p: CoreProgram, seq: int[] }
+
+    fn programDeclOf(p: CoreProgram) -> Decl | not {
+        for (const d of p.decls) { if (d.sym.id == p.program.id) return d; }
+        return not;
+    }
+
+    // r2 (#2041 review MED-1): a place can stand inside an element (lower lowerPlaced puts it
+    // among the element's children, at any depth) — every reader of the places walks El kids.
+    fn initsIn(vs: View[]) -> int[] {
+        let out: int[] = [];
+        for (const v of vs) { out = out.concat(initOf(v)).concat(initsIn(elKids(v))); }
+        return out;
+    }
+
+    // The children of an element view (the only view a place is nested in), else none.
+    fn elKids(v: View) -> View[] {
+        return match v {
+            .El(tag: t, attrs: a, kids: ks) :> ks,
+            .Init :> [],
+            .Text :> [],
+            .RawText :> [],
+            .Dyn :> [],
+            .Cond :> [],
+            .Each :> [],
+            .Instance :> [],
+            .Slot :> [],
+            .Star :> [],
+            .Effect :> [],
+            .Run :> [],
+            .Request :> [],
+            .ResetOn :> [],
+            .Errors :> [],
+            .Reach :> [],
+            .Gather :> []
+        };
+    }
+
+    // `v` with its children replaced (an element), else `v`.
+    fn withElKids(v: View, ks: View[]) -> View {
+        return match v {
+            .El(tag: t, attrs: a, kids: x) :> View.El(t, a, ks),
+            .Init :> v,
+            .Text :> v,
+            .RawText :> v,
+            .Dyn :> v,
+            .Cond :> v,
+            .Each :> v,
+            .Instance :> v,
+            .Slot :> v,
+            .Star :> v,
+            .Effect :> v,
+            .Run :> v,
+            .Request :> v,
+            .ResetOn :> v,
+            .Errors :> v,
+            .Reach :> v,
+            .Gather :> v
+        };
+    }
+
+    // r2 (MED-1) — the body in the order it runs: an element holding a place is its own
+    // attributes (the element with no children: they are wired before its children), then its
+    // children in this order; any other view is itself.
+    fn runOrder(vs: View[]) -> View[] {
+        let out: View[] = [];
+        for (const v of vs) {
+            const ks: View[] = elKids(v);
+            if (ks.length > 0 && initsIn(ks).length > 0) out = out.concat([withElKids(v, [])]).concat(runOrder(ks));
+            else out = out.concat([v]);
+        }
+        return out;
+    }
+
+    // r2 (MED-1) — each place in `vs`, at any depth: an in-sequence one (`seq`) becomes the
+    // body-top statement assigning its binding; any other is dropped.
+    fn placeInits(p0: CoreProgram, vs: View[], seq: int[]) -> View[] {
+        let out: View[] = [];
+        for (const v of vs) {
+            const h: int[] = initOf(v);
+            if (h.length == 0) {
+                const ks: View[] = elKids(v);
+                if (ks.length > 0 && initsIn(ks).length > 0) out = out.concat([withElKids(v, placeInits(p0, ks, seq))]);
+                else out = out.concat([v]);
+            } else if (hasInt(seq, h[0])) {
+                const k: CoreConst | not = findConst(p0, h[0]);
+                if (k is given) out = out.concat([View.Run(block([Stmt.Assign(k.sym, k.init, [])]), [])]);
+            }
+        }
+        return out;
+    }
+
+    fn initOf(v: View) -> int[] {
+        return match v {
+            .Init(k: k) :> [k.id],
+            .El :> [],
+            .Text :> [],
+            .RawText :> [],
+            .Dyn :> [],
+            .Cond :> [],
+            .Each :> [],
+            .Instance :> [],
+            .Slot :> [],
+            .Star :> [],
+            .Effect :> [],
+            .Run :> [],
+            .Request :> [],
+            .ResetOn :> [],
+            .Errors :> [],
+            .Reach :> [],
+            .Gather :> []
+        };
+    }
+
+    fn withRenders(d: Decl, rs: View[]) -> Decl {
+        return { sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: d.fields, renders: rs, wiring: d.wiring, handles: d.handles };
+    }
+
+    // `p` with the program declaration's renders replaced by `rs`.
+    fn withProgramRenders(p: CoreProgram, rs: View[]) -> CoreProgram {
+        let ds: Decl[] = [];
+        for (const d of p.decls) {
+            if (d.sym.id == p.program.id) {
+                ds = ds.concat([withRenders(d, rs)]);
+            } else {
+                ds = ds.concat([d]);
+            }
+        }
+        return { program: p.program, decls: ds, types: p.types, fns: p.fns, server: p.server, dbs: p.dbs, reset: p.reset, sqlError: p.sqlError,
+                 serverCallError: p.serverCallError, css: p.css, consts: p.consts, loads: p.loads, envelopes: p.envelopes, head: p.head,
+                 tool: p.tool, endpoints: p.endpoints, channels: p.channels };
+    }
+
+    // The file-scope bindings code under `roots` reaches when it runs: read directly, read
+    // by a function it calls (transitively), or by the initializer of a binding it reaches.
+    fn constsReached(p: CoreProgram, roots: Node[]) -> int[] {
+        if (roots.length == 0) return [];
+        let rs: Node[] = roots;
+        const fns: int[] = fnClosureThroughConsts(p, roots);
+        for (const f of p.fns) { if (hasInt(fns, f.sym.id)) rs = rs.concat([Node.NFn(f)]); }
+        let out: int[] = [];
+        for (const k of constsReadIn(p, rs)) { out = out.concat([k.sym.id]); }
+        return out;
+    }
+
+    fn findConst(p: CoreProgram, id: int) -> CoreConst | not {
+        for (const k of p.consts) { if (k.sym.id == id) return k; }
+        return not;
+    }
+
+    fn unionInts(a: int[], b: int[]) -> int[] {
+        let out: int[] = a;
+        for (const x of b) { if (!hasInt(out, x)) out = out.concat([x]); }
+        return out;
+    }
+
+    // s481 — an initializer that may DO something when it runs: a call (of any kind), a host or
+    // foreign call, a query, an assignment — or that reads an instance. One that does none of these
+    // computes a value from literals and the bindings it reads, and nothing else observes it run.
+    fn initActs(e: Expr) -> boolean {
+        for (const n of allNodes(Node.NExpr(e))) {
+            if (nodeActs(n)) return true;
+        }
+        return false;
+    }
+
+    fn nodeActs(n: Node) -> boolean {
+        return match n {
+            .NExpr(e: e) :> exprActs(e),
+            .NStmt(s: x) :> true,
+            .NBlock(b: x) :> true,
+            .NPlace(pl: x) :> false,
+            .NProgram(p: x) :> false,
+            .NDecl(d: x) :> false,
+            .NField(f: x) :> false,
+            .NFn(f: x) :> false,
+            .NServerFn(f: x) :> false,
+            .NInst(i: x) :> true,
+            .NPattern(pat: x) :> false,
+            .NEdit(k: x) :> true,
+            .NView(v: x) :> true,
+            .NAttr(a: x) :> true
+        };
+    }
+
+    fn exprActs(e: Expr) -> boolean {
+        return match e {
+            .Lit(lit: x) :> false,
+            .Local(sym: x) :> false,
+            .Read(place: x) :> false,
+            .Prim(op: x) :> false,
+            .Match(scrut: x) :> false,
+            .ArrayOf(elems: x) :> false,
+            .StructOf(ty: x) :> false,
+            .VariantOf(enumSym: x) :> false,
+            .FnRef(fn: x) :> false,
+            .Lambda(params: x) :> false,
+            .Call(callee: x) :> true,
+            .CallV(f: x) :> true,
+            .Host(call: x) :> true,
+            .SeqCall(op: x) :> true,
+            .Refetch(req: x) :> true,
+            .ServerCall(fn: x) :> true,
+            .Query(q: x) :> true,
+            .Assigned(local: x) :> true,
+            .Foreign(slice: x) :> true,
+            .Handle(inst: x) :> true,
+            .InitOf(decl: x) :> true,
+            .Validity(of: x) :> true,
+            .BlockLambda(params: x) :> true
+        };
+    }
+
+    // s481 — the program-body bindings whose initializer can run at module initialization with
+    // no observable difference from running in its place: it does nothing (initActs), and every
+    // binding it reads is a `const` that is itself such a binding or is declared outside the body
+    // (initialized before the body). A `let` it reads could be written by an earlier body-top
+    // statement, so a reader of one runs in its place.
+    fn staticInits(p: CoreProgram, marked: int[]) -> int[] {
+        let out: int[] = [];
+        for (const k of p.consts) {
+            if (hasInt(marked, k.sym.id) && !initActs(k.init)) {
+                let ok = true;
+                for (const n of allNodes(Node.NExpr(k.init))) {
+                    const id: int = localReadOf(n);
+                    if (id >= 0) {
+                        const c: CoreConst | not = findConst(p, id);
+                        if (c is given) {
+                            if (c.mutable) ok = false
+                            else if (hasInt(marked, id) && !hasInt(out, id)) ok = false;
+                        }
+                    }
+                }
+                if (ok) out = out.concat([k.sym.id]);
+            }
+        }
+        return out;
+    }
+
+    fn bodyInits(p: CoreProgram, si: int[]) -> InitPlan {
+        const pd: Decl | not = programDeclOf(p);
+        if (pd is not) return { p: p, seq: [] };
+        const rs0: View[] | not = pd.renders;
+        if (rs0 is not) return { p: p, seq: [] };
+        const rs: View[] = rs0;
+        const marked: int[] = initsIn(rs);
+        if (marked.length == 0) return { p: p, seq: [] };
+        const order: View[] = runOrder(rs);
+        // the program without its places: what the client and the server read otherwise
+        const bare: View[] = withoutInits(rs);
+        const p0: CoreProgram = withProgramRenders(p, bare);
+        const serverOnly0: int[] = serverOnlyFns(p0).concat(reachedOnlyByServer(p0));
+        let croots: Node[] = [];
+        for (const d0 of p0.decls) { croots = croots.concat([Node.NDecl(d0)]); }
+        for (const f0 of p0.fns) { if (!hasInt(serverOnly0, f0.sym.id)) croots = croots.concat([Node.NFn(f0)]); }
+        let clientRead: int[] = [];
+        for (const k0 of constsReadIn(p0, croots)) { clientRead = clientRead.concat([k0.sym.id]); }
+        let sroots: Node[] = [];
+        for (const sf of p0.server) { sroots = sroots.concat([Node.NServerFn(sf)]); }
+        // r2 (#2041 re-review INFO-5): the same server roots as clientConsts / serverInits — the
+        // server functions AND the functions only server code reaches (serverOnly0)
+        for (const sf1 of p0.fns) { if (hasInt(serverOnly0, sf1.sym.id)) sroots = sroots.concat([Node.NFn(sf1)]); }
+        const serverRead: int[] = constsReached(p0, sroots);
+        // what runs before the body: construction (§66.7.6) and the §25.7 CSS bridges
+        let pre: Node[] = [];
+        for (const f of pd.fields) { pre = pre.concat([Node.NField(f)]); }
+        // r1 (M2): only the declarations the program constructs — one no instance mounts
+        // never runs, so it reaches nothing before the place
+        const built: int[] = constructedDecls(p0);
+        for (const d1 of p0.decls) { if (d1.sym.id != p.program.id && hasInt(built, d1.sym.id)) pre = pre.concat([Node.NDecl(d1)]); }
+        // the instances the body mounts unconditionally are constructed with the program
+        // (L12 (b)): their use-site values run at construction, before the body
+        for (const mi of mountedInstances(bare)) { pre = pre.concat([Node.NView(mi)]); }
+        const css: CoreCss | not = p0.css;
+        if (css is given) { for (const cv of css.vars) { pre = pre.concat([Node.NExpr(cv.read)]); } }
+        let reached: int[] = constsReached(p0, pre);
+        const stat: int[] = staticInits(p0, marked);
+        let early: int[] = [];
+        let seq: int[] = [];
+        let left: int = marked.length;
+        let i: int = 0;
+        while (i < order.length && left > 0) {
+            const v: View = order[i];
+            const here: int[] = initOf(v);
+            if (here.length > 0) {
+                const id: int = here[0];
+                left = left - 1;
+                if (hasInt(stat, id)) {
+                    // does nothing and reads nothing the body changes: module initialization, as
+                    // before S481, when the client reads it; left out when it does not
+                    if (hasInt(clientRead, id)) early = early.concat([id]);
+                } else if (hasInt(reached, id)) {
+                    early = early.concat([id]);
+                } else if (hasInt(clientRead, id) || (!hasInt(serverRead, id) && !hasInt(si, id))) {
+                    const kc: CoreConst | not = findConst(p0, id);
+                    // one no code reads that does nothing: running it is unobservable — left out
+                    if (kc is given && (hasInt(clientRead, id) || initActs(kc.init))) seq = seq.concat([id]);
+                }
+            }
+            if (left > 0) reached = unionInts(reached, constsReached(p0, [Node.NView(v)]));
+            i = i + 1;
+        }
+        // an early binding's initializer runs before the body: what it reaches is early too
+        let changed = true;
+        while (changed) {
+            changed = false;
+            let roots: Node[] = [];
+            for (const e of early) {
+                const k: CoreConst | not = findConst(p0, e);
+                if (k is given) roots = roots.concat([Node.NExpr(k.init)]);
+            }
+            const dep: int[] = constsReached(p0, roots);
+            let keep: int[] = [];
+            for (const s of seq) {
+                if (hasInt(dep, s)) {
+                    early = early.concat([s]);
+                    changed = true;
+                } else {
+                    keep = keep.concat([s]);
+                }
+            }
+            seq = keep;
+        }
+        return { p: withProgramRenders(p, placeInits(p0, rs, seq)), seq: seq };
+    }
+
+    // s481 — the file-scope bindings the client artifact holds: those its code reads, and
+    // (§7.6 S481: "every file-scope initializer runs whether or not anything reads it")
+    // those NO artifact reads — in Core order. A binding only server code reads stays out, and
+    // so does one no code reads whose initializer reaches server-only code (`si`, serverInits:
+    // the server artifact runs it).
+    fn clientConsts(p: CoreProgram, clientRoots: Node[], serverOnly: int[], si: int[]) -> CoreConst[] {
+        const read: CoreConst[] = constsReadIn(p, clientRoots);
+        if (read.length == p.consts.length) return read;
+        let rid: int[] = [];
+        for (const k of read) { rid = rid.concat([k.sym.id]); }
+        let sroots: Node[] = [];
+        for (const sf of p.server) { sroots = sroots.concat([Node.NServerFn(sf)]); }
+        for (const f of p.fns) { if (hasInt(serverOnly, f.sym.id)) sroots = sroots.concat([Node.NFn(f)]); }
+        const sread: int[] = constsReached(p, sroots);
+        let out: CoreConst[] = [];
+        for (const k2 of p.consts) {
+            if (hasInt(rid, k2.sym.id)) {
+                out = out.concat([k2]);
+            } else if (!hasInt(sread, k2.sym.id) && initActs(k2.init) && !hasInt(si, k2.sym.id)) {
+                // (one that does nothing, nothing reads: running it is unobservable — left out)
+                out = out.concat([k2]);
+            }
+        }
+        return out;
+    }
+
+    // An initializer that calls (transitively) a function the client artifact does not hold.
+    fn callsServerOnly(p: CoreProgram, k: CoreConst, serverOnly: int[]) -> boolean {
+        for (const id of fnClosure(p, fnCalleesIn(p, Node.NExpr(k.init)))) {
+            if (hasInt(serverOnly, id)) return true;
+        }
+        return false;
+    }
+
+    // s481 r1 (#2041 review H1/M1) — the file-scope bindings NO code reads whose initializer
+    // reaches server-only code: a function the client artifact does not hold (callsServerOnly —
+    // §12.2 Trigger 5, server-placed by inheritance or reached only by server code), or a binding
+    // only server code reads (S472: "a value read only by server code never reaches the client
+    // artifact") — directly, through a function it calls, or through another such binding (a
+    // fixed point). Each is SERVER-ONLY: nothing of it is in the client, and the server artifact
+    // runs it, once, at module initialization, in Core order (print-server.scrml serverConsts) —
+    // S481's "every file-scope initializer runs", in the artifact its reach places it in. (An
+    // initializer that does nothing is left out, as everywhere: running it is unobservable.)
+    // Judged on the program without its body places (View.Init reads every binding it places).
+    export fn serverInits(p1: CoreProgram) -> int[] {
+        if (p1.consts.length == 0) return [];
+        let p: CoreProgram = p1;
+        const pd: Decl | not = programDeclOf(p1);
+        if (pd is given) {
+            const rs: View[] | not = pd.renders;
+            if (rs is given) p = withProgramRenders(p1, withoutInits(rs));
+        }
+        const serverOnly: int[] = serverOnlyFns(p).concat(reachedOnlyByServer(p));
+        let croots: Node[] = [];
+        for (const d of p.decls) { croots = croots.concat([Node.NDecl(d)]); }
+        for (const f of p.fns) { if (!hasInt(serverOnly, f.sym.id)) croots = croots.concat([Node.NFn(f)]); }
+        let cread: int[] = [];
+        for (const k0 of constsReadIn(p, croots)) { cread = cread.concat([k0.sym.id]); }
+        let sroots: Node[] = [];
+        for (const sf of p.server) { sroots = sroots.concat([Node.NServerFn(sf)]); }
+        for (const f2 of p.fns) { if (hasInt(serverOnly, f2.sym.id)) sroots = sroots.concat([Node.NFn(f2)]); }
+        const sread: int[] = constsReached(p, sroots);
+        // the bindings only server code reads
+        let held: int[] = [];
+        for (const s of sread) { if (!hasInt(cread, s)) held = held.concat([s]); }
+        let out: int[] = [];
+        let changed = true;
+        while (changed) {
+            changed = false;
+            for (const k of p.consts) {
+                const id: int = k.sym.id;
+                if (!hasInt(out, id) && !hasInt(cread, id) && !hasInt(sread, id) && initActs(k.init)) {
+                    let hit: boolean = callsServerOnly(p, k, serverOnly);
+                    if (!hit) {
+                        for (const r of constsReached(p, [Node.NExpr(k.init)])) {
+                            if (hasInt(held, r) || hasInt(out, r)) hit = true;
+                        }
+                    }
+                    if (hit) {
+                        out = out.concat([id]);
+                        changed = true;
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    fn withoutInits(rs: View[]) -> View[] {
+        return placeInitsOff(rs);
+    }
+
+    // every place dropped, at any depth (r2: a place nested in an element too — else it would
+    // read as a client read of its binding, and a server-only binding would reach the client)
+    fn placeInitsOff(vs: View[]) -> View[] {
+        let out: View[] = [];
+        for (const v of vs) {
+            if (initOf(v).length == 0) {
+                const ks: View[] = elKids(v);
+                if (ks.length > 0 && initsIn(ks).length > 0) out = out.concat([withElKids(v, placeInitsOff(ks))]);
+                else out = out.concat([v]);
+            }
+        }
+        return out;
+    }
+
+    // s481 r1 (#2041 review M2) — the declarations the program constructs: the program; every
+    // declaration an instance (a mount, a `<*>` star) names in a constructed declaration's
+    // renders, in any function (a lift) or in a shared reference — wherever it stands
+    // (conditional or not: a conditional mount can run before a place). One nothing names is
+    // never constructed, so its code never runs.
+    fn constructedDecls(p: CoreProgram) -> int[] {
+        let out: int[] = [p.program.id];
+        for (const s of sharedRefs(Node.NProgram(p))) { if (!hasInt(out, s.id)) out = out.concat([s.id]); }
+        for (const f of p.fns) { out = unionInts(out, instancedIn(Node.NFn(f))); }
+        let changed = true;
+        while (changed) {
+            changed = false;
+            for (const d of p.decls) {
+                if (hasInt(out, d.sym.id)) {
+                    const more: int[] = unionInts(out, instancedIn(Node.NDecl(d)));
+                    if (more.length != out.length) {
+                        out = more;
+                        changed = true;
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    fn instancedIn(root: Node) -> int[] {
+        let out: int[] = [];
+        for (const n of allNodes(root)) {
+            const id: int = nodeInstanced(n);
+            if (id >= 0 && !hasInt(out, id)) out = out.concat([id]);
+        }
+        return out;
+    }
+
+    fn nodeInstanced(n: Node) -> int {
+        return match n {
+            .NView(v: v) :> viewInstanced(v),
+            .NExpr(e: x) :> -1,
+            .NStmt(s: x) :> -1,
+            .NBlock(b: x) :> -1,
+            .NPlace(pl: x) :> -1,
+            .NProgram(p: x) :> -1,
+            .NDecl(d: x) :> -1,
+            .NField(f: x) :> -1,
+            .NFn(f: x) :> -1,
+            .NServerFn(f: x) :> -1,
+            .NInst(i: x) :> -1,
+            .NPattern(pat: x) :> -1,
+            .NEdit(k: x) :> -1,
+            .NAttr(a: x) :> -1
+        };
+    }
+
+    fn viewInstanced(v: View) -> int {
+        return match v {
+            .Instance(decl: d) :> d.id,
+            .Star(decl: d) :> d.id,
+            .El :> -1,
+            .Text :> -1,
+            .RawText :> -1,
+            .Dyn :> -1,
+            .Cond :> -1,
+            .Each :> -1,
+            .Slot :> -1,
+            .Effect :> -1,
+            .Run :> -1,
+            .Init :> -1,
+            .Request :> -1,
+            .ResetOn :> -1,
+            .Errors :> -1,
+            .Reach :> -1,
+            .Gather :> -1
+        };
+    }
+
+    export fn printProgram(p1: CoreProgram, jsFile: string, runtimeFile: string) -> Output {
+        const ill: string[] = coreRefusal(p1);
         if (ill.length > 0) return { js: "", html: "", refused: ill, routes: [] };
+        const si: int[] = serverInits(p1);
+        const plan: InitPlan = bodyInits(p1, si);
+        const p: CoreProgram = plan.p;
         // S478 ruling item 26 (1): a LIBRARY entry (no `<program>`, §21.5) is analyzed as a
         // library, but §21.5's output — "no HTML output … a JS module with the exported bindings
         // as its sole output" — is not built: refused by name, never printed as a page (INTERIM,
@@ -5402,7 +5961,7 @@ ${
         let clientRoots: Node[] = [];
         for (const d0 of p.decls) { clientRoots = clientRoots.concat([Node.NDecl(d0)]); }
         for (const f0 of p.fns) { if (!hasInt(serverOnly0, f0.sym.id)) clientRoots = clientRoots.concat([Node.NFn(f0)]); }
-        body = body.concat(constStmts(ctx, constsReadIn(p, clientRoots)));
+        body = body.concat(seqConstStmts(ctx, clientConsts(p, clientRoots, serverOnly0, si), plan.seq));
         body = body.concat(requestSlotStmts(ctx, p));          // s475 (S3b)
         const uses: DeclNs[] = declNsUses(p);
         for (const d of p.decls) {

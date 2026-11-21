@@ -1,0 +1,32 @@
+{
+  "id": "body-top-file-scope-unread-init-runs",
+  "description": "A file-scope initializer that nothing reads still runs in a web program: `const unused = bump();` calls bump, so the display shows 11 (S481 P1).",
+  "language-version": "1.0",
+  "spec": "§7.6 rule (b) (S481), §40.8",
+  "source-test": "compiler/self-host-v2/slice-m4/body-run-order-s481.test.js",
+  "rationale": "§7.6 rule (b) S481: the client artifact runs every file-scope initializer, whether or not any code reads the binding, in its place in the program body's one source-ordered run. ruling:user-voice-scrml.md-S481-body-run-order — \"The program body runs once, top to bottom, in source order, and that sequence is the module initialization. Every file-scope initializer runs whether or not anything reads it, so the S480 tool ruling extends to web programs. A display of a `free` value reads it where it stands.\" (owner: \"yes, adopt your rec on P1–P3\") Gap g-spec-file-scope-unread-init-web-s481. impl#1 refuses this source with E-ROUTE-001 (a function writing an element of a file-scope free tape) and carries it (g-impl1-body-run-order-s481).",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "dom": "<p id=\"c\">11</p>",
+    "domAnchored": [
+      {
+        "selector": "#c",
+        "text": "11"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-body-run-order-s481",
+      "fails": {
+        "codes": [
+          "emitted:E-ROUTE-001=1",
+          "prefix:E-ROUTE-001 (matches forbidden E-*)"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "id": "body-top-file-scope-init-after-body-write",
+  "description": "A file-scope initializer runs in its place in the body: written after the body-top statement `n = 5`, `const k = n` gives k = 5 (S481 P2).",
+  "language-version": "1.0",
+  "spec": "§7.6 rule (b) (S481), §7.6.1, §40.8",
+  "source-test": "compiler/self-host-v2/slice-m4/body-run-order-s481.test.js",
+  "rationale": "§7.6 rule (b) S481: a file-scope initializer written in the <program> body runs in its place in that sequence — after the body-top statements written before it. ruling:user-voice-scrml.md-S481-body-run-order — \"The program body runs once, top to bottom, in source order, and that sequence is the module initialization. Every file-scope initializer runs whether or not anything reads it, so the S480 tool ruling extends to web programs. A display of a `free` value reads it where it stands.\" (owner: \"yes, adopt your rec on P1–P3\") Gap g-spec-file-scope-init-vs-body-top-write-s481.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "dom": "<p id=\"c\">5</p>",
+    "domAnchored": [
+      {
+        "selector": "#c",
+        "text": "5"
+      }
+    ]
+  }
+}
