@@ -54,7 +54,7 @@ ${
     // -1 / 0 / 1: `a` before / equal to / after `b`, by UTF-16 code unit.
     export fn codeUnitCompare(a: string, b: string) -> int {
         let i: int = 0;
-        while (i < a.length && i < b.length) {
+        for (; i < a.length && i < b.length; ) {
             const x: int = a.charCodeAt(i);
             const y: int = b.charCodeAt(i);
             if (x < y) return -1;
@@ -278,16 +278,16 @@ ${
         for (const a of asts) {
             if (a.path != entry) rest = rest + 1;
         }
-        while (rest > 0) {
+        for (; rest > 0; ) {
             let pick: int = -1;
             let i: int = 0;
-            while (pick < 0 && i < asts.length) {
+            for (; pick < 0 && i < asts.length; ) {
                 if (asts[i].path != entry && order.indexOf(i) < 0 && allPlaced(deps[i], placed, entry)) pick = i;
                 i = i + 1;
             }
             // an import cycle: the first unplaced file in path order
             i = 0;
-            while (pick < 0 && i < asts.length) {
+            for (; pick < 0 && i < asts.length; ) {
                 if (asts[i].path != entry && order.indexOf(i) < 0) pick = i;
                 i = i + 1;
             }
@@ -296,7 +296,7 @@ ${
             rest = rest - 1;
         }
         let j: int = 0;
-        while (j < asts.length) {
+        for (; j < asts.length; ) {
             if (asts[j].path == entry) order = order.concat([j]);
             j = j + 1;
         }
@@ -336,7 +336,7 @@ ${
         for (const f of files) { deps = deps.concat([edgeIndexes(f, paths)]); }
         let out: ImportCycle[] = [];
         let i: int = 0;
-        while (i < files.length) {
+        for (; i < files.length; ) {
             const c: int[] = cycleThrough(deps, i);
             if (c.length > 0) {
                 let next: int = c[0];
@@ -378,7 +378,7 @@ ${
         let queue: int[] = [s];
         let parents: int[] = [-1];
         let head: int = 0;
-        while (head < queue.length) {
+        for (; head < queue.length; ) {
             const u: int = queue[head];
             for (const v of deps[u]) {
                 if (v == s) return pathTo(queue, parents, head);
@@ -395,7 +395,7 @@ ${
     fn pathTo(queue: int[], parents: int[], at: int) -> int[] {
         let out: int[] = [];
         let k: int = at;
-        while (k >= 0) {
+        for (; k >= 0; ) {
             out = [queue[k]].concat(out);
             k = parents[k];
         }
@@ -418,7 +418,7 @@ ${
 
     fn isIdentity(order: int[]) -> boolean {
         let i: int = 0;
-        while (i < order.length) {
+        for (; i < order.length; ) {
             if (order[i] != i) return false;
             i = i + 1;
         }

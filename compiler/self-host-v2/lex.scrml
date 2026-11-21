@@ -148,7 +148,7 @@ ${
     fn advance(c: Cursor, n: int) -> Cursor {
         let cc = c;
         let i = 0;
-        while (i < n) {
+        for (; i < n; ) {
             cc = advance1(cc);
             i = i + 1;
         }
@@ -407,7 +407,7 @@ ${
 
     fn scanIdentOrKeyword(cur: Cursor) -> Scan {
         let c = advance(cur, 1);              // first char is a known ident-start
-        while (isIdentCont(peekCode(c, 0))) {
+        for (; isIdentCont(peekCode(c, 0)); ) {
             c = advance(c, 1);
         }
         const text: string = sliceText(cur, c);
@@ -421,7 +421,7 @@ ${
     fn scanBareVariant(cur: Cursor) -> Scan {
         const nameStart: Cursor = advance(cur, 1);   // skip the leading '.'
         let c = advance(nameStart, 1);               // first ident char (known ident-start)
-        while (isIdentCont(peekCode(c, 0))) {
+        for (; isIdentCont(peekCode(c, 0)); ) {
             c = advance(c, 1);
         }
         const name: string = sliceText(nameStart, c);   // the identifier (no dot)
@@ -436,19 +436,19 @@ ${
         if (c0 == 48 && (c1 == 120 || c1 == 88)) {
             // 0x / 0X hex literal
             c = advance(cur, 2);
-            while (isHexDigit(peekCode(c, 0))) {
+            for (; isHexDigit(peekCode(c, 0)); ) {
                 c = advance(c, 1);
             }
         } else {
             // decimal: digits, optional fraction, optional exponent
-            while (isDigit(peekCode(c, 0))) {
+            for (; isDigit(peekCode(c, 0)); ) {
                 c = advance(c, 1);
             }
             // '.' — a fraction, unless it begins the range glyph `..` (§49.2.5:
             // "`0..n` is `0`, `..`, `n`, never `0.` followed by `.n`")
             if (peekCode(c, 0) == 46 && peekCode(c, 1) != 46) {
                 c = advance(c, 1);
-                while (isDigit(peekCode(c, 0))) {
+                for (; isDigit(peekCode(c, 0)); ) {
                     c = advance(c, 1);
                 }
             }
@@ -459,7 +459,7 @@ ${
                 if (sgn == 43 || sgn == 45) {   // '+' / '-'
                     c = advance(c, 1);
                 }
-                while (isDigit(peekCode(c, 0))) {
+                for (; isDigit(peekCode(c, 0)); ) {
                     c = advance(c, 1);
                 }
             }
@@ -638,7 +638,7 @@ ${
         let c = cur;
         let hex: string = "";
         let i = 0;
-        while (i < digitCount && !isEof(c) && isHexDigit(peekCode(c, 0))) {
+        for (; i < digitCount && !isEof(c) && isHexDigit(peekCode(c, 0)); ) {
             hex = hex + charAt(c);
             c = advance(c, 1);
             i = i + 1;
@@ -656,7 +656,7 @@ ${
     fn scanBraceUnicodeEscape(cur: Cursor) -> EscapeScan {
         let c = advance(cur, 1);                          // consume the opening {
         let hex: string = "";
-        while (!isEof(c) && isHexDigit(peekCode(c, 0))) {
+        for (; !isEof(c) && isHexDigit(peekCode(c, 0)); ) {
             hex = hex + charAt(c);
             c = advance(c, 1);
         }
@@ -719,7 +719,7 @@ ${
         let c = advance(cur, 1);           // consume the opening quote
         let cooked: string = "";
         let done = false;
-        while (!isEof(c) && !done) {
+        for (; !isEof(c) && !done; ) {
             const code: int = peekCode(c, 0);
             const dq: boolean = display && closeCode == 34;
             if (dq && code == 92) {
@@ -772,7 +772,7 @@ ${
     // Line comment: `//` to (but not including) the next line terminator / EOF.
     fn skipLineComment(cur: Cursor) -> Cursor {
         let c = advance(cur, 2);           // consume the opening //
-        while (!isEof(c) && !isNewline(peekCode(c, 0))) {
+        for (; !isEof(c) && !isNewline(peekCode(c, 0)); ) {
             c = advance(c, 1);
         }
         return c;
@@ -782,7 +782,7 @@ ${
     fn skipBlockComment(cur: Cursor) -> Cursor {
         let c = advance(cur, 2);           // consume the opening /*
         let done = false;
-        while (!isEof(c) && !done) {
+        for (; !isEof(c) && !done; ) {
             if (peekCode(c, 0) == 42 && peekCode(c, 1) == 47) {
                 c = advance(c, 2);         // consume the closing */
                 done = true;
@@ -806,7 +806,7 @@ ${
         let c = advance(cur, 1);           // consume the opening /
         let inClass = false;
         let done = false;
-        while (!isEof(c) && !done) {
+        for (; !isEof(c) && !done; ) {
             const code: int = peekCode(c, 0);
             if (code == 92) {                       // backslash — escape next code point
                 c = advance(c, 2);
@@ -827,7 +827,7 @@ ${
         }
         const bodyEnd: Cursor = c;         // at the flag-run start (one past the closing /)
         let fc = c;
-        while (isIdentCont(peekCode(fc, 0))) {
+        for (; isIdentCont(peekCode(fc, 0)); ) {
             fc = advance(fc, 1);
         }
         const raw: string = sliceText(cur, fc);
@@ -858,7 +858,7 @@ ${
         let cooked: string = "";
         let term: TemplateTerm = TemplateTerm.TermEof;
         let done = false;
-        while (!isEof(c) && !done) {
+        for (; !isEof(c) && !done; ) {
             const code: int = peekCode(c, 0);
             if (code == 92) {                                    // backslash — decode the escape (precise)
                 const esc: EscapeScan = scanEscape(c);
@@ -911,7 +911,7 @@ ${
     // them); `\x` / `\u` without their digits are malformed everywhere.
     fn escapeWhy(text: string) -> string {
         let i: int = 0;
-        while (i < text.length) {
+        for (; i < text.length; ) {
             if (text.charCodeAt(i) != 92) {
                 i = i + 1;
             } else {
@@ -938,13 +938,13 @@ ${
     fn unicodeEscapeWidth(text: string, i: int) -> int {
         if (codeAtOr(text, i) == 123) {
             let j: int = i + 1;
-            while (isHexDigit(codeAtOr(text, j))) { j = j + 1; }
+            for (; isHexDigit(codeAtOr(text, j)); ) { j = j + 1; }
             if (j == i + 1 || codeAtOr(text, j) != 125) return -1;
             if (parseInt(text.substring(i + 1, j), 16) > 1114111) return -1;
             return j + 1 - i;
         }
         let k: int = 0;
-        while (k < 4) {
+        for (; k < 4; ) {
             if (!isHexDigit(codeAtOr(text, i + k))) return -1;
             k = k + 1;
         }
@@ -957,7 +957,7 @@ ${
     fn slotStringWhy(raw: string) -> string {
         const q: int = codeAtOr(raw, 0);
         let i: int = 1;
-        while (i < raw.length) {
+        for (; i < raw.length; ) {
             const c: int = raw.charCodeAt(i);
             if (c == 92) {
                 i = i + 2;
@@ -983,7 +983,7 @@ ${
         if (text.indexOf(open) >= 0) return "`" + open + "` (an HTML-like comment opener — a classic script reads the rest of its line as a comment)";
         let lineStart: int = 0;
         let i: int = 0;
-        while (i <= text.length) {
+        for (; i <= text.length; ) {
             const c: int = codeAtOr(text, i);
             if (c == -1 || c == 10 || c == 13 || c == 8232 || c == 8233) {
                 const line: string = text.substring(lineStart, i);
@@ -1080,7 +1080,7 @@ ${
 
     fn skipTrivia(cur: Cursor) -> Cursor {
         let c = cur;
-        while (isTrivia(peekCode(c, 0))) {
+        for (; isTrivia(peekCode(c, 0)); ) {
             c = advance(c, 1);
         }
         return c;
@@ -1166,7 +1166,7 @@ ${
         if (pos >= src.length || src.charCodeAt(pos) != 95) return -1;
         if (pos > 0 && isIdentCont(src.charCodeAt(pos - 1))) return -1;
         let k: int = pos + 1;
-        while (k < src.length && src.charCodeAt(k) == 61) { k = k + 1; }
+        for (; k < src.length && src.charCodeAt(k) == 61; ) { k = k + 1; }
         if (k >= src.length || src.charCodeAt(k) != 123) return -1;
         return k - pos - 1;
     }
@@ -1190,11 +1190,11 @@ ${
         if (lvl < 0) return { level: -1, bodyEnd: pos, end: pos, closer: -1 };
         let i: int = pos + lvl + 2;
         let depth: int = 0;
-        while (i < src.length) {
+        for (; i < src.length; ) {
             const code: int = src.charCodeAt(i);
             if (code == 125 && depth == 0) {
                 let k: int = i + 1;
-                while (k < src.length && src.charCodeAt(k) == 61) { k = k + 1; }
+                for (; k < src.length && src.charCodeAt(k) == 61; ) { k = k + 1; }
                 if (k - i - 1 >= lvl) return { level: lvl, bodyEnd: i, end: k, closer: k - i - 1 };
             }
             if (lvl == 0 && code == 123) depth = depth + 1;
@@ -1336,7 +1336,7 @@ ${
     fn braceInSlot(st: LexState) -> boolean {
         const top: InterpFrame = st.interps[st.interps.length - 1];
         let i: int = top.depth;
-        while (i < st.bracketStack.length) {
+        for (; i < st.bracketStack.length; ) {
             if (st.bracketStack[i] == BracketKind.Brace) return true;
             i = i + 1;
         }
@@ -1525,7 +1525,7 @@ ${
     // The driver: fold `step` until the cursor is exhausted, then append EOF.
     export fn lex(src: string) -> Token[] {
         let st: LexState = mkState([], makeCursor(src), LexMode.InCode, [], [], [], false);
-        while (!isEof(st.cur)) {
+        for (; !isEof(st.cur); ) {
             st = step(st);
         }
         return allTokens(st).concat([makeEof(st.cur)]);
@@ -1578,7 +1578,7 @@ ${
         let line: int = 1;
         let last: int = -1;
         let k: int = src.indexOf("\n");
-        while (k >= 0 && k < end) {
+        for (; k >= 0 && k < end; ) {
             line = line + 1;
             last = k;
             k = src.indexOf("\n", k + 1);
@@ -1764,7 +1764,7 @@ ${
 
     fn wordTestAt(c: Cursor, w: string) -> boolean {
         let i: int = 0;
-        while (i < w.length) {
+        for (; i < w.length; ) {
             if (peekCode(c, i) != w.charCodeAt(i)) return false;
             i = i + 1;
         }
@@ -1785,7 +1785,7 @@ ${
     // `onclick=<#r>.refetch()` reads on, as `onclick=f()` does.
     fn closesHashRef(c: Cursor) -> boolean {
         let i: int = c.pos - 1;
-        while (i >= 0 && isIdentCont(c.source.charCodeAt(i))) { i = i - 1; }
+        for (; i >= 0 && isIdentCont(c.source.charCodeAt(i)); ) { i = i - 1; }
         if (i == c.pos - 1 || i < 1) return false;
         if (!isIdentStart(c.source.charCodeAt(i + 1))) return false;
         return c.source.charCodeAt(i) == 35 && c.source.charCodeAt(i - 1) == 60;
@@ -1801,7 +1801,7 @@ ${
     // Skip spaces/tabs only (not newlines) — the Line rule's lookahead.
     fn skipBlanks(cur: Cursor) -> Cursor {
         let c = cur;
-        while (isWhitespace(peekCode(c, 0))) {
+        for (; isWhitespace(peekCode(c, 0)); ) {
             c = advance(c, 1);
         }
         return c;
@@ -1838,7 +1838,7 @@ ${
 
     fn skipTriviaAhead(cur: Cursor) -> Cursor {
         let c = cur;
-        while (isTrivia(peekCode(c, 0))) {
+        for (; isTrivia(peekCode(c, 0)); ) {
             c = advance(c, 1);
         }
         return c;
@@ -1847,7 +1847,7 @@ ${
     // The cursor moved forward to offset `pos` (line / col tracked).
     fn advanceTo(cur: Cursor, pos: int) -> Cursor {
         let c = cur;
-        while (c.pos < pos && !isEof(c)) { c = advance1(c); }
+        for (; c.pos < pos && !isEof(c); ) { c = advance1(c); }
         return c;
     }
 
@@ -1888,14 +1888,14 @@ ${
     export fn lexTier0X(src: string, pos: int, depth: int, bare: boolean) -> LexPause {
         let stack: BracketKind[] = [];
         let i: int = 0;
-        while (i < depth) {
+        for (; i < depth; ) {
             stack = stack.concat([BracketKind.Brace]);
             i = i + 1;
         }
         let st: LexState = mkState([], cursorAt(src, pos), LexMode.InCode, [], stack, [], false);
         let done = false;
         let paused = false;
-        while (!done && !isEof(st.cur)) {
+        for (; !done && !isEof(st.cur); ) {
             if (liftMarkupAhead(st) || (bare && bareMarkupAhead(st, depth))) {
                 paused = true;
                 done = true;
@@ -1957,10 +1957,10 @@ ${
     // it would run to the end of the file).
     fn legacyDeclHead(c: Cursor) -> boolean {
         let k: int = 1;
-        while (isIdentCont(peekCode(c, k)) || peekCode(c, k) == 45) { k = k + 1; }
+        for (; isIdentCont(peekCode(c, k)) || peekCode(c, k) == 45; ) { k = k + 1; }
         if (peekCode(c, k) != 62) return false;
         k = k + 1;
-        while (peekCode(c, k) == 32 || peekCode(c, k) == 9) { k = k + 1; }
+        for (; peekCode(c, k) == 32 || peekCode(c, k) == 9; ) { k = k + 1; }
         const n0: int = peekCode(c, k);
         if (n0 == 61) return peekCode(c, k + 1) != 61;
         return n0 == 58;
@@ -1991,7 +1991,7 @@ ${
     export fn lexFromMode(src: string, pos: int, stop: LexStop, display: boolean) -> LexRun {
         let st: LexState = mkState([], cursorAt(src, pos), LexMode.InCode, [], [], [], display);
         let done = false;
-        while (!done && !isEof(st.cur)) {
+        for (; !done && !isEof(st.cur); ) {
             if (stopBefore(st, stop)) {
                 done = true;
             } else if (markupValueAhead(st)) {
@@ -2070,12 +2070,12 @@ ${
     export fn markupValueExtentAt(src: string, pos: int) -> int {
         let i: int = pos;
         let depth: int = 0;
-        while (i < src.length) {
+        for (; i < src.length; ) {
             const c0: int = src.charCodeAt(i);
             const c1: int = i + 1 < src.length ? src.charCodeAt(i + 1) : 0;
             if (c0 == 60 && isAsciiLetter(c1)) {
                 let k: int = i + 1;
-                while (k < src.length && isTagNameCh(src.charCodeAt(k))) { k = k + 1; }
+                for (; k < src.length && isTagNameCh(src.charCodeAt(k)); ) { k = k + 1; }
                 const name: string = src.substring(i + 1, k).toLowerCase();
                 const oe: int = openerEndAt(src, k);
                 const selfClosed: boolean = oe >= 2 && src.charCodeAt(oe - 2) == 47 && src.charCodeAt(oe - 1) == 62;
@@ -2116,14 +2116,14 @@ ${
     // `( … )` / `[ … ]` values, skipped whole by the code lexer.
     fn openerEndAt(src: string, from: int) -> int {
         let i: int = from;
-        while (i < src.length) {
+        for (; i < src.length; ) {
             const c0: int = src.charCodeAt(i);
             const c1: int = i + 1 < src.length ? src.charCodeAt(i + 1) : 0;
             if (c0 == 62) return i + 1;
             if (c0 == 47 && c1 == 62) return i + 2;
             if (c0 == 34 || c0 == 39) {
                 i = i + 1;
-                while (i < src.length && src.charCodeAt(i) != c0) {
+                for (; i < src.length && src.charCodeAt(i) != c0; ) {
                     if (src.charCodeAt(i) == 36 && i + 1 < src.length && src.charCodeAt(i + 1) == 123) {
                         i = lexFrom(src, i + 1, LexStop.Balanced).end;
                     } else {
@@ -2174,7 +2174,7 @@ ${
     // The offset of `</name>` (the name matched case-insensitively) at or after `from`, else -1.
     fn rawNameCloseAt(src: string, from: int, name: string) -> int {
         let i: int = src.indexOf("</", from);
-        while (i >= 0) {
+        for (; i >= 0; ) {
             const after: int = i + 2 + name.length;
             if (src.substring(i + 2, after).toLowerCase() == name && src.substring(after, after + 1) == ">") return i;
             i = src.indexOf("</", i + 1);

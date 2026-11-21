@@ -110,7 +110,7 @@ ${
         if (name.length < 2 || !isLowerAlpha(name.substring(0, 1))) return false;
         let hyphen = false;
         let i: int = 1;
-        while (i < name.length) {
+        for (; i < name.length; ) {
             const c: string = name.substring(i, i + 1);
             if (c == "-") {
                 hyphen = true;

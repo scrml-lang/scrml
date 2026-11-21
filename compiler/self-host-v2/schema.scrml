@@ -93,7 +93,7 @@ ${
     fn skip(s: string, from: int, to: int) -> int {
         let i: int = from;
         let going = true;
-        while (going && i < to) {
+        for (; going && i < to; ) {
             const c: string = ch(s, i);
             if (isSpace(c)) {
                 i = i + 1;
@@ -111,7 +111,7 @@ ${
     fn wordEnd(s: string, i: int, to: int) -> int {
         if (i >= to || !isWordStart(ch(s, i))) return i;
         let j: int = i + 1;
-        while (j < to && isWordCh(ch(s, j))) { j = j + 1; }
+        for (; j < to && isWordCh(ch(s, j)); ) { j = j + 1; }
         return j;
     }
 
@@ -121,7 +121,7 @@ ${
     // a `//` comment start — a top-level head as written.
     fn runEnd(s: string, i: int, to: int) -> int {
         let j: int = i;
-        while (j < to) {
+        for (; j < to; ) {
             const c: string = ch(s, j);
             if (isSpace(c) || c == "{" || c == "}") return j;
             if (c == "/" && ch(s, j + 1) == "/") return j;
@@ -135,8 +135,8 @@ ${
     // else, e.g. `users:`, and is no head at all).
     fn headTail(run: string) -> string {
         let k: int = run.length;
-        while (k > 0 && isWordCh(ch(run, k - 1))) { k = k - 1; }
-        while (k < run.length && isDigit(ch(run, k))) { k = k + 1; }
+        for (; k > 0 && isWordCh(ch(run, k - 1)); ) { k = k - 1; }
+        for (; k < run.length && isDigit(ch(run, k)); ) { k = k + 1; }
         return run.substring(k, run.length);
     }
 
@@ -145,7 +145,7 @@ ${
     fn quoteEnd(s: string, i: int, to: int) -> int {
         const q: string = ch(s, i);
         let j: int = i + 1;
-        while (j < to) {
+        for (; j < to; ) {
             const c: string = ch(s, j);
             if (c == "\n") return -1;
             if (c == q) {
@@ -166,7 +166,7 @@ ${
     fn parenEnd(s: string, open: int, to: int) -> int {
         let depth: int = 0;
         let j: int = open;
-        while (j < to) {
+        for (; j < to; ) {
             const c: string = ch(s, j);
             if (c == "'" || c == "\"") {
                 const e: int = quoteEnd(s, j, to);
@@ -188,7 +188,7 @@ ${
     // read whole), else `to`.
     fn braceEnd(s: string, from: int, to: int) -> int {
         let j: int = from;
-        while (j < to) {
+        for (; j < to; ) {
             const c: string = ch(s, j);
             if (c == "'" || c == "\"") {
                 const e: int = quoteEnd(s, j, to);
@@ -208,7 +208,8 @@ ${
     // §39.2 "with any whitespace or closed comments around the `.`" of a head).
     fn skipHead(s: string, from: int, to: int) -> int {
         let i: int = skip(s, from, to);
-        while (i < to && s.substring(i, i + 2) == "/*") {
+        for (;;) {
+            if (!(i < to && s.substring(i, i + 2) == "/*")) { break; }
             const e: int = s.indexOf("*/", i + 2);
             if (e < 0 || e + 2 > to) return i;
             i = skip(s, e + 2, to);
@@ -229,7 +230,7 @@ ${
         let name: string = s.substring(i, j);
         let dots: int = 0;
         let going = true;
-        while (going) {
+        for (; going; ) {
             const k: int = skipHead(s, j, to);
             if (ch(s, k) == ".") {
                 const k2: int = skipHead(s, k + 1, to);
@@ -256,7 +257,7 @@ ${
     export fn schemaCloseAt(s: string, from: int) -> int {
         const to: int = s.length;
         let j: int = from;
-        while (j < to) {
+        for (; j < to; ) {
             const c: string = ch(s, j);
             if (c == "/" && ch(s, j + 1) == "/") {
                 const nl: int = s.indexOf("\n", j);
@@ -269,7 +270,7 @@ ${
                 if (ch(s, j + 2) == ">") return j;
                 if (s.substring(j + 2, j + 8) == "schema") {
                     let k: int = j + 8;
-                    while (k < to && isSpace(ch(s, k))) { k = k + 1; }
+                    for (; k < to && isSpace(ch(s, k)); ) { k = k + 1; }
                     if (ch(s, k) == ">") return j;
                 }
                 j = j + 1;
@@ -285,7 +286,7 @@ ${
     // Does `low` (lower-cased) hold `w` as a whole word?
     fn hasWord(low: string, w: string) -> boolean {
         let k: int = low.indexOf(w);
-        while (k >= 0) {
+        for (; k >= 0; ) {
             const before: string = k > 0 ? ch(low, k - 1) : "";
             const after: string = ch(low, k + w.length);
             if (!isWordCh(before) && !isWordCh(after)) return true;
@@ -331,7 +332,7 @@ ${
     // (INTERIM — what else "literal" admits is not written down).
     fn wsEnd(s: string, i: int, to: int) -> int {
         let j: int = i;
-        while (j < to && isSpace(ch(s, j))) { j = j + 1; }
+        for (; j < to && isSpace(ch(s, j)); ) { j = j + 1; }
         return j;
     }
 
@@ -342,11 +343,11 @@ ${
     // The end of a numeric literal at `i` (`i`: none there).
     fn numEnd(s: string, i: int, to: int) -> int {
         let j: int = i;
-        while (j < to && isDigit(ch(s, j))) { j = j + 1; }
+        for (; j < to && isDigit(ch(s, j)); ) { j = j + 1; }
         let had = j > i;
         if (ch(s, j) == ".") {
             let k: int = j + 1;
-            while (k < to && isDigit(ch(s, k))) { k = k + 1; }
+            for (; k < to && isDigit(ch(s, k)); ) { k = k + 1; }
             if (k > j + 1) had = true;
             if (had) j = k;
         }
@@ -356,7 +357,7 @@ ${
             let k: int = j + 1;
             if (ch(s, k) == "+" || ch(s, k) == "-") k = k + 1;
             const d0: int = k;
-            while (k < to && isDigit(ch(s, k))) { k = k + 1; }
+            for (; k < to && isDigit(ch(s, k)); ) { k = k + 1; }
             if (k > d0) j = k;
         }
         if (j < to && isWordCh(ch(s, j))) return i;
@@ -365,7 +366,7 @@ ${
 
     fn isHexRun(t: string) -> boolean {
         let k: int = 0;
-        while (k < t.length) {
+        for (; k < t.length; ) {
             if ("0123456789abcdefABCDEF".indexOf(ch(t, k)) < 0) return false;
             k = k + 1;
         }
@@ -376,7 +377,8 @@ ${
     fn defTerm(s: string, i0: int, to: int) -> int {
         let i: int = wsEnd(s, i0, to);
         let signed = false;
-        while (i < to && (ch(s, i) == "-" || ch(s, i) == "+")) {
+        for (;;) {
+            if (!(i < to && (ch(s, i) == "-" || ch(s, i) == "+"))) { break; }
             signed = true;
             i = wsEnd(s, i + 1, to);
         }
@@ -413,7 +415,7 @@ ${
         let e: int = defTerm(s, i, to);
         if (e < 0) return -1;
         let going = true;
-        while (going) {
+        for (; going; ) {
             const j: int = wsEnd(s, e, to);
             const c: string = ch(s, j);
             let op: int = 0;
@@ -462,7 +464,7 @@ ${
     // "int", "real", "bool", "blob" or "expr".
     fn defKind(s: string, a: int, b: int) -> string {
         let i: int = wsEnd(s, a, b);
-        while (i < b && (ch(s, i) == "-" || ch(s, i) == "+")) { i = wsEnd(s, i + 1, b); }
+        for (;;) { if (!(i < b && (ch(s, i) == "-" || ch(s, i) == "+"))) { break; } i = wsEnd(s, i + 1, b); }
         const c: string = ch(s, i);
         if (c == "(") return "expr";
         if (c == "'") return "str";
@@ -531,7 +533,7 @@ ${
         let refs: SchemaRef[] = [];
         let k: int = skip(s, te, to);
         let going = true;
-        while (going) {
+        for (; going; ) {
             if (k >= to) {
                 going = false;
             } else {
@@ -636,7 +638,7 @@ ${
         let gaveUp = false;             // a refusal stopped the reader inside this table
         let i: int = skip(s, open + 1, to);
         let going = true;
-        while (going) {
+        for (; going; ) {
             if (i >= to) {
                 errs = errs.concat([err("E-PARSE-UNCLOSED", "the `{` of `<schema>` table `" + name + "` is never closed", open, open + 1)]);
                 going = false;
@@ -741,7 +743,7 @@ ${
     fn sub(ts: DdlTok[], a: int, b: int) -> DdlTok[] {
         let out: DdlTok[] = [];
         let k: int = a;
-        while (k < b) {
+        for (; k < b; ) {
             out = out.concat([ts[k]]);
             k = k + 1;
         }
@@ -786,7 +788,7 @@ ${
     fn tokClose(ts: DdlTok[], i: int) -> int {
         let depth: int = 0;
         let k: int = i;
-        while (k < ts.length) {
+        for (; k < ts.length; ) {
             if (isPu(ts[k], "(")) depth = depth + 1;
             if (isPu(ts[k], ")")) {
                 depth = depth - 1;
@@ -810,7 +812,8 @@ ${
     fn ddlDefTerm(ts: DdlTok[], i0: int) -> int {
         let i: int = i0;
         let signed = false;
-        while (isPu(tk(ts, i), "-") || isPu(tk(ts, i), "+")) {
+        for (;;) {
+            if (!(isPu(tk(ts, i), "-") || isPu(tk(ts, i), "+"))) { break; }
             signed = true;
             i = i + 1;
         }
@@ -830,7 +833,7 @@ ${
     // The kind of the DEFAULT term at `i0` (ddlDefTerm read it) — as defKind.
     fn ddlDefKind(ts: DdlTok[], i0: int) -> string {
         let i: int = i0;
-        while (isPu(tk(ts, i), "-") || isPu(tk(ts, i), "+")) { i = i + 1; }
+        for (;;) { if (!(isPu(tk(ts, i), "-") || isPu(tk(ts, i), "+"))) { break; } i = i + 1; }
         const t: DdlTok = tk(ts, i);
         if (isPu(t, "(")) return "expr";
         if (t.kind == "num") return t.text.indexOf(".") >= 0 ? "real" : "int";
@@ -844,7 +847,7 @@ ${
         let e: int = ddlDefTerm(ts, i);
         if (e < 0) return -1;
         let going = true;
-        while (going) {
+        for (; going; ) {
             const t: DdlTok = tk(ts, e);
             if (t.kind == "punct" && ["+", "-", "*", "/", "%", "||"].indexOf(t.text) >= 0) {
                 e = ddlDefTerm(ts, e + 1);
@@ -864,7 +867,7 @@ ${
         let names: string[] = [];
         let k: int = i + 1;
         let going = true;
-        while (going) {
+        for (; going; ) {
             const n: DName = nameOf(tk(ts, k));
             if (n.name == "") return not;
             names = names.concat([n.name]);
@@ -885,7 +888,8 @@ ${
     // `ON DELETE|UPDATE <action>`* at `i`: its end, or -1.
     fn fkActions(ts: DdlTok[], i0: int) -> int {
         let i: int = i0;
-        while (isW(tk(ts, i), "ON")) {
+        for (;;) {
+            if (!(isW(tk(ts, i), "ON"))) { break; }
             const e: DdlTok = tk(ts, i + 1);
             if (!isW(e, "DELETE") && !isW(e, "UPDATE")) return -1;
             const a: DdlTok = tk(ts, i + 2);
@@ -905,7 +909,7 @@ ${
     fn shownToks(ts: DdlTok[], i: int) -> string {
         let out: string = "";
         let k: int = i;
-        while (k < ts.length && k < i + 4) {
+        for (; k < ts.length && k < i + 4; ) {
             out = out + (out == "" ? "" : " ") + ts[k].text;
             k = k + 1;
         }
@@ -952,7 +956,7 @@ ${
         let nn = false;
         let refs: SchemaRef[] = [];
         let going = true;
-        while (going) {
+        for (; going; ) {
             const c: DdlTok = tk(it, p);
             const c1: DdlTok = tk(it, p + 1);
             if (c.kind == "end") {
@@ -1065,7 +1069,7 @@ ${
     // The index of the first `(` of `text` outside a `'…'` / `"…"` literal, else -1.
     fn firstParen(text: string) -> int {
         let j: int = 0;
-        while (j < text.length) {
+        for (; j < text.length; ) {
             const c: string = ch(text, j);
             if (c == "'" || c == "\"") {
                 const e: int = quoteEnd(text, j, text.length);
@@ -1093,7 +1097,8 @@ ${
         // CREATE, at most three words, TABLE (§39.2 "What is a head")
         let p: int = 1;
         let other = false;
-        while (p <= 3 && tk(h, p).kind == "word" && tk(h, p).w != "TABLE") {
+        for (;;) {
+            if (!(p <= 3 && tk(h, p).kind == "word" && tk(h, p).w != "TABLE")) { break; }
             if (!isTableModifier(tk(h, p).w)) other = true;
             p = p + 1;
         }
@@ -1118,7 +1123,8 @@ ${
         if (n0.name == "") return ddlErr("E-SCHEMA-013", unreadable, start, end);
         p = p + 1;
         let qualified = false;
-        while (isPu(tk(h, p), ".")) {
+        for (;;) {
+            if (!(isPu(tk(h, p), "."))) { break; }
             const nx: DName = nameOf(tk(h, p + 1));
             if (nx.name == "" && nx.why != "quoted") return ddlErr("E-SCHEMA-013", unreadable, start, end);
             qualified = true;
@@ -1158,7 +1164,7 @@ ${
         let depth: int = 0;
         let k: int = 1;
         let stopped = false;
-        while (k <= lc && !stopped) {
+        for (; k <= lc && !stopped; ) {
             const t: DdlTok = ts[k];
             if (isPu(t, "(")) depth = depth + 1;
             if (isPu(t, ")")) depth = depth - 1;
@@ -1175,7 +1181,7 @@ ${
                     let chain = nameOf(tk(it, 1)).name != "";
                     if (chain) {
                         m = 2;
-                        while (isPu(tk(it, m), ".") && nameOf(tk(it, m + 1)).name != "") { m = m + 2; }
+                        for (;;) { if (!(isPu(tk(it, m), ".") && nameOf(tk(it, m + 1)).name != "")) { break; } m = m + 2; }
                         const nx: DdlTok = tk(it, m);
                         if (nx.kind == "end" || isW(nx, "INCLUDING") || isW(nx, "EXCLUDING")) isTemplate = true;
                     }
@@ -1232,7 +1238,7 @@ ${
         let noRowid = false;
         if (isW(tk(ts, q), "STRICT") || isW(tk(ts, q), "WITHOUT")) {
             let more = true;
-            while (more) {
+            for (; more; ) {
                 if (isW(tk(ts, q), "STRICT")) {
                     strict = true;
                     q = q + 1;
@@ -1296,7 +1302,7 @@ ${
         let j: int = i;
         let depth: int = 0;
         let closed = false;
-        while (j < to) {
+        for (; j < to; ) {
             const c: string = ch(s, j);
             const two: string = s.substring(j, j + 2);
             if (c == "'" || c == "\"") {
@@ -1330,7 +1336,7 @@ ${
     fn strBodies(s: string, a: int, b: int) -> string {
         let out: string = "";
         let j: int = a;
-        while (j < b) {
+        for (; j < b; ) {
             const c: string = ch(s, j);
             if (c == "'" || c == "\"") {
                 const e: int = quoteEnd(s, j, b);
@@ -1356,7 +1362,7 @@ ${
         let liveB: int[] = [];
         let i: int = skip(s, from, to);
         let going = true;
-        while (going && i < to) {
+        for (; going && i < to; ) {
           const two: string = s.substring(i, i + 2);
           if (two == "--") {
             // §39.2 "Comments and literals": a SQL `--` line comment. A carriage
@@ -1528,7 +1534,7 @@ ${
         let masked: string = "";
         let mi: int = from;
         let li: int = 0;
-        while (li < liveA.length) {
+        for (; li < liveA.length; ) {
             // a live statement is blanked except its `'…'` string literals (S478 #1925 review
             // F3: `DEFAULT 'CREATE TABLE t (…)'` is `CREATE TABLE` text in a string)
             masked = masked + s.substring(mi, liveA[li]) + " " + strBodies(s, liveA[li], liveB[li]) + " ";

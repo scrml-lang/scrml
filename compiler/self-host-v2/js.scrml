@@ -349,7 +349,7 @@ ${
     fn isPlainIdent(k: string) -> boolean {
         if (k.length == 0) return false;
         let i = 0;
-        while (i < k.length) {
+        for (; i < k.length; ) {
             const c: int = k.charCodeAt(i);
             if (!isIdentCode(c, i == 0)) return false;
             i = i + 1;
