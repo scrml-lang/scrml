@@ -24,9 +24,9 @@
 // workaround: F15 — no helper fn in this file shares a name with a field.
 // =============================================================================
 ${
-    import { Severity, severityOf } from "./severity.scrml"
-    import { ComplexSel } from "./core.scrml"
-    import { SchemaTable } from "./schema.scrml"
+    import { Severity, severityOf } from "./severity.scrml";
+    import { ComplexSel } from "./core.scrml";
+    import { SchemaTable } from "./schema.scrml";
 
     export type ASpan:struct = { start: int, end: int }
 
@@ -697,10 +697,10 @@ ${
 
     // The ONE Diag constructor (s451): the severity is derived from the code.
     export fn newDiag(code: string, message: string, file: string, span: ASpan) -> Diag {
-        return { code: code, severity: severityOf(code), message: message, file: file, span: span }
+        return { code: code, severity: severityOf(code), message: message, file: file, span: span };
     }
 
-    export fn mkSpan(start: int, end: int) -> ASpan { return { start: start, end: end } }
+    export fn mkSpan(start: int, end: int) -> ASpan { return { start: start, end: end }; }
 
     // s473 (#1678 review F9) — an unquoted attribute value that reads as a
     // hyphenated WORD (`class=foo-bar`, `data-x=a-b`: plain names joined by `-`).
@@ -709,35 +709,35 @@ ${
     // analyze (resolveHtml), which adds E-ATTR-UNQUOTED-OPERATOR only when the
     // names DO resolve — one report per fault.
     export fn isHyphenWordExpr(e: AExpr) -> boolean {
-        const k: AExprK = e.k
+        const k: AExprK = e.k;
         return match k {
-            .Name(name: n) :> true
-            .Binary(op: o, l: l, r: r) :> o == BinOp.Sub && isHyphenWordExpr(l) && isHyphenWordExpr(r)
-            .Recovered :> false
-            .Sql(q: q) :> false
-            .Template(quasis: qs) :> false
-            .HashRef(id: hr0) :> false
-            .Foreign(f: fb0) :> false
-            .At(name: n) :> false
-            .AtItem :> false
-            .Num(raw: r) :> false
-            .Str(v: s) :> false
-            .Bool(v: b) :> false
-            .NotLit :> false
-            .Variant(name: n) :> false
-            .Member(obj: o) :> false
-            .Call(callee: c) :> false
-            .Unary(op: o) :> false
-            .Ternary(test: t) :> false
-            .Assign(target: t) :> false
-            .ArrayLit(elems: es) :> false
-            .ObjectLit(props: ps) :> false
-            .Spread(e: s) :> false
-            .Index(obj: o) :> false
-            .Lambda(params: ps) :> false
-            .BlockLambda(params: ps) :> false
+            .Name(name: n) :> true,
+            .Binary(op: o, l: l, r: r) :> o == BinOp.Sub && isHyphenWordExpr(l) && isHyphenWordExpr(r),
+            .Recovered :> false,
+            .Sql(q: q) :> false,
+            .Template(quasis: qs) :> false,
+            .HashRef(id: hr0) :> false,
+            .Foreign(f: fb0) :> false,
+            .At(name: n) :> false,
+            .AtItem :> false,
+            .Num(raw: r) :> false,
+            .Str(v: s) :> false,
+            .Bool(v: b) :> false,
+            .NotLit :> false,
+            .Variant(name: n) :> false,
+            .Member(obj: o) :> false,
+            .Call(callee: c) :> false,
+            .Unary(op: o) :> false,
+            .Ternary(test: t) :> false,
+            .Assign(target: t) :> false,
+            .ArrayLit(elems: es) :> false,
+            .ObjectLit(props: ps) :> false,
+            .Spread(e: s) :> false,
+            .Index(obj: o) :> false,
+            .Lambda(params: ps) :> false,
+            .BlockLambda(params: ps) :> false,
             .Handled(h: h) :> false
-        }
+        };
     }
 
     // s472 — THE path prefix a driver names stdlib files under
@@ -752,45 +752,45 @@ ${
     // bool, 7 an object literal, 8 a recovered parse error, -1 anything else.
     export type HView:struct = { k: int, name: string, obj: AExpr | not, args: AExpr[], value: AExpr | not, props: AProp[] }
 
-    fn hv(k: int, name: string) -> HView { return { k: k, name: name, obj: not, args: [], value: not, props: [] } }
-    fn hvMember(o: AExpr, n: string) -> HView { return { k: 1, name: n, obj: o, args: [], value: not, props: [] } }
-    fn hvCall(c: AExpr, xs: AExpr[]) -> HView { return { k: 2, name: "", obj: c, args: xs, value: not, props: [] } }
-    fn hvAssign(l: AExpr, r: AExpr) -> HView { return { k: 3, name: "", obj: l, args: [], value: r, props: [] } }
-    fn hvObject(ps: AProp[]) -> HView { return { k: 7, name: "", obj: not, args: [], value: not, props: ps } }
+    fn hv(k: int, name: string) -> HView { return { k: k, name: name, obj: not, args: [], value: not, props: [] }; }
+    fn hvMember(o: AExpr, n: string) -> HView { return { k: 1, name: n, obj: o, args: [], value: not, props: [] }; }
+    fn hvCall(c: AExpr, xs: AExpr[]) -> HView { return { k: 2, name: "", obj: c, args: xs, value: not, props: [] }; }
+    fn hvAssign(l: AExpr, r: AExpr) -> HView { return { k: 3, name: "", obj: l, args: [], value: r, props: [] }; }
+    fn hvObject(ps: AProp[]) -> HView { return { k: 7, name: "", obj: not, args: [], value: not, props: ps }; }
     export fn hostBoolWord(b: boolean) -> string {
-        if (b) return "true"
-        return "false"
+        if (b) return "true";
+        return "false";
     }
 
     export fn hostView(e: AExpr) -> HView {
         return match e.k {
-            .Name(name: n) :> hv(0, n)
-            .Member(obj: o, name: n) :> hvMember(o, n)
-            .Call(callee: c, args: xs) :> hvCall(c, xs)
-            .Assign(target: l, value: r) :> hvAssign(l, r)
-            .Str(v: s) :> hv(4, s)
-            .Num(raw: r) :> hv(5, r)
-            .Bool(v: b) :> hv(6, hostBoolWord(b))
-            .ObjectLit(props: ps) :> hvObject(ps)
-            .Recovered :> hv(8, "")
-            .At(name: n) :> hv(-1, "")
-            .AtItem :> hv(-1, "")
-            .NotLit :> hv(-1, "")
-            .Variant(name: n) :> hv(-1, "")
-            .Unary(op: o) :> hv(-1, "")
-            .Binary(op: o) :> hv(-1, "")
-            .Ternary(test: x) :> hv(-1, "")
-            .ArrayLit(elems: es) :> hv(-1, "")
-            .Spread(e: x) :> hv(-1, "")
-            .Index(obj: x) :> hv(-1, "")
-            .Lambda(params: ps) :> hv(-1, "")
-            .BlockLambda(params: ps) :> hv(-1, "")
-            .Sql(q: q) :> hv(-1, "")
-            .Handled(h: x) :> hv(-1, "")
-            .Template(quasis: qs) :> hv(-1, "")
-            .HashRef(id: hr0) :> hv(-1, "")
+            .Name(name: n) :> hv(0, n),
+            .Member(obj: o, name: n) :> hvMember(o, n),
+            .Call(callee: c, args: xs) :> hvCall(c, xs),
+            .Assign(target: l, value: r) :> hvAssign(l, r),
+            .Str(v: s) :> hv(4, s),
+            .Num(raw: r) :> hv(5, r),
+            .Bool(v: b) :> hv(6, hostBoolWord(b)),
+            .ObjectLit(props: ps) :> hvObject(ps),
+            .Recovered :> hv(8, ""),
+            .At(name: n) :> hv(-1, ""),
+            .AtItem :> hv(-1, ""),
+            .NotLit :> hv(-1, ""),
+            .Variant(name: n) :> hv(-1, ""),
+            .Unary(op: o) :> hv(-1, ""),
+            .Binary(op: o) :> hv(-1, ""),
+            .Ternary(test: x) :> hv(-1, ""),
+            .ArrayLit(elems: es) :> hv(-1, ""),
+            .Spread(e: x) :> hv(-1, ""),
+            .Index(obj: x) :> hv(-1, ""),
+            .Lambda(params: ps) :> hv(-1, ""),
+            .BlockLambda(params: ps) :> hv(-1, ""),
+            .Sql(q: q) :> hv(-1, ""),
+            .Handled(h: x) :> hv(-1, ""),
+            .Template(quasis: qs) :> hv(-1, ""),
+            .HashRef(id: hr0) :> hv(-1, ""),
             .Foreign(f: fb) :> hv(-1, "")
-        }
+        };
     }
 
     // A dotted member chain `root.m1.….mn`; `ok` false when the expression is
@@ -798,19 +798,19 @@ ${
     export type HChain:struct = { ok: boolean, root: string, members: string[] }
 
     export fn hostChainOf(e: AExpr) -> HChain {
-        const v: HView = hostView(e)
-        if (v.k == 0) return { ok: true, root: v.name, members: [] }
+        const v: HView = hostView(e);
+        if (v.k == 0) return { ok: true, root: v.name, members: [] };
         if (v.k == 1) {
-            const o: AExpr | not = v.obj
+            const o: AExpr | not = v.obj;
             if (o is given) {
-                const c: HChain = hostChainOf(o)
-                return { ok: c.ok, root: c.root, members: c.members.concat([v.name]) }
+                const c: HChain = hostChainOf(o);
+                return { ok: c.ok, root: c.root, members: c.members.concat([v.name]) };
             }
         }
-        return { ok: false, root: "", members: [] }
+        return { ok: false, root: "", members: [] };
     }
 
-    export fn hostRootGlobal(n: string) -> boolean { return n == "window" || n == "document" || n == "navigator" }
+    export fn hostRootGlobal(n: string) -> boolean { return n == "window" || n == "document" || n == "navigator"; }
 
     // The checked target's pieces: `shape` 0 call, 1 `new`, 2 property read,
     // 3 property write; `chain` the callee / the read or written member chain;
@@ -818,21 +818,21 @@ ${
     export type HTargetParts:struct = { ok: boolean, shape: int, chain: HChain, args: AExpr[] }
 
     export fn hostTargetParts(target: AExpr, isNew: boolean) -> HTargetParts {
-        const v: HView = hostView(target)
-        const bad: HTargetParts = { ok: false, shape: -1, chain: { ok: false, root: "", members: [] }, args: [] }
-        const o: AExpr | not = v.obj
+        const v: HView = hostView(target);
+        const bad: HTargetParts = { ok: false, shape: -1, chain: { ok: false, root: "", members: [] }, args: [] };
+        const o: AExpr | not = v.obj;
         if (v.k == 2 && o is given) {
-            let shape: int = 0
-            if (isNew) shape = 1
-            return { ok: true, shape: shape, chain: hostChainOf(o), args: v.args }
+            let shape: int = 0;
+            if (isNew) shape = 1;
+            return { ok: true, shape: shape, chain: hostChainOf(o), args: v.args };
         }
-        if (isNew) return bad
-        if (v.k == 1) return { ok: true, shape: 2, chain: hostChainOf(target), args: [] }
-        const w: AExpr | not = v.value
-        if (v.k == 3 && o is given && w is given) return { ok: true, shape: 3, chain: hostChainOf(o), args: [w] }
-        return bad
+        if (isNew) return bad;
+        if (v.k == 1) return { ok: true, shape: 2, chain: hostChainOf(target), args: [] };
+        const w: AExpr | not = v.value;
+        if (v.k == 3 && o is given && w is given) return { ok: true, shape: 3, chain: hostChainOf(o), args: [w] };
+        return bad;
     }
 
 
-    export fn stdlibPathPrefix() -> string { return "scrml:" }
+    export fn stdlibPathPrefix() -> string { return "scrml:"; }
 }

@@ -11,7 +11,7 @@
 ${
     import { Sym, Type, Place, InstRef, Literal, Pattern, Expr, MatchArm, EditKind, Stmt, Block, PathStep, Failable, OkArm, ErrArm, LoopHead, Gather, Lifted, GatherRow,
              Attr, View, CondArm, ConstructAttr, EffectDep, RequestState, Field, Decl, Fn, ServerFn, CoreProgram, CoreConst,
-             ValidityOf, validityInst } from "./core.scrml"
+             ValidityOf, validityInst } from "./core.scrml";
 
     // Every Core node kind, as one sum. Types, Syms and Literals are leaves of
     // the walk (they carry no Expr/Stmt/View below them).
@@ -36,239 +36,239 @@ ${
     // is built by halves — one accumulator rebound per element copied the whole prefix each
     // time, and every walk rebuilds these lists. Same nodes, same order.
     fn exprNodes(es: Expr[]) -> Node[] {
-        return exprNodesOf(es, 0, es.length)
+        return exprNodesOf(es, 0, es.length);
     }
 
     fn exprNodesOf(es: Expr[], lo: int, hi: int) -> Node[] {
         if (hi - lo <= 8) {
-            let out: Node[] = []
-            let i: int = lo
+            let out: Node[] = [];
+            let i: int = lo;
             while (i < hi) {
-                out = out.concat([Node.NExpr(es[i])])
-                i = i + 1
+                out = out.concat([Node.NExpr(es[i])]);
+                i = i + 1;
             }
-            return out
+            return out;
         }
-        const mid: int = lo + Math.floor((hi - lo) / 2)
-        return exprNodesOf(es, lo, mid).concat(exprNodesOf(es, mid, hi))
+        const mid: int = lo + Math.floor((hi - lo) / 2);
+        return exprNodesOf(es, lo, mid).concat(exprNodesOf(es, mid, hi));
     }
 
     fn viewNodes(vs: View[]) -> Node[] {
-        return viewNodesOf(vs, 0, vs.length)
+        return viewNodesOf(vs, 0, vs.length);
     }
 
     fn viewNodesOf(vs: View[], lo: int, hi: int) -> Node[] {
         if (hi - lo <= 8) {
-            let out: Node[] = []
-            let i: int = lo
+            let out: Node[] = [];
+            let i: int = lo;
             while (i < hi) {
-                out = out.concat([Node.NView(vs[i])])
-                i = i + 1
+                out = out.concat([Node.NView(vs[i])]);
+                i = i + 1;
             }
-            return out
+            return out;
         }
-        const mid: int = lo + Math.floor((hi - lo) / 2)
-        return viewNodesOf(vs, lo, mid).concat(viewNodesOf(vs, mid, hi))
+        const mid: int = lo + Math.floor((hi - lo) / 2);
+        return viewNodesOf(vs, lo, mid).concat(viewNodesOf(vs, mid, hi));
     }
 
     fn stmtNodes(ss: Stmt[]) -> Node[] {
-        return stmtNodesOf(ss, 0, ss.length)
+        return stmtNodesOf(ss, 0, ss.length);
     }
 
     fn stmtNodesOf(ss: Stmt[], lo: int, hi: int) -> Node[] {
         if (hi - lo <= 8) {
-            let out: Node[] = []
-            let i: int = lo
+            let out: Node[] = [];
+            let i: int = lo;
             while (i < hi) {
-                out = out.concat([Node.NStmt(ss[i])])
-                i = i + 1
+                out = out.concat([Node.NStmt(ss[i])]);
+                i = i + 1;
             }
-            return out
+            return out;
         }
-        const mid: int = lo + Math.floor((hi - lo) / 2)
-        return stmtNodesOf(ss, lo, mid).concat(stmtNodesOf(ss, mid, hi))
+        const mid: int = lo + Math.floor((hi - lo) / 2);
+        return stmtNodesOf(ss, lo, mid).concat(stmtNodesOf(ss, mid, hi));
     }
 
     fn maybeExpr(e: Expr | not) -> Node[] {
-        if (e is not) return []
-        return [Node.NExpr(e)]
+        if (e is not) return [];
+        return [Node.NExpr(e)];
     }
 
     fn maybeBlock(b: Block | not) -> Node[] {
-        if (b is not) return []
-        return [Node.NBlock(b)]
+        if (b is not) return [];
+        return [Node.NBlock(b)];
     }
 
     fn maybeViews(vs: View[] | not) -> Node[] {
-        if (vs is not) return []
-        return viewNodes(vs)
+        if (vs is not) return [];
+        return viewNodes(vs);
     }
 
     fn armNodes(arms: MatchArm[]) -> Node[] {
-        let out: Node[] = []
-        for (const a of arms) { out = out.concat([Node.NPattern(a.pat), Node.NExpr(a.body)]) }
-        return out
+        let out: Node[] = [];
+        for (const a of arms) { out = out.concat([Node.NPattern(a.pat), Node.NExpr(a.body)]); }
+        return out;
     }
 
     fn condArmNodes(arms: CondArm[]) -> Node[] {
-        let out: Node[] = []
-        for (const a of arms) { out = out.concat([Node.NExpr(a.test)]).concat(viewNodes(a.body)) }
-        return out
+        let out: Node[] = [];
+        for (const a of arms) { out = out.concat([Node.NExpr(a.test)]).concat(viewNodes(a.body)); }
+        return out;
     }
 
     fn constructNodes(attrs: ConstructAttr[]) -> Node[] {
-        let out: Node[] = []
-        for (const a of attrs) { out = out.concat([Node.NExpr(a.value)]) }
-        return out
+        let out: Node[] = [];
+        for (const a of attrs) { out = out.concat([Node.NExpr(a.value)]); }
+        return out;
     }
 
     fn attrNodes(attrs: Attr[]) -> Node[] {
-        let out: Node[] = []
-        for (const a of attrs) { out = out.concat([Node.NAttr(a)]) }
-        return out
+        let out: Node[] = [];
+        for (const a of attrs) { out = out.concat([Node.NAttr(a)]); }
+        return out;
     }
 
     // s476: `kids` under a name a module that has its own `kids` locals can import
     // (print.scrml ownScan — the in-place proof walks every child through it).
-    export fn nodeKids(n: Node) -> Node[] { return kids(n) }
+    export fn nodeKids(n: Node) -> Node[] { return kids(n); }
 
     // The direct children of a node, in source order.
     export fn kids(n: Node) -> Node[] {
         return match n {
-            .NProgram(p: p) :> programKids(p)
-            .NDecl(d: d) :> declKids(d)
-            .NField(f: f) :> maybeExpr(f.init)
-            .NFn(f: f) :> [Node.NBlock(f.body)]
-            .NServerFn(f: f) :> [Node.NBlock(f.body)]
-            .NBlock(b: b) :> stmtNodes(b.stmts)
-            .NStmt(s: s) :> stmtKids(s)
-            .NExpr(e: e) :> exprKids(e)
-            .NPlace(pl: pl) :> placeKids(pl)
-            .NInst(i: i) :> []
-            .NPattern(pat: pat) :> []
-            .NEdit(k: k) :> editKids(k)
-            .NView(v: v) :> viewKids(v)
+            .NProgram(p: p) :> programKids(p),
+            .NDecl(d: d) :> declKids(d),
+            .NField(f: f) :> maybeExpr(f.init),
+            .NFn(f: f) :> [Node.NBlock(f.body)],
+            .NServerFn(f: f) :> [Node.NBlock(f.body)],
+            .NBlock(b: b) :> stmtNodes(b.stmts),
+            .NStmt(s: s) :> stmtKids(s),
+            .NExpr(e: e) :> exprKids(e),
+            .NPlace(pl: pl) :> placeKids(pl),
+            .NInst(i: i) :> [],
+            .NPattern(pat: pat) :> [],
+            .NEdit(k: k) :> editKids(k),
+            .NView(v: v) :> viewKids(v),
             .NAttr(a: a) :> attrKids(a)
-        }
+        };
     }
 
     // S480 (s480-boot-fn-count-perf): each list by halves (as exprNodes) — one concat per
     // declaration made every whole-program walk O(declarations²).
     fn programKids(p: CoreProgram) -> Node[] {
-        const ds: Node[] = declNodesOf(p.decls, 0, p.decls.length)
-        const fs: Node[] = fnNodesOf(p.fns, 0, p.fns.length)
-        const ss: Node[] = serverNodesOf(p.server, 0, p.server.length)
-        const ks: Node[] = constNodesOf(p.consts, 0, p.consts.length)   // s472: file-scope constants
-        return ds.concat(fs).concat(ss).concat(ks)
+        const ds: Node[] = declNodesOf(p.decls, 0, p.decls.length);
+        const fs: Node[] = fnNodesOf(p.fns, 0, p.fns.length);
+        const ss: Node[] = serverNodesOf(p.server, 0, p.server.length);
+        const ks: Node[] = constNodesOf(p.consts, 0, p.consts.length);   // s472: file-scope constants
+        return ds.concat(fs).concat(ss).concat(ks);
     }
 
     fn declNodesOf(xs: Decl[], lo: int, hi: int) -> Node[] {
         if (hi - lo <= 8) {
-            let out: Node[] = []
-            let i: int = lo
+            let out: Node[] = [];
+            let i: int = lo;
             while (i < hi) {
-                out = out.concat([Node.NDecl(xs[i])])
-                i = i + 1
+                out = out.concat([Node.NDecl(xs[i])]);
+                i = i + 1;
             }
-            return out
+            return out;
         }
-        const mid: int = lo + Math.floor((hi - lo) / 2)
-        return declNodesOf(xs, lo, mid).concat(declNodesOf(xs, mid, hi))
+        const mid: int = lo + Math.floor((hi - lo) / 2);
+        return declNodesOf(xs, lo, mid).concat(declNodesOf(xs, mid, hi));
     }
 
     fn fnNodesOf(xs: Fn[], lo: int, hi: int) -> Node[] {
         if (hi - lo <= 8) {
-            let out: Node[] = []
-            let i: int = lo
+            let out: Node[] = [];
+            let i: int = lo;
             while (i < hi) {
-                out = out.concat([Node.NFn(xs[i])])
-                i = i + 1
+                out = out.concat([Node.NFn(xs[i])]);
+                i = i + 1;
             }
-            return out
+            return out;
         }
-        const mid: int = lo + Math.floor((hi - lo) / 2)
-        return fnNodesOf(xs, lo, mid).concat(fnNodesOf(xs, mid, hi))
+        const mid: int = lo + Math.floor((hi - lo) / 2);
+        return fnNodesOf(xs, lo, mid).concat(fnNodesOf(xs, mid, hi));
     }
 
     fn serverNodesOf(xs: ServerFn[], lo: int, hi: int) -> Node[] {
         if (hi - lo <= 8) {
-            let out: Node[] = []
-            let i: int = lo
+            let out: Node[] = [];
+            let i: int = lo;
             while (i < hi) {
-                out = out.concat([Node.NServerFn(xs[i])])
-                i = i + 1
+                out = out.concat([Node.NServerFn(xs[i])]);
+                i = i + 1;
             }
-            return out
+            return out;
         }
-        const mid: int = lo + Math.floor((hi - lo) / 2)
-        return serverNodesOf(xs, lo, mid).concat(serverNodesOf(xs, mid, hi))
+        const mid: int = lo + Math.floor((hi - lo) / 2);
+        return serverNodesOf(xs, lo, mid).concat(serverNodesOf(xs, mid, hi));
     }
 
     fn constNodesOf(xs: CoreConst[], lo: int, hi: int) -> Node[] {
         if (hi - lo <= 8) {
-            let out: Node[] = []
-            let i: int = lo
+            let out: Node[] = [];
+            let i: int = lo;
             while (i < hi) {
-                out = out.concat([Node.NExpr(xs[i].init)])
-                i = i + 1
+                out = out.concat([Node.NExpr(xs[i].init)]);
+                i = i + 1;
             }
-            return out
+            return out;
         }
-        const mid: int = lo + Math.floor((hi - lo) / 2)
-        return constNodesOf(xs, lo, mid).concat(constNodesOf(xs, mid, hi))
+        const mid: int = lo + Math.floor((hi - lo) / 2);
+        return constNodesOf(xs, lo, mid).concat(constNodesOf(xs, mid, hi));
     }
 
     fn declKids(d: Decl) -> Node[] {
-        let out: Node[] = []
-        for (const f of d.fields) { out = out.concat([Node.NField(f)]) }
-        return out.concat(maybeViews(d.renders))
+        let out: Node[] = [];
+        for (const f of d.fields) { out = out.concat([Node.NField(f)]); }
+        return out.concat(maybeViews(d.renders));
     }
 
     fn stmtKids(s: Stmt) -> Node[] {
         return match s {
-            .Let(sym: sym, init: init) :> [Node.NExpr(init)]
-            .Assign(local: local, value: value, path: path) :> pathNodes(path).concat([Node.NExpr(value)])   // s472: a part write's indices, then its value
+            .Let(sym: sym, init: init) :> [Node.NExpr(init)],
+            .Assign(local: local, value: value, path: path) :> pathNodes(path).concat([Node.NExpr(value)]),   // s472: a part write's indices, then its value
             .Write(inst: inst, edit: edit, value: value) :>
-                [Node.NInst(inst), Node.NEdit(edit), Node.NExpr(value)]
-            .Commit(writes: ws) :> stmtNodes(ws)
+                [Node.NInst(inst), Node.NEdit(edit), Node.NExpr(value)],
+            .Commit(writes: ws) :> stmtNodes(ws),
             .If(cond: cond, thenB: thenB, elseB: elseB) :>
-                [Node.NExpr(cond), Node.NBlock(thenB)].concat(maybeBlock(elseB))
-            .Return(e: e) :> [Node.NExpr(e)]
-            .Eval(e: e) :> [Node.NExpr(e)]
-            .Suspend(bind: b, on: on, then: t) :> [Node.NExpr(on), Node.NBlock(t)]
-            .ResetSurface(of: v) :> [Node.NInst(validityInst(v))]
-            .Defer(body: b) :> [Node.NBlock(b)]
-            .Unpersist(inst: i) :> [Node.NInst(i)]
-            .Attempt(result: r, call: c, ok: ok, arms: arms) :> failableKids(c).concat(okKids(ok)).concat(errArmKids(arms))
-            .Fail(args: args) :> exprNodes(args)
-            .Join(k: k, body: b) :> [Node.NBlock(b)]          // s454 (U1b)
-            .Jump(k: k) :> []
-            .Loop(label: l, head: h, body: b) :> loopHeadKids(h).concat([Node.NBlock(b)])   // s469 (§49)
-            .Break(target: t) :> []
-            .Continue(target: t) :> []
-            .Gather(g: g) :> gatherKids(g)                // s469 (§49.6)
-            .Lift(into: i, what: w) :> liftedKids(w)
+                [Node.NExpr(cond), Node.NBlock(thenB)].concat(maybeBlock(elseB)),
+            .Return(e: e) :> [Node.NExpr(e)],
+            .Eval(e: e) :> [Node.NExpr(e)],
+            .Suspend(bind: b, on: on, then: t) :> [Node.NExpr(on), Node.NBlock(t)],
+            .ResetSurface(of: v) :> [Node.NInst(validityInst(v))],
+            .Defer(body: b) :> [Node.NBlock(b)],
+            .Unpersist(inst: i) :> [Node.NInst(i)],
+            .Attempt(result: r, call: c, ok: ok, arms: arms) :> failableKids(c).concat(okKids(ok)).concat(errArmKids(arms)),
+            .Fail(args: args) :> exprNodes(args),
+            .Join(k: k, body: b) :> [Node.NBlock(b)],          // s454 (U1b)
+            .Jump(k: k) :> [],
+            .Loop(label: l, head: h, body: b) :> loopHeadKids(h).concat([Node.NBlock(b)]),   // s469 (§49)
+            .Break(target: t) :> [],
+            .Continue(target: t) :> [],
+            .Gather(g: g) :> gatherKids(g),                // s469 (§49.6)
+            .Lift(into: i, what: w) :> liftedKids(w),
             .LocalFn(f: f) :> [Node.NFn(f)]                 // s477 (§7.3.1): a nested function — its parameters and body
-        }
+        };
     }
 
     // s469 (§49.6) — a bound loop's children: its head, then its body.
     fn gatherKids(g: Gather) -> Node[] {
-        return loopHeadKids(g.head).concat([Node.NBlock(g.body)])
+        return loopHeadKids(g.head).concat([Node.NBlock(g.body)]);
     }
 
     fn liftedKids(w: Lifted) -> Node[] {
         return match w {
-            .LValue(e: e) :> [Node.NExpr(e)]
+            .LValue(e: e) :> [Node.NExpr(e)],
             .LRow(idx: x) :> []
-        }
+        };
     }
 
     // s469 (§17.4) — a Tier-0 gather's row templates, in index order.
     fn gatherRowNodes(rows: GatherRow[]) -> Node[] {
-        let out: Node[] = []
-        for (const r of rows) { out = out.concat(viewNodes(r.views)) }
-        return out
+        let out: Node[] = [];
+        for (const r of rows) { out = out.concat(viewNodes(r.views)); }
+        return out;
     }
 
     // s469 — a loop head's children, in evaluation order: the counted head's
@@ -276,12 +276,12 @@ ${
     // iterable; a range's bounds.
     fn loopHeadKids(h: LoopHead) -> Node[] {
         return match h {
-            .Forever :> []
-            .While(cond: c) :> [Node.NExpr(c)]
-            .Counted(init: i, cond: c, step: sp) :> stmtNodes(i).concat(maybeExpr(c)).concat(stmtNodes(sp))
-            .Each(h: eh) :> [Node.NExpr(eh.src)]
+            .Forever :> [],
+            .While(cond: c) :> [Node.NExpr(c)],
+            .Counted(init: i, cond: c, step: sp) :> stmtNodes(i).concat(maybeExpr(c)).concat(stmtNodes(sp)),
+            .Each(h: eh) :> [Node.NExpr(eh.src)],
             .Range(h: rh) :> [Node.NExpr(rh.lo), Node.NExpr(rh.hi)]
-        }
+        };
     }
 
     // s469 — what a loop binds: its label (printed when a `break` / `continue`
@@ -289,160 +289,160 @@ ${
     // (A counted head's `init` Lets bind as Lets, below them.)
     fn loopBinds(label: Sym, h: LoopHead) -> Sym[] {
         const own: Sym[] = match h {
-            .Each(h: eh) :> [eh.bind]
-            .Range(h: rh) :> [rh.bind, rh.end].concat(maybeSym(rh.counter))
-            .Forever :> []
-            .While(cond: c) :> []
+            .Each(h: eh) :> [eh.bind],
+            .Range(h: rh) :> [rh.bind, rh.end].concat(maybeSym(rh.counter)),
+            .Forever :> [],
+            .While(cond: c) :> [],
             .Counted(init: i) :> []
-        }
-        return [label].concat(own)
+        };
+        return [label].concat(own);
     }
 
     // s451 (Ue): an Attempt's children — the failable's values, the success
     // branch, then each failure arm (its pattern, body and value).
     fn failableKids(c: Failable) -> Node[] {
         return match c {
-            .FCall(fn: f, args: args) :> exprNodes(args)
-            .FSettled(outcome: o) :> []                 // s454 (U1b): a local, read where it settled
-            .FParse(json: j) :> exprNodes([j])           // s478: the §41.13 intrinsic's input
+            .FCall(fn: f, args: args) :> exprNodes(args),
+            .FSettled(outcome: o) :> [],                 // s454 (U1b): a local, read where it settled
+            .FParse(json: j) :> exprNodes([j]),           // s478: the §41.13 intrinsic's input
             .FCallV(f: f, args: args) :> exprNodes([f].concat(args))   // s478-ruled-fn-types
-        }
+        };
     }
 
     fn okKids(ok: OkArm) -> Node[] {
-        return [Node.NBlock(ok.body)].concat(maybeExpr(ok.value))
+        return [Node.NBlock(ok.body)].concat(maybeExpr(ok.value));
     }
 
     fn errArmKids(arms: ErrArm[]) -> Node[] {
-        let out: Node[] = []
-        for (const a of arms) { out = out.concat([Node.NPattern(a.pat), Node.NBlock(a.body)]).concat(maybeExpr(a.value)) }
-        return out
+        let out: Node[] = [];
+        for (const a of arms) { out = out.concat([Node.NPattern(a.pat), Node.NBlock(a.body)]).concat(maybeExpr(a.value)); }
+        return out;
     }
 
     fn exprKids(e: Expr) -> Node[] {
         return match e {
-            .Lit(lit: lit) :> []
-            .Local(sym: sym) :> []
-            .Read(place: place) :> [Node.NPlace(place)]
-            .Call(callee: callee, args: args) :> exprNodes(args)
-            .FnRef(fn: f) :> []
-            .CallV(f: f, args: args) :> [Node.NExpr(f)].concat(exprNodes(args))
-            .Prim(op: op, args: args) :> exprNodes(args)
-            .Match(scrut: scrut, arms: arms) :> [Node.NExpr(scrut)].concat(armNodes(arms))
-            .ArrayOf(elems: elems) :> exprNodes(elems)
-            .StructOf(ty: ty, fields: fields) :> exprNodes(fields)
-            .VariantOf(enumSym: es, args: args) :> exprNodes(args)
-            .Handle(inst: inst) :> [Node.NInst(inst)]
-            .Assigned(local: l, value: v) :> [Node.NExpr(v)]
-            .InitOf(decl: d, inst: inst) :> [Node.NInst(inst)]
-            .Host(call: c) :> []
-            .Lambda(params: ps, body: b) :> [Node.NExpr(b)]
-            .BlockLambda(params: ps, body: b) :> [Node.NBlock(b)]     // s478: its body's statements
-            .SeqCall(op: o, seq: sq, f: f) :> [Node.NExpr(sq), Node.NExpr(f)]
-            .Refetch(req: rf0) :> []
-            .Validity(of: v, prop: pr) :> [Node.NInst(validityInst(v))]
-            .ServerCall(fn: f, args: args) :> exprNodes(args)   // s454 (U1b)
-            .Query(q: q) :> exprNodes(q.params)                 // s468 (U1c): its values (the text is data)
+            .Lit(lit: lit) :> [],
+            .Local(sym: sym) :> [],
+            .Read(place: place) :> [Node.NPlace(place)],
+            .Call(callee: callee, args: args) :> exprNodes(args),
+            .FnRef(fn: f) :> [],
+            .CallV(f: f, args: args) :> [Node.NExpr(f)].concat(exprNodes(args)),
+            .Prim(op: op, args: args) :> exprNodes(args),
+            .Match(scrut: scrut, arms: arms) :> [Node.NExpr(scrut)].concat(armNodes(arms)),
+            .ArrayOf(elems: elems) :> exprNodes(elems),
+            .StructOf(ty: ty, fields: fields) :> exprNodes(fields),
+            .VariantOf(enumSym: es, args: args) :> exprNodes(args),
+            .Handle(inst: inst) :> [Node.NInst(inst)],
+            .Assigned(local: l, value: v) :> [Node.NExpr(v)],
+            .InitOf(decl: d, inst: inst) :> [Node.NInst(inst)],
+            .Host(call: c) :> [],
+            .Lambda(params: ps, body: b) :> [Node.NExpr(b)],
+            .BlockLambda(params: ps, body: b) :> [Node.NBlock(b)],     // s478: its body's statements
+            .SeqCall(op: o, seq: sq, f: f) :> [Node.NExpr(sq), Node.NExpr(f)],
+            .Refetch(req: rf0) :> [],
+            .Validity(of: v, prop: pr) :> [Node.NInst(validityInst(v))],
+            .ServerCall(fn: f, args: args) :> exprNodes(args),   // s454 (U1b)
+            .Query(q: q) :> exprNodes(q.params),                 // s468 (U1c): its values (the text is data)
             .Foreign(slice: fsl0, args: args) :> exprNodes(args)    // s477: its crossing values (the slice text is data)
-        }
+        };
     }
 
     // s472: a local part write's path holds its index expressions (in order).
     fn pathNodes(path: PathStep[]) -> Node[] {
-        let out: Node[] = []
-        for (const st of path) { out = out.concat(pathStepNodes(st)) }
-        return out
+        let out: Node[] = [];
+        for (const st of path) { out = out.concat(pathStepNodes(st)); }
+        return out;
     }
 
     fn pathStepNodes(st: PathStep) -> Node[] {
         return match st {
-            .StepIndex(index: i) :> [Node.NExpr(i)]
+            .StepIndex(index: i) :> [Node.NExpr(i)],
             .StepField(ref: r) :> []
-        }
+        };
     }
 
     // s444: an ElemAt edit holds its index expression.
     fn editKids(k: EditKind) -> Node[] {
         return match k {
-            .ElemAt(index: i, path: p) :> [Node.NExpr(i)]
-            .PositionAt(index: i) :> [Node.NExpr(i)]          // s472
-            .Replace :> []
-            .Append :> []
-            .Prepend :> []
-            .Anywhere :> []
-            .PositionWrite :> []
-            .FieldAt(path: p) :> []
-            .Transition :> []
-            .RemoveEnd :> []
-            .RemoveFront :> []
+            .ElemAt(index: i, path: p) :> [Node.NExpr(i)],
+            .PositionAt(index: i) :> [Node.NExpr(i)],          // s472
+            .Replace :> [],
+            .Append :> [],
+            .Prepend :> [],
+            .Anywhere :> [],
+            .PositionWrite :> [],
+            .FieldAt(path: p) :> [],
+            .Transition :> [],
+            .RemoveEnd :> [],
+            .RemoveFront :> [],
             .RemoveAnywhere :> []
-        }
+        };
     }
 
     fn placeKids(pl: Place) -> Node[] {
         return match pl {
-            .Cell(decl: decl, inst: inst, path: path) :> [Node.NInst(inst)]
+            .Cell(decl: decl, inst: inst, path: path) :> [Node.NInst(inst)],
             .LocalPath(sym: sym, path: path) :> []
-        }
+        };
     }
 
     fn viewKids(v: View) -> Node[] {
         return match v {
-            .El(tag: tag, attrs: attrs, kids: ks) :> attrNodes(attrs).concat(viewNodes(ks))
-            .Text(text: t) :> []
-            .RawText(text: t) :> []
-            .Dyn(e: e) :> [Node.NExpr(e)]
-            .Cond(arms: arms) :> condArmNodes(arms)
+            .El(tag: tag, attrs: attrs, kids: ks) :> attrNodes(attrs).concat(viewNodes(ks)),
+            .Text(text: t) :> [],
+            .RawText(text: t) :> [],
+            .Dyn(e: e) :> [Node.NExpr(e)],
+            .Cond(arms: arms) :> condArmNodes(arms),
             .Each(src: src, key: key, row: row) :>
-                [Node.NExpr(src)].concat(maybeExpr(key)).concat(viewNodes(row))
+                [Node.NExpr(src)].concat(maybeExpr(key)).concat(viewNodes(row)),
             .Instance(decl: decl, attrs: attrs, slot: slot, alias: alias) :>
-                constructNodes(attrs).concat(viewNodes(slot))
-            .Slot :> []
-            .Star(decl: d, inst: inst) :> [Node.NInst(inst)]
-            .Effect(deps: ds, body: b) :> effectDepNodes(ds).concat([Node.NBlock(b)])
-            .Run(body: b) :> [Node.NBlock(b)]
+                constructNodes(attrs).concat(viewNodes(slot)),
+            .Slot :> [],
+            .Star(decl: d, inst: inst) :> [Node.NInst(inst)],
+            .Effect(deps: ds, body: b) :> effectDepNodes(ds).concat([Node.NBlock(b)]),
+            .Run(body: b) :> [Node.NBlock(b)],
             // s475 — the target, the deps and the signals are cells (their instances are children)
             .Request(target: t, deps: ds, body: b, state: st) :>
-                effectDepNodes([t].concat(ds).concat(requestStateDeps(st))).concat([Node.NBlock(b)])
-            .ResetOn(triggers: ds, reset: b) :> effectDepNodes(ds).concat([Node.NBlock(b)])
-            .Errors(of: x, all: a) :> [Node.NInst(validityInst(x))]
-            .Reach(fields: fs) :> validityNodes(fs)
+                effectDepNodes([t].concat(ds).concat(requestStateDeps(st))).concat([Node.NBlock(b)]),
+            .ResetOn(triggers: ds, reset: b) :> effectDepNodes(ds).concat([Node.NBlock(b)]),
+            .Errors(of: x, all: a) :> [Node.NInst(validityInst(x))],
+            .Reach(fields: fs) :> validityNodes(fs),
             .Gather(g: g, rows: rows) :> gatherKids(g).concat(gatherRowNodes(rows))   // s469 (§17.4)
-        }
+        };
     }
 
     // s449: an `<effect>` dependency's instance reference is a child (sharedRefs
     // sees a `.Shared` dep; check.scrml resolves it as it resolves a read's).
     fn effectDepNodes(ds: EffectDep[]) -> Node[] {
-        let out: Node[] = []
-        for (const d of ds) { out = out.concat([Node.NInst(d.inst)]) }
-        return out
+        let out: Node[] = [];
+        for (const d of ds) { out = out.concat([Node.NInst(d.inst)]); }
+        return out;
     }
 
     // s475 — a request's signal cells, in the fixed order loading, data, error, stale
     // (r1: all four or none — RequestState's fields are mandatory).
     export fn requestStateDeps(st: RequestState | not) -> EffectDep[] {
-        if (st is not) return []
-        return [st.loading, st.data, st.error, st.stale]
+        if (st is not) return [];
+        return [st.loading, st.data, st.error, st.stale];
     }
 
     fn attrKids(a: Attr) -> Node[] {
         return match a {
-            .Static(name: name, value: value) :> []
-            .Bound(name: name, e: e) :> [Node.NExpr(e)]
-            .Show(test: t) :> [Node.NExpr(t)]
-            .ClassOn(test: t) :> [Node.NExpr(t)]
-            .On(event: event, body: body) :> [Node.NBlock(body)]
-            .Bind(kind: k, read: r, sink: sk, write: w) :> [Node.NExpr(r), Node.NBlock(w)]
+            .Static(name: name, value: value) :> [],
+            .Bound(name: name, e: e) :> [Node.NExpr(e)],
+            .Show(test: t) :> [Node.NExpr(t)],
+            .ClassOn(test: t) :> [Node.NExpr(t)],
+            .On(event: event, body: body) :> [Node.NBlock(body)],
+            .Bind(kind: k, read: r, sink: sk, write: w) :> [Node.NExpr(r), Node.NBlock(w)],
             .Gate(values: vs, fields: fs) :> validityNodes(fs)
-        }
+        };
     }
 
     // s449: a form gate's statically named fields — their instance references are children.
     fn validityNodes(fs: ValidityOf[]) -> Node[] {
-        let out: Node[] = []
-        for (const f of fs) { out = out.concat([Node.NInst(validityInst(f))]) }
-        return out
+        let out: Node[] = [];
+        for (const f of fs) { out = out.concat([Node.NInst(validityInst(f))]); }
+        return out;
     }
 
     // Every node under (and including) `root`, preorder.
@@ -452,16 +452,16 @@ ${
     // time (O(n²) per walk; the dominant cost of compiling a 2,000-line program).
     // Same nodes, same order as the stack walk it replaces.
     export fn allNodes(root: Node) -> Node[] {
-        const ks: Node[] = kids(root)
-        if (ks.length == 0) return [root]
-        return [root].concat(allNodesOf(ks, 0, ks.length))
+        const ks: Node[] = kids(root);
+        if (ks.length == 0) return [root];
+        return [root].concat(allNodesOf(ks, 0, ks.length));
     }
 
     // The preorder of ks[lo], …, ks[hi - 1], in turn (hi > lo).
     fn allNodesOf(ks: Node[], lo: int, hi: int) -> Node[] {
-        if (hi - lo == 1) return allNodes(ks[lo])
-        const mid: int = lo + Math.floor((hi - lo) / 2)
-        return allNodesOf(ks, lo, mid).concat(allNodesOf(ks, mid, hi))
+        if (hi - lo == 1) return allNodes(ks[lo]);
+        const mid: int = lo + Math.floor((hi - lo) / 2);
+        return allNodesOf(ks, lo, mid).concat(allNodesOf(ks, mid, hi));
     }
 
     // -------------------------------------------------------------------------
@@ -472,91 +472,91 @@ ${
     // with a handle), in preorder — what a Core Refetch may name (check C-R3), and
     // the program-level slots the printer declares.
     export fn requestHandles(p: CoreProgram) -> Sym[] {
-        let out: Sym[] = []
-        for (const n of allNodes(Node.NProgram(p))) { out = out.concat(nodeRequestHandle(n)) }
-        return out
+        let out: Sym[] = [];
+        for (const n of allNodes(Node.NProgram(p))) { out = out.concat(nodeRequestHandle(n)); }
+        return out;
     }
 
     fn nodeRequestHandle(n: Node) -> Sym[] {
         return match n {
-            .NView(v: v) :> viewRequestHandle(v)
-            .NProgram(p: x) :> []
-            .NDecl(d: x) :> []
-            .NField(f: x) :> []
-            .NFn(f: x) :> []
-            .NServerFn(f: x) :> []
-            .NBlock(b: x) :> []
-            .NStmt(s: x) :> []
-            .NExpr(e: x) :> []
-            .NPlace(pl: x) :> []
-            .NInst(i: x) :> []
-            .NPattern(pat: x) :> []
-            .NEdit(k: x) :> []
+            .NView(v: v) :> viewRequestHandle(v),
+            .NProgram(p: x) :> [],
+            .NDecl(d: x) :> [],
+            .NField(f: x) :> [],
+            .NFn(f: x) :> [],
+            .NServerFn(f: x) :> [],
+            .NBlock(b: x) :> [],
+            .NStmt(s: x) :> [],
+            .NExpr(e: x) :> [],
+            .NPlace(pl: x) :> [],
+            .NInst(i: x) :> [],
+            .NPattern(pat: x) :> [],
+            .NEdit(k: x) :> [],
             .NAttr(a: x) :> []
-        }
+        };
     }
 
     fn viewRequestHandle(v: View) -> Sym[] {
         return match v {
-            .Request(handle: h) :> optSym(h)
-            .Each(bind: x) :> []
-            .El(tag: x) :> []
-            .Text(text: x) :> []
-            .RawText(text: x) :> []
-            .Dyn(e: x) :> []
-            .Cond(arms: x) :> []
-            .Instance(decl: x) :> []
-            .Slot :> []
-            .Star(decl: x) :> []
-            .Effect(deps: x) :> []
-            .Run(body: x) :> []
-            .ResetOn(triggers: x) :> []
-            .Errors(of: x) :> []
-            .Reach(fields: x) :> []
+            .Request(handle: h) :> optSym(h),
+            .Each(bind: x) :> [],
+            .El(tag: x) :> [],
+            .Text(text: x) :> [],
+            .RawText(text: x) :> [],
+            .Dyn(e: x) :> [],
+            .Cond(arms: x) :> [],
+            .Instance(decl: x) :> [],
+            .Slot :> [],
+            .Star(decl: x) :> [],
+            .Effect(deps: x) :> [],
+            .Run(body: x) :> [],
+            .ResetOn(triggers: x) :> [],
+            .Errors(of: x) :> [],
+            .Reach(fields: x) :> [],
             .Gather(g: x) :> []
-        }
+        };
     }
 
     // The declarations whose SHARED instance is referenced under `root`
     // (dpa-051 §5.2 (4): `shared_<decl>` is emitted only if `.Shared(decl)`
     // appears in Core — lazy by construction). May contain duplicates.
     export fn sharedRefs(root: Node) -> Sym[] {
-        let out: Sym[] = []
+        let out: Sym[] = [];
         for (const n of allNodes(root)) {
-            const s: Sym | not = sharedOf(n)
-            if (s is given) out = out.concat([s])
+            const s: Sym | not = sharedOf(n);
+            if (s is given) out = out.concat([s]);
         }
-        return out
+        return out;
     }
 
     fn sharedOf(n: Node) -> Sym | not {
         return match n {
-            .NInst(i: i) :> sharedDecl(i)
-            .NProgram(p: p) :> not
-            .NDecl(d: d) :> not
-            .NField(f: f) :> not
-            .NFn(f: f) :> not
-            .NServerFn(f: f) :> not
-            .NBlock(b: b) :> not
-            .NStmt(s: s) :> not
-            .NExpr(e: e) :> not
-            .NPlace(pl: pl) :> not
-            .NPattern(pat: pat) :> not
-            .NEdit(k: k) :> not
-            .NView(v: v) :> not
+            .NInst(i: i) :> sharedDecl(i),
+            .NProgram(p: p) :> not,
+            .NDecl(d: d) :> not,
+            .NField(f: f) :> not,
+            .NFn(f: f) :> not,
+            .NServerFn(f: f) :> not,
+            .NBlock(b: b) :> not,
+            .NStmt(s: s) :> not,
+            .NExpr(e: e) :> not,
+            .NPlace(pl: pl) :> not,
+            .NPattern(pat: pat) :> not,
+            .NEdit(k: k) :> not,
+            .NView(v: v) :> not,
             .NAttr(a: a) :> not
-        }
+        };
     }
 
     fn sharedDecl(i: InstRef) -> Sym | not {
         return match i {
-            .Shared(decl: d) :> d
-            .Lexical(depth: depth) :> not
-            .Alias(sym: s) :> not
-            .Narrowed(sym: s) :> not
-            .Kid(of: o) :> sharedDecl(o)
+            .Shared(decl: d) :> d,
+            .Lexical(depth: depth) :> not,
+            .Alias(sym: s) :> not,
+            .Narrowed(sym: s) :> not,
+            .Kid(of: o) :> sharedDecl(o),
             .HandleOf(of: o) :> sharedDecl(o)
-        }
+        };
     }
 
     // The locals a Stmt-bearing node BINDS (Let, <each> binds and row handles,
@@ -564,250 +564,250 @@ ${
     // S480 (s480-boot-fn-count-perf): by halves — one concat per node copied every Sym bound
     // so far (O(nodes × locals)).
     export fn boundSyms(root: Node) -> Sym[] {
-        const ns: Node[] = allNodes(root)
-        return boundSymsOf(ns, 0, ns.length)
+        const ns: Node[] = allNodes(root);
+        return boundSymsOf(ns, 0, ns.length);
     }
 
     fn boundSymsOf(ns: Node[], lo: int, hi: int) -> Sym[] {
         if (hi - lo <= 8) {
-            let out: Sym[] = []
-            let i: int = lo
+            let out: Sym[] = [];
+            let i: int = lo;
             while (i < hi) {
-                out = out.concat(bindsOf(ns[i]))
-                i = i + 1
+                out = out.concat(bindsOf(ns[i]));
+                i = i + 1;
             }
-            return out
+            return out;
         }
-        const mid: int = lo + Math.floor((hi - lo) / 2)
-        return boundSymsOf(ns, lo, mid).concat(boundSymsOf(ns, mid, hi))
+        const mid: int = lo + Math.floor((hi - lo) / 2);
+        return boundSymsOf(ns, lo, mid).concat(boundSymsOf(ns, mid, hi));
     }
 
     fn bindsOf(n: Node) -> Sym[] {
         return match n {
-            .NStmt(s: s) :> stmtBinds(s)
-            .NView(v: v) :> viewBinds(v)
-            .NPattern(pat: pat) :> patternBinds(pat)
-            .NFn(f: f) :> paramSyms(f)
-            .NExpr(e: e) :> exprBinds(e)
-            .NAttr(a: a) :> attrBinds(a)
-            .NProgram(p: p) :> []
-            .NDecl(d: d) :> []
-            .NField(f: f) :> []
-            .NServerFn(f: f) :> serverParamSyms(f)
-            .NBlock(b: b) :> []
-            .NPlace(pl: pl) :> []
-            .NInst(i: i) :> []
+            .NStmt(s: s) :> stmtBinds(s),
+            .NView(v: v) :> viewBinds(v),
+            .NPattern(pat: pat) :> patternBinds(pat),
+            .NFn(f: f) :> paramSyms(f),
+            .NExpr(e: e) :> exprBinds(e),
+            .NAttr(a: a) :> attrBinds(a),
+            .NProgram(p: p) :> [],
+            .NDecl(d: d) :> [],
+            .NField(f: f) :> [],
+            .NServerFn(f: f) :> serverParamSyms(f),
+            .NBlock(b: b) :> [],
+            .NPlace(pl: pl) :> [],
+            .NInst(i: i) :> [],
             .NEdit(k: k) :> []
-        }
+        };
     }
 
     // s444: a lambda binds its parameters; a bind binds its event-value sink.
     fn exprBinds(e: Expr) -> Sym[] {
         return match e {
-            .Lambda(params: ps) :> ps
-            .BlockLambda(params: ps) :> ps
-            .Lit(lit: x) :> []
-            .Local(sym: x) :> []
-            .Read(place: x) :> []
-            .Call(callee: x) :> []
-            .FnRef(fn: x) :> []
-            .CallV(f: x) :> []
-            .Prim(op: x) :> []
-            .Match(scrut: x) :> []
-            .ArrayOf(elems: x) :> []
-            .StructOf(ty: x) :> []
-            .VariantOf(enumSym: x) :> []
-            .Handle(inst: x) :> []
-            .Assigned(local: x) :> []
-            .InitOf(decl: x) :> []
-            .Host(call: x) :> []
-            .SeqCall(op: x) :> []
-            .Refetch(req: rf0) :> []
-            .Validity(of: x) :> []
-            .ServerCall(fn: x) :> []
-            .Query(q: x) :> []
+            .Lambda(params: ps) :> ps,
+            .BlockLambda(params: ps) :> ps,
+            .Lit(lit: x) :> [],
+            .Local(sym: x) :> [],
+            .Read(place: x) :> [],
+            .Call(callee: x) :> [],
+            .FnRef(fn: x) :> [],
+            .CallV(f: x) :> [],
+            .Prim(op: x) :> [],
+            .Match(scrut: x) :> [],
+            .ArrayOf(elems: x) :> [],
+            .StructOf(ty: x) :> [],
+            .VariantOf(enumSym: x) :> [],
+            .Handle(inst: x) :> [],
+            .Assigned(local: x) :> [],
+            .InitOf(decl: x) :> [],
+            .Host(call: x) :> [],
+            .SeqCall(op: x) :> [],
+            .Refetch(req: rf0) :> [],
+            .Validity(of: x) :> [],
+            .ServerCall(fn: x) :> [],
+            .Query(q: x) :> [],
             .Foreign(slice: fsl0) :> []
-        }
+        };
     }
 
     fn attrBinds(a: Attr) -> Sym[] {
         return match a {
-            .Bind(sink: s) :> [s]
-            .Static(name: x) :> []
-            .Bound(name: x) :> []
-            .Show(test: x) :> []
-            .ClassOn(test: x) :> []
-            .On(event: x) :> []
+            .Bind(sink: s) :> [s],
+            .Static(name: x) :> [],
+            .Bound(name: x) :> [],
+            .Show(test: x) :> [],
+            .ClassOn(test: x) :> [],
+            .On(event: x) :> [],
             .Gate(values: x) :> []
-        }
+        };
     }
 
     fn paramSyms(f: Fn) -> Sym[] {
-        let out: Sym[] = []
-        for (const p of f.params) { out = out.concat([p.sym]) }
-        return out
+        let out: Sym[] = [];
+        for (const p of f.params) { out = out.concat([p.sym]); }
+        return out;
     }
 
     // s451 (U1a): a server function binds its parameters too.
     fn serverParamSyms(f: ServerFn) -> Sym[] {
-        let out: Sym[] = []
-        for (const p of f.params) { out = out.concat([p.sym]) }
-        return out
+        let out: Sym[] = [];
+        for (const p of f.params) { out = out.concat([p.sym]); }
+        return out;
     }
 
     fn stmtBinds(s: Stmt) -> Sym[] {
         return match s {
-            .Let(sym: sym, init: init) :> [sym]
-            .Assign(local: local, value: value) :> []
-            .Write :> []
-            .Commit :> []
-            .If(cond: cond, thenB: thenB, elseB: elseB) :> []
-            .Return(e: e) :> []
-            .Eval(e: e) :> []
-            .Suspend(bind: b) :> [b]
-            .ResetSurface(of: v) :> []
-            .Defer(body: b) :> []
-            .Unpersist(decl: x) :> []
-            .Attempt(result: r, ok: ok, arms: arms) :> maybeSym(r).concat([ok.bind]).concat(wholeSyms(arms))
-            .Fail(err: x) :> []
-            .Join(k: k) :> [k]                           // s454 (U1b): the continuation is a named local
-            .Jump(k: x) :> []
-            .Loop(label: l, head: h) :> loopBinds(l, h)  // s469
-            .Break(target: x) :> []
-            .Continue(target: x) :> []
-            .Gather(g: g) :> loopBinds(g.label, g.head).concat([g.bind])   // s469 (§49.6)
-            .Lift(into: x) :> []
+            .Let(sym: sym, init: init) :> [sym],
+            .Assign(local: local, value: value) :> [],
+            .Write :> [],
+            .Commit :> [],
+            .If(cond: cond, thenB: thenB, elseB: elseB) :> [],
+            .Return(e: e) :> [],
+            .Eval(e: e) :> [],
+            .Suspend(bind: b) :> [b],
+            .ResetSurface(of: v) :> [],
+            .Defer(body: b) :> [],
+            .Unpersist(decl: x) :> [],
+            .Attempt(result: r, ok: ok, arms: arms) :> maybeSym(r).concat([ok.bind]).concat(wholeSyms(arms)),
+            .Fail(err: x) :> [],
+            .Join(k: k) :> [k],                           // s454 (U1b): the continuation is a named local
+            .Jump(k: x) :> [],
+            .Loop(label: l, head: h) :> loopBinds(l, h),  // s469
+            .Break(target: x) :> [],
+            .Continue(target: x) :> [],
+            .Gather(g: g) :> loopBinds(g.label, g.head).concat([g.bind]),   // s469 (§49.6)
+            .Lift(into: x) :> [],
             .LocalFn(f: f) :> [f.sym]                        // s477: the nested function's own name (its parameters are the NFn's)
-        }
+        };
     }
 
     // s452: the whole-error binders of an Attempt's arms (§18.6.1).
     fn wholeSyms(arms: ErrArm[]) -> Sym[] {
-        let out: Sym[] = []
-        for (const a of arms) { out = out.concat(maybeSym(a.whole)) }
-        return out
+        let out: Sym[] = [];
+        for (const a of arms) { out = out.concat(maybeSym(a.whole)); }
+        return out;
     }
 
     fn maybeSym(s: Sym | not) -> Sym[] {
-        if (s is not) return []
-        return [s]
+        if (s is not) return [];
+        return [s];
     }
 
     fn viewBinds(v: View) -> Sym[] {
         return match v {
-            .Each(bind: bind, handles: handles) :> [bind].concat(handles)
-            .El(tag: tag, attrs: attrs, kids: ks) :> []
-            .Text(text: t) :> []
-            .RawText(text: t) :> []
-            .Dyn(e: e) :> []
-            .Cond(arms: arms) :> []
-            .Instance(decl: decl, attrs: attrs, slot: slot, alias: alias) :> []
-            .Slot :> []
-            .Star(decl: d) :> []
-            .Effect(deps: ds) :> []
-            .Run(hoist: hs) :> hs                           // s478-boot-run-locals: its top-level locals (declared by runJs)
-            .Request(handle: h) :> optSym(h)                // s475 r1: the request's handle (bound by requestJs)
-            .ResetOn(triggers: ds) :> []
-            .Errors(of: x) :> []
-            .Reach(fields: fs) :> []
+            .Each(bind: bind, handles: handles) :> [bind].concat(handles),
+            .El(tag: tag, attrs: attrs, kids: ks) :> [],
+            .Text(text: t) :> [],
+            .RawText(text: t) :> [],
+            .Dyn(e: e) :> [],
+            .Cond(arms: arms) :> [],
+            .Instance(decl: decl, attrs: attrs, slot: slot, alias: alias) :> [],
+            .Slot :> [],
+            .Star(decl: d) :> [],
+            .Effect(deps: ds) :> [],
+            .Run(hoist: hs) :> hs,                           // s478-boot-run-locals: its top-level locals (declared by runJs)
+            .Request(handle: h) :> optSym(h),                // s475 r1: the request's handle (bound by requestJs)
+            .ResetOn(triggers: ds) :> [],
+            .Errors(of: x) :> [],
+            .Reach(fields: fs) :> [],
             .Gather(g: g) :> loopBinds(g.label, g.head).concat([g.bind])   // s469 (§17.4)
-        }
+        };
     }
 
     fn optSym(s: Sym | not) -> Sym[] {
-        if (s is not) return []
-        return [s]
+        if (s is not) return [];
+        return [s];
     }
 
     fn patternBinds(pat: Pattern) -> Sym[] {
         return match pat {
-            .PVariant(enumSym: e, idx: idx, binds: binds) :> binds
-            .PLit(lit: lit) :> []
+            .PVariant(enumSym: e, idx: idx, binds: binds) :> binds,
+            .PLit(lit: lit) :> [],
             .PWild :> []
-        }
+        };
     }
 
     // The locals ASSIGNED (not merely bound) under `root` — a Let whose sym is
     // later Assigned prints as `let`, otherwise `const`.
     export fn assignedSyms(root: Node) -> int[] {
-        let out: int[] = []
+        let out: int[] = [];
         for (const n of allNodes(root)) {
-            const id: int = assignedOf(n)
-            if (id >= 0) out = out.concat([id])
+            const id: int = assignedOf(n);
+            if (id >= 0) out = out.concat([id]);
         }
-        return out
+        return out;
     }
 
     fn assignedOf(n: Node) -> int {
         return match n {
-            .NStmt(s: s) :> assignedInStmt(s)
-            .NProgram(p: p) :> -1
-            .NDecl(d: d) :> -1
-            .NField(f: f) :> -1
-            .NFn(f: f) :> -1
-            .NServerFn(f: f) :> -1
-            .NBlock(b: b) :> -1
-            .NExpr(e: e) :> assignedInExpr(e)       // s474: the kept condition-head assignment (§50)
-            .NPlace(pl: pl) :> -1
-            .NInst(i: i) :> -1
-            .NPattern(pat: pat) :> -1
-            .NEdit(k: k) :> -1
-            .NView(v: v) :> -1
+            .NStmt(s: s) :> assignedInStmt(s),
+            .NProgram(p: p) :> -1,
+            .NDecl(d: d) :> -1,
+            .NField(f: f) :> -1,
+            .NFn(f: f) :> -1,
+            .NServerFn(f: f) :> -1,
+            .NBlock(b: b) :> -1,
+            .NExpr(e: e) :> assignedInExpr(e),       // s474: the kept condition-head assignment (§50)
+            .NPlace(pl: pl) :> -1,
+            .NInst(i: i) :> -1,
+            .NPattern(pat: pat) :> -1,
+            .NEdit(k: k) :> -1,
+            .NView(v: v) :> -1,
             .NAttr(a: a) :> -1
-        }
+        };
     }
 
     fn assignedInExpr(e: Expr) -> int {
         return match e {
-            .Assigned(local: l) :> l.id
-            .Lit(lit: x) :> -1
-            .Local(sym: x) :> -1
-            .Read(place: x) :> -1
-            .Call(callee: x) :> -1
-            .FnRef(fn: x) :> -1
-            .CallV(f: x) :> -1
-            .Prim(op: x) :> -1
-            .Match(scrut: x) :> -1
-            .ArrayOf(elems: x) :> -1
-            .StructOf(ty: x) :> -1
-            .VariantOf(enumSym: x) :> -1
-            .Handle(inst: x) :> -1
-            .InitOf(decl: x) :> -1
-            .Host(call: x) :> -1
-            .Lambda(params: x) :> -1
-            .BlockLambda(params: x) :> -1
-            .SeqCall(op: x) :> -1
-            .Refetch(req: rf0) :> -1
-            .Validity(of: x) :> -1
-            .ServerCall(fn: x) :> -1
-            .Query(q: x) :> -1
+            .Assigned(local: l) :> l.id,
+            .Lit(lit: x) :> -1,
+            .Local(sym: x) :> -1,
+            .Read(place: x) :> -1,
+            .Call(callee: x) :> -1,
+            .FnRef(fn: x) :> -1,
+            .CallV(f: x) :> -1,
+            .Prim(op: x) :> -1,
+            .Match(scrut: x) :> -1,
+            .ArrayOf(elems: x) :> -1,
+            .StructOf(ty: x) :> -1,
+            .VariantOf(enumSym: x) :> -1,
+            .Handle(inst: x) :> -1,
+            .InitOf(decl: x) :> -1,
+            .Host(call: x) :> -1,
+            .Lambda(params: x) :> -1,
+            .BlockLambda(params: x) :> -1,
+            .SeqCall(op: x) :> -1,
+            .Refetch(req: rf0) :> -1,
+            .Validity(of: x) :> -1,
+            .ServerCall(fn: x) :> -1,
+            .Query(q: x) :> -1,
             .Foreign(slice: fsl0) :> -1
-        }
+        };
     }
 
     fn assignedInStmt(s: Stmt) -> int {
         return match s {
-            .Assign(local: local, value: value) :> local.id
-            .Let(sym: sym, init: init) :> -1
-            .Write :> -1
-            .Commit :> -1
-            .If(cond: cond, thenB: thenB, elseB: elseB) :> -1
-            .Return(e: e) :> -1
-            .Eval(e: e) :> -1
-            .Suspend(bind: b) :> -1
-            .ResetSurface(of: v) :> -1
-            .Defer(body: b) :> -1
-            .Unpersist(decl: x) :> -1
-            .Attempt(result: r) :> -1
-            .Fail(err: x) :> -1
-            .Join(k: x) :> -1
-            .Jump(k: x) :> -1
-            .Loop(label: x) :> -1
-            .Break(target: x) :> -1
-            .Continue(target: x) :> -1
-            .Gather(g: x) :> -1
-            .Lift(into: x) :> -1
+            .Assign(local: local, value: value) :> local.id,
+            .Let(sym: sym, init: init) :> -1,
+            .Write :> -1,
+            .Commit :> -1,
+            .If(cond: cond, thenB: thenB, elseB: elseB) :> -1,
+            .Return(e: e) :> -1,
+            .Eval(e: e) :> -1,
+            .Suspend(bind: b) :> -1,
+            .ResetSurface(of: v) :> -1,
+            .Defer(body: b) :> -1,
+            .Unpersist(decl: x) :> -1,
+            .Attempt(result: r) :> -1,
+            .Fail(err: x) :> -1,
+            .Join(k: x) :> -1,
+            .Jump(k: x) :> -1,
+            .Loop(label: x) :> -1,
+            .Break(target: x) :> -1,
+            .Continue(target: x) :> -1,
+            .Gather(g: x) :> -1,
+            .Lift(into: x) :> -1,
             .LocalFn(f: x) :> -1
-        }
+        };
     }
 }

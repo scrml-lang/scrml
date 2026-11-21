@@ -56,7 +56,7 @@
 
 import { readFileSync, writeFileSync, statSync, readdirSync, existsSync } from "fs";
 import { resolve, join, relative, sep, dirname } from "path";
-import { fixS66, S66_RULES, IMPL1_SAFE_RULES, S66_DECL_RULES, moduleEdges, hasProgramRoot } from "./fix-s66.js";
+import { fixS66, S66_RULES, IMPL1_SAFE_RULES, S66_DECL_RULES, RULED_ONLY_RULES, moduleEdges, hasProgramRoot } from "./fix-s66.js";
 import { compileErrorsTogether, compileErrorsOfText } from "./fix-verify-shared.js";
 
 const HELP = `scrml fix <file|dir> [options]
@@ -71,7 +71,8 @@ sql-failable: an unhandled \`?{}\` READ in a server function that is not \`!\` �
 \`?{…}.get() !{ _ :> not }\` / \`.all() !{ _ :> [] }\`, §19.8.3; every WRITE — any \`.run()\`, a bare
 \`?{}\` statement, any query not provably a pure read — is LISTED for a human, never rewritten;
 stmt-semi / arm-comma: the S469 \`;\` after every non-block statement and \`,\` between arms, at the
-statement / arm boundaries today's compiler reads).
+statement / arm boundaries today's compiler reads; loop-while / loop-do-while (with --s66): the S469
+\`while (cond)\` → \`for (cond)\` and \`do … while (cond)\` → the body-first \`for { … }\`, §49.4.1).
 A construct that is not mechanically rewritable is left untouched and reported; an "info" line
 marks a rewrite whose meaning differs (a client function's callers no longer abort; a failed read
 no longer throws on today's compiler — it yields \`not\` / \`[]\`).
@@ -84,8 +85,9 @@ DEFAULT rules (${IMPL1_SAFE_RULES.join(", ")}): their output still compiles with
 today's compiler, and each rewrite is verified by compiling the file in its project — a rewrite
 that changes what the compiler reports is withdrawn and reported.
 
---s66 adds the §66 declaration rules (${S66_DECL_RULES.join(", ")}). Their output is the §66 opener
-dialect, which TODAY'S COMPILER CANNOT COMPILE. --s66 is a preview: dry-run unless --write is given.
+--s66 adds the §66 declaration rules (${S66_DECL_RULES.join(", ")}) and the S469 loop rules
+(loop-while, loop-do-while). Their output is the ruled dialect, which TODAY'S COMPILER CANNOT
+COMPILE. --s66 is a preview: dry-run unless --write is given.
 
 Options:
   --dry-run            Print a diff; write nothing
@@ -95,7 +97,7 @@ Options:
   --write              With --s66: write the §66 rewrite in place
   --entry              Treat every file as an application entry (program-wrap applies)
   --no-program-wrap    Never wrap a file in <program>
-  --rules=<a,b,...>    Restrict to these rules (the declaration rules need --s66): ${S66_RULES.join(", ")}
+  --rules=<a,b,...>    Restrict to these rules (the declaration and loop rules need --s66): ${S66_RULES.join(", ")}
   --json               Print a JSON report to stdout
   --help, -h           Show this message
 `;
@@ -203,8 +205,8 @@ export function parseFixArgs(args) {
   }
   if (o.rules) for (const r of o.rules) if (!S66_RULES.includes(r)) throw new Error(`unknown rule '${r}' (rules: ${S66_RULES.join(", ")})`);
   if (o.rules && !o.s66) {
-    const decl = o.rules.filter((r) => S66_DECL_RULES.includes(r));
-    if (decl.length) throw new Error(`rule(s) ${decl.join(", ")} produce the §66 dialect, which impl#1 cannot compile — pass --s66 to preview them`);
+    const decl = o.rules.filter((r) => RULED_ONLY_RULES.includes(r));
+    if (decl.length) throw new Error(`rule(s) ${decl.join(", ")} produce ruled-dialect output (§66 openers / the S469 \`for\` heads), which impl#1 cannot compile — pass --s66 to preview them`);
   }
   if (o.write && !o.s66) throw new Error("--write is only for --s66 (the default rules write in place already)");
   // --s66 is a preview unless --write: its output does not compile with today's compiler.

@@ -47,58 +47,58 @@ ${
 
     // A callable's own fact.
     export fn ownAtom(key: string, root: int, pos: int) -> FxAtom {
-        return { key: key, root: root, pos: pos, depth: 0, path: [], via: -1 }
+        return { key: key, root: root, pos: pos, depth: 0, path: [], via: -1 };
     }
 
     // `a` comes before `b` in the path order (see the banner).
     export fn atomBefore(a: FxAtom, b: FxAtom) -> boolean {
-        if (a.depth != b.depth) return a.depth < b.depth
-        let i = 0
+        if (a.depth != b.depth) return a.depth < b.depth;
+        let i = 0;
         while (i < a.path.length && i < b.path.length) {
-            if (a.path[i] != b.path[i]) return a.path[i] < b.path[i]
-            i = i + 1
+            if (a.path[i] != b.path[i]) return a.path[i] < b.path[i];
+            i = i + 1;
         }
-        return a.pos < b.pos
+        return a.pos < b.pos;
     }
 
     // The atom a caller gains from callee `c`'s atom `a` through its reference number `e`.
     fn viaAtom(a: FxAtom, c: int, e: int) -> FxAtom {
-        return { key: a.key, root: a.root, pos: a.pos, depth: a.depth + 1, path: [e].concat(a.path), via: c }
+        return { key: a.key, root: a.root, pos: a.pos, depth: a.depth + 1, path: [e].concat(a.path), via: c };
     }
 
     // Would adding `a` change `xs` (a new key, or a shorter path to a present one)?
     fn improves(xs: FxAtom[], a: FxAtom) -> boolean {
         for (const x of xs) {
-            if (x.key == a.key) return atomBefore(a, x)
+            if (x.key == a.key) return atomBefore(a, x);
         }
-        return true
+        return true;
     }
 
     // `xs` (in path order, one atom per key) with `a` in its place; `a` replaces
     // the atom of its key. Call only when `improves(xs, a)`.
     fn withAtom(xs: FxAtom[], a: FxAtom) -> FxAtom[] {
-        let out: FxAtom[] = []
-        let placed = false
+        let out: FxAtom[] = [];
+        let placed = false;
         for (const x of xs) {
             if (x.key != a.key) {
                 if (!placed && atomBefore(a, x)) {
-                    out = out.concat([a])
-                    placed = true
+                    out = out.concat([a]);
+                    placed = true;
                 }
-                out = out.concat([x])
+                out = out.concat([x]);
             }
         }
-        if (!placed) out = out.concat([a])
-        return out
+        if (!placed) out = out.concat([a]);
+        return out;
     }
 
     // A callable's own atoms in path order, one per key (the first site of a key wins).
     fn ownSorted(xs: FxAtom[]) -> FxAtom[] {
-        let out: FxAtom[] = []
+        let out: FxAtom[] = [];
         for (const x of xs) {
-            if (improves(out, x)) out = withAtom(out, x)
+            if (improves(out, x)) out = withAtom(out, x);
         }
-        return out
+        return out;
     }
 
     // S480 (s480-boot-fn-count-perf): closeDim's `fx` is a local tape written in place
@@ -106,16 +106,16 @@ ${
     // and two concats) and one concat per callable were each O(callables) a step.
     fn ownSortedAll(own: FxAtom[][], lo: int, hi: int) -> FxAtom[][] {
         if (hi - lo <= 8) {
-            let out: FxAtom[][] = []
-            let i: int = lo
+            let out: FxAtom[][] = [];
+            let i: int = lo;
             while (i < hi) {
-                out = out.concat([ownSorted(own[i])])
-                i = i + 1
+                out = out.concat([ownSorted(own[i])]);
+                i = i + 1;
             }
-            return out
+            return out;
         }
-        const mid: int = lo + Math.floor((hi - lo) / 2)
-        return ownSortedAll(own, lo, mid).concat(ownSortedAll(own, mid, hi))
+        const mid: int = lo + Math.floor((hi - lo) / 2);
+        return ownSortedAll(own, lo, mid).concat(ownSortedAll(own, mid, hi));
     }
 
     // Close ONE dimension: `own[i]` — callable i's own atoms; `edges[i]` — the
@@ -126,62 +126,62 @@ ${
     // before a callee it reaches only through an edge that set lacks, and
     // under-report. By construction it cannot.
     export fn closeDim(own: FxAtom[][], edges: int[][]) -> FxAtom[][] {
-        const order: int[][] = sccOrder(edges)
-        let fx: FxAtom[][] = ownSortedAll(own, 0, own.length)
+        const order: int[][] = sccOrder(edges);
+        let fx: FxAtom[][] = ownSortedAll(own, 0, own.length);
         for (const scc of order) {
-            let changed = true
+            let changed = true;
             while (changed) {
-                changed = false
+                changed = false;
                 for (const i of scc) {
-                    let mine: FxAtom[] = fx[i]
-                    let grew = false
-                    let e = 0
+                    let mine: FxAtom[] = fx[i];
+                    let grew = false;
+                    let e = 0;
                     for (const c of edges[i]) {
                         for (const a of fx[c]) {
-                            const v: FxAtom = viaAtom(a, c, e)
+                            const v: FxAtom = viaAtom(a, c, e);
                             if (improves(mine, v)) {
-                                mine = withAtom(mine, v)
-                                grew = true
+                                mine = withAtom(mine, v);
+                                grew = true;
                             }
                         }
-                        e = e + 1
+                        e = e + 1;
                     }
                     if (grew) {
-                        fx[i] = mine
-                        changed = true
+                        fx[i] = mine;
+                        changed = true;
                     }
                 }
             }
         }
-        return fx
+        return fx;
     }
 
     // The first atom (the witness) of a callable's closed atoms, else not.
     export fn witnessOf(xs: FxAtom[]) -> FxAtom | not {
-        if (xs.length == 0) return not
-        return xs[0]
+        if (xs.length == 0) return not;
+        return xs[0];
     }
 
     fn atomKeyed(xs: FxAtom[], key: string) -> FxAtom | not {
         for (const x of xs) {
-            if (x.key == key) return x
+            if (x.key == key) return x;
         }
-        return not
+        return not;
     }
 
     // The callables from `i` down to the site of its atom `a`, outermost first:
     // `i`, then each `via`, following the atom's key (at the fixed point every
     // step is the callee's own shortest path to it).
     export fn atomChain(fx: FxAtom[][], i: int, a: FxAtom) -> int[] {
-        let out: int[] = [i]
-        let cur: FxAtom = a
+        let out: int[] = [i];
+        let cur: FxAtom = a;
         while (cur.via >= 0) {
-            out = out.concat([cur.via])
-            const nxt: FxAtom | not = atomKeyed(fx[cur.via], cur.key)
-            if (nxt is not) return out
-            cur = nxt
+            out = out.concat([cur.via]);
+            const nxt: FxAtom | not = atomKeyed(fx[cur.via], cur.key);
+            if (nxt is not) return out;
+            cur = nxt;
         }
-        return out
+        return out;
     }
 
     // ---- the call graph's strongly connected components (Tarjan) ---------------
@@ -193,107 +193,107 @@ ${
     // concats) at every step — O(callables²) — and recursed once per call-chain
     // link. Same visit order, same components, same order of components and members.
     export fn sccOrder(edges: int[][]) -> int[][] {
-        const n: int = edges.length
-        let index: int[] = filledInt(n)
-        let low: int[] = filledInt(n)
-        let on: int[] = filledInt(n)            // 1: on the stack
-        let stk: int[] = filledInt(n)
-        let sp: int = 0
-        let cv: int[] = filledInt(n)
-        let ce: int[] = filledInt(n)
-        let dp: int = 0
-        let flat: int[] = filledInt(n)          // the components' members, component after component
-        let ends: int[] = filledInt(n)          // where each component ends in `flat`
-        let fp: int = 0
-        let nc: int = 0
-        let next: int = 0
-        let r: int = 0
+        const n: int = edges.length;
+        let index: int[] = filledInt(n);
+        let low: int[] = filledInt(n);
+        let on: int[] = filledInt(n);            // 1: on the stack
+        let stk: int[] = filledInt(n);
+        let sp: int = 0;
+        let cv: int[] = filledInt(n);
+        let ce: int[] = filledInt(n);
+        let dp: int = 0;
+        let flat: int[] = filledInt(n);          // the components' members, component after component
+        let ends: int[] = filledInt(n);          // where each component ends in `flat`
+        let fp: int = 0;
+        let nc: int = 0;
+        let next: int = 0;
+        let r: int = 0;
         while (r < n) {
             if (index[r] < 0) {
-                index[r] = next
-                low[r] = next
-                next = next + 1
-                stk[sp] = r
-                sp = sp + 1
-                on[r] = 1
-                cv[0] = r
-                ce[0] = 0
-                dp = 1
+                index[r] = next;
+                low[r] = next;
+                next = next + 1;
+                stk[sp] = r;
+                sp = sp + 1;
+                on[r] = 1;
+                cv[0] = r;
+                ce[0] = 0;
+                dp = 1;
                 while (dp > 0) {
-                    const v: int = cv[dp - 1]
-                    const ei: int = ce[dp - 1]
+                    const v: int = cv[dp - 1];
+                    const ei: int = ce[dp - 1];
                     if (ei < edges[v].length) {
-                        ce[dp - 1] = ei + 1
-                        const w: int = edges[v][ei]
+                        ce[dp - 1] = ei + 1;
+                        const w: int = edges[v][ei];
                         if (index[w] < 0) {
-                            index[w] = next
-                            low[w] = next
-                            next = next + 1
-                            stk[sp] = w
-                            sp = sp + 1
-                            on[w] = 1
-                            cv[dp] = w
-                            ce[dp] = 0
-                            dp = dp + 1
+                            index[w] = next;
+                            low[w] = next;
+                            next = next + 1;
+                            stk[sp] = w;
+                            sp = sp + 1;
+                            on[w] = 1;
+                            cv[dp] = w;
+                            ce[dp] = 0;
+                            dp = dp + 1;
                         } else if (on[w] == 1) {
-                            low[v] = minInt(low[v], index[w])
+                            low[v] = minInt(low[v], index[w]);
                         }
                     } else {
                         if (low[v] == index[v]) {
                             // `v` roots a component: everything above it on the stack
-                            let at: int = sp - 1
-                            while (stk[at] != v) { at = at - 1 }
-                            let j: int = at
+                            let at: int = sp - 1;
+                            while (stk[at] != v) { at = at - 1; }
+                            let j: int = at;
                             while (j < sp) {
-                                flat[fp] = stk[j]
-                                fp = fp + 1
-                                on[stk[j]] = -1
-                                j = j + 1
+                                flat[fp] = stk[j];
+                                fp = fp + 1;
+                                on[stk[j]] = -1;
+                                j = j + 1;
                             }
-                            sp = at
-                            ends[nc] = fp
-                            nc = nc + 1
+                            sp = at;
+                            ends[nc] = fp;
+                            nc = nc + 1;
                         }
-                        dp = dp - 1
+                        dp = dp - 1;
                         if (dp > 0) {
-                            const u: int = cv[dp - 1]
-                            low[u] = minInt(low[u], low[v])
+                            const u: int = cv[dp - 1];
+                            low[u] = minInt(low[u], low[v]);
                         }
                     }
                 }
             }
-            r = r + 1
+            r = r + 1;
         }
-        return compsOf(flat, ends, 0, nc)
+        return compsOf(flat, ends, 0, nc);
     }
 
     // Components `lo..hi` (component i ends at `ends[i]` in `flat`), by halves.
     fn compsOf(flat: int[], ends: int[], lo: int, hi: int) -> int[][] {
         if (hi - lo <= 8) {
-            let out: int[][] = []
-            let i: int = lo
+            let out: int[][] = [];
+            let i: int = lo;
             while (i < hi) {
-                let from: int = 0
-                if (i > 0) from = ends[i - 1]
-                out = out.concat([flat.slice(from, ends[i])])
-                i = i + 1
+                let from: int = 0;
+                if (i > 0) from = ends[i - 1];
+                out = out.concat([flat.slice(from, ends[i])]);
+                i = i + 1;
             }
-            return out
+            return out;
         }
-        const mid: int = lo + Math.floor((hi - lo) / 2)
-        return compsOf(flat, ends, lo, mid).concat(compsOf(flat, ends, mid, hi))
+        const mid: int = lo + Math.floor((hi - lo) / 2);
+        return compsOf(flat, ends, lo, mid).concat(compsOf(flat, ends, mid, hi));
     }
 
     // A fresh tape of `n` -1s (by doubling, not one concat per element).
     fn filledInt(n: int) -> int[] {
-        if (n <= 0) return []
-        let out: int[] = [-1]
-        while (out.length + out.length <= n) { out = out.concat(out) }
-        return out.concat(filledInt(n - out.length))
+        if (n <= 0) return [];
+        let out: int[] = [-1];
+        while (out.length + out.length <= n) { out = out.concat(out); }
+        return out.concat(filledInt(n - out.length));
     }
 
     fn minInt(a: int, b: int) -> int {
-        if (a < b) return a
-        return b
+        if (a < b) return a;
+        return b;
     }
 }
