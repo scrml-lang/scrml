@@ -3442,33 +3442,81 @@ ${
             if (r.s.err != "") return r
             return vr(r.v, assignAny(r.s, root, r.v))
         }
-        // sort: stable (an insertion sort — JavaScript's sort is stable), by the
-        // comparator, or by the elements' text (JavaScript's default order; absent
-        // values last). Each insertion copies the list so far (THE BUDGET charges it).
-        let s: MS = s0
+        // sort: stable (JavaScript's sort is stable), by the comparator, or by
+        // the elements' text (JavaScript's default order; absent values last). A
+        // merge sort (S482 r1): n log n comparator calls, so a list of tens of
+        // thousands sorts within the step bound (an insertion sort ran out of
+        // steps at ~1000 elements); each merge level's copying is charged (THE BUDGET).
         const cmp: MV = argOr(args, 0)
-        if (!isAbsent(cmp) && !isFnV(cmp)) return bad(s, "`.sort()` takes a function, and is given " + kindName(cmp) + " (a TypeError)")
-        let ys: MV[] = []
-        for (const x of xs) {
-            let at: int = ys.length
-            let going = true
-            while (going && at > 0) {
-                const r: SortCmp = sortBefore(env, cmp, x, ys[at - 1], s)
-                s = r.s
-                if (s.err != "") return vr(MV.VUndef, s)
-                if (r.before) {
-                    at = at - 1
-                } else {
-                    going = false
-                }
-            }
-            s = charge(s, ys.length + 1)
-            if (s.err != "") return vr(MV.VUndef, s)
-            ys = ys.slice(0, at).concat([x]).concat(ys.slice(at, ys.length))
-        }
-        const r: MR = madeWD(ys, tw, td, s)
+        if (!isAbsent(cmp) && !isFnV(cmp)) return bad(s0, "`.sort()` takes a function, and is given " + kindName(cmp) + " (a TypeError)")
+        const sl: SortL = sortList(env, cmp, xs, s0)
+        if (sl.s.err != "") return vr(MV.VUndef, sl.s)
+        const r: MR = madeWD(sl.xs, tw, td, sl.s)
         if (r.s.err != "") return r
         return vr(r.v, assignAny(r.s, root, r.v))
+    }
+
+    type SortL:struct = { xs: MV[], s: MS }
+
+    fn sortList(env: MEnv, cmp: MV, xs: MV[], s: MS) -> SortL {
+        if (xs.length <= 1) return { xs: xs, s: s }
+        const mid: int = Math.floor(xs.length / 2)
+        const a: SortL = sortList(env, cmp, xs.slice(0, mid), s)
+        if (a.s.err != "") return a
+        const b: SortL = sortList(env, cmp, xs.slice(mid, xs.length), a.s)
+        if (b.s.err != "") return b
+        const c: MS = charge(b.s, xs.length)
+        if (c.err != "") return { xs: [], s: c }
+        return mergeSorted(env, cmp, a.xs, b.xs, c)
+    }
+
+    // Merge two sorted lists; every element of `a` stood before every element of
+    // `b`, so on a tie `a`'s comes first (stability) — a `b` element goes before an
+    // `a` element only when it sorts strictly before it. A long merge splits at
+    // `a`'s middle element `p`: the `b` elements strictly before `p` (a binary
+    // search — `b` is sorted) merge with `a`'s left half, the rest with its right
+    // half, so the lists are copied a logarithmic number of times, not once per element.
+    fn mergeSorted(env: MEnv, cmp: MV, a: MV[], b: MV[], s0: MS) -> SortL {
+        if (a.length == 0) return { xs: b, s: s0 }
+        if (b.length == 0) return { xs: a, s: s0 }
+        let s: MS = s0
+        if (a.length + b.length <= 32) {
+            let out: MV[] = []
+            let i: int = 0
+            let j: int = 0
+            while (i < a.length && j < b.length) {
+                const r: SortCmp = sortBefore(env, cmp, b[j], a[i], s)
+                s = r.s
+                if (s.err != "") return { xs: [], s: s }
+                if (r.before) {
+                    out = out.concat([b[j]])
+                    j = j + 1
+                } else {
+                    out = out.concat([a[i]])
+                    i = i + 1
+                }
+            }
+            return { xs: out.concat(a.slice(i, a.length)).concat(b.slice(j, b.length)), s: s }
+        }
+        const m: int = Math.floor(a.length / 2)
+        let lo: int = 0
+        let hi: int = b.length
+        while (lo < hi) {
+            const mid: int = lo + Math.floor((hi - lo) / 2)
+            const r: SortCmp = sortBefore(env, cmp, b[mid], a[m], s)
+            s = r.s
+            if (s.err != "") return { xs: [], s: s }
+            if (r.before) {
+                lo = mid + 1
+            } else {
+                hi = mid
+            }
+        }
+        const left: SortL = mergeSorted(env, cmp, a.slice(0, m), b.slice(0, lo), s)
+        if (left.s.err != "") return left
+        const right: SortL = mergeSorted(env, cmp, a.slice(m + 1, a.length), b.slice(lo, b.length), left.s)
+        if (right.s.err != "") return right
+        return { xs: left.xs.concat([a[m]]).concat(right.xs), s: right.s }
     }
 
     fn revRange(xs: MV[], lo: int, hi: int) -> MV[] {
@@ -3533,8 +3581,15 @@ ${
             if (d.code == "E-SCRIPT-001" || d.code == "E-STYLE-001") {
                 c = withDiag(c, d.code, d.message + " (in `^{}` emit() output — emitted markup is held to the rules source is, §22.4.1)", m.span)
             } else if (isErrorDiag(d) && c.diags.length == d0) {
-                // the first parse error names the fault; the reader's later ones are its cascade
-                c = withDiag(c, "E-META-EVAL-002", "the `^{}` block's emit() output does not parse as markup: [" + d.code + "] " + d.message + " (§22.4.1)", m.span)
+                // the first parse error names the fault; the reader's later ones are its
+                // cascade — unless a namespaced attribute caused it (LOW-4: `<a xlink:href="…">x</a>`
+                // fails as a declaration body), which is named for what it is
+                const ns: string = nsAttrTag(text)
+                if (ns != "") {
+                    c = withDiag(c, "E-META-EVAL-002", nsAttrMsg(ns), m.span)
+                } else {
+                    c = withDiag(c, "E-META-EVAL-002", "the `^{}` block's emit() output does not parse as markup: [" + d.code + "] " + d.message + " (§22.4.1)", m.span)
+                }
             }
         }
         if (c.diags.length == d0 && !fr.whole) {
@@ -3614,8 +3669,60 @@ ${
     // `name:` for a declaration's type); the bootstrap's markup reader does not
     // read a namespaced attribute (as in source), so it stays refused, by its name.
     fn declReason(d: ADecl) -> string {
-        if (emitStandardElement(d.name)) return "the `^{}` block's emit() output contains `<" + d.name + ">` with a namespaced attribute (`prefix:name=`, e.g. `xlink:href=`) — the bootstrap's markup reader does not read a namespaced attribute yet, in emitted output as in source; write the plain attribute (`href=`) instead (§22.4.1)"
+        if (emitStandardElement(d.name)) return nsAttrMsg(d.name)
         return notPlain("a declaration")
+    }
+
+    fn nsAttrMsg(tag: string) -> string {
+        return "the `^{}` block's emit() output contains `<" + tag + ">` with a namespaced attribute (`prefix:name=`, e.g. `xlink:href=`) — the bootstrap's markup reader does not read a namespaced attribute yet, in emitted output as in source; write the plain attribute (`href=`) instead (§22.4.1)"
+    }
+
+    // The first standard element of `text` whose open tag holds a namespaced
+    // attribute (`prefix:name=`, outside quoted values), or "". Read only when
+    // the output failed to parse, to name that failure (LOW-4) — never to admit.
+    fn nsAttrTag(text: string) -> string {
+        let i: int = 0
+        while (i < text.length) {
+            if (text.substring(i, i + 1) == "<") {
+                let j: int = i + 1
+                while (j < text.length && isTagNameCh(text.substring(j, j + 1))) j = j + 1
+                const name: string = text.substring(i + 1, j)
+                if (name != "" && emitStandardElement(name)) {
+                    let q: string = ""
+                    let tok: string = ""
+                    let gap: boolean = true
+                    let k: int = j
+                    while (k < text.length && (q != "" || text.substring(k, k + 1) != ">")) {
+                        const ch: string = text.substring(k, k + 1)
+                        if (q != "") {
+                            if (ch == q) q = ""
+                        } else if (ch == "\"" || ch == "'") {
+                            q = ch
+                            tok = ""
+                        } else if (ch == "=") {
+                            if (tok.indexOf(":") > 0) return name
+                            tok = ""
+                        } else if (ch == " " || ch == "\n" || ch == "\t" || ch == "\r") {
+                            gap = true
+                        } else if (gap) {
+                            tok = ch
+                            gap = false
+                        } else {
+                            tok = tok + ch
+                        }
+                        k = k + 1
+                    }
+                }
+                i = j
+            } else {
+                i = i + 1
+            }
+        }
+        return ""
+    }
+
+    fn isTagNameCh(ch: string) -> boolean {
+        return "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-".indexOf(ch) >= 0
     }
 
     fn notPlain(what: string) -> string {

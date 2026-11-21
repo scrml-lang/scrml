@@ -269,6 +269,15 @@ describe("s481 r1 — one fault, one correct code (LOW-1..5)", () => {
     expect(errs(r)).toEqual(["E-META-EVAL-002"]);
     expect(r.diags[0].message).toContain("namespaced attribute");
     expect(r.diags[0].message).not.toContain("contains a declaration");
+    // a text child: the reader fails the declaration body first — still named for the attribute
+    const r2 = run(D(`emit("<svg><a xlink:href=\\"https://x.example/\\">x</a></svg>");`));
+    expect(errs(r2)).toEqual(["E-META-EVAL-002"]);
+    expect(r2.diags[0].message).toContain("namespaced attribute");
+    expect(r2.diags[0].message).not.toContain("declaration body");
+    // an unrelated parse failure keeps the reader's own reason; a `:` inside a quoted value is no attribute name
+    const r3 = run(D(`emit("<p title=\\"a:b=c\\">x</q>");`));
+    expect(errs(r3)).toEqual(["E-META-EVAL-002"]);
+    expect(r3.diags[0].message).not.toContain("namespaced attribute");
   });
   test("§45.3: `==` between incompatible types is E-EQ-001 when it runs (the review: `1 == \"1\"` answered false)", () => {
     expect(errs(run(D(`emit("<p>" + (1 == "1") + "</p>");`)))).toEqual(["E-EQ-001"]);
@@ -282,6 +291,17 @@ describe("s481 r1 — one fault, one correct code (LOW-1..5)", () => {
     expect(html(T(`const c: C = .B; if (c == .B) { emit("<p>eq</p>"); }`))).toContain("<p>eq</p>");
     expect(html(T(`fn f(x: C) -> string { return "k"; } emit("<p>" + f(.A) + "</p>");`))).toContain("<p>k</p>");
     expect(html(T(`fn g() -> C { return .A; } const c: C = g(); match c { .A :> { emit("<p>a</p>"); }, .B :> { emit("<p>b</p>"); }, }`))).toContain("<p>a</p>");
+  });
+  test("sort is a stable merge sort: JavaScript's order on ties, and a 4096-element reverse list sorts within the step bound", () => {
+    const body = `let t = [{k: 2, n: "a"}, {k: 1, n: "b"}, {k: 2, n: "c"}, {k: 1, n: "d"}, {k: 0, n: "e"}, {k: 2, n: "f"}]; let i = 0; let u = []; for (i < 40) { u = u.concat(t.map((r) => ({ k: (r.k * 7 + i) % 5, n: r.n + i }))); i = i + 1; } u.sort((a, b) => a.k - b.k); emit("<p>" + u.map((r) => r.n).join(",") + "</p>");`;
+    const t = [{ k: 2, n: "a" }, { k: 1, n: "b" }, { k: 2, n: "c" }, { k: 1, n: "d" }, { k: 0, n: "e" }, { k: 2, n: "f" }];
+    let u = [];
+    for (let i = 0; i < 40; i++) u = u.concat(t.map((r) => ({ k: (r.k * 7 + i) % 5, n: r.n + i })));
+    u.sort((a, b) => a.k - b.k);
+    expect(html(D(body))).toContain("<p>" + u.map((r) => r.n).join(",") + "</p>");
+    // 4096 descending (built by doubling): an insertion sort needs ~8.4 M comparator calls, past the step bound
+    expect(html(D(`let t = [1]; let i = 0; for (i < 12) { t = t.map((x) => x + t.length).concat(t); i = i + 1; } t.sort((a, b) => a - b); emit("<p>" + t[0] + "," + t[4095] + "," + t.length + "</p>");`))).toContain("<p>1,4096,4096</p>");
+    expect(html(D(`let t = ["b", "a", "c", "a"]; t.sort(); emit("<p>" + t.join("") + "</p>");`))).toContain("<p>aabc</p>");
   });
   test("LOW-5: a sort comparator that returns a boolean is refused by name (its order is engine-defined)", () => {
     expect(evalErr(D(`let xs = [3, 1, 2]; xs.sort((a, b) => a > b); emit("<p>" + xs.join(",") + "</p>");`))).toContain("comparator returned a boolean");
