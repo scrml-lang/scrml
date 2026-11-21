@@ -1,6 +1,6 @@
 ${
     <n> = 0
-    defer @n = 5
+    defer @n = 5;
 
     function go() {
         @n = 1;
