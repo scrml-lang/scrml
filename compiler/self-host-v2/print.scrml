@@ -5408,7 +5408,9 @@ ${
     //    place among the body's statements and displays; the binding is declared (only) at
     //    module level. Unless code that runs BEFORE the place reaches it:
     //  - EARLY: cell construction (§66.7.6 — the program's field initializers, every other
-    //    declaration, the use-site values of the instances the body mounts unconditionally),
+    //    declaration the program constructs (constructedDecls: one no instance mounts, which
+    //    never runs, does not count — r1 M2), the use-site values of the instances the body
+    //    mounts unconditionally),
     //    a §25.7 CSS bridge, an earlier view, or a function any of those
     //    calls, reaches the binding. Its initializer runs at module initialization, before
     //    construction, as before S481, so it is never read before it is set. (INTERIM:
@@ -5416,8 +5418,10 @@ ${
     //    source's; the seed-place question is the owner's — §66.7.6 rule 5.) Whatever an
     //    early binding's initializer reaches is early too.
     //  - SERVER ONLY: no client code reads it and server code does — it stays out of the
-    //    client artifact (the server artifact evaluates what it reads, rule (b)).
-    // A binding no artifact reads is IN SEQUENCE: its initializer runs (S481, P1).
+    //    client artifact (the server artifact evaluates what it reads, rule (b)). So does one
+    //    no code reads whose initializer reaches server-only code (serverInits, r1 H1): the
+    //    server artifact runs it.
+    // Any other binding no artifact reads is IN SEQUENCE: its initializer runs (S481, P1).
     // As-if: an initializer that does nothing (initActs) and reads no `let` and no in-sequence
     // binding (staticInits) runs at module initialization, as before S481 — nothing can observe
     // the difference — and one that does nothing and that no code reads is left out.
@@ -5582,7 +5586,7 @@ ${
         return out
     }
 
-    fn bodyInits(p: CoreProgram) -> InitPlan {
+    fn bodyInits(p: CoreProgram, si: int[]) -> InitPlan {
         const pd: Decl | not = programDeclOf(p)
         if (pd is not) return { p: p, seq: [] }
         const rs0: View[] | not = pd.renders
@@ -5591,8 +5595,7 @@ ${
         const marked: int[] = initsIn(rs)
         if (marked.length == 0) return { p: p, seq: [] }
         // the program without its places: what the client and the server read otherwise
-        let bare: View[] = []
-        for (const v0 of rs) { if (initOf(v0).length == 0) bare = bare.concat([v0]) }
+        const bare: View[] = withoutInits(rs)
         const p0: CoreProgram = withProgramRenders(p, bare)
         const serverOnly0: int[] = serverOnlyFns(p0).concat(reachedOnlyByServer(p0))
         let croots: Node[] = []
@@ -5606,7 +5609,10 @@ ${
         // what runs before the body: construction (§66.7.6) and the §25.7 CSS bridges
         let pre: Node[] = []
         for (const f of pd.fields) { pre = pre.concat([Node.NField(f)]) }
-        for (const d1 of p0.decls) { if (d1.sym.id != p.program.id) pre = pre.concat([Node.NDecl(d1)]) }
+        // r1 (M2): only the declarations the program constructs — one no instance mounts
+        // never runs, so it reaches nothing before the place
+        const built: int[] = constructedDecls(p0)
+        for (const d1 of p0.decls) { if (d1.sym.id != p.program.id && hasInt(built, d1.sym.id)) pre = pre.concat([Node.NDecl(d1)]) }
         // the instances the body mounts unconditionally are constructed with the program
         // (L12 (b)): their use-site values run at construction, before the body
         for (const mi of mountedInstances(bare)) { pre = pre.concat([Node.NView(mi)]) }
@@ -5630,7 +5636,7 @@ ${
                     if (hasInt(clientRead, id)) early = early.concat([id])
                 } else if (hasInt(reached, id)) {
                     early = early.concat([id])
-                } else if (hasInt(clientRead, id) || !hasInt(serverRead, id)) {
+                } else if (hasInt(clientRead, id) || (!hasInt(serverRead, id) && !hasInt(si, id))) {
                     const kc: CoreConst | not = findConst(p0, id)
                     // one no code reads that does nothing: running it is unobservable — left out
                     if (kc is given && (hasInt(clientRead, id) || initActs(kc.init))) seq = seq.concat([id])
@@ -5675,8 +5681,10 @@ ${
 
     // s481 — the file-scope bindings the client artifact holds: those its code reads, and
     // (§7.6 S481: "every file-scope initializer runs whether or not anything reads it")
-    // those NO artifact reads — in Core order. A binding only server code reads stays out.
-    fn clientConsts(p: CoreProgram, clientRoots: Node[], serverOnly: int[]) -> CoreConst[] {
+    // those NO artifact reads — in Core order. A binding only server code reads stays out, and
+    // so does one no code reads whose initializer reaches server-only code (`si`, serverInits:
+    // the server artifact runs it).
+    fn clientConsts(p: CoreProgram, clientRoots: Node[], serverOnly: int[], si: int[]) -> CoreConst[] {
         const read: CoreConst[] = constsReadIn(p, clientRoots)
         if (read.length == p.consts.length) return read
         let rid: int[] = []
@@ -5689,7 +5697,7 @@ ${
         for (const k2 of p.consts) {
             if (hasInt(rid, k2.sym.id)) {
                 out = out.concat([k2])
-            } else if (!hasInt(sread, k2.sym.id) && initActs(k2.init) && !callsServerOnly(p, k2, serverOnly)) {
+            } else if (!hasInt(sread, k2.sym.id) && initActs(k2.init) && !hasInt(si, k2.sym.id)) {
                 // (one that does nothing, nothing reads: running it is unobservable — left out)
                 out = out.concat([k2])
             }
@@ -5705,10 +5713,146 @@ ${
         return false
     }
 
+    // s481 r1 (#2041 review H1/M1) — the file-scope bindings NO code reads whose initializer
+    // reaches server-only code: a function the client artifact does not hold (callsServerOnly —
+    // §12.2 Trigger 5, server-placed by inheritance or reached only by server code), or a binding
+    // only server code reads (S472: "a value read only by server code never reaches the client
+    // artifact") — directly, through a function it calls, or through another such binding (a
+    // fixed point). Each is SERVER-ONLY: nothing of it is in the client, and the server artifact
+    // runs it, once, at module initialization, in Core order (print-server.scrml serverConsts) —
+    // S481's "every file-scope initializer runs", in the artifact its reach places it in. (An
+    // initializer that does nothing is left out, as everywhere: running it is unobservable.)
+    // Judged on the program without its body places (View.Init reads every binding it places).
+    export fn serverInits(p1: CoreProgram) -> int[] {
+        if (p1.consts.length == 0) return []
+        let p: CoreProgram = p1
+        const pd: Decl | not = programDeclOf(p1)
+        if (pd is given) {
+            const rs: View[] | not = pd.renders
+            if (rs is given) p = withProgramRenders(p1, withoutInits(rs))
+        }
+        const serverOnly: int[] = serverOnlyFns(p).concat(reachedOnlyByServer(p))
+        let croots: Node[] = []
+        for (const d of p.decls) { croots = croots.concat([Node.NDecl(d)]) }
+        for (const f of p.fns) { if (!hasInt(serverOnly, f.sym.id)) croots = croots.concat([Node.NFn(f)]) }
+        let cread: int[] = []
+        for (const k0 of constsReadIn(p, croots)) { cread = cread.concat([k0.sym.id]) }
+        let sroots: Node[] = []
+        for (const sf of p.server) { sroots = sroots.concat([Node.NServerFn(sf)]) }
+        for (const f2 of p.fns) { if (hasInt(serverOnly, f2.sym.id)) sroots = sroots.concat([Node.NFn(f2)]) }
+        const sread: int[] = constsReached(p, sroots)
+        // the bindings only server code reads
+        let held: int[] = []
+        for (const s of sread) { if (!hasInt(cread, s)) held = held.concat([s]) }
+        let out: int[] = []
+        let changed = true
+        while (changed) {
+            changed = false
+            for (const k of p.consts) {
+                const id: int = k.sym.id
+                if (!hasInt(out, id) && !hasInt(cread, id) && !hasInt(sread, id) && initActs(k.init)) {
+                    let hit: boolean = callsServerOnly(p, k, serverOnly)
+                    if (!hit) {
+                        for (const r of constsReached(p, [Node.NExpr(k.init)])) {
+                            if (hasInt(held, r) || hasInt(out, r)) hit = true
+                        }
+                    }
+                    if (hit) {
+                        out = out.concat([id])
+                        changed = true
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    fn withoutInits(rs: View[]) -> View[] {
+        let out: View[] = []
+        for (const v of rs) { if (initOf(v).length == 0) out = out.concat([v]) }
+        return out
+    }
+
+    // s481 r1 (#2041 review M2) — the declarations the program constructs: the program; every
+    // declaration an instance (a mount, a `<*>` star) names in a constructed declaration's
+    // renders, in any function (a lift) or in a shared reference — wherever it stands
+    // (conditional or not: a conditional mount can run before a place). One nothing names is
+    // never constructed, so its code never runs.
+    fn constructedDecls(p: CoreProgram) -> int[] {
+        let out: int[] = [p.program.id]
+        for (const s of sharedRefs(Node.NProgram(p))) { if (!hasInt(out, s.id)) out = out.concat([s.id]) }
+        for (const f of p.fns) { out = unionInts(out, instancedIn(Node.NFn(f))) }
+        let changed = true
+        while (changed) {
+            changed = false
+            for (const d of p.decls) {
+                if (hasInt(out, d.sym.id)) {
+                    const more: int[] = unionInts(out, instancedIn(Node.NDecl(d)))
+                    if (more.length != out.length) {
+                        out = more
+                        changed = true
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    fn instancedIn(root: Node) -> int[] {
+        let out: int[] = []
+        for (const n of allNodes(root)) {
+            const id: int = nodeInstanced(n)
+            if (id >= 0 && !hasInt(out, id)) out = out.concat([id])
+        }
+        return out
+    }
+
+    fn nodeInstanced(n: Node) -> int {
+        return match n {
+            .NView(v: v) :> viewInstanced(v)
+            .NExpr(e: x) :> -1
+            .NStmt(s: x) :> -1
+            .NBlock(b: x) :> -1
+            .NPlace(pl: x) :> -1
+            .NProgram(p: x) :> -1
+            .NDecl(d: x) :> -1
+            .NField(f: x) :> -1
+            .NFn(f: x) :> -1
+            .NServerFn(f: x) :> -1
+            .NInst(i: x) :> -1
+            .NPattern(pat: x) :> -1
+            .NEdit(k: x) :> -1
+            .NAttr(a: x) :> -1
+        }
+    }
+
+    fn viewInstanced(v: View) -> int {
+        return match v {
+            .Instance(decl: d) :> d.id
+            .Star(decl: d) :> d.id
+            .El :> -1
+            .Text :> -1
+            .RawText :> -1
+            .Dyn :> -1
+            .Cond :> -1
+            .Each :> -1
+            .Slot :> -1
+            .Effect :> -1
+            .Run :> -1
+            .Init :> -1
+            .Request :> -1
+            .ResetOn :> -1
+            .Errors :> -1
+            .Reach :> -1
+            .Gather :> -1
+        }
+    }
+
     export fn printProgram(p1: CoreProgram, jsFile: string, runtimeFile: string) -> Output {
         const ill: string[] = coreRefusal(p1)
         if (ill.length > 0) return { js: "", html: "", refused: ill, routes: [] }
-        const plan: InitPlan = bodyInits(p1)
+        const si: int[] = serverInits(p1)
+        const plan: InitPlan = bodyInits(p1, si)
         const p: CoreProgram = plan.p
         // S478 ruling item 26 (1): a LIBRARY entry (no `<program>`, §21.5) is analyzed as a
         // library, but §21.5's output — "no HTML output … a JS module with the exported bindings
@@ -5732,7 +5876,7 @@ ${
         let clientRoots: Node[] = []
         for (const d0 of p.decls) { clientRoots = clientRoots.concat([Node.NDecl(d0)]) }
         for (const f0 of p.fns) { if (!hasInt(serverOnly0, f0.sym.id)) clientRoots = clientRoots.concat([Node.NFn(f0)]) }
-        body = body.concat(seqConstStmts(ctx, clientConsts(p, clientRoots, serverOnly0), plan.seq))
+        body = body.concat(seqConstStmts(ctx, clientConsts(p, clientRoots, serverOnly0, si), plan.seq))
         body = body.concat(requestSlotStmts(ctx, p))          // s475 (S3b)
         const uses: DeclNs[] = declNsUses(p)
         for (const d of p.decls) {

@@ -52,7 +52,7 @@ ${
     import { Node, allNodes } from "./walk.scrml"
     import { JsExpr, JsStmt, JsProp, jid, jstr, jnum, jcall, jmember, jmcall, sexpr, printModule } from "./js.scrml"
     import { RouteOut, Ctx, coreRefusal, sliceName, serverCtx, serverFnJs, envelopedFnJs, symNameOf, routeJs, routeName, routePath, calledServerFns, routeEntryChecks,
-             sqlTextName, dbVarName, hostImports, hostFnJs, constsReadIn, constStmts, wireOrNull, channelRefusal, chOpsJs,
+             sqlTextName, dbVarName, hostImports, hostFnJs, constsReadIn, constStmts, serverInits, wireOrNull, channelRefusal, chOpsJs,
              ChReset, chFoldWhy, chResets, chValueJs, chEdgesJs } from "./print.scrml"
 
     export type ServerOutput:struct = { js: string, refused: string[], routes: RouteOut[] }
@@ -87,7 +87,10 @@ ${
         const epRefused: string[] = endpointRefusal(p).concat(channelRefusal(p))
         if (epRefused.length > 0) return { js: "", refused: epRefused, routes: [] }
         const ctx: Ctx = serverCtx(p)
-        const reach: int[] = serverReach(p, routed.concat(endpointFns(p)), false)
+        // s481 r1 (#2041 review H1/M1): the bindings no code reads whose initializer reaches
+        // server-only code — this artifact runs them (print.scrml serverInits)
+        const si: int[] = serverInits(p)
+        const reach: int[] = serverReach(p, routed.concat(endpointFns(p)), false, si)
 
         // s472 (boot-math-port): the host modules the reached functions call (§21.3.1 —
         // imported from `./_scrml/<module>/<file>`, the same copy the client artifact imports)
@@ -143,7 +146,7 @@ ${
         let roots: Node[] = []
         for (const sf2 of p.server) { if (reach.indexOf(sf2.sym.id) >= 0) roots = roots.concat([Node.NServerFn(sf2)]) }
         for (const f2 of p.fns) { if (reach.indexOf(f2.sym.id) >= 0) roots = roots.concat([Node.NFn(f2)]) }
-        const sconsts: CoreConst[] = constsReadIn(p, roots)
+        const sconsts: CoreConst[] = serverConsts(p, roots, si)
         body = body.concat(constStmts(ctx, sconsts))
         // s479: the functions those bindings' initializers call run at MODULE initialization
         // (§7.6 S478 rule (b)), before any createServer — so they are printed at module level,
@@ -275,7 +278,7 @@ ${
         // S480 (ruling:user-voice-scrml.md-S480-four-recs-2 item 3): a tool evaluates EVERY
         // file-scope initializer, in source order — not only those `main` reads — so an
         // unread initializer's effect (a `tick()` counter) is not elided (§7.6 rule (b), §64.1).
-        const reach: int[] = serverReach(p, [mf], true)
+        const reach: int[] = serverReach(p, [mf], true, [])
         let reachedFns: Fn[] = []
         for (const rf of p.fns) {
             if (reach.indexOf(rf.sym.id) >= 0) reachedFns = reachedFns.concat([rf])
@@ -706,7 +709,7 @@ ${
     // S480: `everyInit` (a tool) — every file-scope initializer runs at module load, so the
     // functions EVERY initializer calls are reached, not only those of the bindings reached
     // code reads (ruling:user-voice-scrml.md-S480-four-recs-2 item 3).
-    fn serverReach(p: CoreProgram, routed: ServerFn[], everyInit: boolean) -> int[] {
+    fn serverReach(p: CoreProgram, routed: ServerFn[], everyInit: boolean, si: int[]) -> int[] {
         let out: int[] = []
         let todo: int[] = []
         for (const sf of routed) {
@@ -721,7 +724,7 @@ ${
             for (const sf2 of p.server) { if (out.indexOf(sf2.sym.id) >= 0) roots = roots.concat([Node.NServerFn(sf2)]) }
             for (const f2 of p.fns) { if (out.indexOf(f2.sym.id) >= 0) roots = roots.concat([Node.NFn(f2)]) }
             let inits: CoreConst[] = p.consts
-            if (!everyInit) inits = constsReadIn(p, roots)
+            if (!everyInit) inits = serverConsts(p, roots, si)
             for (const k of inits) {
                 for (const n of allNodes(Node.NExpr(k.init))) {
                     const c: Sym | not = nodeCallee(n)
@@ -739,6 +742,21 @@ ${
             for (const id of todo) { out = out.concat([id]) }
             more = todo.length > 0
         }
+        return out
+    }
+
+    // s481 r1 (#2041 review H1/M1) — the file-scope bindings this artifact holds: those the code
+    // under `roots` reads, and every `si` binding (print.scrml serverInits: no code reads it, and
+    // its initializer reaches server-only code, so the server runs it — S481 "every file-scope
+    // initializer runs"), with the bindings its initializer reads — in Core order.
+    fn serverConsts(p: CoreProgram, roots: Node[], si: int[]) -> CoreConst[] {
+        if (si.length == 0) return constsReadIn(p, roots)
+        let rs: Node[] = roots
+        for (const k of p.consts) { if (si.indexOf(k.sym.id) >= 0) rs = rs.concat([Node.NExpr(k.init)]) }
+        let want: int[] = []
+        for (const k2 of constsReadIn(p, rs)) { want = want.concat([k2.sym.id]) }
+        let out: CoreConst[] = []
+        for (const k3 of p.consts) { if (want.indexOf(k3.sym.id) >= 0 || si.indexOf(k3.sym.id) >= 0) out = out.concat([k3]) }
         return out
     }
 

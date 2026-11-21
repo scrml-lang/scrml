@@ -2876,7 +2876,8 @@ ${
     }
 
     // s481 — lowerNodes, with a View.Init for each admitted file-scope binding at its place
-    // (§7.6 S481). A place inside an if-chain (§17.1.1) is put after the chain.
+    // (§7.6 S481). A place inside an if-chain (§17.1.1) is put after the chain (unreachable since
+    // s481 r1: analyze programChainGaps refuses a declaration between chain members, E-CTRL-001).
     fn lowerMarked(c: LC, ns: ANode[], marks: ConstMark[]) -> View[] {
         let out: View[] = []
         let m: int = 0

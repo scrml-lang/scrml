@@ -11537,7 +11537,7 @@ ${
                 }
                 if (sum.client[j].length > 0) {
                     const ca: FxAtom = sum.client[j][0]
-                    return [newDiag("E-BOOTSTRAP-UNSUPPORTED", "the initializer of " + what + " calls `" + c.label + "`, which reaches client-only state (`" + sum.nodes[ca.root].label + "` " + clientWhatAt(sum.nodes[ca.root].f, ca.pos) + ") — the initializer runs at module initialization in every artifact that reads the binding (§7.6 rule (b)): before the program instance exists, and on the server, which has no cells or DOM. The bootstrap does not evaluate it there (INTERIM, g-boot-file-scope-init-residue-s479); read the cell where the value is needed", r.file, r.span)]
+                    return [newDiag("E-BOOTSTRAP-UNSUPPORTED", "the initializer of " + what + " calls `" + c.label + "`, which reaches client-only state (`" + sum.nodes[ca.root].label + "` " + clientWhatAt(sum.nodes[ca.root].f, ca.pos) + ") — the initializer runs once, at module initialization (§7.6 rule (b), S481: at module load, or in its place in the program body's one source-ordered run), in the artifact that holds the binding: in the client, where it can run before the program instance exists, or on the server, which has no cells or DOM. The bootstrap does not evaluate it there (INTERIM, g-boot-file-scope-init-residue-s479); read the cell where the value is needed", r.file, r.span)]
                 }
                 if (sum.routeOpen[j].length > 0) return [newDiag("E-BOOTSTRAP-UNSUPPORTED", "the initializer of " + what + " calls `" + c.label + "`, which makes a call the analysis cannot resolve — the bootstrap evaluates at module initialization (§7.6 rule (b)) only code whose callees it knows (INTERIM, g-boot-file-scope-init-residue-s479)", r.file, r.span)]
                 // s479 r1 (#1975 review F2) — E-SCOPE-001 only for a use reached through DIRECT
@@ -31068,6 +31068,84 @@ ${
                 out = out.concat(blockRedeclares(f.path, af.body, af.params, true))
             }
             out = out.concat(handlerRedeclares(f.path, fileMarkup(f.items)))
+            out = out.concat(programChainGaps(f.path, f.items))
+        }
+        return out
+    }
+
+    // s481 r1 (#2041 review L1) — §17.1.1: "no element, text node, or other syntactic construct
+    // appears between the chain members". A `${ }` block whose top level declares a file-scope
+    // binding, a function or a type is read into program ITEMS, not markup nodes, so chainCheck
+    // (which walks the markup) never saw it and accepted `<p if=…/> ${ const a = f(); } <p else/>`
+    // — while the same block holding a statement (a markup Run node) was E-CTRL-001, as on impl#1.
+    // Judged here, on the program's items: such an item between a member and an `else` /
+    // `else-if=` breaks the chain, the same error.
+    fn programChainGaps(file: string, items: AItem[]) -> Diag[] {
+        let out: Diag[] = []
+        for (const it of items) {
+            const k: AItemK = it.k
+            const ps: AItem[] = match k {
+                .ProgramItem(p: p) :> p.items
+                .ConstItem(c: x) :> []
+                .DeclItem(d: x) :> []
+                .ImportItem(i: x) :> []
+                .TypeItem(t: x) :> []
+                .FnItem(f: x) :> []
+                .MarkupItem(n: x) :> []
+            }
+            if (ps.length > 0) out = out.concat(chainGapsIn(file, ps))
+        }
+        return out
+    }
+
+    fn chainGapsIn(file: string, items: AItem[]) -> Diag[] {
+        let out: Diag[] = []
+        let prev: int = 0               // the preceding member: 1 `if=` / `else-if=`, else 0
+        let gap = false                 // a non-markup item stands after that member
+        for (const it of items) {
+            const k: AItemK = it.k
+            const n: ANode | not = match k {
+                .MarkupItem(n: x) :> x
+                .ConstItem(c: x) :> not
+                .DeclItem(d: x) :> not
+                .ImportItem(i: x) :> not
+                .TypeItem(t: x) :> not
+                .FnItem(f: x) :> not
+                .ProgramItem(p: x) :> not
+            }
+            if (n is not) {
+                if (prev == 1) gap = true
+            } else {
+                const nk: ANodeK = n.k
+                const e: AElem | not = match nk {
+                    .Elem(e: x) :> x
+                    .Text(text: t) :> not
+                    .Interp(e: x) :> not
+                    .DeclNode(d: d) :> not
+                    .Css(c: c) :> not
+                    .Gather(f: x) :> not
+                    .Effect(w: w) :> not
+                    .Run(b: rb0) :> not
+                    .Request(r: r) :> not
+                }
+                if (e is given) {
+                    if (gap) {
+                        const ea: AAttr | not = attrNamed(e.attrs, "else-if")
+                        const la: AAttr | not = attrNamed(e.attrs, "else")
+                        const why: string = " — a `${ }` block declaring a binding, a function or a type stands between it and the chain; no other construct may appear between chain members (§17.1.1). Move the declaration before the `if=` element or after the chain"
+                        if (attrNamed(e.attrs, "if") is not) {
+                            if (ea is given) out = out.concat([newDiag("E-CTRL-002", "`else-if=` on `<" + e.tag + ">` has no preceding `if=` element at the same level" + why, file, ea.span)])
+                            else if (la is given) out = out.concat([newDiag("E-CTRL-001", "`else` on `<" + e.tag + ">` has no preceding `if=` element at the same level" + why, file, la.span)])
+                        }
+                    }
+                    prev = 0
+                    if (attrNamed(e.attrs, "if") is given || attrNamed(e.attrs, "else-if") is given) prev = 1
+                    gap = false
+                } else if (!blankNode(n) && !isCssNode(n)) {
+                    prev = 0
+                    gap = false
+                }
+            }
         }
         return out
     }

@@ -16,9 +16,10 @@
 // sequence keeps it.
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { compileSource } from "../../../scripts/scrml-boot.ts";
 import { runBootstrapArtifact } from "../../../scripts/bootstrap-conformance.ts";
 
@@ -182,5 +183,204 @@ describe("§7.6 S481 — artifacts", () => {
     const res = await compile(P2);
     expect(res.client.js).toMatch(/^let k;$/m);
     expect(res.client.js).toMatch(/k = n;/);
+  }, 120000);
+});
+
+// =============================================================================
+// r1 (#2041 S239 review H1 / M1): an unread file-scope initializer whose reach includes
+// server-only code — a function the client does not hold (§12.2 Trigger 5) or a binding only
+// server code reads — is SERVER-ONLY (PA reading S481 of the S472 placement + S481 "every
+// initializer runs"): nothing of it reaches ANY client artifact file, and the server artifact
+// runs it once, at module initialization. Run through the shipping CLI (`scrml-boot compile`);
+// the server artifact is imported, and the binding read back, to show it ran there.
+// Red on 0b55e0208 (the secret reached program.client.js; a6: the server never ran it) and on
+// base 0d775f390 (the server never ran any of them).
+// =============================================================================
+const ROOT = resolve(import.meta.dir, "..", "..", "..");
+const CLI = join(ROOT, "scripts", "scrml-boot.ts");
+const SERVER_FILES = ["program.server.js", "scrml-server-runtime.js", "runtime.js", ".scrml-boot-manifest.json"];
+
+async function build(src, bindingPat) {
+  const sub = join(dir, `srv${n++}`);
+  const file = sub + ".scrml";
+  writeFileSync(file, src);
+  const p = Bun.spawnSync(["bun", CLI, "compile", file, "--output-dir", sub], { cwd: ROOT, env: { ...process.env, NO_COLOR: "1" }, stdout: "pipe", stderr: "pipe" });
+  if (p.exitCode !== 0) throw new Error("did not compile: " + p.stderr.toString());
+  const files = readdirSync(sub);
+  const client = files.filter((f) => !SERVER_FILES.includes(f)).map((f) => ({ f, text: readFileSync(join(sub, f), "utf8") }));
+  // the server artifact: the binding is a module-level `const` (before createServer); export it
+  // under a probe name and import the module — its module initialization runs the initializer
+  let server = readFileSync(join(sub, "program.server.js"), "utf8");
+  const m = server.match(new RegExp("^const (" + bindingPat + ") = ", "m"));
+  const atModule = m !== null && server.indexOf(m[0]) < server.indexOf("export function createServer");
+  let value;
+  if (m) {
+    writeFileSync(join(sub, "probe.server.js"), server + `\nexport { ${m[1]} as __probe };\n`);
+    value = (await import(pathToFileURL(join(sub, "probe.server.js")).href)).__probe;
+  }
+  return { client, atModule, value };
+}
+function leaked(client, needles) {
+  const out = [];
+  for (const c of client) for (const nd of needles) if (c.text.includes(nd)) out.push(c.f + ": " + nd);
+  return out;
+}
+
+const DBFN = `    type Row:struct = { name: string }
+    function label(id: int) -> string {
+        const r: Row = ?{\`SELECT name FROM users WHERE id = \${id}\`}.get() !{ _ :> { return "none"; } };
+        return BODY;
+    }`;
+const GO = `let <out:string=""/>
+<button id="go" onclick={ @out = label(1) !{ .Transport(t) :> return }; }>go</button>`;
+
+describe("§7.6 S481 r1 — an unread initializer that reaches server-only code is server-only", () => {
+  test("a7: it reads a binding only server code reads — the secret is in no client file; the server runs it", async () => {
+    const src = `<program db="./app.db">
+\${
+    const API_KEY: string = "zz-sk-live-123";
+    function tag(s: string) -> string { return "[" + s + "]"; }
+${DBFN.replace("BODY", "r.name + API_KEY")}
+    const keyTag: string = tag(API_KEY);
+}
+${GO}
+<p id="c">\${tag(@out)}</p>
+</program>
+`;
+    const b = await build(src, "keyTag\\w*");
+    expect(leaked(b.client, ["zz-sk-live-123", "API_KEY", "keyTag"])).toEqual([]);
+    expect(b.atModule).toBe(true);
+    expect(b.value).toBe("[zz-sk-live-123]");
+  }, 180000);
+
+  test("a1: it calls a helper only a server function reaches — neither the helper nor its secret is in a client file", async () => {
+    const src = `<program db="./app.db">
+\${
+    const SECRET: string = "zz-secret-salt";
+    function mix(s: string) -> string { return s + SECRET; }
+${DBFN.replace("BODY", "mix(r.name)")}
+    const unused: string = mix("a");
+}
+${GO}
+<p id="c">\${@out}</p>
+</program>
+`;
+    const b = await build(src, "unused\\w*");
+    expect(leaked(b.client, ["zz-secret-salt", "function mix", "unused"])).toEqual([]);
+    expect(b.atModule).toBe(true);
+    expect(b.value).toBe("azz-secret-salt");
+  }, 180000);
+
+  test("a5: the helper's only other reader is an <endpoint> arm — server-only too", async () => {
+    const src = `<program>
+\${
+    type M:enum = {
+      Hello(id: int)
+    }
+    const SALT: string = "zz-ep-salt";
+    function mix(s: string) -> string { return s + SALT; }
+    const unused: string = mix("q");
+}
+<endpoint path="/api/look" method="POST" accepts=M>
+  <Hello(id) : { why: mix("w") }>
+</endpoint>
+<p id="c">x</p>
+</program>
+`;
+    const b = await build(src, "unused\\w*");
+    expect(leaked(b.client, ["zz-ep-salt", "function mix", "unused"])).toEqual([]);
+    expect(b.atModule).toBe(true);
+    expect(b.value).toBe("qzz-ep-salt");
+  }, 180000);
+
+  test("a6 (M1): the same initializer written outside the body runs — on the server — not nowhere", async () => {
+    const src = `\${
+    const SECRET: string = "zz-secret-salt";
+    function mix(s: string) -> string { return s + SECRET; }
+    const unused: string = mix("a");
+}
+<program db="./app.db">
+\${
+${DBFN.replace("BODY", "mix(r.name)")}
+}
+${GO}
+<p id="c">\${@out}</p>
+</program>
+`;
+    const b = await build(src, "unused\\w*");
+    expect(leaked(b.client, ["zz-secret-salt", "function mix", "unused"])).toEqual([]);
+    expect(b.atModule).toBe(true);
+    expect(b.value).toBe("azz-secret-salt");
+  }, 180000);
+});
+
+// =============================================================================
+// r1 (#2041 review M2): only a declaration the program constructs runs before the body. An
+// unused component that reads the binding never runs, so it does not force the binding early:
+// the ruling's P2 answer (5) holds. Red on 0b55e0208 and base ("1").
+// =============================================================================
+describe("§7.6 S481 r1 — what forces a binding early", () => {
+  test("b4: an unused component reading the binding does not move it before the body", async () => {
+    const src = `<card n:int=0>
+    let <m:int=(n + k)/>
+</> renders <span>\${m}</span>
+<program>
+\${ let n: int = 1; }
+\${ n = 5; }
+\${ const k: int = n + 0; }
+<p id="c">\${k}</p>
+</program>
+`;
+    expect(await texts(src, ["c"])).toEqual(["5"]);
+  }, 120000);
+
+  test("b3: a component mounted after the place still forces it early (INTERIM — the ⚑ on use-site values; flips when it is ruled)", async () => {
+    const src = `<card n:int=0>
+    let <m:int=(n)/>
+</> renders <span>\${m}</span>
+<program>
+\${ let n: int = 1; }
+\${ n = 5; }
+\${ const k: int = n + 0; }
+<p id="c">\${k}</p>
+<div id="d"><card n=(k)/></div>
+</program>
+`;
+    expect(await texts(src, ["c", "d"])).toEqual(["1", "1"]);
+  }, 120000);
+});
+
+// =============================================================================
+// r1 (#2041 review L1): §17.1.1 "no element, text node, or other syntactic construct appears
+// between the chain members" — a `${ }` declaring a binding between `if=` and `else` breaks the
+// chain (E-CTRL-001), as a `${ }` statement there already did and as impl#1 does. Accepted on
+// 0b55e0208 and base (the place was moved after the chain).
+// =============================================================================
+describe("§17.1.1 — a declaration between if-chain members breaks the chain (r1 L1)", () => {
+  const chain = (mid) => `<program>
+\${
+    let log: string = "";
+    function note(s: string) -> int { log = log + s; return 1; }
+}
+let <flag:boolean=false/>
+<p id="a" if=(@flag)>yes</p>
+${mid}
+<p id="b" else>no \${log}</p>
+</program>
+`;
+  async function errCodes(src) {
+    const file = join(dir, `chain${n++}.scrml`);
+    writeFileSync(file, src);
+    const res = await compileSource(file);
+    return res.diagnostics.filter((d) => d.severity === "error").map((d) => d.code);
+  }
+  test("a `${ const }` between `if=` and `else` is E-CTRL-001", async () => {
+    expect(await errCodes(chain('${ const a: int = note("a"); }'))).toEqual(["E-CTRL-001"]);
+  }, 120000);
+  test("a `${ }` statement there is E-CTRL-001 (unchanged)", async () => {
+    expect(await errCodes(chain('${ note("a"); }'))).toEqual(["E-CTRL-001"]);
+  }, 120000);
+  test("the declaration before the chain compiles", async () => {
+    expect(await errCodes(chain("").replace('<p id="a"', '${ const a: int = note("a"); }\n<p id="a"'))).toEqual([]);
   }, 120000);
 });
