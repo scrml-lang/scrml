@@ -27,7 +27,16 @@ Branch `s482-boot-parse-gaps` from origin/main eca9c5af5. Scratch: ~/.cache/scrm
 - E-MATCH-ARM-SEPARATOR 27 -> 0; E-PARSE-LOCAL 3 -> 1 (`let some` — `some` not in scope)
 - rises: lex.scrml / lower.scrml now analysed further (were stopped by the parse errors).
 
+- [x] commit 1 (fix + test + progress) — hook PASS (57594 pass, 0 fail)
+- [x] E-SYNTAX-011 guard branch uses skipAltHead too (`.Admin |⏎ p.active :>` = one E-SYNTAX-011)
+- [x] print.scrml:5657 — the one real missing `;` in the self-host, added (E-STMT-MISSING-SEMICOLON 36 -> 0)
+- [x] conformance parse-syntax/keyword-named-member-rt, parse-syntax/from-server-names-rt: impl#1 corpus-bridge
+      PASS; bootstrap PASS (TWIN, runtime held); host-global-scan --check 1/2, 2/2 exit 0
+- [x] gap markers: 3 resolved; filed g-boot-match-alternation-unbuilt-s482 (MED),
+      g-boot-contextual-word-fn-name-s482 (LOW)
+- [x] re-measure: lower.scrml rises are lines 4900+ (the old `} else {` E-STMT-UNEXPECTED-TOKEN derailed the
+      rest of the file's parse); lex.scrml rises likewise past the old separator cascade at :368
+
 ## TODO
-- [ ] tests (red base / green head), conformance cases
-- [ ] gap markers
+- [ ] red-on-base proof for the test file
 - [ ] final gates

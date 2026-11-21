@@ -1,0 +1,18 @@
+{
+  "id": "parse-syntax-keyword-named-member-rt",
+  "description": "A reserved word after `.` / `?.` is a member name: struct fields named `server`, `fn`, `if`, `for`, `of` are read through chains (`t.server.id`, `t?.server.id`, `t.fn.on`). sum(t) = 10 + 20 + 1 + 2 + 3 = 36; pick(t) = 10; pick(not) = 0 — @total is 46 after the click, and @flag is \"on\" (t.server.on is true, t.fn.on is false).",
+  "language-version": "1.0",
+  "spec": "§7.2, §7.2.1, §42.3.6",
+  "provenance": "lane:s482-boot-parse-gaps (g-boot-keyword-named-member-s481)",
+  "rationale": "§7.2: \"All JavaScript that is valid in a Bun execution context is valid inside `${ }`, except the constructs §7.2.1 excludes\" — in JavaScript a member name is any IdentifierName, reserved words included. §7.2.1: \"`class` SHALL remain valid … as a member name (`x.class`, `x?.class`) … A diagnostic on any of these is a compiler defect.\" The bootstrap lexed the `.id` after `t.server` as a bare variant and ended the statement there (E-STMT-MISSING-SEMICOLON).",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-"],
+    "input": [{ "click": "#go" }],
+    "state": { "total": 46, "flag": "on" },
+    "domAnchored": [
+      { "selector": "#tot", "text": "46" },
+      { "selector": "#flag", "text": "on" }
+    ]
+  }
+}

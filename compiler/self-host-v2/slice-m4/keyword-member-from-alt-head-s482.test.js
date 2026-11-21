@@ -180,6 +180,11 @@ describe("g-boot-multiline-alternation-arm-head-s481 — a line ending in `|` co
     expect(codes(MULTI.replace(/\n/g, "\r\n"))).toEqual(codes(ONE));
   });
 
+  test("a guard after a line-ending `|` (`.Admin |⏎ p.active :>`) is the one E-SYNTAX-011 (§18.10), no cascade", () => {
+    const src = prog(`    type Role:enum = { Admin, Editor }\n    type Post:struct = { role: Role, active: boolean }\n    fn label(p: Post) -> string {\n        return match p.role {\n            .Admin |\n                p.active :> "admin",\n            .Editor :> "editor",\n        };\n    }`);
+    expect(codes(src)).toEqual(["E-SYNTAX-011"]);
+  });
+
   test("a line NOT ending in `|` still ends the arm: a missing `,` is still E-MATCH-ARM-SEPARATOR", () => {
     const src = prog(TYPES + `    fn k3(k: K) -> int {\n        return match k {\n            .A :> 1\n            .B :> 2,\n            else :> 3,\n        };\n    }`);
     expect(codes(src)).toEqual(["E-MATCH-ARM-SEPARATOR"]);

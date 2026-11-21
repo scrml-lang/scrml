@@ -1349,7 +1349,8 @@ ${
                     // something that is not a pattern (`.Admin | p.active :> …`): that is the
                     // same guard, spelled with a pipe."
                     t = diagAt(t, "E-SYNTAX-011", "a match arm has no guard clause in v1 (§18.10): `| " + cur(adv(t)).text + "…` after the arm's pattern is a guard, not a second pattern — match the variant, then branch inside the arm body", c);
-                    for (;;) { if (!(!atEnd(t) && !isP(t, "}") && !sepAt(t, 0) && cur(t).line == c.line)) { break; } t = adv(t); }
+                    // s482: the head runs on past a line that ends in `|` (skipAltHead), as an alternation's does
+                    t = skipAltHead(t, c.line);
                     if (sepAt(t, 0)) t = adv(t);
                     if (isP(t, ">")) t = adv(t);
                 } else if (c.cls == TC.Punct && tk(c, "|")) {
