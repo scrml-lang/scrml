@@ -27866,7 +27866,13 @@ bound covers work and size as well as statements, so a short body cannot take th
   `emit`), and one step per 16 elements of a list or record it walks (`==` on lists and records, a
   list turned to text, `includes`, `map` / `filter`, and — S482 — a record literal, an object spread
   `{ ...r }` and a field write `r.k = v`, each by the fields it copies; a spread into a record that
-  already has fields also by the pairs of keys it compares).
+  already has fields also by the pairs of keys it compares). S482 r4: every operation the evaluator
+  performs is charged at least its worst-case cost as a function of its inputs — a substring search
+  (`indexOf`, `includes`, `split`, `replace`, `replaceAll`) runs in time linear in the two strings and
+  is charged their length; reading, writing or declaring a binding, a record member read and a call's
+  arguments are charged by the bindings, keys and arguments the evaluator searches or copies (one step
+  per 1,024, each comparison weighed by the length of the name compared); a function value made at
+  run time is charged the walk of its body.
 - **Size.** No single value may exceed 16 Mi (16,777,216): the characters of a string, or a list or
   record counted with everything it holds (a list holding the same list twice counts it twice). No
   list may hold more than 1 Mi (1,048,576) elements, and values nest at most 256 levels deep. The
@@ -27877,18 +27883,31 @@ bound covers work and size as well as statements, so a short body cannot take th
   counts 1, a list slot or record field it copies 8, an element value it creates 128 (`split`, a
   string's characters in a spread or a `for … of`, `reflect`). A body past it is refused with
   `E-META-EVAL-001` naming the bound; element values are counted before they are made.
-- **The emit budget (S482).** All the `^{}` blocks of ONE FILE together may emit at most 1 Mi
-  (1,048,576) characters and 64 Ki (65,536) `<` characters, and the markup they splice may hold at
-  most 32 Ki (32,768) nodes (elements and text, counted once read). The block that would pass one is
-  refused with `E-META-EVAL-001` naming the file's budget. The `<` count is checked before the
-  emitted text is read as markup, and `emit()` text past the budget is refused before its escapes are
-  read (§22.4.1).
+- **The emit budget (S482; one per compile since S482 r4).** All the `^{}` blocks of ONE COMPILE
+  together — every file's, imported files included — may emit at most 1 Mi (1,048,576) characters
+  and 64 Ki (65,536) `<` characters, and the markup they splice may hold at most 32 Ki (32,768) nodes
+  (elements and text) and 32 Ki attributes; one emitted element may carry at most 1 Ki (1,024)
+  attributes, emitted elements nest at most 256 levels deep, and reading the output may raise at most
+  1 Ki problems. The block that would pass one is refused with `E-META-EVAL-001` naming the bound.
+  The characters and `<` characters are counted as the body runs, and `emit()` text past the budget is
+  refused before its escapes are read (§22.4.1). The nodes, attributes, nesting and problems are
+  counted by the markup reader itself as it reads the emitted text, and it stops at the first excess,
+  before its cost grows past the text's — emitted output is never read past the budget.
+- **Plain markup only, as it is read (S482 r4).** The markup reader reads emitted output as plain
+  markup (§22.4.1): at the first construct that is not — a `${…}` logic block, a `#{…}` CSS block, a
+  `^{…}`, `!{…}`, `?{…}` or `_{…}` block, a declaration, an instance reference `<*…>`, a structural
+  element (`<match>`, `<db>`, `<schema>`, `<host>`, `<program>`, `<effect>`, `<request>`, `<theme>`), a
+  typed or namespaced attribute, a call in a tag, or an attribute value that is not quoted — it stops
+  and the block is refused with `E-META-EVAL-002` naming the construct. Such output was always
+  refused; it is now refused without reading the construct (a few kilobytes of brackets in a logic
+  block drove the logic reader past the compiler's stack).
 
 Building a long string by repeated `+` costs its length at each step; `.map(…).join("")` or one
 `emit()` per piece builds it at the cost of its length once. A list built by `push` in a loop costs its
 length once: a `push` to a binding whose list no other value holds appends in place (a list read in
-any other way since — kept in another binding, a container or a call — is copied first, so the value
-taken earlier is unchanged, §66.10).
+any other way since — kept in another binding, a container or a call, or read inside a callback such
+as `.map((x) => xs)` — is copied first, so the value taken earlier is unchanged and no list can come to
+hold itself, §66.10).
 
 > **Provenance:** ruling:user-voice-scrml.md S481 "⭐ RULED — `^{}` meta in the bootstrap: four design
 > questions" item 4 (*"a scrml interpreter over the bootstrap's own syntax tree, as the permanent design,
@@ -27901,6 +27920,13 @@ taken earlier is unchanged, §66.10).
 > forty 60-byte blocks of `emit("…".repeat(1000000))` passed 6 GB; `<i></i>` emitted 262,144 times ran
 > past 60 seconds in the markup reader; fourteen `s.split("")` of a 1 Mi string reached 2 GB inside the
 > step bound; a 1,000-field `{ ...r }` in a loop was charged no steps and ran 37 minutes of CPU per block).
+> The per-compile budget, the reader's own bounds, the plain-markup reading and the charged searches are
+> the S482 r4 PA default (PR #2045 r4, re-review HIGH-2..4 and MED-1: a worst-case `indexOf` ran one
+> block for minutes inside the step bound; forty imported files multiplied the per-file budget to
+> 2.2 GB; one emitted element of 150,000 attributes, or 256 elements of 1,024 repeated attributes, ran
+> past 60 seconds in the reader; 7,000 nested elements ended in a host `RangeError`); the cost model is
+> stated as an invariant and checked operation by operation (the bootstrap's
+> `compiler/self-host-v2/meta.scrml` THE BINDINGS / THE SEARCH, and `parse.scrml` FRAGMENT MODE).
 > **impl#1 status:** impl#1 bounds a compile-time body by a 5-second `node:vm` timeout (a clock) and
 > does not bound a single allocation or a file's emitted output; a host `RangeError` there is reported
 > as `E-META-EVAL-001`.

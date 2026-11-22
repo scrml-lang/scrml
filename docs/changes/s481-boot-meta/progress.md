@@ -89,4 +89,5 @@ Rulings: user-voice-scrml.md S480 census build order item 2; ruling:user-voice-s
 - [x] LOW-2 + class: binding scans/copies charged (findB, declare, rebind, pins, owned keys, records, args, keepFn work)
 - [x] gate reasons capped (32 + summary), respan by halves, nsAttrTag linear, url.scrml srcset/runs linear
 - [x] tests: meta-s481.test.js "s482 r4" (16 tests)
-- [ ] SPEC §22.4 text, gates, PR body
+- [x] SPEC §22.4 text (per-compile budget, reader bounds, plain-only, charged searches); gap g-boot-fragment-reader-superlinear-s482 widened
+- [ ] gates, PR body
