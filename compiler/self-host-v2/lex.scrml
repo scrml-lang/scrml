@@ -1108,7 +1108,14 @@ ${
         if (keywordName(lt.kind) == "") return false;
         const pt: Token = st.tokens[n - 2];
         const pk: TokenKind = pt.kind;
-        if (pk is .Dot || pk is .OptionalChain) return true;
+        if (pk is .OptionalChain) return true;
+        // s482-boot-contextual-names (#2056 review F3): a spread `...` lexes as three Dots
+        // (munchDot), so the word after it — `...await x`, `...typeof y` — follows a Dot that a
+        // Dot precedes: an OPERAND of the spread, never a member name
+        if (pk is .Dot) {
+            if (n >= 3 && st.tokens[n - 3].kind is .Dot) return false;
+            return true;
+        }
         return false;
     }
 
@@ -1124,8 +1131,19 @@ ${
     //            JavaScript name (§18 lists `server` among the scrml keywords that are "not an
     //            ECMAScript strict-mode reserved word" — a shorthand property name).
     // So `from.x` / `server.concat(…)` are member reads of the NAME, never a bare variant.
+    // s482-boot-contextual-names — and three more words whose keyword reading never takes a `.`
+    // or a `/` after the word, each a scrml keyword that is not an ECMAScript strict-mode
+    // reserved word (§18's shorthand-name class) and that no SPEC sentence reserves (§7.2):
+    //   `pure` — the deprecated function modifier (§33; §27: "The parser SHALL recognize `pure`,
+    //            `server`, and `pure server` as modifier[s]"): `pure function` / `pure fn`.
+    //   `render` — §20.3a: "`render` SHALL NOT be a reserved identifier"; its keyword reading is
+    //            the snippet invocation `render propName(…)` (§16.7), a name follows it.
+    //   `some` — a word only after `is` (`x is some`, §42.2.2a), where it ENDS the expression
+    //            (§7.2.2: "`not` / `given` / `some` end the expression").
+    // `as` is NOT one: its keyword reading takes a bare variant after it (`return a as .Published;`,
+    // §14.12.6.2), so `as .x` cannot be read as a member by the previous token alone.
     fn isContextualNameWord(name: string) -> boolean {
-        return name == "from" || name == "server";
+        return name == "from" || name == "server" || name == "pure" || name == "render" || name == "some";
     }
 
     // The previous token's kind as the `/`-and-`.` decisions (regexAllowedAfter) read it: a
