@@ -7,22 +7,22 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1956 of 1956 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1958 of 1958 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 770 | 39.4% |
+| PASS | 772 | 39.4% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 3 | 0.2% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 628 | 32.1% |
-| UNSUPPORTED | 555 | 28.4% |
+| UNSUPPORTED | 555 | 28.3% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 773; of those, 770 hold (99.6%). Runtime half executed on the bootstrap for 248 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 775; of those, 772 hold (99.6%). Runtime half executed on the bootstrap for 250 case(s).
 
-- **Vacuous** passes: 15 of 770 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **755**.
+- **Vacuous** passes: 15 of 772 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **757**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 1 of 3; the other 2 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
@@ -30,7 +30,7 @@ UNSUPPORTED by reason: bootstrap-unsupported 555.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **910** — PASS 494 · FAIL 3 · UNSUPPORTED 413. Twin holds 494 (non-vacuous 482). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **912** — PASS 496 · FAIL 3 · UNSUPPORTED 413. Twin holds 496 (non-vacuous 484). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 7 replace a twin's expectations · 14 exclude a case.
 - Superseded-code mappings applied: 8 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -165,7 +165,7 @@ NOT-TWINNED by reason (628 cases; a case counts once per distinct reason):
 | outlet | 7 | · | · | · | · | 1 | 6 | · | · |
 | own-value-type | 12 | 12 | · | · | · | · | · | · | · |
 | page | 3 | 2 | · | · | · | 1 | · | · | · |
-| parse-syntax | 4 | 2 | · | · | · | 2 | · | · | · |
+| parse-syntax | 6 | 4 | · | · | · | 2 | · | · | · |
 | parse-variant | 13 | 13 | · | · | · | · | · | · | · |
 | persist | 5 | 5 | · | · | · | · | · | · | · |
 | print | 1 | 1 | · | · | · | · | · | · | · |
@@ -207,7 +207,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (770)
+### PASS / CODES-ONLY (772)
 
 - `attr-executable-sink/base-href-data-neg` — PASS · TWIN
 - `attr-executable-sink/base-href-static-pos` — PASS · TWIN
@@ -776,6 +776,8 @@ none
 - `page/e-page-duplicate-pos` — PASS
 - `parse-syntax/e-syntax-042-not-value-position-neg` — PASS · TWIN · VACUOUS
 - `parse-syntax/e-syntax-042-null-value-position-pos` — PASS · TWIN
+- `parse-syntax/from-server-names-rt` — PASS · TWIN
+- `parse-syntax/keyword-named-member-rt` — PASS · TWIN
 - `parse-variant/alias-of-struct-neg` — PASS · TWIN
 - `parse-variant/alias-type-arg` — PASS · TWIN
 - `parse-variant/error-extra-key` — PASS · TWIN

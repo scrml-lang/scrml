@@ -5723,7 +5723,7 @@ ${
                     if (id >= 0) {
                         const c: CoreConst | not = findConst(p, id);
                         if (c is given) {
-                            if (c.mutable) ok = false
+                            if (c.mutable) ok = false;
                             else if (hasInt(marked, id) && !hasInt(out, id)) ok = false;
                         }
                     }

@@ -1349,14 +1349,20 @@ ${
                     // something that is not a pattern (`.Admin | p.active :> …`): that is the
                     // same guard, spelled with a pipe."
                     t = diagAt(t, "E-SYNTAX-011", "a match arm has no guard clause in v1 (§18.10): `| " + cur(adv(t)).text + "…` after the arm's pattern is a guard, not a second pattern — match the variant, then branch inside the arm body", c);
-                    for (;;) { if (!(!atEnd(t) && !isP(t, "}") && !sepAt(t, 0) && cur(t).line == c.line)) { break; } t = adv(t); }
+                    // s482: the head runs on past a line that ends in `|` (skipAltHead), as an alternation's does
+                    t = skipAltHead(t, c.line);
                     if (sepAt(t, 0)) t = adv(t);
                     if (isP(t, ">")) t = adv(t);
                 } else if (c.cls == TC.Punct && tk(c, "|")) {
                     // s452 r3 (LOW-D): `.A | .B :>` — §18.2's arm-pattern alternation
                     t = diagAt(t, "E-PARSE-ARM", "alternation `|` between patterns (`.A | .B :> …`, §18.2) is not yet supported in the bootstrap — write one arm per pattern", c);
                     // s452 r4: skip the rest of the alternation through its separator (one report, no follow-on E-PARSE-EXPR)
-                    for (;;) { if (!(!atEnd(t) && !isP(t, "}") && !sepAt(t, 0) && cur(t).line == c.line)) { break; } t = adv(t); }
+                    // s482 (g-boot-multiline-alternation-arm-head-s481): a line that ENDS in `|` continues the
+                    // head (§7.2.2 rule 4: "a line break SHALL NOT end, continue or separate a statement or an
+                    // arm: it is whitespace"; §18.2: "An arm pattern MAY list several alternates separated by
+                    // `|`") — `.A | .B |⏎ .C :>` is ONE head, refused once like the one-line head, never one
+                    // arm per line (an E-MATCH-ARM-SEPARATOR per line before)
+                    t = skipAltHead(t, c.line);
                     if (sepAt(t, 0)) t = adv(t);
                     if (isP(t, ">")) t = adv(t);
                 } else if (!isGiven || !gh.bad) {
@@ -1576,6 +1582,28 @@ ${
             .PBare(bind: b) :> false,
             .PLit(e: x) :> false
         };
+    }
+
+    // s482 (g-boot-multiline-alternation-arm-head-s481) — past the rest of an alternation arm head,
+    // up to its separator (left for the caller), the list's `}`, or the end of the head's last line.
+    // A line break ends the head only where the token before it is not a `|`: a line that ends in
+    // `|` continues the head onto the next (§7.2.2 rule 4 — a newline is whitespace; §18.2 — the
+    // alternates of one arm are separated by `|`). Comments are trivia (no token), so a comment
+    // between the lines changes nothing.
+    fn skipAltHead(tp: TP, line: int) -> TP {
+        let t: TP = tp;
+        let ln: int = line;
+        for (;;) {
+            if (atEnd(t) || isP(t, "}") || sepAt(t, 0)) { break; }
+            const x: PTok = cur(t);
+            if (x.line != ln) {
+                const pv: PTok = peekAt(t, -1);
+                if (!(pv.cls == TC.Punct && tk(pv, "|"))) { break; }
+                ln = x.line;
+            }
+            t = adv(t);
+        }
+        return t;
     }
 
     // s469 — E-MATCH-ARM-SEPARATOR (its dpa-073 F2 meaning, SPEC §18.2): an arm
@@ -5991,7 +6019,7 @@ ${
         const nameTok: PTok = cur(tp);
         const start: int = nameTok.start;
         let t: TP = tp;
-        if (nameTok.cls != TC.Ident) t = diagAt(t, "E-PARSE-LOCAL", "expected a name in the `let` of a `for` head", nameTok);
+        if (!bindNameTok(nameTok)) t = diagAt(t, "E-PARSE-LOCAL", "expected a name in the `let` of a `for` head", nameTok);
         t = adv(t);
         let aty: AType | not = not;
         if (isP(t, ":")) {
@@ -6092,7 +6120,7 @@ ${
         const mutable: boolean = isWord(tp, "let");
         let t: TP = adv(tp);
         const nameTok: PTok = cur(t);
-        if (nameTok.cls != TC.Ident) t = diagAt(t, "E-PARSE-LOCAL", "expected a name after `let` / `const`", nameTok);
+        if (!bindNameTok(nameTok)) t = diagAt(t, "E-PARSE-LOCAL", "expected a name after `let` / `const`", nameTok);
         t = adv(t);
         let aty: AType | not = not;
         if (isP(t, ":")) {
@@ -6399,7 +6427,7 @@ ${
                         steps = steps.concat(r2.steps);
                         t = r2.tp;
                         bad = true;
-                    } else if (v.cls == TC.Ident) {
+                    } else if (bindNameTok(v)) {
                         steps = steps.concat([{ dst: v.v, src: src, key: k.v, span: mkSpan(k.start, v.end), leaf: true }]);
                         t = adv(t);
                     } else if (v.cls == TC.At) {
@@ -6414,7 +6442,7 @@ ${
                         t = sr.tp;
                         bad = true;
                     }
-                } else if (k.cls != TC.Ident) {
+                } else if (!bindNameTok(k)) {
                     t = diagAt(t, "E-STMT-BINDING-NAME", "`" + k.v + "` is a keyword and cannot be bound as a name — rename it: `{ " + k.v + ": name }`", k);
                     bad = true;
                 } else {
@@ -6488,7 +6516,7 @@ ${
         const start: int = cur(tp).start;
         let t: TP = adv(tp);
         const nameTok: PTok = cur(t);
-        if (nameTok.cls != TC.Ident) t = diagAt(t, "E-PARSE-LOCAL", "expected a name after `lin`", nameTok);
+        if (!bindNameTok(nameTok)) t = diagAt(t, "E-PARSE-LOCAL", "expected a name after `lin`", nameTok);
         t = adv(t);
         let aty: AType | not = not;
         if (isP(t, ":")) {
@@ -6924,6 +6952,18 @@ ${
     }
 
     fn isNameTok(x: PTok) -> boolean { return x.cls == TC.Ident || x.cls == TC.Keyword; }
+
+    // s482 (g-boot-from-identifier-s481, g-boot-keyword-named-member-s481) — a name a `let` /
+    // `const` / `lin` may bind: an identifier, or a CONTEXTUAL word the lexer's reserved table
+    // carries that is a name wherever its keyword reading is impossible (lex.scrml
+    // isContextualNameWord): `from` (SPEC §54.3: "`from` SHALL NOT be a reserved word outside
+    // this position. Existing code that uses `from` as a parameter name, local binding, or field
+    // name … SHALL continue to compile without change") and `server` (a function modifier only
+    // before `function` / `fn`, §52.10; no SPEC sentence reserves it — §7.2).
+    fn bindNameTok(x: PTok) -> boolean {
+        if (x.cls == TC.Ident) return true;
+        return x.cls == TC.Keyword && (x.v == "from" || x.v == "server");
+    }
 
     fn parseFail(tp: TP) -> RStmt {
         const start: int = cur(tp).start;
