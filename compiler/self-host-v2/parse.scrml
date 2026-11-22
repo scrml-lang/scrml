@@ -257,7 +257,8 @@ ${
         for (; i < ts.length; ) {
             const t: PTok = ts[i];
             let merged = false;
-            if (t.cls == TC.Ident && ns.at.indexOf(t.start) >= 0 && ns.names.indexOf(t.v) >= 0 && i + 2 < ts.length) {
+            // (s482-boot-contextual-names: a contextual word may name the namespace, `import * as from`)
+            if (bindNameTok(t) && ns.at.indexOf(t.start) >= 0 && ns.names.indexOf(t.v) >= 0 && i + 2 < ts.length) {
                 const d: PTok = ts[i + 1];
                 const x: PTok = ts[i + 2];
                 if (tk(d, ".") && x.cls == TC.Ident) {
@@ -283,7 +284,7 @@ ${
         const a: PTok = peekAt(tp, k);
         const b: PTok = peekAt(tp, k + 1);
         const c: PTok = peekAt(tp, k + 2);
-        if (a.cls == TC.Ident && tp.ns.names.indexOf(a.v) >= 0 && b.cls == TC.Punct && tk(b, ".") && c.cls == TC.Ident && touching(a, b) && touching(b, c)) {
+        if (bindNameTok(a) && tp.ns.names.indexOf(a.v) >= 0 && b.cls == TC.Punct && tk(b, ".") && c.cls == TC.Ident && touching(a, b) && touching(b, c)) {
             return { name: a.v + "." + c.v, n: 3 };
         }
         return { name: "", n: 0 };
@@ -1748,7 +1749,7 @@ ${
             const nx: PTok = cur(t);
             // s452 — `_ err` (§18.6.1, the whole-error binder) / `else err`
             // (E-MATCH-BARE-BINDER, analyze's): the wildcard with one binder
-            if (nx.cls == TC.Ident && nx.line == a.line && nx.v != "_") {
+            if (bindNameTok(nx) && nx.line == a.line && nx.v != "_") {
                 const bind: ABind = { nid: t.nid, span: mkSpan(nx.start, nx.end), name: nx.v };
                 return { pat: APat.PWhole(bind, a.v == "else"), tp: bumpId(adv(t)) };
             }
@@ -1811,7 +1812,7 @@ ${
             for (;;) {
                 if (!(!isP(t, ")") && !atEnd(t))) { break; }
                 const b: PTok = cur(t);
-                if (b.cls != TC.Ident) {
+                if (!bindNameTok(b)) {
                     t = adv(diagAt(t, "E-PARSE-ARM", "expected a binder name (or `_`) in the pattern's `(…)`, found `" + b.text + "`", b));
                 } else {
                     if (binderRepeated(binds, b.v)) t = diagAt(t, "E-SCOPE-REDECLARE", binderDupMsg(b.v, qual + sep + name + "(…)"), b);
@@ -1828,7 +1829,7 @@ ${
         // `parens` false (analyze holds it to §18.7's arity: E-TYPE-021 on a
         // unit or multi-field variant). A `match` arm has no such pattern
         // (§18.2 `variant-pattern ::= ('.' | '::') VariantName ('(' binding-list ')')?`).
-        if (o.cls == TC.Ident && o.line == nameTok.line && o.v != "_") {
+        if (bindNameTok(o) && o.line == nameTok.line && o.v != "_") {
             if (!guard) {
                 const d: TP = diagAt(tp, "E-PARSE-ARM", binderReason(), o);
                 return { pat: APat.PName(name, [], false, qual), tp: adv(d) };
@@ -3243,7 +3244,7 @@ ${
         let going = true;
         for (; going; ) {
             const x: PTok = peekAt(tp, k);
-            if (x.cls == TC.Ident) {
+            if (bindNameTok(x)) {
                 names = names.concat([x.v]);
                 k = k + 1;
                 const sep: PTok = peekAt(tp, k);
@@ -3268,8 +3269,8 @@ ${
     // parameter types.
     fn typedArrowAhead(tp: TP) -> boolean {
         const a: PTok = peekAt(tp, 1);
-        let named: boolean = a.cls == TC.Ident && tk(peekAt(tp, 2), ":");
-        if (a.cls == TC.Keyword && a.v == "lin" && peekAt(tp, 2).cls == TC.Ident && tk(peekAt(tp, 3), ":")) named = true;
+        let named: boolean = bindNameTok(a) && tk(peekAt(tp, 2), ":");
+        if (a.cls == TC.Keyword && a.v == "lin" && bindNameTok(peekAt(tp, 2)) && tk(peekAt(tp, 3), ":")) named = true;
         if (!named) return false;
         const close: int = parenClose(tp);
         if (close < 0) return false;
@@ -3339,7 +3340,7 @@ ${
     // read by the bootstrap: refused by name (INTERIM).
     fn parseFnExpr(tp: TP, start: int) -> RExpr {
         let t: TP = adv(tp);
-        if (cur(t).cls == TC.Ident) {
+        if (bindNameTok(cur(t))) {
             t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a NAMED function expression `function " + cur(t).v + "(…) { … }` used as a value is not in the bootstrap (INTERIM) — drop the name (`function (…) { … }`), or declare it as a statement (§7.3.1) and pass its name", cur(t));
             t = adv(t);
         }
@@ -3391,6 +3392,9 @@ ${
     fn parseKeywordPrimary(tp: TP) -> RExpr {
         const t: PTok = cur(tp);
         const start: int = t.start;
+        // s482-boot-contextual-names — `from => …`: a contextual word is an arrow's one parameter
+        // as an identifier is (bindNameTok)
+        if (bindNameTok(t) && tk(peekAt(tp, 1), "=>")) return parseLambda(adv(tp), start, [t.v]);
         if (t.v == "true") return mkE(adv(tp), start, AExprK.Bool(true));
         if (t.v == "false") return mkE(adv(tp), start, AExprK.Bool(false));
         if (t.v == "not") return notPrimary(tp, start);
@@ -4409,7 +4413,7 @@ ${
         const a: PTok = peekAt(tp, k);
         if (a.cls != TC.Ident && a.cls != TC.Keyword) return false;
         if (a.v == "function") return true;
-        return a.v == "fn" && peekAt(tp, k + 1).cls == TC.Ident;
+        return a.v == "fn" && bindNameTok(peekAt(tp, k + 1));
     }
 
     // s469 r3 — after a block-like statement's `}` (token tp.i - 1): does the
@@ -4638,7 +4642,7 @@ ${
     // starts `name :` is read as a label.
     fn labelAhead(tp: TP) -> boolean {
         const t: PTok = cur(tp);
-        if (t.cls != TC.Ident) return false;
+        if (!bindNameTok(t)) return false;
         const c: PTok = peekAt(tp, 1);
         if (c.cls != TC.Punct || !tk(c, ":")) return false;
         const f: PTok = peekAt(tp, 2);
@@ -4687,7 +4691,9 @@ ${
         const a: PTok = peekAt(tp, 1);
         if (isNameTok(a) && (a.v == "let" || a.v == "const")) k = 2;
         const n: PTok = peekAt(tp, k);
-        if (n.cls != TC.Ident) return -1;
+        // s482-boot-contextual-names (F1): a contextual word binds here too (`for (const from of
+        // xs)`, §54.3 — "SHALL continue to compile"; bindNameTok)
+        if (!bindNameTok(n)) return -1;
         const o: PTok = peekAt(tp, k + 1);
         if (isNameTok(o) && o.v == w) return k + 1;
         return -1;
@@ -6058,7 +6064,7 @@ ${
     fn bracelessFor(tp: TP, kw: PTok, start: int) -> RStmt {
         let t: TP = diagAt(tp, "E-FOR-UNPARENTHESIZED-HEAD", "a `for` head is parenthesized — write `for (x of xs) { … }` (§49.4.1, §17.4; the braceless `for x in xs` form is removed)", kw);
         if (isWord(t, "let") || isWord(t, "const")) t = adv(t);
-        if (cur(t).cls == TC.Ident) t = adv(t);
+        if (bindNameTok(cur(t))) t = adv(t);
         if (isWord(t, "in") || isWord(t, "of")) t = adv(t);
         const it: RExpr = parseAssign(t);
         const body: RBlock = parseLoopBody(it.tp);
@@ -6072,7 +6078,7 @@ ${
         let t: TP = adv(tp);
         let label: string = "";
         const nx: PTok = cur(t);
-        if (nx.cls == TC.Ident && nx.line == kw.line) {
+        if (bindNameTok(nx) && nx.line == kw.line) {
             label = nx.v;
             t = adv(t);
         } else if (nx.cls != TC.End && nx.line == kw.line && !tk(nx, ";") && !tk(nx, "}")) {
@@ -6316,7 +6322,7 @@ ${
                 going = false;
             } else {
                 const nx: PTok = peekAt(t, 1);
-                const named: boolean = x.cls == TC.Ident || x.cls == TC.Variant;
+                const named: boolean = bindNameTok(x) || x.cls == TC.Variant;
                 if (named && nx.cls == TC.Punct && (tk(nx, ",") || tk(nx, "}") || tk(nx, "]") || tk(nx, "="))) {
                     steps = steps.concat([{ dst: x.v, src: src, key: x.v, span: mkSpan(x.start, x.end), leaf: true }]);
                 }
@@ -6960,9 +6966,25 @@ ${
     // this position. Existing code that uses `from` as a parameter name, local binding, or field
     // name … SHALL continue to compile without change") and `server` (a function modifier only
     // before `function` / `fn`, §52.10; no SPEC sentence reserves it — §7.2).
+    // s482-boot-contextual-names — and `as`, `pure`, `render`, `some`: scrml keywords that are
+    // not ECMAScript strict-mode reserved words, which §7.2 admits as JavaScript names ("All
+    // JavaScript that is valid in a Bun execution context is valid inside `${ }`, except the
+    // constructs §7.2.1 excludes") and no SPEC sentence reserves: `as` is named among them in
+    // §18 (a shorthand name is "an identifier, or a scrml keyword that is not an ECMAScript
+    // strict-mode reserved word (`type`, `from`, `is`, `as`, `get`, `set`, `server`, …)");
+    // `render` — §20.3a: "`render` SHALL NOT be a reserved identifier"; `pure` is a function
+    // modifier only (§33, deprecated; §27: "The parser SHALL recognize `pure`, `server`, and
+    // `pure server` as modifier[s]"); `some` is a word only after `is` (§42.2.2a). Every
+    // binding site reads its name through this one predicate (a `let` / `const` / `lin`, a
+    // `for` binder, a function / function-expression / arrow parameter, a function name, a
+    // pattern binder, a loop label, an import's local name).
     fn bindNameTok(x: PTok) -> boolean {
         if (x.cls == TC.Ident) return true;
-        return x.cls == TC.Keyword && (x.v == "from" || x.v == "server");
+        return x.cls == TC.Keyword && isContextualName(x.v);
+    }
+
+    fn isContextualName(w: string) -> boolean {
+        return ["from", "server", "as", "pure", "render", "some"].indexOf(w) >= 0;
     }
 
     fn parseFail(tp: TP) -> RStmt {
@@ -7013,7 +7035,7 @@ ${
         if (!givenRebindAhead(tp)) return parseGivenPresence(tp);
         let t: TP = adv(tp);
         const nameTok: PTok = cur(t);
-        if (nameTok.cls != TC.Ident) t = diagAt(t, "E-PARSE-GIVEN", "expected a name after `given`", nameTok);
+        if (!bindNameTok(nameTok)) t = diagAt(t, "E-PARSE-GIVEN", "expected a name after `given`", nameTok);
         t = expectP(adv(t), "=");
         const subj: RExpr = parseTernary(t);
         t = subj.tp;
@@ -8760,9 +8782,9 @@ ${
                     const nmT: PTok = cur(adv(asT));
                     if (!isWord(asT, "as")) {
                         rt = diagAt(rt, "E-PARSE-IMPORT", "expected `as` after `import *` — a namespace import is written `import * as name from \"…\"` (§21.3)", cur(asT));
-                    } else if (nmT.cls == TC.Keyword) {
+                    } else if (nmT.cls == TC.Keyword && !bindNameTok(nmT)) {
                         rt = diagAt(rt, "E-PARSE-IMPORT", "`" + nmT.text + "` is a keyword and cannot be a local name — write another name after `as` (`import * as m from \"…\"`)", nmT);
-                    } else if (nmT.cls != TC.Ident || !isWord(adv(adv(asT)), "from")) {
+                    } else if (!bindNameTok(nmT) || !isWord(adv(adv(asT)), "from")) {
                         rt = diagAt(rt, "E-PARSE-IMPORT", "expected `import * as name from \"…\"` — one name after `as`, then `from` (§21.3)", nmT);
                     } else {
                         ns = nmT.v;
@@ -8806,12 +8828,13 @@ ${
                 // re-export `export { a as b } from`) (g-boot-import-codes-and-alias-s471)
                 if (isWord(t, "as")) {
                     const loc: PTok = cur(adv(t));
-                    if (loc.cls == TC.Keyword) {
+                    // s482-boot-contextual-names: a contextual word is a binding name (bindNameTok)
+                    if (loc.cls == TC.Keyword && !bindNameTok(loc)) {
                         // s474 r1 (F5): a local name is a binding — a keyword is no binding name
                         // (as `fn if` is E-PARSE-FN); the exported name may be one (a host export)
                         t = adv(adv(diagAt(t, "E-PARSE-IMPORT", "`" + loc.text + "` is a keyword and cannot be a local name — write another name after `as` (`import { " + n.text + " as other } from \"…\"`)", loc)));
                         bind = false;
-                    } else if (loc.cls == TC.Ident) {
+                    } else if (bindNameTok(loc)) {
                         bound = loc;
                         t = adv(adv(t));
                     } else {
@@ -9319,7 +9342,7 @@ ${
             // s471 — `lin name: T` (§35.2.1: "parameter ::= ['lin'] identifier ':' type-annotation")
             const lt: PTok = cur(t);
             let isLin = false;
-            if (lt.cls == TC.Keyword && lt.v == "lin" && peekAt(t, 1).cls == TC.Ident) {
+            if (lt.cls == TC.Keyword && lt.v == "lin" && bindNameTok(peekAt(t, 1))) {
                 isLin = true;
                 t = adv(t);
             }
@@ -9360,7 +9383,9 @@ ${
     fn parseFnDecl(tp: TP, start: int, exported: boolean, pure: boolean, server: boolean) -> RFnDecl {
         let t: TP = adv(tp);
         const nameTok: PTok = cur(t);
-        if (nameTok.cls != TC.Ident) t = diagAt(t, "E-PARSE-FN", "expected a function name", nameTok);
+        // s482-boot-contextual-names (g-boot-contextual-word-fn-name-s482): `fn from(…)` — a
+        // contextual word names a function as it names a local (bindNameTok)
+        if (!bindNameTok(nameTok)) t = diagAt(t, "E-PARSE-FN", "expected a function name", nameTok);
         const rp: RParams = parseParamList(expectP(adv(t), "("), true);
         const params: AParam[] = rp.ps;
         t = expectP(rp.tp, ")");
@@ -13171,7 +13196,7 @@ ${
             t = adv(t);
         }
         const nameTok: PTok = cur(t);
-        if (nameTok.cls != TC.Ident || !tk(peekAt(t, 1), "(")) return hostMalformed(mp, at, end, "this line is not a binding");
+        if (!bindNameTok(nameTok) || !tk(peekAt(t, 1), "(")) return hostMalformed(mp, at, end, "this line is not a binding");
         const rp: RParams = parseParamList(adv(adv(t)), false);
         if (!isP(rp.tp, ")")) return hostMalformed(mp, at, end, "a binding's parameter list does not close on its line");
         t = adv(rp.tp);
@@ -13407,7 +13432,7 @@ ${
         if (j + 1 >= tp.toks.length) return false;
         const t1: PTok = tp.toks[j];
         const t2: PTok = tp.toks[j + 1];
-        if (t1.cls != TC.Ident || t1.line != t0.line) return false;
+        if (!bindNameTok(t1) || t1.line != t0.line) return false;
         if (t0.v == "function" || t0.v == "fn") return tk(t2, "(") || tk(t2, "<");
         if (i == 0 && t0.v == "type") return tk(t2, ":") || tk(t2, "=") || tk(t2, "<");
         return false;
@@ -14424,7 +14449,7 @@ ${
     fn nestedWhenMessage(mp: MP) -> RMItems {
         let t: TP = adv(adv(regionTP(mp, LexStop.Statement)));   // `when` `message`
         t = expectP(t, "(");
-        if (cur(t).cls == TC.Ident) {
+        if (bindNameTok(cur(t))) {
             t = adv(t);
             // an annotated binding `data: Job` (a parameter's spelling; §4.12.4 shows only the
             // bare name, and the hook is never built, so the annotation is read, not judged)
