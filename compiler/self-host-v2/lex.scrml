@@ -1291,7 +1291,23 @@ ${
     fn classifyCode(st: LexState, cur: Cursor) -> LexEvent {
         if (isEof(cur)) return .SawEof;
         if (isInterpCloseHere(st, cur)) return .SawInterpClose;
-        return classify(cur, valueLastKind(st));
+        return classify(cur, dotLastKind(st, cur));
+    }
+
+    // s482-as-adjacency — the previous token's kind as the `.` decision reads it. `as` is the one
+    // contextual word whose keyword reading takes a bare variant after it (`return a as .Published;`,
+    // §14.12.6.2), so the previous token alone cannot decide `as .x`. ADJACENCY decides (owner ruling
+    // S482, user-voice-scrml.md "RULED — `as.value`: adjacency decides"; the §7.2.2 rule 4 precedent):
+    // a `.` TOUCHING `as` — no whitespace, newline or comment between — is member access on the name
+    // `as` (`as.value`, `as.f()`); a spaced `as .V` stays the bare-variant cast. Only the `.` decision
+    // changes: a `/` after `as` is decided by valueLastKind as before.
+    fn dotLastKind(st: LexState, cur: Cursor) -> TokenKind | not {
+        const k: TokenKind | not = valueLastKind(st);
+        if (k is not) return k;
+        if (peekCode(cur, 0) != 46) return k;
+        if (keywordName(k) != "as") return k;
+        if (st.tokens[st.tokens.length - 1].span.end != cur.pos) return k;
+        return kIdent("as");
     }
 
     // The (mode x event) transition table (the DD's `match (st.mode, ev)`),
