@@ -77,7 +77,7 @@ ${
         let diags: Diag[] = [];
         // THE EMIT BUDGET is ONE per compile (S482 r4, review HIGH-3): every file's
         // blocks draw on it, imported files included, in file order
-        let used: MUsed = { chars: 0, tags: 0, nodes: 0, attrs: 0 };
+        let used: MUsed = { chars: 0, tags: 0, nodes: 0, attrs: 0, steps: 0 };
         for (const f of files) {
             const env: MEnv = envOf(f, files);
             const c0: MC = { file: f.path, env: env, next: next, diags: [], errs: f.errs, hits: 0, used: used };
@@ -271,7 +271,7 @@ ${
     type MC:struct = { file: string, env: MEnv, next: int, diags: Diag[], errs: ASpan[], hits: int, used: MUsed }
     // THE EMIT BUDGET spent by the file's blocks so far (characters, `<` characters, nodes).
     // What the compile's `^{}` blocks have emitted so far (THE EMIT BUDGET).
-    type MUsed:struct = { chars: int, tags: int, nodes: int, attrs: int }
+    type MUsed:struct = { chars: int, tags: int, nodes: int, attrs: int, steps: int }
 
     fn withDiag(c: MC, code: string, msg: string, span: ASpan) -> MC {
         return { file: c.file, env: c.env, next: c.next, diags: c.diags.concat([newDiag(code, msg, c.file, span)]), errs: c.errs, hits: c.hits, used: c.used };
@@ -950,20 +950,26 @@ ${
     // stands at a program body / the file top (code-default).
     // =========================================================================
     // `attr`: the block is the value of this attribute ("" — it is not).
-    fn metaBlock(c: MC, m: AMeta, parent: string, bodyTop: boolean, attr: string) -> RNodes {
+    fn metaBlock(c0: MC, m: AMeta, parent: string, bodyTop: boolean, attr: string) -> RNodes {
         // 1. a parse error inside the block (E-META-002): its own report stands
-        if (errWithin(c.errs, m.span)) return { nodes: [], c: c };
+        if (errWithin(c0.errs, m.span)) return { nodes: [], c: c0 };
         // 2. the static checks
-        const fx: FX = factsOf(c.env, m.body, []);
-        const ds: Diag[] = staticDiags(c, m, fx.f);
-        if (ds.length > 0) return { nodes: [], c: withDiags(c, ds) };
+        const fx: FX = factsOf(c0.env, m.body, []);
+        const ds: Diag[] = staticDiags(c0, m, fx.f);
+        if (ds.length > 0) return { nodes: [], c: withDiags(c0, ds) };
         // 3. a runtime block (§22.5): phase 2, not built
         if (!isCompileTime(fx.f)) {
-            return { nodes: [], c: withDiag(c, "E-BOOTSTRAP-UNSUPPORTED", "a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap builds compile-time `^{}` (§22.4) only (INTERIM, g-boot-meta-runtime-unbuilt-s481)", m.span) };
+            return { nodes: [], c: withDiag(c0, "E-BOOTSTRAP-UNSUPPORTED", "a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap builds compile-time `^{}` (§22.4) only (INTERIM, g-boot-meta-runtime-unbuilt-s481)", m.span) };
         }
-        // 4. evaluate
-        const u: MUsed = c.used;
-        const s: MS = runBlock(c.env, m.body, { room: maxFileChars() - u.chars, troom: maxFileTags() - u.tags, tags: 0, alloc: 0, own: [] });
+        // 4. evaluate — on the compile's step total (THE STEP TOTAL, S482 r5, review HIGH-2):
+        // what every block before this one spent, refused or not, is gone
+        const u0: MUsed = c0.used;
+        if (u0.steps >= maxTotalSteps()) return { nodes: [], c: withDiag(c0, "E-META-EVAL-001", evalFailMsg(totalMsg()), m.span) };
+        let cap: int = maxSteps();
+        if (maxTotalSteps() - u0.steps < cap) cap = maxTotalSteps() - u0.steps;
+        const s: MS = runBlock(c0.env, m.body, { room: maxFileChars() - u0.chars, troom: maxFileTags() - u0.tags, tags: 0, alloc: 0, own: [], cap: cap, recv: [] });
+        const u: MUsed = { chars: u0.chars, tags: u0.tags, nodes: u0.nodes, attrs: u0.attrs, steps: u0.steps + s.steps };
+        const c: MC = withUsed(c0, u);
         if (s.err != "") return { nodes: [], c: withDiag(c, s.code, s.err, m.span) };
         if (s.emits > 0 && attr != "") {
             return { nodes: [], c: withDiag(c, "E-META-EVAL-002", "this compile-time `^{}` is the value of the attribute `" + attr + "=` and emits markup: `emit()` output is inlined where markup sits (§22.4.1 \"Where emitted output lands\"), and an attribute value is no markup position — write the value as an expression (`" + attr + "=" + "$" + "{…}`), or move the `^{}` among the element's children", m.span) };
@@ -978,14 +984,14 @@ ${
         // 5. re-read, judge, splice
         let p: string = parent;
         if (bodyTop || p == "") p = "program";
-        const c2: MC = withUsed(c, { chars: u.chars + s.out.length, tags: u.tags + s.bud.tags, nodes: u.nodes, attrs: u.attrs });
+        const c2: MC = withUsed(c, { chars: u.chars + s.out.length, tags: u.tags + s.bud.tags, nodes: u.nodes, attrs: u.attrs, steps: u.steps });
         const r: RNodes = spliceOut(c2, m, s.out, p, bodyTop);
         if (r.nodes.length == 0) return r;
         // the nodes read count against the compile's budget (THE EMIT BUDGET; the
         // reader stopped at it already — this counts what the gate admitted)
         const nn: int = u.nodes + countNodes(r.nodes);
         if (nn > maxFileNodes()) return { nodes: [], c: withDiag(r.c, "E-META-EVAL-001", evalFailMsg(emitBudgetMsg("nodes (elements and text, once read)", nn, maxFileNodes() - u.nodes, maxFileNodes())), m.span) };
-        return { nodes: r.nodes, c: withUsed(r.c, { chars: r.c.used.chars, tags: r.c.used.tags, nodes: nn, attrs: r.c.used.attrs }) };
+        return { nodes: r.nodes, c: withUsed(r.c, { chars: r.c.used.chars, tags: r.c.used.tags, nodes: nn, attrs: r.c.used.attrs, steps: r.c.used.steps }) };
     }
 
     fn evalFailMsg(msg: string) -> string {
@@ -1302,7 +1308,7 @@ ${
         const k: AStmtK = s.k;
         return match k {
             .Eval(e: e) :> fExpr(env, x, e),
-            .Local(name: n, ty: ty, init: init) :> fxDeclareT(fLocalInit(env, x, ty, init), n, "V" + enumOfType(env, ty)),
+            .Local(name: n, mutable: mu, ty: ty, init: init) :> fxDeclareT(fLocalInit(env, x, ty, init), n, localTy(env, mu, ty, init)),
             .Return(e: e) :> fReturn(env, x, e),
             .If(cond: cond, thenB: tb, elseB: eb) :> fIf(env, x, cond, tb, eb),
             .Given(name: n, subject: subj, body: b) :> fBlock(env, fExpr(env, x, subj), b, [n]),
@@ -1343,6 +1349,36 @@ ${
             i = i + 1;
         }
         return out;
+    }
+
+    // What a local is typed as: its annotation's enum ("V…"), or — a `const` bound to an
+    // arrow that annotates its parameters (`const f = (c: C) => c`) — the arrow's parameter
+    // enums ("F|…", S482 r5, review LOW-1), so a call's bare variant is judged as for a
+    // local `fn`. A `let` may be rebound to another function, so it is not typed so.
+    fn localTy(env: MEnv, mu: boolean, ty: AType | not, init: AExpr) -> string {
+        if (!mu && ty is not) {
+            const sig: string = lambdaSig(env, init);
+            if (sig != "") return sig;
+        }
+        return "V" + enumOfType(env, ty);
+    }
+
+    fn lambdaSig(env: MEnv, e: AExpr) -> string {
+        const ps: AParam[] = lambdaTyped(e);
+        const es: string[] = paramEnums(env, ps);
+        let any: boolean = false;
+        for (const en of es) { if (en != "") any = true; }
+        if (!any) return "";
+        return "F|" + es.join("|");
+    }
+
+    fn lambdaTyped(e: AExpr) -> AParam[] {
+        return match e.k {
+            .Lambda(typed: ps) :> ps,
+            .BlockLambda(params: ps) :> blockParams(e),
+            // no-default-arm: only an arrow annotates parameters
+            _ :> []
+        };
     }
 
     fn fnSig(env: MEnv, f: AFn) -> string { return "F" + enumOfType(env, f.ret) + "|" + paramEnums(env, f.params).join("|"); }
@@ -1890,8 +1926,12 @@ ${
 
     // `room` / `troom`: the characters / `<` characters the file's blocks may still
     // emit; `tags`: the `<` characters this block has emitted; `alloc`: its allocation;
-    // `own`: the bindings ("frame:name") whose list is held by nothing else (OWNED below).
-    type MBud:struct = { room: int, troom: int, tags: int, alloc: number, own: string[] }
+    // `own`: the bindings ("frame:name") whose list is held by nothing else (OWNED below);
+    // `cap`: the step count this block stops at — the per-block bound, or what is left of
+    // the compile's step total, whichever is less (THE STEP TOTAL, S482 r5); `recv`: the
+    // bindings ("frame:name") whose list a `push` / `pop` / `sort` / `reverse` is changing
+    // while its arguments are evaluated (S482 r5, review HIGH-1 — OWNED below).
+    type MBud:struct = { room: int, troom: int, tags: int, alloc: number, own: string[], cap: int, recv: string[] }
 
     fn runBlock(env: MEnv, b: ABlock, bud: MBud) -> MS {
         const s0: MS = { frames: [], out: "", emits: 0, steps: 0, depth: 0, err: "", code: "", ctl: 0, label: "", ret: MV.VUndef, cNames: [], cVals: [], busy: [], floor: 0, pinI: [], pinN: [], bud: bud };
@@ -1917,12 +1957,29 @@ ${
         return "it ran past the evaluator's step bound (" + String(maxSteps()) + " steps; a built-in's work is counted too — one step per " + String(copyUnit()) + " characters it produces or reads or list elements it copies, and per " + String(walkUnit()) + " elements of a list or record it walks) — a compile-time body must finish; the bound is a step count, not a clock, so the result is the same on every machine";
     }
 
+    // THE STEP TOTAL (S482 r5, review HIGH-2): the step bound is per block, and a
+    // compile may hold any number of blocks — so every `^{}` block of the compile, every
+    // file's (imported files included), draws on ONE total of 4 × the per-block bound.
+    // A block that reaches it is refused like one that reaches its own bound, and once it
+    // is spent every further block is refused (SPEC §22.4 "The compile-wide step total").
+    fn maxTotalSteps() -> int { return 4 * maxSteps(); }
+
+    fn totalMsg() -> string {
+        return "the `^{}` blocks of this compile ran past the compile's step total (" + String(maxTotalSteps()) + " steps across every `^{}` block of every file, imported files included — " + String(maxSteps()) + " per block, and 4 × that for the compile; a built-in's work is counted as for the step bound) — the blocks before this one spent it; a compile's compile-time work must finish, and the total is a step count, not a clock, so the result is the same on every machine";
+    }
+
+    // The bound a block stopped at: its own, or the compile's total.
+    fn capMsg(s: MS) -> string {
+        if (s.bud.cap < maxSteps()) return totalMsg();
+        return stepMsg();
+    }
+
     fn withSteps(s: MS, n: int) -> MS {
         return { frames: s.frames, out: s.out, emits: s.emits, steps: n, depth: s.depth, err: s.err, code: s.code, ctl: s.ctl, label: s.label, ret: s.ret, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: s.floor, pinI: s.pinI, pinN: s.pinN, bud: s.bud };
     }
 
     fn tick(s: MS) -> MS {
-        if (s.steps >= maxSteps()) return failS(s, stepMsg());
+        if (s.steps >= s.bud.cap) return failS(s, capMsg(s));
         return withSteps(s, s.steps + 1);
     }
 
@@ -1936,7 +1993,7 @@ ${
         if (s.err != "") return s;
         const k: number = Math.floor(n / unit);
         if (k <= 0) return s;
-        if (s.steps + k > maxSteps()) return failS(s, stepMsg());
+        if (s.steps + k > s.bud.cap) return failS(s, capMsg(s));
         return withSteps(s, s.steps + k);
     }
 
@@ -2089,7 +2146,7 @@ ${
         if (b.tags + nt > b.troom) return failS(s0, emitBudgetMsg("`<` characters (markup tags)", b.tags + nt, b.troom, maxFileTags()));
         const s: MS = charge(s0, text.length);
         if (s.err != "") return s;
-        const b2: MBud = { room: b.room, troom: b.troom, tags: b.tags + nt, alloc: b.alloc, own: b.own };
+        const b2: MBud = { room: b.room, troom: b.troom, tags: b.tags + nt, alloc: b.alloc, own: b.own, cap: b.cap, recv: b.recv };
         return { frames: s.frames, out: s.out + text, emits: s.emits + 1, steps: s.steps, depth: s.depth, err: s.err, code: s.code, ctl: s.ctl, label: s.label, ret: s.ret, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: s.floor, pinI: s.pinI, pinN: s.pinN, bud: b2 };
     }
 
@@ -2105,7 +2162,7 @@ ${
         const b: MBud = s.bud;
         const n: number = b.alloc + chars + slots * slotUnit() + elems * elemUnit();
         if (n > maxAlloc()) return failS(s, "its built-ins would allocate " + String(n) + " units, past the evaluator's allocation bound (" + String(maxAlloc()) + " units per block, never given back: a character 1, a list slot or record field copied " + String(slotUnit()) + ", an element value created " + String(elemUnit()) + ") — a compile-time body allocates a bounded amount, so it cannot take the compiler's memory; the bound is the same on every machine");
-        return { frames: s.frames, out: s.out, emits: s.emits, steps: s.steps, depth: s.depth, err: s.err, code: s.code, ctl: s.ctl, label: s.label, ret: s.ret, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: s.floor, pinI: s.pinI, pinN: s.pinN, bud: { room: b.room, troom: b.troom, tags: b.tags, alloc: n, own: b.own } };
+        return { frames: s.frames, out: s.out, emits: s.emits, steps: s.steps, depth: s.depth, err: s.err, code: s.code, ctl: s.ctl, label: s.label, ret: s.ret, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: s.floor, pinI: s.pinI, pinN: s.pinN, bud: { room: b.room, troom: b.troom, tags: b.tags, alloc: n, own: b.own, cap: b.cap, recv: b.recv } };
     }
 
     fn allocC(s: MS, chars: number) -> MS { return alloc(s, chars, 0, 0); }
@@ -2141,9 +2198,14 @@ ${
     // function's reads pin the binding, so it is never written (or pushed) again.
     fn ownKey(i: int, n: string) -> string { return String(i) + ":" + n; }
 
+    fn withRecv(s: MS, recv: string[]) -> MS {
+        const b: MBud = s.bud;
+        return { frames: s.frames, out: s.out, emits: s.emits, steps: s.steps, depth: s.depth, err: s.err, code: s.code, ctl: s.ctl, label: s.label, ret: s.ret, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: s.floor, pinI: s.pinI, pinN: s.pinN, bud: { room: b.room, troom: b.troom, tags: b.tags, alloc: b.alloc, own: b.own, cap: b.cap, recv: recv } };
+    }
+
     fn withOwn(s: MS, own: string[]) -> MS {
         const b: MBud = s.bud;
-        return { frames: s.frames, out: s.out, emits: s.emits, steps: s.steps, depth: s.depth, err: s.err, code: s.code, ctl: s.ctl, label: s.label, ret: s.ret, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: s.floor, pinI: s.pinI, pinN: s.pinN, bud: { room: b.room, troom: b.troom, tags: b.tags, alloc: b.alloc, own: own } };
+        return { frames: s.frames, out: s.out, emits: s.emits, steps: s.steps, depth: s.depth, err: s.err, code: s.code, ctl: s.ctl, label: s.label, ret: s.ret, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: s.floor, pinI: s.pinI, pinN: s.pinN, bud: { room: b.room, troom: b.troom, tags: b.tags, alloc: b.alloc, own: own, cap: b.cap, recv: b.recv } };
     }
 
     // The owned set searched for a key (charged).
@@ -3110,11 +3172,25 @@ ${
         if (rv.s.err != "") return rv;
         const tk: AExprK = t.k;
         return match tk {
-            .Name(name: n) :> vr(rv.v, assign(rv.s, n, rv.v)),
+            .Name(name: n) :> assignName(rv.s, n, rv.v),
             .Member(obj: o, name: n) :> assignMember(env, o, n, rv.v, rv.s),
             // no-default-arm: a compile-time body writes a binding or a binding's field
             _ :> bad(rv.s, "a write to this target is not a form the compile-time evaluator evaluates (it writes a binding, or a field of a binding)")
         };
+    }
+
+    // S482 r5 (review HIGH-1): `t.push((t = [9]).length)` — JavaScript appends to the list
+    // `t` named BEFORE the assignment, which `t` no longer names; the binding the evaluator
+    // changes is `t`'s current list. The two answers differ, so the assignment is refused.
+    fn assignName(s0: MS, n: string, v: MV) -> MR {
+        if (s0.bud.recv.length > 0) {
+            const b: FB = findB(s0, n);
+            const s: MS = charge(b.s, s0.bud.recv.length * (12 + n.length));
+            if (s.err != "") return vr(MV.VUndef, s);
+            if (b.i >= 0 && s.bud.recv.indexOf(ownKey(b.i, n)) >= 0) return bad(s, "`" + n + "` is assigned inside the arguments of a `" + n + ".push(…)` / `.pop()` / `.sort(…)` / `.reverse()` call that changes it — JavaScript would change the list `" + n + "` held before the assignment, which `" + n + "` no longer names; the compile-time evaluator refuses the block rather than give either answer. Assign before (or after) the call");
+            return vr(v, assign(s, n, v));
+        }
+        return vr(v, assign(s0, n, v));
     }
 
     fn assignMember(env: MEnv, o: AExpr, n: string, v: MV, s0: MS) -> MR {
@@ -3637,7 +3713,7 @@ ${
         let own0: string[] = [];
         if (share) own0 = s.bud.own;
         // `floor`: the captured frames are below it (CLOSURES — a write to them is refused)
-        const inner: MS = { frames: f.env.concat([frame]), out: s.out, emits: s.emits, steps: s.steps, depth: s.depth + 1, err: "", code: "", ctl: 0, label: "", ret: MV.VUndef, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: f.env.length, pinI: [], pinN: [], bud: { room: s.bud.room, troom: s.bud.troom, tags: s.bud.tags, alloc: s.bud.alloc, own: own0 } };
+        const inner: MS = { frames: f.env.concat([frame]), out: s.out, emits: s.emits, steps: s.steps, depth: s.depth + 1, err: "", code: "", ctl: 0, label: "", ret: MV.VUndef, cNames: s.cNames, cVals: s.cVals, busy: s.busy, floor: f.env.length, pinI: [], pinN: [], bud: { room: s.bud.room, troom: s.bud.troom, tags: s.bud.tags, alloc: s.bud.alloc, own: own0, cap: s.bud.cap, recv: [] } };
         let v: MV = MV.VUndef;
         let after: MS = inner;
         const ex1: AExpr | not = f.expr;
@@ -3675,7 +3751,7 @@ ${
             st = charge(st, r.work);
             ownB = r.ks;
         }
-        const back: MS = { frames: s.frames, out: st.out, emits: st.emits, steps: st.steps, depth: s.depth, err: st.err, code: st.code, ctl: 0, label: "", ret: MV.VUndef, cNames: st.cNames, cVals: st.cVals, busy: s.busy, floor: s.floor, pinI: pi, pinN: pn, bud: { room: st.bud.room, troom: st.bud.troom, tags: st.bud.tags, alloc: st.bud.alloc, own: ownB } };
+        const back: MS = { frames: s.frames, out: st.out, emits: st.emits, steps: st.steps, depth: s.depth, err: st.err, code: st.code, ctl: 0, label: "", ret: MV.VUndef, cNames: st.cNames, cVals: st.cVals, busy: s.busy, floor: s.floor, pinI: pi, pinN: pn, bud: { room: st.bud.room, troom: st.bud.troom, tags: st.bud.tags, alloc: st.bud.alloc, own: ownB, cap: st.bud.cap, recv: s.bud.recv } };
         if (back.err != "") return vr(MV.VUndef, back);
         return vr(v, back);
     }
@@ -3822,12 +3898,23 @@ ${
             ro = evalE(env, o, s);
         }
         if (ro.s.err != "") return ro;
-        let ra: MArgs = { vs: [], s: ro.s };
-        if (isTapeV(ro.v) && callbackMethod(m)) {
-            ra = evalListArgs(env, xs, ro.s);
-        } else {
-            ra = evalArgs(env, xs, ro.s);
+        // S482 r5 (review HIGH-1): a method that changes the list it is called on changes the
+        // BINDING's list as it stands AFTER the arguments (tapeMutate re-reads it); while the
+        // arguments run, the binding is marked (`recv`) so an argument that ASSIGNS it is refused
+        let s1: MS = ro.s;
+        const recv0: string[] = ro.s.bud.recv;
+        const root: string = primName(o);
+        if (isTapeV(ro.v) && changesList(m) && root != "") {
+            const b: FB = findB(ro.s, root);
+            if (b.i >= 0) s1 = withRecv(charge(b.s, recv0.length), recv0.concat([ownKey(b.i, root)]));
         }
+        let ra: MArgs = { vs: [], s: s1 };
+        if (isTapeV(ro.v) && callbackMethod(m)) {
+            ra = evalListArgs(env, xs, s1);
+        } else {
+            ra = evalArgs(env, xs, s1);
+        }
+        ra = { vs: ra.vs, s: withRecv(ra.s, recv0) };
         // an argument read as a number or as text is read whole (THE BUDGET; a
         // string method charges its arguments itself)
         if (!isStrV(ro.v)) {
@@ -3848,18 +3935,71 @@ ${
         };
     }
 
+    // The list methods that change the list they are called on (on a binding only — tapeMutate).
+    fn changesList(m: string) -> boolean { return m == "push" || m == "pop" || m == "sort" || m == "reverse"; }
+
     fn noMethod(kind: string, m: string, s: MS) -> MR {
         return bad(s, "`." + m + "()` on " + kind + " is not a method the compile-time evaluator knows (it evaluates the methods §22.12 names and their plain neighbours)");
     }
 
+    // An argument not passed, or passed as `undefined`, takes the default; `not` is
+    // JavaScript's `null` — a value ("null" as text, 0 as a number), as JavaScript reads it
+    // (S482 r5, review MED-1 audit).
     fn argStr(args: MV[], i: int, dflt: string) -> string {
-        if (i < args.length && !isAbsent(args[i])) return jsStr(args[i]);
+        if (i < args.length && !isUndefV(args[i])) return jsStr(args[i]);
         return dflt;
     }
 
     fn argNum(args: MV[], i: int, dflt: number) -> number {
-        if (i < args.length && !isAbsent(args[i])) return toNum(args[i]);
+        if (i < args.length && !isUndefV(args[i])) return toNum(args[i]);
         return dflt;
+    }
+
+    fn isUndefV(v: MV) -> boolean {
+        return match v {
+            .VUndef :> true,
+            // no-default-arm: one question of a value — is it undefined
+            _ :> false
+        };
+    }
+
+    fn hasArg(args: MV[], i: int) -> boolean { return i < args.length && !isUndefV(args[i]); }
+
+    // JavaScript's ToIntegerOrInfinity: NaN is 0, ±Infinity stays, any other number is
+    // truncated toward 0.
+    fn toIntInf(n: number) -> number {
+        if (n != n) return 0;
+        if (n == 1 / 0 || n == -1 / 0) return n;
+        return Math.trunc(n);
+    }
+
+    // A string method's position argument (`indexOf`, `includes`, `startsWith`,
+    // `endsWith`): ToIntegerOrInfinity, clamped to [0, len]; `dflt` when it is absent.
+    fn strPos(args: MV[], i: int, dflt: int, len: int) -> int {
+        if (!hasArg(args, i)) return dflt;
+        const n: number = toIntInf(toNum(args[i]));
+        if (n < 0) return 0;
+        if (n > len) return len;
+        return n;
+    }
+
+    // A list method's `fromIndex` (`indexOf`, `includes`): ToIntegerOrInfinity; negative
+    // counts from the end, clamped at 0; past the end (+Infinity too) finds nothing (len).
+    fn listFrom(args: MV[], i: int, len: int) -> int {
+        if (!hasArg(args, i)) return 0;
+        const n: number = toIntInf(toNum(args[i]));
+        if (n >= len) return len;
+        if (n >= 0) return n;
+        if (len + n < 0) return 0;
+        return len + n;
+    }
+
+    // JavaScript's ToUint32 (`split`'s limit).
+    fn toUint32(n: number) -> number {
+        if (n != n || n == 1 / 0 || n == -1 / 0) return 0;
+        let k: number = Math.trunc(n) % 4294967296;
+        if (k < 0) k = k + 4294967296;
+        return k;
     }
 
     // JavaScript's relative index (`slice`, `at`): negative from the end, clamped.
@@ -3876,7 +4016,7 @@ ${
     // THE BUDGET: a method that reads its string is charged by its length, one
     // that builds a string by the length it builds — checked before it is built.
     fn strMethod(x: string, m: string, args: MV[], s0: MS) -> MR {
-        if (m == "charAt") return vr(MV.VStr(strOf(charAtOr(x, argNum(args, 0, 0)))), s0);
+        if (m == "charAt") return vr(MV.VStr(strOf(charAtOr(x, toIntInf(argNum(args, 0, 0))))), s0);
         if (m == "at") return vr(charAtV(x, relAt(argNum(args, 0, 0), x.length)), s0);
         if (m == "toString") return vr(MV.VStr(x), s0);
         let argT: number = 0;
@@ -3892,16 +4032,20 @@ ${
         if (m == "trim") return madeStr(x.trim(), s);
         // a substring search is linear (S482 r4, review HIGH-2): the host's indexOf is
         // O(n·m) on some inputs, so the search is the evaluator's own (findStr, KMP)
-        if (m == "includes") return vr(MV.VBool(findStr(x, argStr(args, 0, "undefined"), 0) >= 0), s);
+        // the second argument is a position (S482 r5, review MED-1): JavaScript's
+        // ToIntegerOrInfinity, clamped to the string
+        if (m == "includes") return vr(MV.VBool(findStr(x, argStr(args, 0, "undefined"), strPos(args, 1, 0, x.length)) >= 0), s);
         if (m == "startsWith") {
             const p: string = argStr(args, 0, "undefined");
-            return vr(MV.VBool(x.substring(0, p.length) == p), s);
+            const at: int = strPos(args, 1, 0, x.length);
+            return vr(MV.VBool(at + p.length <= x.length && x.substring(at, at + p.length) == p), s);
         }
         if (m == "endsWith") {
             const p: string = argStr(args, 0, "undefined");
-            return vr(MV.VBool(p.length <= x.length && x.substring(x.length - p.length, x.length) == p), s);
+            const end: int = strPos(args, 1, x.length, x.length);
+            return vr(MV.VBool(p.length <= end && x.substring(end - p.length, end) == p), s);
         }
-        if (m == "indexOf") return vr(MV.VNum(findStr(x, argStr(args, 0, "undefined"), 0)), s);
+        if (m == "indexOf") return vr(MV.VNum(findStr(x, argStr(args, 0, "undefined"), strPos(args, 1, 0, x.length))), s);
         if (m == "slice") {
             const a: int = relIndex(argNum(args, 0, 0), x.length);
             const b: int = relIndex(argNum(args, 1, x.length), x.length);
@@ -3909,10 +4053,17 @@ ${
             return madeStr(x.substring(a, b), s);
         }
         if (m == "split") {
-            if (args.length == 0 || isAbsent(args[0])) return madeTape([MV.VStr(x)], s);
+            // the limit (S482 r5, review MED-1): ToUint32; 0 gives no parts; at most one part
+            // past the list bound is made either way
+            let lim: number = maxElems() + 1;
+            if (hasArg(args, 1)) {
+                const k: number = toUint32(toNum(args[1]));
+                if (k < lim) lim = k;
+            }
+            if (lim == 0) return madeTape([], s);
+            if (!hasArg(args, 0)) return madeTape([MV.VStr(x)], s);
             if (!isStrV(args[0])) return noMethod("a string, with a pattern that is not a string,", m, s);
-            // at most one part past the bound is made (JavaScript split's limit)
-            const parts: string[] = splitStr(x, strOf(args[0]), maxElems() + 1);
+            const parts: string[] = splitStr(x, strOf(args[0]), lim);
             if (parts.length > maxElems()) return bad(s, overMsg("the list of parts of a `.split(…)`"));
             // every part becomes an element value (THE ALLOCATION BOUND, S482 r3 HIGH-3)
             const sp: MS = alloc(chargeW(s, parts.length), x.length, 0, parts.length);
@@ -3921,9 +4072,8 @@ ${
         }
         if (m == "repeat") {
             const n: number = argNum(args, 0, 0);
-            if (n != n) return vr(MV.VStr(""), s);
-            if (n < 0 || n == 1 / 0) return bad(s, "`.repeat(" + jsStr(MV.VNum(n)) + ")` — Invalid count value: " + jsStr(MV.VNum(n)) + " (a RangeError)");
-            const k: number = Math.trunc(n);
+            const k: number = toIntInf(n);
+            if (k < 0 || k == 1 / 0) return bad(s, "`.repeat(" + jsStr(MV.VNum(n)) + ")` — Invalid count value: " + jsStr(MV.VNum(n)) + " (a RangeError)");
             if (x == "" || k == 0) return vr(MV.VStr(""), s);
             const s2: MS = willBuild(s, x.length * k);
             if (s2.err != "") return vr(MV.VUndef, s2);
@@ -4077,11 +4227,24 @@ ${
     fn numMethod(x: number, m: string, args: MV[], s: MS) -> MR {
         if (m == "toFixed") {
             const d: number = argNum(args, 0, 0);
-            // JavaScript Number.prototype.toFixed: RangeError outside 0…100
-            if (d != d || d < 0 || d > 100) return bad(s, "`.toFixed(" + jsStr(MV.VNum(d)) + ")` — toFixed() digits argument must be between 0 and 100 (a RangeError)");
-            return vr(MV.VStr(x.toFixed(Math.trunc(d))), s);
+            // JavaScript Number.prototype.toFixed: ToIntegerOrInfinity (NaN is 0), then a
+            // RangeError outside 0…100
+            const f: number = toIntInf(d);
+            if (f < 0 || f > 100) return bad(s, "`.toFixed(" + jsStr(MV.VNum(d)) + ")` — toFixed() digits argument must be between 0 and 100 (a RangeError)");
+            return vr(MV.VStr(x.toFixed(f)), s);
         }
-        if (m == "toString") return vr(MV.VStr(String(x)), s);
+        if (m == "toString") {
+            // the radix (S482 r5, review MED-1 audit): ToIntegerOrInfinity, 2…36 (else a
+            // RangeError); a non-integer in a radix other than 10 is refused — its digits
+            // past the point are the engine's choice, not the language's
+            if (!hasArg(args, 0)) return vr(MV.VStr(String(x)), s);
+            const r0: number = toNum(args[0]);
+            const r: number = toIntInf(r0);
+            if (r < 2 || r > 36) return bad(s, "`.toString(" + jsStr(MV.VNum(r0)) + ")` — toString() radix must be between 2 and 36 (a RangeError)");
+            if (r == 10) return vr(MV.VStr(String(x)), s);
+            if (x != Math.trunc(x) || x == 1 / 0 || x == -1 / 0) return noMethod("a number that is not an integer, with a radix other than 10,", m, s);
+            return vr(MV.VStr(x.toString(r)), s);
+        }
         return noMethod("a number", m, s);
     }
 
@@ -4100,8 +4263,10 @@ ${
         };
     }
 
-    // A callback's arguments: the element and its index (JavaScript passes the list too).
-    fn cb(env: MEnv, f: MV, a: MV, i: int, s: MS) -> MR { return applyV(env, f, [a, MV.VNum(i)], s); }
+    // A callback's arguments: the element, its index and the list (JavaScript's three;
+    // S482 r5, review MED-1 audit — the list was not passed). The list is the receiver's
+    // value, read by name (evalE), so the binding is no longer OWNED and a later push copies.
+    fn cb(env: MEnv, f: MV, a: MV, i: int, lst: MV, s: MS) -> MR { return applyV(env, f, [a, MV.VNum(i), lst], s); }
 
     // `tw`: the list's size (THE BUDGET: a walk of it costs that much).
     fn tapeMethod(env: MEnv, o: AExpr, xs: MV[], tw: number, td: int, m: string, args: MV[], s0: MS) -> MR {
@@ -4118,9 +4283,13 @@ ${
         if (m == "includes" || m == "indexOf") {
             s = chargeW(s, tw);
             if (s.err != "") return vr(MV.VUndef, s);
-            let i: int = 0;
+            // the second argument is `fromIndex` (S482 r5, review MED-1); `includes` finds
+            // NaN (SameValueZero), `indexOf` does not (strict equality)
+            const want: MV = argOr(args, 0);
+            const nan: boolean = m == "includes" && isNaNV(want);
+            let i: int = listFrom(args, 1, xs.length);
             for (; i < xs.length; ) {
-                if (sameValue(xs[i], argOr(args, 0))) {
+                if (sameValue(xs[i], want) || (nan && isNaNV(xs[i]))) {
                     if (m == "includes") return vr(MV.VBool(true), s);
                     return vr(MV.VNum(i), s);
                 }
@@ -4166,7 +4335,7 @@ ${
         const f: MV = argOr(args, 0);
         if (m == "map" || m == "filter") {
             if (!isFnV(f)) return bad(s, "`." + m + "()` takes a function, and is given " + kindName(f) + " (a TypeError)");
-            const r: MArgs = mapRange(env, f, xs, m == "map", 0, xs.length, s);
+            const r: MArgs = mapRange(env, f, xs, MV.VTape(xs, tw, td), m == "map", 0, xs.length, s);
             if (r.s.err != "") return vr(MV.VUndef, r.s);
             return madeTape(r.vs, r.s);
         }
@@ -4174,7 +4343,7 @@ ${
             if (!isFnV(f)) return bad(s, "`." + m + "()` takes a function, and is given " + kindName(f) + " (a TypeError)");
             let i: int = 0;
             for (; i < xs.length; ) {
-                const r: MR = cb(env, f, xs[i], i, s);
+                const r: MR = cb(env, f, xs[i], i, MV.VTape(xs, tw, td), s);
                 s = r.s;
                 if (s.err != "") return vr(MV.VUndef, s);
                 const t: boolean = truthy(r.v);
@@ -4201,7 +4370,7 @@ ${
                 i = 1;
             }
             for (; i < xs.length; ) {
-                const r: MR = applyV(env, f, [acc, xs[i], MV.VNum(i)], s);
+                const r: MR = applyV(env, f, [acc, xs[i], MV.VNum(i), MV.VTape(xs, tw, td)], s);
                 s = r.s;
                 if (s.err != "") return vr(MV.VUndef, s);
                 acc = r.v;
@@ -4210,6 +4379,14 @@ ${
             return vr(acc, s);
         }
         return noMethod("a list", m, s);
+    }
+
+    fn isNaNV(v: MV) -> boolean {
+        return match v {
+            .VNum(n: x) :> x != x,
+            // no-default-arm: one question of a value — is it NaN
+            _ :> false
+        };
     }
 
     fn tapeLen(v: MV) -> number {
@@ -4222,13 +4399,13 @@ ${
 
     // `map` / `filter` over xs[lo, hi), the callbacks in order, the result built
     // by halves (no quadratic copying — THE BUDGET charges the length once).
-    fn mapRange(env: MEnv, f: MV, xs: MV[], isMap: boolean, lo: int, hi: int, s0: MS) -> MArgs {
+    fn mapRange(env: MEnv, f: MV, xs: MV[], lst: MV, isMap: boolean, lo: int, hi: int, s0: MS) -> MArgs {
         if (hi - lo <= 32) {
             let s: MS = s0;
             let out: MV[] = [];
             let i: int = lo;
             for (; i < hi; ) {
-                const r: MR = cb(env, f, xs[i], i, s);
+                const r: MR = cb(env, f, xs[i], i, lst, s);
                 s = r.s;
                 if (s.err != "") return { vs: [], s: s };
                 if (isMap) {
@@ -4241,9 +4418,9 @@ ${
             return { vs: out, s: s };
         }
         const mid: int = lo + Math.floor((hi - lo) / 2);
-        const l: MArgs = mapRange(env, f, xs, isMap, lo, mid, s0);
+        const l: MArgs = mapRange(env, f, xs, lst, isMap, lo, mid, s0);
         if (l.s.err != "") return l;
-        const r: MArgs = mapRange(env, f, xs, isMap, mid, hi, l.s);
+        const r: MArgs = mapRange(env, f, xs, lst, isMap, mid, hi, l.s);
         if (r.s.err != "") return r;
         return { vs: l.vs.concat(r.vs), s: r.s };
     }
@@ -4264,12 +4441,24 @@ ${
     fn joinWith(xs: MV[], sep: string) -> string { return partsOf(xs, 0, xs.length).join(sep); }
 
     // `push` / `pop` / `sort` / `reverse` change the list: on a binding only.
-    fn tapeMutate(env: MEnv, o: AExpr, xs: MV[], tw: number, td: int, m: string, args: MV[], s00: MS) -> MR {
+    // S482 r5 (review HIGH-1): the list changed is the binding's list as it stands AFTER the
+    // arguments — not the one read before them (`xs0`): an argument may have changed the
+    // binding (`t.push(t.push(2))`, `t.push(t.pop())`), and a list read before it is no longer
+    // the binding's (it may be held by another name, or by an argument). Every changing
+    // method (push, pop, sort, reverse) reads it here.
+    fn tapeMutate(env: MEnv, o: AExpr, xs0: MV[], tw0: number, td0: int, m: string, args: MV[], s00: MS) -> MR {
         const root: string = primName(o);
         let fb: FB = { v: not, i: -1, j: -1, s: s00 };
         if (root != "") fb = findB(s00, root);
         const s0: MS = fb.s;
         if (root == "" || fb.i < 0) return bad(s0, "`." + m + "()` changes the list it is called on; the compile-time evaluator evaluates it on a binding of the body only (`xs." + m + "(…)`)");
+        const cur: MV | not = fb.v;
+        let lp: ListParts = { ok: false, xs: [], w: 0, d: 0 };
+        if (cur is given) lp = listParts(cur);
+        if (!lp.ok) return bad(s0, "`" + root + "` no longer holds a list after the arguments of its `." + m + "(…)` call");
+        const xs: MV[] = lp.xs;
+        const tw: number = lp.w;
+        const td: int = lp.d;
         if (m == "push") {
             if (xs.length + args.length > maxElems()) return bad(s0, sizeMsg("a list", xs.length + args.length, maxElems(), "elements"));
             let w: number = tw;
@@ -4317,12 +4506,22 @@ ${
         // thousands sorts within the step bound (an insertion sort ran out of
         // steps at ~1000 elements); each merge level's copying is charged (THE BUDGET).
         const cmp: MV = argOr(args, 0);
-        if (!isAbsent(cmp) && !isFnV(cmp)) return bad(s0, "`.sort()` takes a function, and is given " + kindName(cmp) + " (a TypeError)");
+        if (!isUndefV(cmp) && !isFnV(cmp)) return bad(s0, "`.sort()` takes a function, and is given " + kindName(cmp) + " (a TypeError)");
         const sl: SortL = sortList(env, cmp, xs, s0);
         if (sl.s.err != "") return vr(MV.VUndef, sl.s);
         const r: MR = madeWD(sl.xs, tw, td, sl.s);
         if (r.s.err != "") return r;
         return vr(r.v, assignAny(r.s, root, r.v));
+    }
+
+    type ListParts:struct = { ok: boolean, xs: MV[], w: number, d: int }
+
+    fn listParts(v: MV) -> ListParts {
+        return match v {
+            .VTape(xs: ys, w: w, d: d) :> { ok: true, xs: ys, w: w, d: d },
+            // no-default-arm: one question of a value — its list, when it is one
+            _ :> { ok: false, xs: [], w: 0, d: 0 }
+        };
     }
 
     // After a `push`, the binding holds a list nothing else holds (OWNED).
@@ -4460,7 +4659,7 @@ ${
         const fr: Fragment = parseFragment(c0.file, text, parent, c0.next, cap);
         let c: MC = withNext(c0, fr.nextId);
         if (fr.stop != "") return { nodes: [], c: withDiag(c, stopCode(fr.stop), stopMsg(fr.stop, text, u), m.span) };
-        c = withUsed(c, { chars: u.chars, tags: u.tags, nodes: u.nodes, attrs: u.attrs + fr.attrs });
+        c = withUsed(c, { chars: u.chars, tags: u.tags, nodes: u.nodes, attrs: u.attrs + fr.attrs, steps: u.steps });
         const d0: int = c.diags.length;
         for (const d of fr.diags) {
             if (d.code == "E-SCRIPT-001" || d.code == "E-STYLE-001") {

@@ -98,3 +98,18 @@ Rulings: user-voice-scrml.md S480 census build order item 2; ruling:user-voice-s
       instead of two — the reader stops at the first non-plain construct); 252 probes, every `^{}` probe <= 3.3 s /
       493 MB (only the 4 hand-written-source calibration probes exceed: pre-existing reader gap)
 - [ ] push + PR body ### r4
+
+## r5 (S482 — re-review ~/.cache/scrml/review/s482-2045-r4rev/review.md, brief s482-briefs/fix-2045-r5.md; FINAL round)
+- [x] merge origin/main a7f50def5 (cfc8d74ef; lex/parse/known-gaps from #2058, no `while` added to meta / emit-gate)
+- [x] HIGH-1 every changing method (push/pop/sort/reverse) re-reads the binding's list AFTER its arguments
+      (tapeMutate); an argument that assigns the receiver is refused (MBud.recv, assignName); splice/shift/… stay
+      refused (noMethod); sort comparator that pushes stays refused (writeFault)
+- [x] HIGH-2 compile-wide step total 4 × 1,000,000 (MUsed.steps, MBud.cap; totalMsg); corpus/conformance/snippets
+      max 223 steps (steps.txt)
+- [x] MED-1 string indexOf/includes/startsWith/endsWith positions, split limit (ToUint32), list indexOf/includes
+      fromIndex; audit: charAt/toFixed/repeat ToIntegerOrInfinity, number toString(radix), `not` = null in
+      argStr/argNum, sort(not) TypeError, callbacks get the list, list includes finds NaN
+- [x] LOW-1 `const f = (c: C) => …` typed like a local fn (localTy); `let` residual filed g-boot-meta-let-lambda-typed-param-s482
+- [x] tests: meta-s481.test.js "s482 r5" (15 tests; 12 red on base 6cdb377e7)
+- [x] SPEC §22.4 "The compile-wide step total (S482)" + changing-method sentence
+- [ ] gates, push, PR body ### r5

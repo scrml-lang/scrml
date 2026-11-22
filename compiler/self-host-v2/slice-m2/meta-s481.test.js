@@ -631,3 +631,116 @@ describe("s482 r4 — LOW-2: a binding scan is charged (frame size × reads)", (
     expect(r.secs).toBeLessThan(15);
   }, 120000);
 });
+
+// ---------------------------------------------------------------------------
+// S482 r5 — the fourth re-review of #2045 (~/.cache/scrml/review/s482-2045-r4rev/review.md).
+// Every expected value is the §66.10 value-semantics answer: what JavaScript gives if every list
+// were copied on assignment (a name bound to `t` earlier keeps its own list).
+// ---------------------------------------------------------------------------
+describe("s482 r5 — HIGH-1: a changing method changes the binding's list as it stands AFTER its arguments (§66.10)", () => {
+  test("pp_alias: t.push(t.push(2)) — u keeps [1]; t is [1,2,2] (JS with copy-on-assign: 1,3)", () => {
+    expect(html(D(`let t = [1]; const u = t; t.push(t.push(2)); emit("<p>" + u.length + "," + t.length + "</p>");`))).toContain("<p>1,3</p>");
+    expect(html(D(`let t = [1]; t.push(t.push(2)); emit("<p>" + t.length + "</p>");`))).toContain("<p>3</p>");
+    expect(html(D(`let t = [1]; const u = t; t.push(t.push(t.push(2))); emit("<p>" + u + "|" + t + "</p>");`))).toContain("<p>1|1,2,2,3</p>");
+  });
+  test("pp_twoarg: t.push(t.push(2), t.push(3)) — u keeps [1]; t is [1,2,3,2,3]", () => {
+    expect(html(D(`let t = [1]; const u = t; t.push(t.push(2), t.push(3)); emit("<p>" + u.length + "," + t + "</p>");`))).toContain("<p>1,1,2,3,2,3</p>");
+  });
+  test("pp_cycle: t.push(t, t.push(0)) — no RangeError; t is [1,0,[1],2] (the argument is t's value when read)", () => {
+    expect(html(D(`let t = [1]; t.push(t, t.push(0)); emit("<p>" + t.length + "</p>"); emit("<p>" + t + "</p>");`))).toContain("<p>4</p><p>1,0,1,2</p>");
+    expect(html(D(`let t = [1]; t.push(t, t.push(0)); emit("<p>" + (t == t) + "</p>");`))).toContain("<p>true</p>");
+  });
+  test("pp_pop: t.push(t.pop()) — t is [1,2] (JS: 2)", () => {
+    expect(html(D(`let t = []; t.push(1); t.push(2); t.push(t.pop()); emit("<p>" + t.length + "</p>");`))).toContain("<p>2</p>");
+  });
+  test("pop / reverse / sort see their arguments' changes too (JS: 5,1 · 3,2,1|1,2 · 1,2,3)", () => {
+    expect(html(D(`let t = [1]; const x = t.pop(t.push(5)); emit("<p>" + x + "," + t + "</p>");`))).toContain("<p>5,1</p>");
+    expect(html(D(`let t = [1, 2]; const u = t; t.reverse(t.push(3)); emit("<p>" + t + "|" + u + "</p>");`))).toContain("<p>3,2,1|1,2</p>");
+    expect(html(D(`let t = [3, 1]; t.sort(t.push(2) > 0 ? (a, b) => a - b : (a, b) => b - a); emit("<p>" + t + "</p>");`))).toContain("<p>1,2,3</p>");
+  });
+  test("an argument that ASSIGNS the receiver is refused (JS would change the list t named before it)", () => {
+    expect(evalErr(D(`let t = [1]; t.push((t = [9, 9]).length); emit("<p>" + t + "</p>");`))).toContain("`t` is assigned inside the arguments");
+    expect(evalErr(D(`let t = [1]; t.push(t = [9]); emit("<p>" + t.length + "</p>");`))).toContain("`t` is assigned inside the arguments");
+    // an assignment of another binding, or of t outside the call, stands
+    expect(html(D(`let t = [1]; let k = 0; t.push(k = 5); t = [2]; t.push(k); emit("<p>" + t + "</p>");`))).toContain("<p>2,5</p>");
+  });
+  test("a sort comparator that pushes, and splice, are refused by name (no engine-dependent answer)", () => {
+    expect(evalErr(D(`let t = [3, 1, 2]; t.sort((a, b) => { t.push(0); return a - b; }); emit("<p>" + t + "</p>");`))).toContain("`t` is written from inside a function or lambda");
+    expect(evalErr(D(`let t = [1, 2]; t.splice(0, 0, t.pop()); emit("<p>" + t + "</p>");`))).toContain("`.splice()` on a list is not a method");
+  });
+});
+
+describe("s482 r5 — HIGH-2: one step total for every `^{}` block of a compile (§22.4)", () => {
+  const blk = `<div>^{ const x = "ab".repeat(8388000); const p = "ab".repeat(4000) + "c"; let n = 0; for (let i = 0; i < 55; i = i + 1) { n = n + x.indexOf(p); } emit("<i>" + n + "</i>"); }</div>`;
+  test("nblk40: forty blocks each just inside the per-block bound stop at the total, fast", () => {
+    const r = timed(() => run(P(blk.repeat(40))));
+    const ms = r.v.diags.filter((d) => d.code === "E-META-EVAL-001").map((d) => d.message);
+    expect(ms.length).toBeGreaterThan(30);
+    expect(ms.every((m) => m.includes("step total (4000000 steps"))).toBe(true);
+    expect(r.secs).toBeLessThan(30);
+  }, 120000);
+  test("nfail30: thirty blocks each past the per-block bound — the first four fail on their own bound, the rest on the total", () => {
+    const fail = blk.replace("i < 55", "i < 1000");
+    const r = timed(() => run(P(fail.repeat(30))));
+    const ms = r.v.diags.filter((d) => d.code === "E-META-EVAL-001").map((d) => d.message);
+    expect(ms.length).toBe(30);
+    expect(ms.filter((m) => m.includes("step bound (1000000 steps")).length).toBe(4);
+    expect(ms.filter((m) => m.includes("step total (4000000 steps")).length).toBe(26);
+    expect(r.secs).toBeLessThan(30);
+  }, 120000);
+  test("imported files draw on the same total (mfstep: twenty files of one block)", () => {
+    const files = [];
+    let imports = "";
+    for (let i = 1; i <= 20; i++) {
+      files.push({ path: `c${i}.scrml`, src: `\${ export function h${i}() { return 1; } }\n${blk}\n` });
+      imports += `import { h${i} } from './c${i}.scrml';\n`;
+    }
+    files.push({ path: "app.scrml", src: `<program>\n${imports}<p>app</p>\n</program>\n` });
+    const r = timed(() => frontEndStdlib(mods, files, "app.scrml"));
+    const ms = r.v.diags.filter((d) => d.code === "E-META-EVAL-001").map((d) => d.message);
+    expect(ms.filter((m) => m.includes("step total (4000000 steps")).length).toBeGreaterThan(0);
+    expect(r.secs).toBeLessThan(30);
+  }, 120000);
+  test("a compile whose blocks stay under the total is untouched", () => {
+    expect(errs(run(P(blk.repeat(2))))).toEqual([]);
+  }, 60000);
+});
+
+describe("s482 r5 — MED-1: position and limit arguments are JavaScript's", () => {
+  const cases = [
+    [`"abab".indexOf("b", 2)`, 3], [`"abab".indexOf("b", -5)`, 1], [`"abab".indexOf("b", 99)`, -1], [`"abab".indexOf("", 99)`, 4],
+    [`"abab".indexOf("b", 1.9)`, 1], [`"abab".indexOf("b", 0 / 0)`, 1], [`"abab".indexOf("b", "2")`, 3], [`"abab".indexOf("b", 1 / 0)`, -1],
+    [`"abab".includes("a", 3)`, false], [`"abab".includes("a", -1)`, true], [`"abc".startsWith("b", 1)`, true], [`"abc".startsWith("c", 2.9)`, true],
+    [`"abc".startsWith("", 9)`, true], [`"abc".endsWith("b", 2)`, true], [`"abc".endsWith("c", 99)`, true], [`"abc".endsWith("a", 1.5)`, true],
+    [`"abc".endsWith("c", 0 / 0)`, false], [`"a,b,c".split(",", 2).length`, 2], [`"a-b-c".split("-", 0).length`, 0], [`"a-b-c".split("-", -1).length`, 3],
+    [`"a-b-c".split("-", 2.9).length`, 2], [`"a-b-c".split("-", 4294967297).length`, 1], [`"abc".split("", 2).join("|")`, "a|b"],
+    [`[1, 2, 1].indexOf(1, 1)`, 2], [`[1, 2, 1].indexOf(1, -1)`, 2], [`[1, 2, 1].indexOf(1, -9)`, 0], [`[1, 2, 1].indexOf(1, 9)`, -1],
+    [`[1, 2, 3].includes(1, 1)`, false], [`[1, 2, 3].includes(3, -1)`, true], [`[1, 2, 3].includes(1, -1 / 0)`, true], [`[0 / 0].includes(0 / 0)`, true], [`[0 / 0].indexOf(0 / 0)`, -1],
+    [`"abc".charAt(1.5)`, "b"], [`"abc".charAt(0 / 0)`, "a"], [`(1.5).toFixed(0 / 0)`, "2"], [`(1.25).toFixed(-0.5)`, "1"], [`"ab".repeat(-0.5)`, ""],
+    [`(255).toString(16)`, "ff"], [`(-255).toString(36)`, "-73"], [`(255).toString(10.9)`, "255"],
+    [`[1, 2, 3].map((x, i, a) => a.length).join("")`, "333"], [`[1, 2].reduce((acc, x, i, a) => acc + a.length, 0)`, 4],
+    [`"xnullx".includes(not)`, true], [`[1, 2].join(not)`, "1null2"], [`"abc".slice(0, not)`, ""], [`"ab".padStart(5, not)`, "nulab"],
+  ];
+  test("each expression gives the value JavaScript gives (`not` is JavaScript's null)", () => {
+    const body = cases.map(([e], i) => `emit("<p>${i}:" + (${e}) + "</p>");`).join(" ");
+    const out = html(D(body));
+    for (let i = 0; i < cases.length; i++) expect(out).toContain(`<p>${i}:${String(cases[i][1])}</p>`);
+  }, 60000);
+  test("a radix the evaluator cannot answer deterministically is refused, a bad one is JavaScript's RangeError", () => {
+    expect(evalErr(D(`emit("<p>" + (0.5).toString(3) + "</p>");`))).toContain("with a radix other than 10");
+    expect(evalErr(D(`emit("<p>" + (5).toString(1) + "</p>");`))).toContain("radix must be between 2 and 36");
+    expect(evalErr(D(`let t = [2, 1]; t.sort(not); emit("<p>" + t + "</p>");`))).toContain("`.sort()` takes a function");
+  });
+});
+
+describe("s482 r5 — LOW-1: a `const` arrow with annotated parameters is a typed position (§14.10)", () => {
+  const T = (body) => P(`    type C:enum = { A, B }\n    type D:enum = { A, Zzz }\n<div id="m">^{ ${body} }</div>`);
+  test("a call's bare variant the parameter's enum does not declare is E-TYPE-063", () => {
+    expect(errs(run(T(`const f = (c: C) => c; emit("<p>" + f(.Zzz) + "</p>");`)))).toEqual(["E-TYPE-063"]);
+    expect(errs(run(T(`const f = (c: C) => { return c; }; emit("<p>" + f(.Zzz) + "</p>");`)))).toEqual(["E-TYPE-063"]);
+    expect(errs(run(T(`const f = (n: int, c: C) => c; emit("<p>" + f(1, .Zzz) + "</p>");`)))).toEqual(["E-TYPE-063"]);
+  });
+  test("a declared variant, and an untyped arrow, stay legal", () => {
+    expect(html(T(`const f = (c: C) => c; const g = (c) => c; emit("<p>" + f(.B) + g(.Zzz) + "</p>");`))).toContain("<p>BZzz</p>");
+  });
+});

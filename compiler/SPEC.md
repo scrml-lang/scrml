@@ -27873,6 +27873,14 @@ bound covers work and size as well as statements, so a short body cannot take th
   arguments are charged by the bindings, keys and arguments the evaluator searches or copies (one step
   per 1,024, each comparison weighed by the length of the name compared); a function value made at
   run time is charged the walk of its body.
+- **The compile-wide step total (S482).** The step bound is per block, and a compile may hold any
+  number of blocks, so all the `^{}` blocks of ONE COMPILE together — every file's, imported files
+  included, refused blocks too — may take at most 4,000,000 steps (4 × the per-block bound), counted
+  as the step bound counts them. The block that reaches the total is refused with `E-META-EVAL-001`
+  naming it, and once it is spent every further block of the compile is refused the same way, before
+  it runs. (A namespace re-read parses a file again and runs its blocks once more, so a compile runs
+  at most twice the total — the same rule as the emit budget.) The largest total any corpus program,
+  conformance case or documentation snippet takes is 223 steps.
 - **Size.** No single value may exceed 16 Mi (16,777,216): the characters of a string, or a list or
   record counted with everything it holds (a list holding the same list twice counts it twice). No
   list may hold more than 1 Mi (1,048,576) elements, and values nest at most 256 levels deep. The
@@ -27907,7 +27915,12 @@ Building a long string by repeated `+` costs its length at each step; `.map(…)
 length once: a `push` to a binding whose list no other value holds appends in place (a list read in
 any other way since — kept in another binding, a container or a call, or read inside a callback such
 as `.map((x) => xs)` — is copied first, so the value taken earlier is unchanged and no list can come to
-hold itself, §66.10).
+hold itself, §66.10). A method that changes the list it is called on (`push`, `pop`, `sort`,
+`reverse`) changes the binding's list as it stands after the call's arguments are evaluated, so an
+argument that changes the same binding is seen (`t.push(t.push(2))` appends to the list the inner
+`push` made, and a name bound to `t` earlier keeps its own value); an argument that ASSIGNS the binding
+(`t.push((t = [9]).length)`) is refused with `E-META-EVAL-001`, since JavaScript would change the list
+`t` named before the assignment (S482 r5).
 
 > **Provenance:** ruling:user-voice-scrml.md S481 "⭐ RULED — `^{}` meta in the bootstrap: four design
 > questions" item 4 (*"a scrml interpreter over the bootstrap's own syntax tree, as the permanent design,
@@ -27927,6 +27940,9 @@ hold itself, §66.10).
 > past 60 seconds in the reader; 7,000 nested elements ended in a host `RangeError`); the cost model is
 > stated as an invariant and checked operation by operation (the bootstrap's
 > `compiler/self-host-v2/meta.scrml` THE BINDINGS / THE SEARCH, and `parse.scrml` FRAGMENT MODE).
+> The compile-wide step total is the S482 r5 PA default (PR #2045 r5, re-review HIGH-2: forty blocks
+> (7 KB of source in all), each running just inside the per-block bound, took 54 seconds; with the total they are
+> refused after the fourth in about 6 seconds).
 > **impl#1 status:** impl#1 bounds a compile-time body by a 5-second `node:vm` timeout (a clock) and
 > does not bound a single allocation or a file's emitted output; a host `RangeError` there is reported
 > as `E-META-EVAL-001`.
