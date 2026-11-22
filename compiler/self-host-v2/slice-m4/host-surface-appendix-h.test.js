@@ -119,7 +119,10 @@ describe("the surface is well-formed and agrees with the one sink table", () => 
 const run = (src) => frontEnd(mods(), [{ path: "app.scrml", src }], "app.scrml");
 const errsOf = (r) => r.diags.filter((d) => d.severity !== "Warning" && d.severity !== "Info").map((d) => d.code + ": " + d.message);
 const P = (host) => `<host>\n${host}\n</host>\n<program>\n<p>x</p>\n</program>\n`;
-const jsOf = (r) => mods().print.printProgram(r.core, "t.client.js", "scrml-runtime.js").js;
+// s482 (s482-client-roots): these tests read how a function is LOWERED, and many name functions nothing
+// in their program calls — an unreached function is not printed (§12.2 Trigger 6), so every function is
+// named to the printer's test entry (print.scrml printProgramExposing).
+const jsOf = (r) => mods().print.printProgramExposing(r.core, "t.client.js", "scrml-runtime.js", r.core.fns.map((f) => f.sym.id)).js;
 // a parameter or literal filling one slot of an entry (the walk's own notation, Appendix H.1)
 const fill = (slot, k, attr = "title") => {
   if (slot === "attr-name") return { lit: "\"" + attr + "\"" };

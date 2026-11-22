@@ -83,13 +83,18 @@ ${
         // calls nothing
         // s478 (s478-boot-channel): §38.8 "The compiler emits a WebSocket upgrade route at
         // `/_scrml_ws/<name>`" — a program with a channel has a server half too
-        if (routed.length == 0 && p.endpoints.length == 0 && p.channels.length == 0) return { js: "", refused: [], routes: [] };
-        const epRefused: string[] = endpointRefusal(p).concat(channelRefusal(p));
-        if (epRefused.length > 0) return { js: "", refused: epRefused, routes: [] };
-        const ctx: Ctx = serverCtx(p);
         // s481 r1 (#2041 review H1/M1): the bindings no code reads whose initializer reaches
         // server-only code — this artifact runs them (print.scrml serverInits)
         const si: int[] = serverInits(p);
+        // s482 (s482-client-roots; g-boot-server-only-init-no-server-artifact-s481): and a program
+        // with such a binding has a server half even when it routes nothing — S481 "every
+        // file-scope initializer runs … in the artifact its reach places it in"
+        // (ruling:user-voice-scrml.md-S481-run-order-followups item 3): the artifact is module
+        // initialization only (an empty manifest; createServer answers no route)
+        if (routed.length == 0 && p.endpoints.length == 0 && p.channels.length == 0 && si.length == 0) return { js: "", refused: [], routes: [] };
+        const epRefused: string[] = endpointRefusal(p).concat(channelRefusal(p));
+        if (epRefused.length > 0) return { js: "", refused: epRefused, routes: [] };
+        const ctx: Ctx = serverCtx(p);
         const reach: int[] = serverReach(p, routed.concat(endpointFns(p)), false, si);
 
         // s472 (boot-math-port): the host modules the reached functions call (§21.3.1 —
