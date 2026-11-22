@@ -95,3 +95,24 @@ Scratch: ~/.cache/scrml/review/s482-runorder-followups/ (probes p/, harness h/, 
   g-boot-persist-seed-at-construction-s482 (capable alternative: restore at construction; on empty storage compute the
   default at the place).
 - INFO: runtime.js seeding-cycle message updated (seeds run at their place or on an earlier read).
+
+## r2 (fix round for the r1 re-review, verdict FIX) — S482
+
+- Merged origin/main twice (1393a1539 → `1d26a35e6`; ea04fc7b0 → `240c81d61`), clean, no new `while` in self-host.
+- MED-A (introduced in r1) FIXED (`6a2d74fec`): analyze.scrml fileScopePass builds a body-run closure `usesR`
+  (:11427) from each function's reads and refs OUTSIDE its nested function declarations (heldSpansIn; refs via
+  heldRefTargets :12011), so a nested declaration counts only through a call of it or its use as a value (an edge
+  to its own node), at every depth; bodyReachDiags judges on usesR (:11477). Messages name the real path
+  ("calls `h()`, which reaches `inner()`, which uses `k`"). Tests "B r2" (9): 8 red on 0548d92e4 (the 9th, a direct
+  read beside a never-called nested decl, is a guard green on both). Chromium: m-nested-decl r1 E-SCOPE-001 →
+  head `1 | 7` (= main); r2-two-level r1 refused → `2 | 7`; r2-called / r2-lam-call / m-nested-ret still
+  E-SCOPE-001 with the inner function named.
+- LOW (host-handed function value) — PA ruled keep fail-closed: §7.6 (b) S482 r2 sentence + ⚑ INTERIM; gap
+  g-boot-body-reach-host-fn-value-s482 (LOW, prov=pa-ruled; capable alternative = host signatures declaring
+  sync/async callback use) (`18026b452`).
+- MED-2 given its own id g-boot-seed-read-early-reach-s482 (MED, open owner question), cross-referenced from P2.
+- Gates on 240c81d61: pretest exit 0; bootstrap-conformance base ea04fc7b0 → head PASS 772→778 (the 6 branch
+  cases), FAIL 3→3 same, CRASH 0; corpus 2968 files: 0 newly rejected, code changes only on 3 already-failing
+  files (as r1), 2 byte diffs (reactive/no-write-{field,own}-init-neg — item A held seeds, as r1); PR tests 109/0;
+  s34-census PASS, types-gate unchanged, snippet/claim 0 failed, corpus floor PASS, md-shim + severity current.
+  119 probes base vs head in Chromium: only the r0/r1 expected changes + r2 probes.
