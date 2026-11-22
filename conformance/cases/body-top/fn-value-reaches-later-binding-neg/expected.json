@@ -1,0 +1,11 @@
+{
+  "id": "body-top-fn-value-reaches-later-binding-neg",
+  "description": "§7.6 rule (b) (S482 r1) — `${ out = run(g); }` hands `g` to `run`, which calls it, and `g` reads `k`, whose `${ }` comes later in the program body. A function value body code hands on counts as called (§6.7.4 rule 3), so this reaches `k` before its place: E-SCOPE-001. Before #2053 r1 it compiled and showed `k` = 1 (run before the body), not the source-order 5.",
+  "language-version": "1.0",
+  "spec": "§7.6 rule (b) (S482, S482 r1), §6.7.4 rule 3, §34",
+  "source-test": "compiler/self-host-v2/slice-m4/runorder-followups-s482.test.js",
+  "rationale": "§7.6 rule (b) (S482): \"A display … or a body-top statement … that reaches a file-scope binding whose place in the run comes after it — directly, or through a function it calls, at any depth — SHALL be E-SCOPE-001\"; S482 r1: \"A function value that body code names or writes … counts as if it were called where it stands, as §6.7.4 rule 3 counts one\". ruling:user-voice-scrml.md-S481-run-order-followups item 2 — \"A display or statement that calls a function reaching a binding whose place is later … E-SCOPE-001\" (PA reading of \"calls\", prov=pa-ruled S482 r1).",
+  "expect": {
+    "codes": ["E-SCOPE-001"]
+  }
+}

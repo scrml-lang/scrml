@@ -1,0 +1,14 @@
+// §7.6 rule (b) / §66.7.6 rule 5 (S482) — a cell's seed is computed at its place in the program body's one run.
+<program>
+${
+    let log: string = "";
+    function note(s: string) -> int { log = log + s; return 1; }
+    let n: int = 1;
+}
+${ n = 5; }
+${ const k: int = n + note("k"); }
+let <c:int=(k + note("c"))/>
+${ const z: int = note("z"); }
+<p id="e">${@c}</p>
+<p id="r">${log}</p>
+</program>
