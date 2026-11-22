@@ -90,4 +90,11 @@ Rulings: user-voice-scrml.md S480 census build order item 2; ruling:user-voice-s
 - [x] gate reasons capped (32 + summary), respan by halves, nsAttrTag linear, url.scrml srcset/runs linear
 - [x] tests: meta-s481.test.js "s482 r4" (16 tests)
 - [x] SPEC §22.4 text (per-compile budget, reader bounds, plain-only, charged searches); gap g-boot-fragment-reader-superlinear-s482 widened
-- [ ] gates, PR body
+- [x] merge origin/main ea04fc7b0 (7c37fde2e, generated regen only)
+- [x] gates (head 7c37fde2e): pretest exit 0; bootstrap conformance PASS 810 / FAIL 3 / UNS 517 / CRASH 0 vs main
+      772 / 3 / 555 / 0 — 38 UNSUPPORTED->PASS (all meta), 0 PASS->other; meta PASS 39; impl#1 `-t meta` 68/68;
+      meta-s481 104/104 (r4 block: 11 red on base 16ff8cf); CI checks job green; byte-compare 68 diffs vs main,
+      all meta, 0 non-meta, 0 throws; vs the r3 merged head 1 diff (meta-emit-url-foreign-neg: one E-META-EVAL-002
+      instead of two — the reader stops at the first non-plain construct); 252 probes, every `^{}` probe <= 3.3 s /
+      493 MB (only the 4 hand-written-source calibration probes exceed: pre-existing reader gap)
+- [ ] push + PR body ### r4
