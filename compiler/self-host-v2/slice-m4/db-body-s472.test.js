@@ -139,18 +139,18 @@ describe("a `<db>` body declares; it does not run — E-DB-BODY-STATEMENT", () =
     "purge();",
     "@n = 1;",
     "let x = 1;",
-    "if (@n > 0) { log(1); }",
-    "for (const i of [1, 2]) { log(i); }",
-    "when @n changes { log(1); }",
-    "on mount { log(1); }",
+    "if (@n > 0) { bump(1); }",
+    "for (const i of [1, 2]) { bump(i); }",
+    "when @n changes { bump(1); }",
+    "on mount { bump(1); }",
     `${IV} @n }`,
-    `<effect deps=[@n]>${IV} log(1); }</effect>`,
+    `<effect deps=[@n]>${IV} bump(1); }</effect>`,
     '"a" + "b"',
     "Hello",
   ];
   for (const s of STMTS) {
     test(`\`${s}\` → exactly one E-DB-BODY-STATEMENT, nothing written`, () => {
-      const r = run(DB(`        function log(x: int) {\n            @n = x;\n        }\n        ${s}`));
+      const r = run(DB(`        function bump(x: int) {\n            @n = x;\n        }\n        ${s}`));
       expect(r.diags.map((d) => d.code)).toEqual(["E-DB-BODY-STATEMENT"]);
       expect(r.core == null).toBe(true);
     });

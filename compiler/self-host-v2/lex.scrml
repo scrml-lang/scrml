@@ -1141,7 +1141,8 @@ ${
     //   `some` — a word only after `is` (`x is some`, §42.2.2a), where it ENDS the expression
     //            (§7.2.2: "`not` / `given` / `some` end the expression").
     // `as` is NOT one: its keyword reading takes a bare variant after it (`return a as .Published;`,
-    // §14.12.6.2), so `as .x` cannot be read as a member by the previous token alone.
+    // §14.12.6.2), so `as .x` cannot be read as a member by the previous token alone — adjacency
+    // decides it (dotLastKind, S482 ruling).
     fn isContextualNameWord(name: string) -> boolean {
         return name == "from" || name == "server" || name == "pure" || name == "render" || name == "some";
     }

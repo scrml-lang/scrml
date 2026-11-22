@@ -1453,7 +1453,7 @@ ${
             if (n.cls == TC.At && touching(n, n2) && (n2.cls == TC.Ident || n2.cls == TC.Keyword) && n.line == gtok.line) {
                 w = "@" + n2.v;
                 t = adv(adv(t));
-            } else if (n.cls == TC.Ident && n.line == gtok.line) {
+            } else if (bindNameTok(n) && n.line == gtok.line) {   // s482-as-adjacency (#2058 LOW-2): `given some :>`
                 w = n.v;
                 t = adv(t);
             }
@@ -1466,7 +1466,7 @@ ${
                 // s478 r1 (review MED-1): a later name may be a cell (`, @b`), as the first may
                 const a1: PTok = peekAt(t, 1);
                 const a2: PTok = peekAt(t, 2);
-                if (isP(t, ",") && a1.line == gtok.line && (a1.cls == TC.Ident || (a1.cls == TC.At && touching(a1, a2) && (a2.cls == TC.Ident || a2.cls == TC.Keyword)))) {
+                if (isP(t, ",") && a1.line == gtok.line && (bindNameTok(a1) || (a1.cls == TC.At && touching(a1, a2) && (a2.cls == TC.Ident || a2.cls == TC.Keyword)))) {
                     t = adv(t);
                 } else {
                     going = false;
@@ -1769,7 +1769,8 @@ ${
         }
         // s452 — a bare identifier as the WHOLE pattern (`err :>`, §18.2): a
         // pattern of its own, so analyze reports E-MATCH-BARE-BINDER by name
-        if (a.cls == TC.Ident && sepAt(tp, 1)) {
+        // s482-as-adjacency (#2058 LOW-3): a contextual word (`as :>`) is a bare binder too
+        if (bindNameTok(a) && sepAt(tp, 1)) {
             const bb: ABind = { nid: tp.nid, span: mkSpan(a.start, a.end), name: a.v };
             return { pat: APat.PBare(bb), tp: bumpId(adv(tp)) };
         }
@@ -2294,7 +2295,8 @@ ${
         if (j < 0 && ((a.cls == TC.Ident && a.v == "_") || (a.cls == TC.Keyword && a.v == "else"))) {
             j = i + 1;
             // s452: `_ err` / `else err` — the wildcard's one binder (§18.6.1)
-            if (j < ts.length && ts[j].cls == TC.Ident && ts[j].line == a.line) j = j + 1;
+            // s482-as-adjacency (#2058 LOW-3): the binder as parsePattern reads it (bindNameTok)
+            if (j < ts.length && bindNameTok(ts[j]) && ts[j].line == a.line) j = j + 1;
         }
         // s469 r2: a qualified head, `Type.V` / `Type::V` (§18.13) — the forms
         // parsePattern accepts — so a newline-separated `E.A :> 1⏎ E.B :> 2`
@@ -2304,13 +2306,13 @@ ${
         if (j < 0 && a.cls == TC.Ident && i + 3 < ts.length && tk(ts[i + 1], ":") && tk(ts[i + 2], ":") && touching(a, ts[i + 1]) && touching(ts[i + 1], ts[i + 2]) && (ts[i + 3].cls == TC.Ident || ts[i + 3].cls == TC.Keyword) && touching(ts[i + 2], ts[i + 3])) j = i + 4;
         // s452: a bare identifier pattern (`err :>`, §18.2) — only before the
         // canonical `:>` here: `x =>` mid-expression is an arrow function
-        if (j < 0 && a.cls == TC.Ident) {
+        if (j < 0 && bindNameTok(a)) {
             if (i + 2 < ts.length && ts[i + 1].cls == TC.Punct && tk(ts[i + 1], ":") && tk(ts[i + 2], ">") && touching(ts[i + 1], ts[i + 2])) return true;
             return false;
         }
         if (j < 0 || j >= ts.length) return false;
         // the legacy paren-free binder (`.V m :>`): one identifier before the separator
-        if (j < ts.length && a.cls != TC.Ident && a.cls != TC.Keyword && ts[j].cls == TC.Ident && ts[j].line == a.line && j + 1 < ts.length && ts[j + 1].cls == TC.Punct) j = j + 1;
+        if (j < ts.length && a.cls != TC.Ident && a.cls != TC.Keyword && bindNameTok(ts[j]) && ts[j].line == a.line && j + 1 < ts.length && ts[j + 1].cls == TC.Punct) j = j + 1;
         if (ts[j].cls == TC.Punct && tk(ts[j], "(")) {
             let depth: int = 0;
             let going = true;
@@ -3421,7 +3423,9 @@ ${
         // `${ … }` may drop them (§17.6.10 `'if' condition`, parseInterp).
         if (t.v == "if") return parseValueIfExpr(tp, false);
         // s478 — `function (…) { … }` where a value stands: a function expression
-        if (t.v == "function" && (tk(peekAt(tp, 1), "(") || peekAt(tp, 1).cls == TC.Ident)) return parseFnExpr(tp, start);
+        // s482-as-adjacency (#2058 review LOW-1): a contextual word names one too (bindNameTok), so
+        // `function from(…) { … }` reaches parseFnExpr's named-function-expression refusal
+        if (t.v == "function" && (tk(peekAt(tp, 1), "(") || bindNameTok(peekAt(tp, 1)))) return parseFnExpr(tp, start);
         return mkE(adv(tp), start, AExprK.Name(t.v));
     }
 
@@ -7079,7 +7083,7 @@ ${
             if (nameTok.cls == TC.At) {
                 written = "@" + peekAt(t, 1).v;
                 n = parseAt(t);
-            } else if (nameTok.cls == TC.Ident) {
+            } else if (bindNameTok(nameTok)) {   // s482-as-adjacency (#2058 LOW-2): `given some :> { … }`
                 n = mkE(adv(t), nameTok.start, AExprK.Name(nameTok.v));
             }
             if (n is given) {
@@ -9448,7 +9452,32 @@ ${
         if (ret is given && !voidType(ret)) t = dropTailNoEffect(t, body.b, n0);
         const f: AFn = { nid: t.nid, span: spanFrom(t, start), exported: exported, pure: pure,
                          name: nameTok.v, params: params, ret: ret, body: body.b, server: server, failable: failable, err: err };
+        t = shadowLint(t, f.name, f.span);
         return { f: f, tp: bumpId(t) };
+    }
+
+    // s482-as-adjacency (#2058 review INFO-1) — a function DECLARATION named `render` / `log` shadows a
+    // language built-in, and the SPEC asks for an info lint at the declaration: §20.3a "The compiler SHALL
+    // emit an info-level lint **`W-RENDER-SHADOWED`** at the shadowing declaration so the author knows the
+    // built-in is not active for that name"; §20.6.7 "The compiler SHALL emit an info-level lint
+    // **`W-LOG-SHADOWED`** at the shadowing declaration's use". impl#1's checkRenderShadowing /
+    // checkLogShadowing (type-system.ts) fire once per `function` / `fn` declaration of the name, with the
+    // messages below. (`print` / `println` are W-PRINT-SHADOWED at the call, analyze.scrml printShadowed —
+    // §20.7.5 places that one "at the shadowing use".)
+    fn shadowLint(tp: TP, name: string, sp: ASpan) -> TP {
+        let msg: string = "";
+        let code: string = "";
+        if (name == "render") {
+            code = "W-RENDER-SHADOWED";
+            msg = "this `render` declaration shadows the `render()` client component-render builtin. Calls to `render(...)` resolve to THIS function and do NOT trigger the builtin component render. Remove this declaration to adopt the builtin. (`render` is not a reserved identifier; this is an info-level nudge, not an error.)";
+        }
+        if (name == "log") {
+            code = "W-LOG-SHADOWED";
+            msg = "this `log` declaration shadows the location-transparent `log()` builtin (§20.6). Calls to `log(...)` resolve to THIS function and carry no [server|client] origin tag and no dev unified-view forwarding. Remove this declaration to adopt the builtin. (`log` is not a reserved identifier; this is an info-level nudge, not an error.)";
+        }
+        if (code == "") return tp;
+        const d: Diag = newDiag(code, msg, tp.file, sp);
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns, inFn: tp.inFn };
     }
 
     // =========================================================================
@@ -13647,7 +13676,7 @@ ${
         const g: PTok = cur(tp);
         const n: PTok = peekAt(tp, 1);
         if (n.line != g.line) return false;
-        if (n.cls == TC.Ident || n.cls == TC.At) return true;
+        if (bindNameTok(n) || n.cls == TC.At) return true;   // s482-as-adjacency (#2058 LOW-2)
         return n.cls == TC.Punct && tk(n, "(") && !touching(g, n);
     }
 
