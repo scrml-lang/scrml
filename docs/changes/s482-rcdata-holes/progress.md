@@ -16,5 +16,18 @@ Scratch: ~/.cache/scrml/review/s482-rcdata-holes/ (probes p/, Chromium runner h/
 
 ## Chromium (head) — all probes load with no error; after a cell change the value follows.
 
+## Measured
+- slice-m4/rcdata-holes-s482.test.js: base 10 pass / 8 fail, head 18 pass.
+- compiler/tests/browser/rcdata-holes-chromium-s482.browser.test.js: base 0/4, head 4/4 (Chromium).
+- bootstrap-conformance --json: base == head (PASS 816, FAIL 3, NOT-TWINNED 628, UNSUPPORTED 517, CRASH 0); no verdict changed.
+- byte-compare (printProgram/printServer per conformance case): 1 of 253 printed differs —
+  reactive/textarea-rcdata-value-bind (`<textarea id="ta">${@x}</textarea>`: anchor + rt.text → empty + rt.textContent). Expected.
+- corpus differential (2968 files): 0 changed error sets.
+- s34-census --check-new, types-gate --check, snippet-gate, claim-gate, corpus-compile-floor --check,
+  gen-md-shim --check, gen-bootstrap-severity --check, e2e-render-map (259 pass): all clean.
+- impl#1 oracle (Chromium): mixed textarea value `a &amp; b hi c` (static `&amp;` literal, same as head);
+  after typing, a cell change overwrites (`.value`), same as head; impl#1's DOM child text stays the
+  first paint (`a &amp; b  c`), head sets textContent too (form reset restores the current value).
+
 ## Next
-- slice-m4/rcdata-holes-s482.test.js, gates, byte-compare, corpus differential, gap marker, PR.
+- commit, push, PR.
