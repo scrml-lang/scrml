@@ -1,0 +1,16 @@
+{
+  "id": "match-codes-e-match-alt-binding-neg",
+  "description": "§18.2 — an alternation arm whose alternates carry only POSITIONAL `_` discards (`.Circle(_) | .Square(_) :> \"sized\"`) is permitted: no E-MATCH-ALT-BINDING, and the arm takes either variant (#out shows \"sized\" for `.Square(3)`; #dot shows \"point\" for `.Dot`).",
+  "language-version": "1.0",
+  "spec": "§18.2",
+  "rationale": "§18.2: \"Only POSITIONAL `_` discards (`.P(_) | .Q(_) :> r`) are permitted.\"",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-MATCH-ALT-BINDING"],
+    "notCodePrefixes": ["E-"],
+    "domAnchored": [
+      { "selector": "#out", "text": "sized" },
+      { "selector": "#dot", "text": "point" }
+    ]
+  }
+}

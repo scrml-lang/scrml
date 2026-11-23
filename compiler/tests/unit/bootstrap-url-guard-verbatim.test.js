@@ -17,6 +17,7 @@ import {
   isInSync,
 } from "../../../scripts/sync-bootstrap-url-guard.ts";
 import { URL_GUARD_RUNTIME_SOURCE } from "../../src/runtime-template.js";
+import { currentBlock as metaGateBlock } from "../../../scripts/sync-bootstrap-meta-emit-gate.ts";
 
 describe("bootstrap runtime carries impl#1's §5.2 URL guard verbatim", () => {
   test("the block between the markers equals compiler/src/runtime-url-guard.js (`export ` stripped)", () => {
@@ -34,7 +35,10 @@ describe("bootstrap runtime carries impl#1's §5.2 URL guard verbatim", () => {
   test("the bootstrap's bound-attribute write goes through the guard (no second list in the runtime)", () => {
     const runtime = readText(BOOT_RUNTIME_PATH);
     const { before, after } = currentBlock(runtime);
-    const outside = before + after;
+    // s482 (s482-meta-runtime): impl#1's runtime meta.emit gate is a second verbatim block (its own
+    // drift test, bootstrap-meta-emit-gate-verbatim.test.js) — impl#1's code, not the bootstrap's
+    const m = metaGateBlock(before + after);
+    const outside = m.before + m.after;
     // `attr` asks the guard; the only URL-attribute table is the verbatim one.
     // s473: `attr` asks `writeGuardOf`, which adds the CSS-url attribute guard
     // (cssValueOf) and asks `urlGuardOf` for every URL write.

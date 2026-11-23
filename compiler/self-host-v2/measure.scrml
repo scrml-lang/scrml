@@ -128,7 +128,8 @@ ${
         return match p {
             .PVariant(enumSym: x) :> "PVariant",
             .PLit(lit: x) :> "PLit",
-            .PWild :> "PWild"
+            .PWild :> "PWild",
+            .PAlt(pats: ps) :> "PAlt"
         };
     }
 

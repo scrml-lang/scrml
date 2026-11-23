@@ -51,7 +51,7 @@ ${
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, APage, AEndpoint, AEpArm, AChannel, AOnchange, Diag, ASql, ASqlMode,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, ACss, AForeign, mkSpan, newDiag, stdlibPathPrefix,
-             HView, HChain, HTargetParts, hostView, hostChainOf, hostRootGlobal, hostTargetParts, isHyphenWordExpr, metaCallee, metaOf, AMeta } from "./ast.scrml";
+             HView, HChain, HTargetParts, hostView, hostChainOf, hostRootGlobal, hostTargetParts, isHyphenWordExpr, metaCallee, metaOf, AMeta, patAlts } from "./ast.scrml";
     import { CssErr, CssParsed, parseCssBlock } from "./css-syntax.scrml";
     import { SchemaErr, SchemaRead, SchemaTable, SchemaCol, readSchemaBody, schemaCloseAt } from "./schema.scrml";
     import { logicWriteSink, executableAttrName } from "./url.scrml";
@@ -1301,6 +1301,9 @@ ${
 
     type RArms:struct = { arms: AArm[], tp: TP }
     type RPat:struct = { pat: APat, tp: TP }
+    // s482: an alternation head (parseAltHead); `bad` — its first alternate that carries a
+    // payload pattern (E-MATCH-ALT-BINDING, reported by parseArms), else not
+    type RAltHead:struct = { pat: APat, tp: TP, bad: PTok | not }
     type RArmBody:struct = { body: AArmBody, lifted: boolean, bare: boolean, tp: TP }
 
     // At `{`: the arms, through the matching `}`. ONE arm parser for `!{}`
@@ -1354,13 +1357,26 @@ ${
                 const isGiven: boolean = !guard && !piped && isWord(t, "given") && !sepAt(t, 1);
                 let gh: GHead = { idx: arms.length, names: [], written: "", bad: false, start: 0, sepEnd: 0, tp: t };
                 let rp: RPat = { pat: APat.PWild, tp: t };
+                let altBad: PTok | not = not;
                 if (isGiven) {
                     gh = givenArmHead(t, arms.length, true);
                     rp = { pat: APat.PWild, tp: gh.tp };
                 } else {
                     rp = parsePattern(t, guard && piped);
+                    // s482 (s482-match-alternation) — §18.2: "An arm pattern MAY list several
+                    // alternates separated by `|` … at ANY arm position". A `|` after the pattern
+                    // followed by another pattern makes the head an alternation: re-read from the
+                    // arm's start, alternate by alternate (parseAltHead). (A `|` followed by
+                    // anything else is the §18.10 guard, E-SYNTAX-011, below.)
+                    if (isP(rp.tp, "|") && patStartAt(adv(rp.tp))) {
+                        const ah: RAltHead = parseAltHead(t, guard && piped);
+                        rp = { pat: ah.pat, tp: ah.tp };
+                        altBad = ah.bad;
+                    }
                 }
                 t = rp.tp;
+                // s482 — E-MATCH-ALT-BINDING (§18.2), one per arm, at its first offending alternate
+                if (altBad is given) t = diagAt(t, "E-MATCH-ALT-BINDING", altBindingMsg(), altBad);
                 // r2: the lint names a rewrite, so only for an arm that PARSED — a
                 // non-empty pattern with no diagnostic of its own, followed by its
                 // separator (not an unsupported alternation, not error recovery)
@@ -1387,25 +1403,23 @@ ${
                     t = skipAltHead(t, c.line);
                     if (sepAt(t, 0)) t = adv(t);
                     if (isP(t, ">")) t = adv(t);
-                } else if (c.cls == TC.Punct && tk(c, "|")) {
-                    // s452 r3 (LOW-D): `.A | .B :>` — §18.2's arm-pattern alternation
-                    t = diagAt(t, "E-PARSE-ARM", "alternation `|` between patterns (`.A | .B :> …`, §18.2) is not yet supported in the bootstrap — write one arm per pattern", c);
-                    // s452 r4: skip the rest of the alternation through its separator (one report, no follow-on E-PARSE-EXPR)
-                    // s482 (g-boot-multiline-alternation-arm-head-s481): a line that ENDS in `|` continues the
-                    // head (§7.2.2 rule 4: "a line break SHALL NOT end, continue or separate a statement or an
-                    // arm: it is whitespace"; §18.2: "An arm pattern MAY list several alternates separated by
-                    // `|`") — `.A | .B |⏎ .C :>` is ONE head, refused once like the one-line head, never one
-                    // arm per line (an E-MATCH-ARM-SEPARATOR per line before)
-                    t = skipAltHead(t, c.line);
-                    if (sepAt(t, 0)) t = adv(t);
-                    if (isP(t, ">")) t = adv(t);
                 } else if (!isGiven || !gh.bad) {
                     t = diagAt(t, "E-PARSE-ARM", "expected `:>` after the arm's pattern, found `" + c.text + "`", c);
                 }
                 if (isGiven) gheads = gheads.concat([gh]);
                 const rb: RArmBody = parseArmBody(t, !guard);
                 t = rb.tp;
-                const arm: AArm = { nid: t.nid, span: spanFrom(t, astart), pat: rp.pat, body: rb.body, legacy: legacy, lifted: rb.lifted, bare: rb.bare, test: false };
+                let armBody: AArmBody = rb.body;
+                if (altBad is given) {
+                    // s482 — the E-MATCH-ALT-BINDING arm's alternates were kept without their
+                    // binders, so its body is a placeholder (Recovered — nothing downstream types
+                    // it; the Error stops the build): a name a binder would have bound is not
+                    // reported a second time.
+                    const rx: RExpr = mkE(t, astart, AExprK.Recovered);
+                    t = rx.tp;
+                    armBody = AArmBody.ArmExpr(rx.e);
+                }
+                const arm: AArm = { nid: t.nid, span: spanFrom(t, astart), pat: rp.pat, body: armBody, legacy: legacy, lifted: rb.lifted, bare: rb.bare, test: false };
                 arms = arms.concat([arm]);
                 t = bumpId(t);
                 lastComma = false;
@@ -1610,6 +1624,7 @@ ${
     fn patIsNot(p: APat) -> boolean {
         return match p {
             .PNot :> true,
+            .PAlt(alts: xs) :> false,
             .PName(name: n) :> false,
             .PWild :> false,
             .PWhole(bind: b) :> false,
@@ -1688,6 +1703,7 @@ ${
     fn parenFreeBinder(p: APat) -> boolean {
         return match p {
             .PName(binds: bs, parens: pr) :> !pr && bs.length == 1,
+            .PAlt(alts: xs) :> false,
             .PWild :> false,
             .PWhole(bind: b) :> false,
             .PBare(bind: b) :> false,
@@ -1790,13 +1806,15 @@ ${
         }
         // s469 — the absence arm `not :>` (§18.2: "`not` is not a bare name
         // here: it is the absence arm (§42)"; §42.2.3)
-        if ((a.cls == TC.Ident || a.cls == TC.Keyword) && a.v == "not" && sepAt(tp, 1)) return { pat: APat.PNot, tp: adv(tp) };
+        // s482 — or one alternate of an alternation (`not | .A`, `"a" | "b"`, `1 | -1`, §18.2):
+        // followed by a `|` (altBarAt) as well as by the separator
+        if ((a.cls == TC.Ident || a.cls == TC.Keyword) && a.v == "not" && (sepAt(tp, 1) || altBarAt(tp, 1))) return { pat: APat.PNot, tp: adv(tp) };
         // s469 — a literal arm (§18.16.1: a string, number or boolean literal)
-        if ((a.cls == TC.Str || a.cls == TC.Num || ((a.cls == TC.Keyword || a.cls == TC.Ident) && (a.v == "true" || a.v == "false"))) && sepAt(tp, 1)) {
+        if ((a.cls == TC.Str || a.cls == TC.Num || ((a.cls == TC.Keyword || a.cls == TC.Ident) && (a.v == "true" || a.v == "false"))) && (sepAt(tp, 1) || altBarAt(tp, 1))) {
             const rl: RExpr = parsePrimary(tp);
             return { pat: APat.PLit(rl.e), tp: rl.tp };
         }
-        if (a.cls == TC.Punct && tk(a, "-") && b.cls == TC.Num && touching(a, b) && sepAt(tp, 2)) {
+        if (a.cls == TC.Punct && tk(a, "-") && b.cls == TC.Num && touching(a, b) && (sepAt(tp, 2) || altBarAt(tp, 2))) {
             const rn: RExpr = mkE(adv(adv(tp)), a.start, AExprK.Num("-" + b.v));
             return { pat: APat.PLit(rn.e), tp: rn.tp };
         }
@@ -1833,6 +1851,139 @@ ${
             return { pat: APat.PWild, tp: t };
         }
         return { pat: APat.PWild, tp: diagAt(tp, "E-PARSE-ARM", "expected an arm pattern (`.Variant`, `.Variant(a, b)`, `not`, a literal, `_` or `else`), found `" + a.text + "`", a) };
+    }
+
+    // s482 (s482-match-alternation) — `|` at token offset `k`: the separator between two
+    // alternates (a `||` is one token, never this).
+    fn altBarAt(tp: TP, k: int) -> boolean {
+        const x: PTok = peekAt(tp, k);
+        return x.cls == TC.Punct && tk(x, "|");
+    }
+
+    // s482 — an alternation arm head, from the arm's first pattern (the caller saw a `|`
+    // and a pattern after it). §18.2: "An arm pattern MAY list several alternates separated
+    // by `|` (`.B | .C :> r`, `"a" | "b" :> r`, `1 | 2 :> r` …), at ANY arm position."
+    // Each alternate is read by parseAlternate; a `|` continues the head across a line
+    // break, before or after it (§7.2.2 rule 4: "a line break SHALL NOT end, continue or
+    // separate a statement or an arm: it is whitespace"). The head ends where the token
+    // after an alternate is not a `|` followed by a pattern: at the separator (left for the
+    // caller), or at a `|` followed by something else — the §18.10 guard the caller
+    // reports (E-SYNTAX-011). `bad`: the first alternate carrying a payload pattern.
+    fn parseAltHead(tp: TP, guard: boolean) -> RAltHead {
+        let t: TP = tp;
+        let alts: APat[] = [];
+        let bad: PTok | not = not;
+        let going: boolean = true;
+        for (; going; ) {
+            const ra: RAltHead = parseAlternate(t, guard);
+            t = ra.tp;
+            if (bad is not) bad = ra.bad;
+            alts = alts.concat(patAlts(ra.pat));
+            if (isP(t, "|") && patStartAt(adv(t))) {
+                t = adv(t);
+            } else {
+                going = false;
+            }
+        }
+        return { pat: APat.PAlt(alts), tp: t, bad: bad };
+    }
+
+    // s482 — one alternate of an alternation. §18.2: "The alternates of one arm SHALL NOT
+    // carry payload patterns — a binding (`.P(a: x) | .Q(a: x) :> x`), a NAMED field even
+    // when discarded (`.P(a: _) | .Q(a: _)`), or a nested / literal pattern — each SHALL
+    // produce E-MATCH-ALT-BINDING (§34). Only POSITIONAL `_` discards (`.P(_) | .Q(_) :> r`)
+    // are permitted." A variant's `( … )` holding anything but `_` and `,` is such a payload
+    // pattern, whatever it holds (it is not read as binders: no E-PARSE-ARM, no named-binding
+    // refusal); so are a paren-free binder (`| .V m`, a `!{}` arm's legacy spelling of
+    // `.V(m)`) and the whole-value binder `_ err` (§18.6.1). The alternate is kept WITHOUT
+    // its binders — `.V(…)` as `.V`, `_ err` as `_` — and reported as `bad`.
+    fn parseAlternate(tp: TP, guard: boolean) -> RAltHead {
+        const rp: RPat = parsePattern(tp, guard);
+        const p: APat = rp.pat;
+        const head: PTok = cur(tp);
+        const pn: AltName | not = match p {
+            .PName(name: n, binds: bs, parens: pr, qual: q) :> { name: n, binds: bs, parens: pr, qual: q },
+            .PWild :> not,
+            .PWhole(bind: b) :> not,
+            .PBare(bind: b) :> not,
+            .PNot :> not,
+            .PLit(e: x) :> not,
+            .PAlt(alts: xs) :> not
+        };
+        if (pn is given) {
+            const open: int = altOpenAt(tp, rp.tp.i);
+            if (open >= 0 && !altDiscardsOnly(tp, open)) {
+                const close: int = altCloseAt(tp, open);
+                const back: TP = { toks: tp.toks, i: close, nid: rp.tp.nid, diags: tp.diags, file: tp.file, ns: tp.ns, inFn: tp.inFn };
+                return { pat: APat.PName(pn.name, [], false, pn.qual), tp: back, bad: head };
+            }
+            if (!pn.parens && pn.binds.length > 0) return { pat: APat.PName(pn.name, [], false, pn.qual), tp: rp.tp, bad: head };
+            return { pat: p, tp: rp.tp, bad: not };
+        }
+        const wb: boolean = match p {
+            .PWhole(bind: b) :> true,
+            .PName(name: n) :> false,
+            .PWild :> false,
+            .PBare(bind: b) :> false,
+            .PNot :> false,
+            .PLit(e: x) :> false,
+            .PAlt(alts: xs) :> false
+        };
+        if (wb) return { pat: APat.PWild, tp: rp.tp, bad: head };
+        return { pat: p, tp: rp.tp, bad: not };
+    }
+
+    type AltName:struct = { name: string, binds: ABind[], parens: boolean, qual: string }
+
+    // s482 — the token index of the `(` that opens a variant alternate's payload, among the
+    // tokens the pattern read (`tp.i` up to `end`), else -1.
+    fn altOpenAt(tp: TP, end: int) -> int {
+        let i: int = tp.i;
+        for (; i < end; ) {
+            const x: PTok = tp.toks[i];
+            if (x.cls == TC.Punct && tk(x, "(")) return i;
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    // s482 — the `( … )` opened at token `open` holds only positional `_` discards and `,`.
+    fn altDiscardsOnly(tp: TP, open: int) -> boolean {
+        let i: int = open + 1;
+        for (; i < tp.toks.length; ) {
+            const x: PTok = tp.toks[i];
+            if (x.cls == TC.Punct && tk(x, ")")) return true;
+            if (x.cls == TC.End) return false;
+            const disc: boolean = (x.cls == TC.Ident || x.cls == TC.Keyword) && x.v == "_";
+            if (!disc && !(x.cls == TC.Punct && tk(x, ","))) return false;
+            i = i + 1;
+        }
+        return false;
+    }
+
+    // s482 — the token index just past the `)` matching the `(` at token `open` (nested
+    // parentheses balanced), stopping before the arm's separator, its list's `{` / `}`, or
+    // the end, so an unclosed `(` never swallows the arm.
+    fn altCloseAt(tp: TP, open: int) -> int {
+        let depth: int = 0;
+        let i: int = open;
+        for (; i < tp.toks.length; ) {
+            const x: PTok = tp.toks[i];
+            if (x.cls == TC.End) return i;
+            const probe: TP = { toks: tp.toks, i: i, nid: tp.nid, diags: tp.diags, file: tp.file, ns: tp.ns, inFn: tp.inFn };
+            if (depth > 0 && (sepAt(probe, 0) || (x.cls == TC.Punct && (tk(x, "{") || tk(x, "}"))))) return i;
+            if (x.cls == TC.Punct && tk(x, "(")) depth = depth + 1;
+            if (x.cls == TC.Punct && tk(x, ")")) {
+                depth = depth - 1;
+                if (depth == 0) return i + 1;
+            }
+            i = i + 1;
+        }
+        return i;
+    }
+
+    fn altBindingMsg() -> string {
+        return "an arm that lists several patterns with `|` cannot carry payload patterns — a binding (`.P(x) | .Q(x)`), a named field even when discarded (`.P(a: _)`), a nested or literal pattern (`.P(1)`), or the whole-value binder (`_ err`) (§18.2). Give each variant its own arm, or use positional `_` discards (`.P(_) | .Q(_) :> …`) when the body does not read the payload";
     }
 
     // After a pattern's variant name (`nameTok`): its `(binders)`, if written.
@@ -8698,7 +8849,7 @@ ${
         const sp: ASpan = mkSpan(start, last.span.end);
         const b: ABlock = { nid: tp.nid, span: sp, stmts: stmts };
         const t1: TP = bumpId(tp);
-        const n: ANode = { nid: t1.nid, span: sp, k: ANodeK.Run(b) };
+        const n: ANode = { nid: t1.nid, span: sp, k: ANodeK.Run(b, "") };
         const t2: TP = bumpId(t1);
         const it: AItem = { nid: t2.nid, span: sp, k: AItemK.MarkupItem(n) };
         return { items: [it], tp: bumpId(t2) };

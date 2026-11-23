@@ -54,7 +54,7 @@ ${
              AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, APage, AEndpoint, AEpArm, AChannel, AOnchange, Diag, ASql, ASqlMode,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, AForeign,
              ACss, ACssItem, ACssRule, ACssDecl, ACssPart, ACssRef, mkSpan, newDiag,
-             HView, HTargetParts, hostView, hostTargetParts, hostRootGlobal, isHyphenWordExpr } from "./ast.scrml";
+             HView, HTargetParts, hostView, hostTargetParts, hostRootGlobal, isHyphenWordExpr, patAlts } from "./ast.scrml";
     import { Severity } from "./severity.scrml";
     import { isIdentifierText, isVoidName } from "./lex.scrml";
     import { isKnownElementName, isHtmlElementName, htmlNs, childNs, isForeignNs, isHtmlInNs, isForeignBreakout, closesP,
@@ -389,6 +389,11 @@ ${
     //     implicitly (keyed by its Sql node, §19.8.2): see HandledFact.
     //   FArm — an arm of a `!{}` / `match` (keyed by its AArm nid): the
     //     variant index it matches; -1 the wildcard (`_` / `else`); -2 `.Ok`.
+    //     s482: -7 an alternation (§18.2, APat.PAlt) — `alts` holds, per
+    //     alternate in written order, the index that alternate alone would have
+    //     (≥ 0 a variant, -5 `not`, -6 a literal, -3 did not resolve); an
+    //     alternation with a wildcard alternate IS the wildcard arm (-1, its
+    //     `alts` still recorded). `alts` is [] for every other arm.
     //   FFail — a `fail` statement (keyed by its AStmt nid): variant `idx` of
     //     enum `err` (§19.3).
     // HandledFact: `err` — the error enum of the failable; `result` — the local
@@ -418,7 +423,7 @@ ${
     export type RemoteFact:struct = { callee: Sym, caller: int, local: Sym | not, retagT: Retag[] }
     export type FailFact:enum = {
         FHandled(h: HandledFact),
-        FArm(idx: int),
+        FArm(idx: int, alts: int[]),
         FFail(err: Sym, idx: int),
         FPlain(m: PlainMatch),
     }
@@ -5303,6 +5308,7 @@ ${
     fn armBinders(p: APat) -> ParamT[] {
         return match p {
             .PName(name: n, binds: bs) :> bindersOf(bs),
+            .PAlt(alts: xs) :> [],
             .PWild :> [],
             .PWhole(bind: b) :> bindersOf([b]),
             .PBare(bind: b) :> bindersOf([b]),
@@ -9916,6 +9922,98 @@ ${
         return diagX(env, e, "E-SCOPE-001", "`" + name + "` is not declared" + valueElsewhere(env.g.te.link, env.file, name), st);
     }
 
+    // s482 (s482-meta-runtime) — a RUNTIME `^{}` block's calls on its `meta` object (SPEC
+    // §22.5.1). meta.scrml rewrote `meta.<op>(…)` in the block's body to `^.<op>(…)` — `^` is
+    // spelled by no identifier, so only that rewrite makes one, and only inside such a block
+    // (ANodeK.Run with its `meta` id), or a function value made there. Each records its Meta
+    // op (VMethod; lower: a Prim with no receiver) and has its §22.5.1 signature:
+    //   get(@x)                 the cell's type — `meta.get("x")`, a dependency read
+    //   emit(html: string)      no value
+    //   cleanup(f: () => void)  no value
+    //   interval / timeout(ms: number, f: () => void) -> string  (the timer's id — the
+    //                           §22.5.1 "opaque intervalId", a `string` here: INTERIM, the
+    //                           bootstrap has no opaque type; the runtime keys it per block)
+    //   clearInterval / clearTimeout(id: string)  no value
+    fn metaOpCallee(callee: AExpr) -> string {
+        const m: MethodCall | not = memberCall(callee);
+        if (m is not) return "";
+        if (exprName(m.obj) != "^") return "";
+        return m.method;
+    }
+
+    fn metaPrimOp(op: string) -> PrimOp | not {
+        if (op == "get") return PrimOp.MetaGet;
+        if (op == "emit") return PrimOp.MetaEmit;
+        if (op == "cleanup") return PrimOp.MetaCleanup;
+        if (op == "interval") return PrimOp.MetaInterval;
+        if (op == "timeout") return PrimOp.MetaTimeout;
+        if (op == "clearInterval") return PrimOp.MetaClearInterval;
+        if (op == "clearTimeout") return PrimOp.MetaClearTimeout;
+        return not;
+    }
+
+    fn metaArity(op: string) -> int {
+        if (op == "interval" || op == "timeout") return 2;
+        return 1;
+    }
+
+    fn voidFnType() -> Type { return Type.Fn([], not, false, not); }
+
+    fn resolveMetaCall(env: Env, e: AExpr, op: string, args: AExpr[], st0: AS) -> RX {
+        const po: PrimOp | not = metaPrimOp(op);
+        if (po is not) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`meta." + op + "(…)` is not a call of the runtime `meta` object the bootstrap builds (§22.5.1)", resolveExprs(env, args, not, st0));
+        if (args.length != metaArity(op)) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`meta." + op + "(…)` takes " + metaArity(op) + " argument(s) (§22.5.1)", resolveExprs(env, args, not, st0));
+        if (op == "get") {
+            const rg: RX = resolveExpr(env, args[0], not, st0);
+            return plain(rg.x.ty, addValue(rg.st, e.nid, ValueFact.VMethod(po)));
+        }
+        if (op == "emit") {
+            const re: RX = resolveExpr(env, args[0], Type.Str, st0);
+            return plain(not, addValue(re.st, e.nid, ValueFact.VMethod(po)));
+        }
+        if (op == "cleanup") {
+            const sc: AS = resolveMetaCallback(env, args[0], op, st0);
+            return plain(not, addValue(sc, e.nid, ValueFact.VMethod(po)));
+        }
+        if (op == "interval" || op == "timeout") {
+            const rm: RX = resolveExpr(env, args[0], Type.Num, st0);
+            const sf: AS = resolveMetaCallback(env, args[1], op, rm.st);
+            return plain(Type.Str, addValue(sf, e.nid, ValueFact.VMethod(po)));
+        }
+        const ri: RX = resolveExpr(env, args[0], Type.Str, st0);
+        return plain(not, addValue(ri.st, e.nid, ValueFact.VMethod(po)));
+    }
+
+    // s482 — a runtime `^{}` block's CALLBACK (`meta.cleanup(f)`, `meta.interval(ms, f)`,
+    // `meta.timeout(ms, f)`): an arrow of no parameters, a function value of type `() => void`
+    // the runtime calls later (a timer firing, the run's teardown). It gives no value, so —
+    // unlike a function value the bootstrap otherwise builds — its body may end without a
+    // `return`. Its body is the bootstrap's closure body (lamBodyCheck: locals, writes of its own
+    // `let` locals, `if` / `else`, and calls of the block's `meta` — isMetaCallExpr); anything
+    // else in it, and a named function as the callback, are refused by name (INTERIM,
+    // g-boot-meta-runtime-residue-s482).
+    fn resolveMetaCallback(env: Env, lam: AExpr, op: string, st0: AS) -> AS {
+        if (!isLambda(lam)) return addDiag(st0, env.file, lam.span, "E-BOOTSTRAP-UNSUPPORTED", "the callback of `meta." + op + "(…)` is built only as an arrow written in place (`() => { … }`) — a named function or another function value is not in the bootstrap yet (INTERIM, g-boot-meta-runtime-residue-s482)");
+        if (lambdaParams(lam).length != 0) return addDiag(st0, env.file, lam.span, "E-BOOTSTRAP-UNSUPPORTED", "the callback of `meta." + op + "(…)` takes no parameters (§22.5.1: the runtime calls it with none) — write `() => { … }`");
+        let st: AS = st0;
+        const env2: Env = noNarrows(sealEvent(env));
+        const blk: ABlock | not = lambdaBlock(lam);
+        if (blk is given) {
+            st = lamBodyCheck(env, blk, [], st);
+            const lenv: Env = withFx(withNest(env2, { fns: env2.nest.fns, top: [], caps: env2.nest.caps, pureCaps: env2.nest.pureCaps, pureFn: env2.nest.pureFn, lam: lam.nid, lamWant: not }), noFailCtx());
+            st = resolveBlock(lenv, blk, st);
+        } else {
+            const b: AExpr | not = lambdaBody(lam);
+            if (b is given) {
+                st = lamExprCheck(env, b, [], st);
+                st = resolveExpr(withFx(env2, noFailCtx()), b, not, st).st;
+            }
+        }
+        const ft: Type = voidFnType();
+        st = addValue(st, lam.nid, ValueFact.VLambda([], ft));
+        return addPending(st, PendRule.FnValue(-1, env.fx.fnSym, env.file, lam.span, ""));
+    }
+
     // s478 (g-boot-s20-builtins-unbuilt-s473, g-bootstrap-twin-log-unknown-s451) — the built-in
     // names of the language the bootstrap does not build yet. Each is refused BY NAME (S473 D30:
     // "UNSUPPORTED is only for E-BOOTSTRAP-UNSUPPORTED"), never reported as an undeclared name: the
@@ -10842,6 +10940,9 @@ ${
     }
 
     fn resolveCall(env: Env, e: AExpr, callee: AExpr, args: AExpr[], st0: AS) -> RX {
+        // s482 (s482-meta-runtime): a runtime `^{}` block's `meta` call (the receiver `^`)
+        const mop: string = metaOpCallee(callee);
+        if (mop != "") return resolveMetaCall(env, e, mop, args, st0);
         const n: string = exprName(callee);
         if (n == "reset") return diagX(env, e, "E-RESET-POSITION", "`reset(@x)` is a statement (a write), not a value", st0);
         if (n == "cleanup" && builtinFree(env, n)) return resolveCleanup(env, e, args, st0);   // s478 (§6.7.3)
@@ -14502,6 +14603,9 @@ ${
     // An expression statement: only `x = v` whose `x` is one of the body's own `let` locals
     // (a condition head's kept assignment is lamExprCheck's, by the same rule).
     fn lamEvalWhy(e: AExpr, own: string[]) -> string {
+        // s482 (s482-meta-runtime): a call of a runtime `^{}` block's `meta` (`meta.emit(…)`,
+        // `meta.clearInterval(id)`, …) — the closure runs in that block (its timer, its cleanup)
+        if (isMetaCallExpr(e)) return "";
         const t: AExpr | not = assignedTarget(e);
         if (t is not) return "an expression statement (a call run for its effect)";
         if (lamOwnTarget(t, own)) return "";
@@ -14526,6 +14630,15 @@ ${
     }
 
     // An assignment's target is one of the body's own `let` locals (a plain name).
+    fn isMetaCallExpr(e: AExpr) -> boolean {
+        const k: AExprK = e.k;
+        return match k {
+            .Call(callee: c) :> metaOpCallee(c) != "",
+            // no-default-arm: one question of an expression — is it a `^.<op>(…)` call
+            _ :> false
+        };
+    }
+
     fn lamOwnTarget(t: AExpr, own: string[]) -> boolean {
         const n: string = exprName(t);
         return n != "" && atName(t) == "" && own.indexOf(n) >= 0;
@@ -20474,6 +20587,7 @@ ${
     fn armBindNames(p: APat) -> string[] {
         return match p {
             .PName(binds: bs) :> bindNames(bs),
+            .PAlt(alts: xs) :> [],
             .PWild :> [],
             .PWhole(bind: b) :> [b.name],
             .PBare(bind: b) :> [b.name],
@@ -21280,11 +21394,14 @@ ${
     // `F`", by Sym identity), so the widened search cannot mis-link silently.
     fn armsSubject(env: Env, pref: Sym | not, arms: AArm[]) -> PSubj {
         let maybe = false;
-        for (const a of arms) {
-            if (isNotPat(a.pat)) maybe = true;
+        // s482: an alternation's alternates are read as the arms' patterns are (§18.2)
+        let pats: APat[] = [];
+        for (const a0 of arms) { pats = pats.concat(patAlts(a0.pat)); }
+        for (const p of pats) {
+            if (isNotPat(p)) maybe = true;
         }
-        for (const a2 of arms) {
-            const pn: PatName | not = patName(a2.pat);
+        for (const p2 of pats) {
+            const pn: PatName | not = patName(p2);
             if (pn is given) {
                 if (pn.qual != "") {
                     const qs: Sym | not = typeNamedHere(env, pn.qual);
@@ -21303,7 +21420,7 @@ ${
                 if (r.n == 0) return psubjBad("E-TYPE-VARIANT", "`." + pn.name + "` is not a variant of any enum in scope");
                 return psubjBad("E-VARIANT-AMBIGUOUS", "`." + pn.name + "` is a variant of more than one enum, and the subject's type is not known here — give the subject a declared type (§18.13)");
             }
-            const lit: AExpr | not = litPatOf(a2.pat);
+            const lit: AExpr | not = litPatOf(p2);
             if (lit is given) {
                 const li: LitInfo = litInfo(lit);
                 if (li.kind > 0) return psubj(li.kind, not, maybe, false);
@@ -21377,6 +21494,7 @@ ${
     fn isNotPat(p: APat) -> boolean {
         return match p {
             .PNot :> true,
+            .PAlt(alts: xs) :> false,
             .PName(name: n) :> false,
             .PWild :> false,
             .PWhole(bind: b) :> false,
@@ -21385,9 +21503,28 @@ ${
         };
     }
 
+    // s482 — does an alternation hold a wildcard alternate (`_` / `else`, §18.2)?
+    fn altHasWild(xs: APat[]) -> boolean {
+        for (const x0 of xs) {
+            const x: APat = x0;
+            const w: boolean = match x {
+                .PWild :> true,
+                .PName(name: n) :> false,
+                .PWhole(bind: b) :> false,
+                .PBare(bind: b) :> false,
+                .PNot :> false,
+                .PLit(e: e) :> false,
+                .PAlt(alts: ys) :> false
+            };
+            if (w) return true;
+        }
+        return false;
+    }
+
     fn litPatOf(p: APat) -> AExpr | not {
         return match p {
             .PLit(e: x) :> x,
+            .PAlt(alts: xs) :> not,
             .PNot :> not,
             .PName(name: n) :> not,
             .PWild :> not,
@@ -21442,13 +21579,16 @@ ${
         return "a value that is neither an enum nor a literal type";
     }
 
-    type RPArm:struct = { idx: int, key: string, env: Env, st: AS }
+    // s482: `alts` / `keys` — an alternation's (idx -7 / -1): each alternate's index and literal key
+    type RPArm:struct = { idx: int, key: string, env: Env, st: AS, alts: int[], keys: string[] }
 
-    fn rparm(idx: int, key: string, env: Env, st: AS) -> RPArm { return { idx: idx, key: key, env: env, st: st }; }
+    fn rparm(idx: int, key: string, env: Env, st: AS) -> RPArm { return { idx: idx, key: key, env: env, st: st, alts: [], keys: [] }; }
 
     // One arm's pattern: its FArm index, its literal key, the env its body is
     // resolved in (payload binders bound, §18.7).
     fn plainArm(env: Env, a: AArm, sk: PSubj, vs: VariantDef[], st0: AS) -> RPArm {
+        const xs: APat[] = patAlts(a.pat);
+        if (xs.length > 1) return plainAltArm(env, a, xs, sk, vs, st0);
         let st: AS = st0;
         const armEnv: Env = withSubject(withWhole(env, -1), -1);
         const p: APat = a.pat;
@@ -21510,6 +21650,33 @@ ${
         return rparm(-1, "", armEnv, st);
     }
 
+    // s482 (s482-match-alternation) — an alternation arm (§18.2: "An arm pattern MAY list
+    // several alternates separated by `|` … at ANY arm position"). Each alternate is read as
+    // the arm with that one pattern would be (plainArm: an unknown variant, a qualifier that
+    // is not the subject's enum, §18.7's arity of positional `_` discards, a literal of the
+    // wrong kind — each reported as for its own arm); the arm is -7 with every alternate's
+    // index and key, or the wildcard (-1) when an alternate is `_` / `else` ("An alternation
+    // containing a wildcard alternate (`_` / `else`) is the wildcard arm"). An alternate
+    // binds nothing (the parser refused every other binder, E-MATCH-ALT-BINDING), so the
+    // body's env is the arm's own.
+    fn plainAltArm(env: Env, a: AArm, xs: APat[], sk: PSubj, vs: VariantDef[], st0: AS) -> RPArm {
+        let st: AS = st0;
+        let idxs: int[] = [];
+        let keys: string[] = [];
+        let wild: boolean = false;
+        for (const x of xs) {
+            const one: AArm = { nid: a.nid, span: a.span, pat: x, body: a.body, legacy: a.legacy, lifted: a.lifted, bare: a.bare, test: a.test };
+            const r: RPArm = plainArm(env, one, sk, vs, st);
+            st = r.st;
+            if (r.idx == -1) wild = true;
+            idxs = idxs.concat([r.idx]);
+            keys = keys.concat([r.key]);
+        }
+        let idx: int = -7;
+        if (wild) idx = -1;
+        return { idx: idx, key: "", env: withSubject(withWhole(env, -1), -1), st: st, alts: idxs, keys: keys };
+    }
+
     // An arm's value (the value form): one expression — an expression arm, or
     // a `{ e }` block of one expression.
     fn plainArmValue(env: Env, a: AArm, want: Type | not, st: AS) -> RX {
@@ -21563,21 +21730,35 @@ ${
             st = ra.st;
             const idx: int = ra.idx;
             let dup = false;
-            if (idx >= 0) {
-                if (covered.indexOf(idx) >= 0) dup = true;
-                covered = covered.concat([idx]);
+            // s482: an alternation's cases are its alternates (§18.2), each judged as an arm of
+            // its own would be — a case an earlier arm, or an earlier alternate of this one,
+            // already takes is unreachable (§18.14.2 E-TYPE-023), reported once per arm
+            let cases: int[] = [idx];
+            let ckeys: string[] = [ra.key];
+            if (idx == -7) {
+                cases = ra.alts;
+                ckeys = ra.keys;
             }
-            if (idx == -5) {
-                if (notSeen) dup = true;
-                notSeen = true;
+            let ci: int = 0;
+            for (const cx of cases) {
+                if (cx >= 0) {
+                    if (covered.indexOf(cx) >= 0) dup = true;
+                    covered = covered.concat([cx]);
+                }
+                if (cx == -5) {
+                    if (notSeen) dup = true;
+                    notSeen = true;
+                }
+                if (cx == -6 && ckeys[ci] != "") {
+                    if (lits.indexOf(ckeys[ci]) >= 0) dup = true;
+                    lits = lits.concat([ckeys[ci]]);
+                }
+                ci = ci + 1;
             }
-            if (idx == -6 && ra.key != "") {
-                if (lits.indexOf(ra.key) >= 0) dup = true;
-                lits = lits.concat([ra.key]);
-            }
-            if (dup && !wild) st = addDiag(st, env.file, a.span, "E-TYPE-023", "a second arm for the same case — the first arm already takes it, so this one is unreachable (§18.14.2 E-TYPE-023: duplicate match arm)");
+            if (dup && !wild && idx == -7) st = addDiag(st, env.file, a.span, "E-TYPE-023", "an alternate of this arm names a case that an earlier arm, or an earlier alternate of this arm, already takes, so that alternate is unreachable — drop it (§18.14.2 E-TYPE-023: duplicate match arm; §18.2 alternation)");
+            if (dup && !wild && idx != -7) st = addDiag(st, env.file, a.span, "E-TYPE-023", "a second arm for the same case — the first arm already takes it, so this one is unreachable (§18.14.2 E-TYPE-023: duplicate match arm)");
             if (idx == -1) wild = true;
-            st = addFail(st, a.nid, FailFact.FArm(idx));
+            st = addFail(st, a.nid, FailFact.FArm(idx, ra.alts));
             let inner: Sym[] = [];
             if (stmt) {
                 for (const b of patBindsOf(a.pat)) {
@@ -21697,12 +21878,17 @@ ${
                 st = addDiag(st, env.file, a.span, "E-SYNTAX-010", afterWildMsg(wildWhole));
             } else if ((ra.idx >= 0 && covered.indexOf(ra.idx) >= 0) || (ra.idx == -2 && okSeen)) {
                 st = addDiag(st, env.file, a.span, "E-TYPE-023", "a second arm for the same variant — the first arm already takes it, so this one is unreachable (§18.8.1 E-TYPE-023: duplicate match arm)");
+            } else if (ra.idx == -7 && altCasesDup(ra.alts, covered)) {
+                // s482 — an alternate naming a variant an earlier arm, or an earlier alternate of
+                // this arm, already takes (§18.2, §18.8.1)
+                st = addDiag(st, env.file, a.span, "E-TYPE-023", "an alternate of this arm names a variant that an earlier arm, or an earlier alternate of this arm, already takes, so that alternate is unreachable — drop it (§18.8.1 E-TYPE-023: duplicate match arm; §18.2 alternation)");
             }
             // s475 r1 (review F2): pattern errors only (`ra.patErr`, and the duplicate check just
             // above) — an Error in an arm's BODY (an unknown name) says nothing about which variants
             // the arms cover, so it does not silence W-MATCH-001
             if (!last && (ra.patErr || hasErrorDiag(st.diags.slice(d0)))) armErr = true;
             if (!last && ra.idx >= 0) coveredBefore = coveredBefore.concat([ra.idx]);
+            if (!last && ra.idx == -7) coveredBefore = coveredBefore.concat(altVariants(ra.alts));
             if (ra.idx == -1) {
                 const okPrior: boolean = okSeen;
                 okSeen = true;                // a plain wildcard takes the success value too (§19.7.3)
@@ -21725,8 +21911,30 @@ ${
             }
             if (ra.idx == -2) okSeen = true;
             if (ra.idx >= 0) covered = covered.concat([ra.idx]);
+            if (ra.idx == -7) covered = covered.concat(altVariants(ra.alts));
         }
         return { st: st, covered: covered, wild: wild, okSeen: okSeen, absorb: absorb, absorbSpan: absorbSpan, okBefore: okBefore, coveredBefore: coveredBefore, armErr: armErr };
+    }
+
+    // s482 — the variant indices an alternation's alternates name (its -3s, unresolved, left out).
+    fn altVariants(alts: int[]) -> int[] {
+        let out: int[] = [];
+        for (const x of alts) {
+            if (x >= 0) out = out.concat([x]);
+        }
+        return out;
+    }
+
+    // s482 — does an alternate name a variant already `covered`, or one an earlier alternate names?
+    fn altCasesDup(alts: int[], covered: int[]) -> boolean {
+        let seen: int[] = covered;
+        for (const x of alts) {
+            if (x >= 0) {
+                if (seen.indexOf(x) >= 0) return true;
+                seen = seen.concat([x]);
+            }
+        }
+        return false;
     }
 
     // What the failure set decides about resolved arms: totality over the
@@ -22128,11 +22336,14 @@ ${
     // One arm: its pattern's variant (`idx`: -1 wildcard, -2 `.Ok`, -3 none),
     // its binders (locals scoped to the arm), its body. `patErr` (s475 r1): the
     // PATTERN part drew an Error — never the body's (W-MATCH-001, resolveArms).
-    type RArm:struct = { idx: int, st: AS, patErr: boolean }
+    // s482: `alts` — an alternation's (idx -7 / -1): each alternate's index (FArm), [] otherwise.
+    type RArm:struct = { idx: int, st: AS, patErr: boolean, alts: int[] }
 
     fn resolveArm(env: Env, a: AArm, err: Sym, own: Sym | not, vs: VariantDef[], isMatch: boolean, cx: ArmCx, st0: AS) -> RArm {
         let st: AS = st0;
         if (a.legacy) st = addDiag(st, env.file, a.span, "W-MATCH-ARROW-LEGACY", "the arm separator `=>` / `->` is deprecated — write `:>` (§19 alias note; `bun scrml migrate --fix` rewrites it)");
+        const xs: APat[] = patAlts(a.pat);
+        if (xs.length > 1) return resolveAltArm(env, a, xs, err, own, vs, isMatch, cx, st);
         let armEnv: Env = withSubject(withWhole(env, -1), -1);
         let idx: int = -3;
         const p: APat = a.pat;
@@ -22197,11 +22408,79 @@ ${
                 st = rb2.st;
             }
         }
-        st = addFail(st, a.nid, FailFact.FArm(idx));
+        st = addFail(st, a.nid, FailFact.FArm(idx, []));
         const patErr: boolean = hasErrorDiag(st.diags.slice(st0.diags.length));
         const body: AArmBody = a.body;
         st = resolveArmBody(armEnv, a, body, cx, st);
-        return { idx: idx, st: st, patErr: patErr };
+        return { idx: idx, st: st, patErr: patErr, alts: [] };
+    }
+
+    // s482 (s482-match-alternation) — an alternation arm of a `!{}` / a `match` on a failable
+    // result (§18.2 "at ANY arm position"; §19.4.5: a `!{}` arm "SHALL be §18.2 `match-arm`s",
+    // "alternation and E-MATCH-ALT-BINDING … SHALL apply to a `!{}` arm unchanged"). Each
+    // alternate is judged as the arm with that one pattern would be (failAltIdx); the arm is
+    // -7 with each alternate's index, or the wildcard (-1) when an alternate is `_` / `else`
+    // ("An alternation containing a wildcard alternate … is the wildcard arm" — so in a
+    // `match` it is the `else`, which covers `.Ok` only, §18.6). The body is resolved once,
+    // with no binder (an alternate binds nothing).
+    fn resolveAltArm(env: Env, a: AArm, xs: APat[], err: Sym, own: Sym | not, vs: VariantDef[], isMatch: boolean, cx: ArmCx, st0: AS) -> RArm {
+        let st: AS = st0;
+        let idxs: int[] = [];
+        let wild: boolean = false;
+        for (const x of xs) {
+            const r: RAltIdx = failAltIdx(env, a, x, err, own, vs, isMatch, st);
+            st = r.st;
+            if (r.idx == -1) wild = true;
+            idxs = idxs.concat([r.idx]);
+        }
+        let idx: int = -7;
+        if (wild) idx = -1;
+        st = addFail(st, a.nid, FailFact.FArm(idx, idxs));
+        const patErr: boolean = hasErrorDiag(st.diags.slice(st0.diags.length));
+        st = resolveArmBody(withSubject(withWhole(env, -1), -1), a, a.body, cx, st);
+        return { idx: idx, st: st, patErr: patErr, alts: idxs };
+    }
+
+    type RAltIdx:struct = { idx: int, st: AS }
+
+    // s482 — one alternate of a failable-subject alternation: its variant index of `err`, -1
+    // a wildcard alternate, -3 one that does not resolve (reported, as resolveArm reports the
+    // arm with that one pattern). `.Ok` as an alternate of a `match` is refused by name: the
+    // success value and an error would share one body, which the bootstrap's lowering (one
+    // success branch, one arm per failure) does not build (INTERIM,
+    // g-boot-match-alt-ok-alternate-s482).
+    fn failAltIdx(env: Env, a: AArm, x: APat, err: Sym, own: Sym | not, vs: VariantDef[], isMatch: boolean, st0: AS) -> RAltIdx {
+        let st: AS = st0;
+        if (isNotPat(x) || litPatOf(x) is given) {
+            st = addDiag(st, env.file, a.span, "E-TYPE-VARIANT", "`" + patLabel(x) + "` is not a pattern over a failable result — its arms are `.Ok(v)` (in a `match`) and the variants of `" + err.hint + "` (§19.7)");
+            return { idx: -3, st: st };
+        }
+        const pn: PatName | not = patName(x);
+        if (pn is not) return { idx: -1, st: st };
+        if (isMatch && pn.name == "Ok") {
+            st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`.Ok` as an alternate of an alternation (`.Ok | ." + firstErrName(vs) + " :> …`, §18.2) is not in the bootstrap yet — the success value and a failure would share one arm body; write the `.Ok` arm and the failure arm separately");
+            return { idx: -3, st: st };
+        }
+        const i: int = variantIndex(env.g.types, err, pn.name);
+        if (pn.qual != "" && i >= 0 && !qualNames(env, pn.qual, pn.name)) {
+            st = addDiag(st, env.file, a.span, "E-TYPE-VARIANT", "`" + pn.qual + "." + pn.name + "` — `" + pn.qual + "` is not an enum that declares `" + pn.name + "` (the failure here is `" + err.hint + "`, §18.13)");
+        } else if (pn.qual != "" && i >= 0 && !qualIsFailure(env, pn.qual, err, own)) {
+            st = addDiag(st, env.file, a.span, "E-TYPE-VARIANT", foreignQualMsg(env, pn, err, own));
+        }
+        if (i < 0) {
+            let what: string = "`." + pn.name + "` is not a variant of `" + err.hint + "`";
+            if (pn.name == "Ok") what = "`.Ok` is the success value of a `match` — a `!{ … }` handler's arms are failures only";
+            st = addDiag(st, env.file, a.span, "E-TYPE-VARIANT", what + " (its variants: " + variantNamesOf(vs).join(", ") + ")");
+            return { idx: -3, st: st };
+        }
+        const fs: FieldDef[] = vs[i].fields;
+        if (pn.parens && pn.binds.length != fs.length) st = addDiag(st, env.file, a.span, "E-TYPE-021", "`." + pn.name + "` carries " + fs.length + " value(s) but the pattern binds " + pn.binds.length + " — bind one name (or `_`) per payload field, in declared order (§18.7)");
+        return { idx: i, st: st };
+    }
+
+    fn firstErrName(vs: VariantDef[]) -> string {
+        if (vs.length == 0) return "E";
+        return vs[0].sym.hint;
     }
 
     type PatName:struct = { name: string, binds: ABind[], parens: boolean, qual: string }
@@ -22209,6 +22488,7 @@ ${
     fn patName(p: APat) -> PatName | not {
         return match p {
             .PName(name: n, binds: bs, parens: pr, qual: q) :> { name: n, binds: bs, parens: pr, qual: q },
+            .PAlt(alts: xs) :> not,
             .PWild :> not,
             .PWhole(bind: b) :> not,
             .PBare(bind: b) :> not,
@@ -22231,6 +22511,7 @@ ${
         return match p {
             .PWhole(bind: b, viaElse: v) :> { b: b, viaElse: v, bare: false },
             .PBare(bind: b) :> { b: b, viaElse: false, bare: true },
+            .PAlt(alts: xs) :> not,
             .PName(name: n) :> not,
             .PWild :> not,
             .PNot :> not,
@@ -22702,12 +22983,20 @@ ${
     fn patLabel(p: APat) -> string {
         return match p {
             .PName(name: n, binds: bs, parens: pr) :> patNameLabel(n, bs, pr),
+            .PAlt(alts: xs) :> altLabel(xs),
             .PWild :> "_",
             .PWhole(bind: b, viaElse: v) :> wholeLabel(b.name, v),
             .PBare(bind: b) :> b.name,
             .PNot :> "not",
             .PLit(e: x) :> subjectLabel(x)
         };
+    }
+
+    // s482 — an alternation, as written: its alternates joined by ` | ` (§18.2).
+    fn altLabel(xs: APat[]) -> string {
+        let out: string[] = [];
+        for (const x of xs) { out = out.concat([patLabel(x)]); }
+        return out.join(" | ");
     }
 
     fn patNameLabel(n: string, bs: ABind[], parens: boolean) -> string {
@@ -23071,6 +23360,19 @@ ${
     // (§17.3), so they are resolved as a handler block is (a write, a host call and
     // a server call are allowed; a `lift` has no loop to append to; a `break` /
     // `continue` has no loop around it — loopChecks).
+    // s482 (s482-meta-runtime) — a runtime `^{}` block (ANodeK.Run with its `meta` id) is
+    // resolved as a run is, where the program's markup stands; anywhere else it is refused by
+    // name (a component's renders, a child field's own renders — every instance would share one
+    // `meta.emit` place; meta.scrml already refuses the row, the foreign-content and the logic
+    // positions).
+    fn resolveRunNode(env: Env, b: ABlock, meta: string, st0: AS) -> AS {
+        if (meta == "") return resolveRun(env, b, st0);
+        if (!inProgramCtx(env) || env.own != "") {
+            return addDiag(st0, env.file, b.span, "E-BOOTSTRAP-UNSUPPORTED", "a runtime `^{}` block (§22.5) outside the `<program>` markup (a declaration's renders) is not in the bootstrap — every instance would share one `meta.emit` place, and §22.10 makes the block's scope id unique in the document (INTERIM, g-boot-meta-runtime-residue-s482). Move the block into the `<program>` markup");
+        }
+        return resolveRunEnv(env, b, st0).st;
+    }
+
     fn resolveRun(env: Env, b: ABlock, st0: AS) -> AS {
         if (!inProgramCtx(env) || env.own != "") {
             return addDiag(st0, env.file, b.span, "E-BOOTSTRAP-UNSUPPORTED", "statements here are not in the bootstrap — only a `<program>` / `<page>` body top runs statements (§40.8)");
@@ -24519,9 +24821,13 @@ ${
         let variants: int = 0;
         let sawTrue: boolean = false;
         let sawFalse: boolean = false;
-        for (const a of arms) {
-            const p: APat = a.pat;
+        // s482 — an alternation is read alternate by alternate (§18.2: one arm, several cases)
+        let pats: APat[] = [];
+        for (const a0 of arms) { pats = pats.concat(patAlts(a0.pat)); }
+        for (const p0 of pats) {
+            const p: APat = p0;
             const wild: boolean = match p {
+                .PAlt(alts: xs) :> false,
                 .PWild :> true,
                 .PWhole(bind: b) :> true,
                 .PBare(bind: b) :> false,
@@ -24532,6 +24838,7 @@ ${
             if (wild) return true;
             const isVariant: boolean = match p {
                 .PName(name: n) :> true,
+                .PAlt(alts: xs) :> false,
                 .PWild :> false,
                 .PWhole(bind: b) :> false,
                 .PBare(bind: b) :> false,
@@ -24541,6 +24848,7 @@ ${
             if (isVariant) variants = variants + 1;
             const lit: AExpr | not = match p {
                 .PLit(e: x) :> x,
+                .PAlt(alts: xs) :> not,
                 .PWild :> not,
                 .PWhole(bind: b) :> not,
                 .PBare(bind: b) :> not,
@@ -27043,7 +27351,7 @@ ${
             .DeclNode(d: d) :> addDiag(st, env.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "a declaration inside markup is not in bootstrap slice M2"),
             .Css(c: c) :> st,
             .Effect(w: w) :> resolveEffect(env, w, st),
-            .Run(b: b) :> resolveRun(env, b, st),                          // s478 (§40.8)
+            .Run(b: b, meta: mt) :> resolveRunNode(env, b, mt, st),           // s478 (§40.8); s482 a runtime `^{}`
             .Request(r: r) :> resolveRequest(env, r, st),
             .Gather(f: lf) :> resolveTier0(env, n, lf, st)                 // s469 (§17.4)
         };
@@ -27443,7 +27751,7 @@ ${
         for (const n of nodes) {
             let cn: MkCx = c;
             const k: ANodeK = n.k;
-            const e: AElem | not = mkElemOf(k);
+            const e: AElem | not = mkElemOf(n);
             if (e is given) {
                 if (mkPrintsElem(g, file, e)) {
                     const t: string = e.tag.toLowerCase();
@@ -27469,14 +27777,17 @@ ${
         return out;
     }
 
-    fn mkElemOf(k: ANodeK) -> AElem | not {
+    // The element a node puts in its template: an element, or a runtime `^{}` block's placeholder
+    // `<span>` (mkMetaPlace) — the first element of a template root decides its mode either way.
+    fn mkElemOf(n: ANode) -> AElem | not {
+        const k: ANodeK = n.k;
         return match k {
             .Elem(e: e) :> e,
             .Text(text: t) :> not,
             .Interp(e: x) :> not,
             .DeclNode(d: x) :> not,
             .Effect(w: x) :> not,
-            .Run(b: rb0) :> not,
+            .Run(b: rb0, meta: mt) :> mkMetaPlace(n, mt),
             .Request(r: x) :> not,
             .Css(c: x) :> not,
             .Gather(f: lf) :> not
@@ -27538,11 +27849,60 @@ ${
             .Interp(e: x) :> mkLitText(file, n, x, c),
             .DeclNode(d: x) :> [],
             .Effect(w: x) :> [],
-            .Run(b: rb0) :> [],
+            .Run(b: rb0, meta: mt) :> mkMetaRun(g, sa, file, n, mt, c),
             .Request(r: x) :> [],
             .Css(c: x) :> [],
             .Gather(f: lf) :> mkBranch(g, sa, file, rowsOfBlock(lf.body), c)
         };
+    }
+
+    // s482 r1 (review of #2067, MED-1) — a RUNTIME `^{}` block (meta "" — a body-top run, which
+    // renders a comment) renders a placeholder `<span data-scrml-meta>` where it stands (print.scrml
+    // runHole): the place its `meta.emit` output goes (§22.12). That span is markup the parser reads
+    // like any other, so it is judged as the span it is — by this check's own rules, with nothing
+    // added: inside a table part it is foster-parented out, inside a raw-text / RCDATA element it is
+    // text (§24.5). A fault is reported at the block, naming the placeholder.
+    fn mkMetaPlace(n: ANode, mt: string) -> AElem | not {
+        if (mt == "") return not;
+        return { nid: n.nid, span: n.span, star: false, tag: "span", attrs: [], kids: [], binds: [], parens: false };
+    }
+
+    fn mkMetaRun(g: Globals, sa: AS, file: string, n: ANode, mt: string, c: MkCx) -> MkFault[] {
+        const e: AElem | not = mkMetaPlace(n, mt);
+        if (e is not) return [];
+        let out: MkFault[] = [];
+        for (const f of mkElem(g, sa, file, e, c)) {
+            out = out.concat([{ nid: f.nid, file: f.file, span: f.span, code: f.code, msg: mkMetaMsg(f.msg) }]);
+        }
+        return out;
+    }
+
+    // Every runtime `^{}` block in an HTML `<template>`'s content `nodes` (at any depth) a fault of
+    // `done` does not already name — refused: its placeholder is in the inert template content,
+    // where the gate never finds it (§22.12 then writes into a fresh span at the end of `<body>`).
+    fn mkInertMeta(file: string, nodes: ANode[], done: MkFault[]) -> MkFault[] {
+        let out: MkFault[] = done;
+        for (const n of nodes) {
+            const k: ANodeK = n.k;
+            const mt: string = match k {
+                .Run(b: rb0, meta: m) :> m,
+                // no-default-arm: one question of a node — is it a runtime `^{}` block
+                _ :> ""
+            };
+            if (mt != "") {
+                let seen: boolean = false;
+                for (const x of out) { if (x.nid == n.nid) seen = true; }
+                if (!seen) out = out.concat([{ nid: n.nid, file: file, span: n.span, code: "E-HTML-PARSER-REPAIR",
+                                               msg: mkMetaMsg("inside an HTML `<template>` it is inert content, never in the page (HTML §4.12.3), so the gate would not find it (§22.12)") }]);
+            }
+            const e: AElem | not = elemOfANode(n);
+            if (e is given) out = mkInertMeta(file, e.kids, out);
+        }
+        return out;
+    }
+
+    fn mkMetaMsg(why: string) -> string {
+        return "a runtime `^{}` block renders a placeholder `<span data-scrml-meta>` where it stands — the place its `meta.emit` output goes (§22.12) — and that span is judged as one written here: " + why + ". Move the block where a `<span>` may stand (inside a `<td>`, a `<div>`, a `<p>`)";
     }
 
     // s482 (g-boot-rcdata-hole-anchor-s482) — a child of an HTML raw-text / RCDATA element (`c.raw`:
@@ -27565,7 +27925,7 @@ ${
             .Interp(e: x) :> mkLitText(file, n, x, c),
             .DeclNode(d: x) :> [],
             .Css(c: x) :> [],
-            .Run(b: rb0) :> [],
+            .Run(b: rb0, meta: mt) :> mkMetaRun(g, sa, file, n, mt, c),   // s482 r1 (MED-1): a runtime block's placeholder span is text here — refused
             .Effect(w: x) :> [{ nid: n.nid, file: file, span: n.span, code: "E-HTML-PARSER-REPAIR", msg: rawTextMsg("effect", c.raw) }],
             .Request(r: x) :> [{ nid: n.nid, file: file, span: n.span, code: "E-HTML-PARSER-REPAIR", msg: rawTextMsg("request", c.raw) }],
             .Gather(f: lf) :> rawGather(file, n, lf, c.raw)
@@ -27750,7 +28110,9 @@ ${
         // s475: `<plaintext>` is one fault — what it holds is its text either way (one report, no cascade)
         if (t == "plaintext" && out.length > 0) return out;
         // s475: an HTML `<template>`'s content is parsed apart, "in template" — a root of its own
-        if (t == "template" && isHtmlInNs(c.ns, t)) return out.concat(mkNodes(g, sa, file, e.kids, mkRoot(htmlNs(), c.depth)));
+        // s482 r1 (MED-1): it is also INERT — the page never runs or shows it (its content is a
+        // DocumentFragment, HTML §4.12.3), so a runtime `^{}` block there has no place in the page
+        if (t == "template" && isHtmlInNs(c.ns, t)) return mkInertMeta(file, e.kids, out.concat(mkNodes(g, sa, file, e.kids, mkRoot(htmlNs(), c.depth))));
         return out.concat(mkNodes(g, sa, file, e.kids, mkKid(ns, t, mkQuoted(e.attrs, "encoding"), kc)));
     }
 
@@ -30569,7 +30931,7 @@ ${
         if (wildBefore) st = addDiag(st, env.file, ae.span, "E-SYNTAX-010", afterWildMsg(false));
         if (ra.idx >= 0 && covered.indexOf(ra.idx) >= 0 && !wildBefore) st = addDiag(st, env.file, ae.span, "E-TYPE-023", "a second arm for the same variant — the first `<" + ae.tag + ">` arm already takes it, so this one is unreachable (§18.14.2 E-TYPE-023: duplicate match arm)");
         if (isWild && !wildBefore && allCovered(covered, vs.length)) st = addDiag(st, env.file, ae.span, "W-MATCH-001", "the wildcard arm `<_>` is unreachable: every variant of " + en + " already has an arm (§18.6)");
-        st = addFail(st, ae.nid, FailFact.FArm(ra.idx));
+        st = addFail(st, ae.nid, FailFact.FArm(ra.idx, ra.alts));
         st = resolveNodes(ra.env, ae.kids, st);
         return { idx: ra.idx, ok: true, st: st };
     }
@@ -37039,7 +37401,14 @@ ${
             .LengthCheck :> ts,
             .RefineCheck :> ts,
             .TapeInsert :> ts,
-            .Print :> ts
+            .Print :> ts,
+            .MetaGet :> ts,
+            .MetaEmit :> ts,
+            .MetaCleanup :> ts,
+            .MetaInterval :> ts,
+            .MetaTimeout :> ts,
+            .MetaClearInterval :> ts,
+            .MetaClearTimeout :> ts
         };
     }
 
@@ -37825,7 +38194,14 @@ ${
             .LengthCheck :> VType.Unknown,
             .RefineCheck :> VType.Unknown,
             .TapeInsert :> VType.Unknown,
-            .Print :> VType.Unknown
+            .Print :> VType.Unknown,
+            .MetaGet :> VType.Unknown,
+            .MetaEmit :> VType.Unknown,
+            .MetaCleanup :> VType.Unknown,
+            .MetaInterval :> VType.Unknown,
+            .MetaTimeout :> VType.Unknown,
+            .MetaClearInterval :> VType.Unknown,
+            .MetaClearTimeout :> VType.Unknown
         };
     }
 
@@ -38109,6 +38485,9 @@ ${
     // defaulted — is honoured by never guessing). Checked only when the
     // callee resolves statically to a function (provable-or-silent).
     fn typeCall(env: TEnv, e: AExpr, callee: AExpr, args: AExpr[], ts0: TypeState) -> RVT {
+        // s482 (s482-meta-runtime): a runtime `^{}` block's `meta` call (resolveMetaCall)
+        const mop: string = metaOpCallee(callee);
+        if (mop != "") return typeMetaCall(env, e, mop, args, ts0);
         // s477 (s477-boot-tape-forms): a removal used as a VALUE (resolveRemovalValue) —
         // the edit judged as in statement position, the value `T | not` (§66.12.6 rule 3)
         const rf: EffectFact | not = effectFact(env.t.effects, e.nid);
@@ -38189,6 +38568,21 @@ ${
         // s473 (§48.8): an unannotated function's INFERRED return (inferReturn)
         const inf: VType | not = findLocalT(env.settled, retKey(s).id);
         if (inf is given) return rvt(inf, ts);
+        return rvt(VType.Unknown, ts);
+    }
+
+    // s482 (s482-meta-runtime) — the §22.5.1 signature of a runtime `^{}` block's `meta` call
+    // (resolveMetaCall): the arguments typed, each checked against its parameter type.
+    fn typeMetaCall(env: TEnv, e: AExpr, op: string, args: AExpr[], ts0: TypeState) -> RVT {
+        let ts: TypeState = typeExprs(env, args, ts0);
+        if (args.length != metaArity(op)) return rvt(VType.Unknown, ts);
+        if (op == "get") return rvt(exprType0(ts, args[0].nid), ts);
+        if (op == "emit") return rvt(VType.Unknown, checkValue(env, exprType0(ts, args[0].nid), Type.Str, args[0].span, "the argument of `meta.emit` (the markup, §22.5.1)", ts));
+        if (op == "interval" || op == "timeout") {
+            ts = checkValue(env, exprType0(ts, args[0].nid), Type.Num, args[0].span, "the delay of `meta." + op + "` (milliseconds, §22.5.1)", ts);
+            return rvt(known(Type.Str), ts);
+        }
+        if (op == "clearInterval" || op == "clearTimeout") return rvt(VType.Unknown, checkValue(env, exprType0(ts, args[0].nid), Type.Str, args[0].span, "the timer id of `meta." + op + "` (§22.5.1)", ts));
         return rvt(VType.Unknown, ts);
     }
 
@@ -38677,9 +39071,11 @@ ${
             // NARROWED / E-TYPE-001). An arm that did not resolve (-3, reported) is
             // narrowed as before — no cascade.
             const ai: int = armIdx(af);
-            const armPresent: boolean = ai != -5 && (ai != -1 || notBefore);
+            // s482: an alternation with a `not` alternate takes `not` as a `not :>` arm does
+            const altNot: boolean = ai == -7 && armAlts(af).indexOf(-5) >= 0;
+            const armPresent: boolean = ai != -5 && !altNot && (ai != -1 || notBefore);
             if (armPresent && present.length > 0) aenv = tNarrow(aenv, present);
-            if (ai == -5) notBefore = true;
+            if (ai == -5 || altNot) notBefore = true;
             const fs: FieldDef[] = armFields(env.t, m.es, af);
             let i = 0;
             for (const b of patBindsOf(a.pat)) {
@@ -38895,9 +39291,21 @@ ${
         };
     }
 
+    // s482 — an alternation arm's per-alternate indices (FArm `alts`), [] for any other fact.
+    fn armAlts(f: FailFact | not) -> int[] {
+        return match f {
+            .FArm(alts: xs) :> xs,
+            .FHandled(h: x) :> [],
+            .FFail(err: x) :> [],
+            .FPlain(m: pm) :> [],
+            not :> []
+        };
+    }
+
     fn patBindsOf(p: APat) -> ABind[] {
         return match p {
             .PName(binds: bs) :> bs,
+            .PAlt(alts: xs) :> [],
             .PWild :> [],
             .PWhole(bind: b) :> [b],
             .PBare(bind: b) :> [b],
@@ -46526,16 +46934,39 @@ ${
         return false;
     }
 
+    // s482 — an alternation is a `.Transport` arm when one of its alternates is (mArms then
+    // drops only that alternate, transportAltsOut)
     fn armIsTransport(a: AArm) -> boolean {
-        const p: APat = a.pat;
+        for (const p of patAlts(a.pat)) {
+            if (patIsTransport(p)) return true;
+        }
+        return false;
+    }
+
+    fn patIsTransport(p: APat) -> boolean {
         return match p {
             .PName(name: n) :> n == "Transport",
+            .PAlt(alts: xs) :> false,
             .PWild :> false,
             .PWhole(bind: b) :> false,
             .PBare(bind: b) :> false,
             .PNot :> false,
             .PLit(e: x) :> false
         };
+    }
+
+    // s482 — an alternation's alternates other than `.Transport`, else not (none left, or
+    // not an alternation): the arm a dropped `.Transport` arm leaves (mArms).
+    fn transportAltsOut(p: APat) -> APat | not {
+        const xs: APat[] = patAlts(p);
+        if (xs.length < 2) return not;
+        let rest: APat[] = [];
+        for (const x of xs) {
+            if (!patIsTransport(x)) rest = rest.concat([x]);
+        }
+        if (rest.length == 0) return not;
+        if (rest.length == 1) return rest[0];
+        return APat.PAlt(rest);
     }
 
     // A resolved Type the batch's parameter list can spell back (a tape cannot: its grants).
@@ -47429,6 +47860,7 @@ ${
     fn isPlainWild(p: APat) -> boolean {
         return match p {
             .PWild :> true,
+            .PAlt(alts: xs) :> altHasWild(xs),
             .PBare(bind: b) :> true,
             .PWhole(bind: b) :> false,
             .PName(name: n) :> false,
@@ -48045,7 +48477,13 @@ ${
     fn mArms(arms: AArm[], m: CMap) -> AArm[] {
         let out: AArm[] = [];
         for (const a of arms) {
-            if (m.drop.indexOf(a.nid) < 0) out = out.concat([{ nid: a.nid, span: a.span, pat: a.pat, body: mArmBody(a.body, m), legacy: a.legacy, lifted: a.lifted, bare: a.bare, test: a.test }]);
+            if (m.drop.indexOf(a.nid) < 0) {
+                out = out.concat([{ nid: a.nid, span: a.span, pat: a.pat, body: mArmBody(a.body, m), legacy: a.legacy, lifted: a.lifted, bare: a.bare, test: a.test }]);
+            } else {
+                // s482: a dropped `.Transport` arm that is an alternation keeps its other alternates
+                const rest: APat | not = transportAltsOut(a.pat);
+                if (rest is given) out = out.concat([{ nid: a.nid, span: a.span, pat: rest, body: mArmBody(a.body, m), legacy: a.legacy, lifted: a.lifted, bare: a.bare, test: a.test }]);
+            }
         }
         return out;
     }

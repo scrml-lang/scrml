@@ -164,16 +164,18 @@ describe("g-boot-multiline-alternation-arm-head-s481 — a line ending in `|` co
   const ONE = prog(TYPES + `    fn k1(k: K) -> int {\n        return match k {\n            .A | .B | .C :> 1,\n            .D :> 2,\n        };\n    }`);
   const MULTI = prog(TYPES + `    fn k1(k: K) -> int {\n        return match k {\n            .A | .B |\n                .C :> 1,\n            .D :> 2,\n        };\n    }`);
 
+  // s482 (s482-match-alternation): alternation is built, so both heads now compile clean (they
+  // were one E-PARSE-ARM "not yet supported" each); the multi-line head still reads as the one-line one
   test("the multi-line head reports what the one-line head reports — no E-MATCH-ARM-SEPARATOR", () => {
     expect(codes(MULTI)).not.toContain("E-MATCH-ARM-SEPARATOR");
     expect(codes(MULTI)).toEqual(codes(ONE));
-    expect(codes(MULTI).filter((c) => c === "E-PARSE-ARM")).toEqual(["E-PARSE-ARM"]);
+    expect(codes(MULTI)).toEqual([]);
   });
 
   test("a head over three lines, comments between them", () => {
     const src = prog(TYPES + `    fn k2(k: K) -> int {\n        return match k {\n            .A | // the first\n                .B | /* then */\n                .C :> 1,\n            .D :> 2,\n        };\n    }`);
     expect(codes(src)).not.toContain("E-MATCH-ARM-SEPARATOR");
-    expect(codes(src).filter((c) => c === "E-PARSE-ARM")).toEqual(["E-PARSE-ARM"]);
+    expect(codes(src)).toEqual([]);
   });
 
   test("CRLF line ends", () => {

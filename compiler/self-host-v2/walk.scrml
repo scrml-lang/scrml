@@ -726,8 +726,16 @@ ${
         return match pat {
             .PVariant(enumSym: e, idx: idx, binds: binds) :> binds,
             .PLit(lit: lit) :> [],
-            .PWild :> []
+            .PWild :> [],
+            .PAlt(pats: ps) :> altPatternBinds(ps)
         };
+    }
+
+    // s482 — an alternation's binders: its alternates' (none — an alternate binds nothing, §18.2).
+    fn altPatternBinds(ps: Pattern[]) -> Sym[] {
+        let out: Sym[] = [];
+        for (const p of ps) { out = out.concat(patternBinds(p)); }
+        return out;
     }
 
     // The locals ASSIGNED (not merely bound) under `root` — a Let whose sym is

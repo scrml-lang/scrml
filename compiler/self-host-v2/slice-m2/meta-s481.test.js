@@ -13,7 +13,8 @@
 //      E-META-EVAL-001 (an unevaluable form, a host failure, the step and depth bounds — deterministic);
 //   3. the splice: E-META-EVAL-002 (re-parse, the gate, a logic position), E-SCRIPT-001 from emitted
 //      output, spans rewritten to the block;
-//   4. a runtime block is refused by name (phase 2 is not built);
+//   4. a runtime block is built since s482 (slice-m4/meta-runtime-s482.test.js); a literal reflect in one
+//      is still refused by name (the runtime type registry is phase 3);
 //   5. DRIFT: emit-gate.scrml is impl#1's markup-attr-allow-list.js + the document member table, on
 //      a grid of inputs;
 //   6. DIFFERENTIAL: compile-time bodies over the corpus method surface render the same markup under
@@ -78,7 +79,7 @@ describe("s481 — the static checks (§22.11, §22.12)", () => {
   test("ruling S481-meta-four item 1: a literal reflect(T) beside a runtime value is a RUNTIME block, not E-META-005", () => {
     const r = run(P(`    type User:struct = { name: string }\n^{ const i = reflect(User); meta.emit("<p>" + i.name + "</p>"); }`));
     expect(errs(r)).not.toContain("E-META-005");
-    // phase 2 is not built: the runtime block is refused by name
+    // s482: runtime blocks are built; `reflect` in one is refused by name (the runtime type registry, phase 3)
     expect(errs(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(r.diags[0].message).toContain("runtime `^{}`");
   });
@@ -158,8 +159,9 @@ describe("s481 — compile-time emit / emit.raw / reflect (§22.4)", () => {
   });
   test("a block that emits nothing leaves nothing; no reserved `^` call survives the pass", () => {
     const r = run(P(`<div>^{ const x = 1; }</div>`));
-    // no emit and no reflect: a runtime block (§22.5) — refused by name
-    expect(errs(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    // no emit and no reflect: a runtime block (§22.5) — built since s482 (kept as a run, no `^` call)
+    expect(errs(r)).toEqual([]);
+    expect(JSON.stringify(r.asts)).not.toContain('"name":"^"');
     const r2 = run(P(`    type C:enum = { A }\n<div>^{ const c = reflect(C); }</div>`));
     expect(errs(r2)).toEqual([]);
     expect(JSON.stringify(r2.asts)).not.toContain('"name":"^"');

@@ -20341,7 +20341,11 @@ tuple value (no-tuple, §59.7 / §14.11). Full grammar + product-exhaustiveness 
   payload patterns — a binding (`.P(a: x) | .Q(a: x) :> x`), a NAMED field even when discarded
   (`.P(a: _) | .Q(a: _)`), or a nested / literal pattern — each SHALL produce **E-MATCH-ALT-BINDING**
   (§34). Only POSITIONAL `_` discards (`.P(_) | .Q(_) :> r`) are permitted. (S438 —
-  g-impl1-match-miscompiles F12.)
+  g-impl1-match-miscompiles F12.) *(Status S482: built in the bootstrap — `compiler/self-host-v2`
+  `APat.PAlt` / Core `Pattern.PAlt`, s482-match-alternation; each alternate is judged as an arm of its
+  own would be, exhaustiveness is over their union, and an alternate naming a case an earlier arm or
+  alternate takes is E-TYPE-023. `.Ok` as an alternate on a failable result is refused there by name,
+  INTERIM — g-boot-match-alt-ok-alternate-s482.)*
 - **A bare name is not an arm pattern.** An arm whose WHOLE pattern is a bare identifier —
   `err :> …` in a `match` or a `!{}` handler (§19.4.3; in a `!{}`, also its soft-deprecated
   `| err :> …` spelling, §19.4.5) — SHALL be a compile error,
@@ -28331,6 +28335,50 @@ always pass all four arguments.
 > effect function was invoked for this run") is met. impl#1 emits that form; an object
 > evaluated once at the `^{}` site held the FIRST run's values for every later run.
 
+> **Bootstrap status (S482, s482-meta-runtime).** The bootstrap builds a runtime block that stands
+> where markup stands (an element's children, a `<program>` body). The block's scope ID (§22.10) is the
+> file's project-relative path spelled in `[A-Za-z0-9_]` (every other character, `_` included, written as
+> `_` and its UTF-16 code unit in four hex digits) and `_` plus the block's ordinal in the file. The escape
+> is fixed-width, so two paths never spell one ID; the ID is deterministic and unique in the document. The
+> block renders impl#1's placeholder, a `<span data-scrml-meta="…">`. That span is judged as any span
+> written in that position (§24.5). Where a `<span>` would be E-HTML-PARSER-REPAIR, the block is
+> E-HTML-PARSER-REPAIR too: a table part, a raw-text or RCDATA element, or the inert content of an HTML
+> `<template>`. Its body runs
+> first where it stands, in source order with the statements around it, as impl#1's inline call does
+> (probed: `run1;meta1;run2;meta2;` on both implementations). Such a block stands in markup, so it is not a
+> §22.3 "top-level" block (file scope, "outside any … markup"); a runtime block at the file top outside
+> `<program>` — the one §22.3 times on `DOMContentLoaded` — is refused by name, as any statement there. It
+> runs again when a dependency changes.
+> The dependencies are exactly the reads §22.5.1 and §22.9 name: `meta.get("x")` and a `meta.bindings`
+> entry of a cell. A direct `@x` read in the body, or one in a function the body calls, is not a
+> dependency (impl#1 tracks only these two forms too, probed). They are dependencies only while the run is
+> in progress. A `meta.get` in a timer or cleanup callback reads the cell and subscribes nothing, as in
+> impl#1. A write the run makes itself never re-runs it, as impl#1's re-entrancy guard. impl#1 re-runs a
+> block synchronously inside the write that changed its dependency, and skips a block that is still
+> running. So no change caused by a block's own run, directly or through the runs it sets off, re-runs
+> that block. The bootstrap carries that cause with each queued re-run. Two blocks that each `meta.set` a
+> cell the other `meta.get`s therefore settle as in impl#1 (probed: `x` = 2). As in impl#1, a block runs at
+> most 100 times in one flush (`globalThis.__scrml_max_meta_runs` overrides the limit). After that it logs
+> impl#1's message, `[scrml] meta effect <id> exceeded <n> re-runs — possible infinite loop`, and skips the
+> run. The next flush counts again. A `meta.emit` made while the placeholder is still in a detached
+> render (a mount builds its tree before inserting it) is handed to the gate after the insert, so the gate
+> judges the page `<form>` the block really stands in. An emit made once the placeholder is in the page
+> drops any emits still held, so an older emit never replaces a newer one. The gate is impl#1's runtime
+> gate, copied verbatim (§22.12).
+> Literal names (ruling:user-voice-scrml.md-S481-meta-four item 2: *"accept literal names only for now,
+> resolved at compile time; a computed name gets a clear 'not supported yet' error"*; a literal naming no
+> cell: *"make it a compile error (E-SCOPE-001)"*). `meta.get` is typed as the cell it names. INTERIM
+> limits, each refused by name, never compiled wrong (`g-boot-meta-runtime-residue-s482`): a computed
+> name; `meta.subscribe`; `meta.types` and `reflect` in a runtime block (the runtime type registry); a
+> `meta.bindings` entry of a binding the bootstrap cannot see is constant; a runtime block in a logic
+> body, as an attribute value, inside `<svg>` / `<math>`, in a declaration's markup, or nested in another
+> block; and a callback (`meta.cleanup` / `meta.interval` / `meta.timeout`) that does more than declare
+> its own locals, branch, and call the block's `meta`. A timer ID is typed `string` (the bootstrap has
+> no opaque type; the runtime keys IDs per block, so a clear of another block's ID is a no-op).
+> **Direction of change:** newly-accepting against the S481 bootstrap, which refused every runtime block;
+> newly-rejecting against impl#1 for a literal naming no cell (`E-SCOPE-001`, ruled; no corpus or
+> conformance case has one).
+
 #### 22.5.1 The `meta` API Object
 
 The runtime SHALL construct a `meta` object and pass it to the effect function on every run.
@@ -28620,6 +28668,10 @@ setting `meta.runtime` is `true` (default: `true`). If `meta.runtime` is `false`
 
 - E-META-001 SHALL fire when a runtime `^{}` block is present and `meta.runtime` is `false`.
 
+> **Bootstrap status (S482).** No surface sets `meta.runtime` (impl#1 reads an option no caller passes), so
+> the bootstrap builds no setting and runtime blocks are always admitted (PA default, S481 design read Q9;
+> INTERIM until a manifest key is specified).
+
 ### 22.8 Phase Separation
 
 Compile-time meta (§22.4) executes during the compilation pass. Runtime meta (§22.5)
@@ -28733,7 +28785,7 @@ Where:
 
 | Code | Condition | Severity |
 |---|---|---|
-| E-META-001 | (1) Runtime variable referenced inside compile-time `^{}` meta context (§22.4); (2) Runtime `^{}` block used when `meta.runtime` is `false` (§22.5); (3) anything outside the §22.12 closed allow-list inside any `^{}` body (compile-time OR runtime) — a free identifier that is not a scrml construct, a local or captured binding, or a primitive (JS-host globals such as `bun`, `Bun`, `process`, `console`, `globalThis`, `Reflect`, `Function`, `eval`, `setInterval`, `fetch`, `document`, `Object`, `JSON`, `Math`, `String` are all in this class); a member access to `constructor` / `__proto__` / `prototype` / `__defineGetter__` / `__defineSetter__` / `__lookupGetter__` / `__lookupSetter__` on any value; a non-literal computed member key; or a refused construct (`this`, `import(…)`, a class, a tagged template, an object-literal getter / setter) (S457). The message names the identifier, member or construct and the allowed set. (Condition (3) emitted at `compiler/src/meta-checker.ts` and `compiler/src/meta-eval.ts` via `compiler/src/meta-allow-list.ts`.) **Provenance:** ruling:user-voice-scrml.md S457 "I don't want JS there. I would prefer scrml." + ruling:user-voice-scrml.md S458 "1a". ALSO (S458 final review F7, impl#1 status): a RUNTIME `^{}` inside an `<each>` row template — impl#1 emits no per-row `^{}` effect, so the row's `as` binding cannot be captured per row and the block would never run; refused with that cause (a compile-time `^{}` there is spliced into every row). | Error |
+| E-META-001 | (1) Runtime variable referenced inside compile-time `^{}` meta context (§22.4); (2) Runtime `^{}` block used when `meta.runtime` is `false` (§22.5); (3) anything outside the §22.12 closed allow-list inside any `^{}` body (compile-time OR runtime) — a free identifier that is not a scrml construct, a local or captured binding, or a primitive (JS-host globals such as `bun`, `Bun`, `process`, `console`, `globalThis`, `Reflect`, `Function`, `eval`, `setInterval`, `fetch`, `document`, `Object`, `JSON`, `Math`, `String` are all in this class); a member access to `constructor` / `__proto__` / `prototype` / `__defineGetter__` / `__defineSetter__` / `__lookupGetter__` / `__lookupSetter__` on any value; a non-literal computed member key; or a refused construct (`this`, `import(…)`, a class, a tagged template, an object-literal getter / setter) (S457). The message names the identifier, member or construct and the allowed set. (Condition (3) emitted at `compiler/src/meta-checker.ts` and `compiler/src/meta-eval.ts` via `compiler/src/meta-allow-list.ts`.) **Provenance:** ruling:user-voice-scrml.md S457 "I don't want JS there. I would prefer scrml." + ruling:user-voice-scrml.md S458 "1a". ALSO (S458 final review F7, impl#1 status): a RUNTIME `^{}` inside an `<each>` row template — impl#1 emits no per-row `^{}` effect, so the row's `as` binding cannot be captured per row and the block would never run; refused with that cause (a compile-time `^{}` there is spliced into every row). The bootstrap reports the same (S482; PA default, S481 design read Q7 — INTERIM: the capable alternative is a per-row effect, `g-boot-meta-runtime-residue-s482`), for an `<each>` row and a `for … lift` row alike. | Error |
 | E-META-002 | Invalid token inside `^{}` meta block (existing) | Error |
 | E-META-003 | `reflect()` called on unknown type in compile-time meta (existing) | Error |
 | E-META-004 | *Reserved.* Number unallocated; do not reuse — preserved for forensic search-hit stability against historical bug reports and design notes that may reference E-META-004. Future codes SHOULD start at E-META-011. | — |
@@ -31487,7 +31539,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-MATCH-ONTRANSITION-FORBIDDEN | §18.0.2 | `<onTransition>` element used inside a `<match>` block. Transition handlers are engine-only. Use `<engine>` (Tier 2). | Error |
 | E-MATCH-NOT-EXHAUSTIVE | §18.0.1 | Block-form `<match for=Type>` is missing variants of `Type` and has no wildcard `<_>` catch-all. Add the missing variants or add `<_>`. | Error |
 | E-MATCH-INVALID-ARM | §18.0.1 | A tag opener at the block-form `<match>` arm position is not a variant-named arm (`<VariantName>…</>`) or the wildcard `<_>…</_>` catch-all — e.g. the Ghost-Pattern `<when is="…">` (the Vue/Svelte-style conditional an LLM or framework-refugee reaches for). Such a tag is un-tokenizable as an arm; left un-flagged it yields ZERO recognised arms, the match tree-shakes to nothing, and a DEAD PAGE is emitted with 0 errors (the worst failure shape). Resolution: rewrite each case as a variant arm matching the enum of `for=Type`/the `on=` cell (`<Ok>…</>`, `<Err>…</>`), or use `<_>…</_>` for a catch-all. (Catalog addition S288 — g-match-without-for-plus-when-children; emitted by the Phase-2 arm tokenizer at `compiler/src/match-statechild-parser.ts:parseMatchArms`.) | Error |
-| E-MATCH-ALT-BINDING | §18.2, §18.7 | A `|` alternation arm whose alternates carry PAYLOAD PATTERNS — a binding (`.P(a: x) \| .Q(a: x) :> x`, `.P(x) \| .Q(x) :> x`), a NAMED field even when discarded (`.P(a: _) \| .Q(a: _)`), or a nested / literal pattern — in a JS-style `match`, at any arm position. The arm has no lowering (dispatch compares the variant tags only); before S438 it compiled with ZERO diagnostics and the arm silently never matched (or, as a non-first arm, satisfied exhaustiveness while being dropped). Only POSITIONAL `_` discards are accepted in an alternation. Resolution: give each variant its own arm, or use positional `_` discards (`.P(_) \| .Q(_) :> …`) when the body does not need the payload. (Catalog addition S438 — g-impl1-match-miscompiles F12 review F1; emitted at `compiler/src/ast-builder.js` `armChainBindingAlternate`.) | Error |
+| E-MATCH-ALT-BINDING | §18.2, §18.7 | A `|` alternation arm whose alternates carry PAYLOAD PATTERNS — a binding (`.P(a: x) \| .Q(a: x) :> x`, `.P(x) \| .Q(x) :> x`), a NAMED field even when discarded (`.P(a: _) \| .Q(a: _)`), or a nested / literal pattern — in a JS-style `match`, at any arm position. The arm has no lowering (dispatch compares the variant tags only); before S438 it compiled with ZERO diagnostics and the arm silently never matched (or, as a non-first arm, satisfied exhaustiveness while being dropped). Only POSITIONAL `_` discards are accepted in an alternation. Resolution: give each variant its own arm, or use positional `_` discards (`.P(_) \| .Q(_) :> …`) when the body does not need the payload. (Catalog addition S438 — g-impl1-match-miscompiles F12 review F1; emitted at `compiler/src/ast-builder.js` `armChainBindingAlternate`; S482: and by the bootstrap at `compiler/self-host-v2/parse.scrml` `parseAlternate` / `parseArms` — one per arm, at its first offending alternate, which also counts a paren-free binder `\| .V m` and the whole-error binder `_ e` as alternates carrying a binding.) | Error |
 | E-MATCH-SUBSET-DEAD-ARM | §18.8.1, §53.15 | A concrete arm names a variant that is excluded by the matched value's enum-subset refinement type (`oneOf([…])` / `notIn([…])`) — the arm is dead (the variant can never inhabit the value). The message names the excluded variant + the subset. Distinct from E-TYPE-023 (duplicate arm names the SAME variant twice); a dead subset arm names an excluded variant once. (Catalog addition S154 — §53.15 enum-subset refinement, SF-1.) | Error |
 | E-MATCH-ON-REQUIRED | §18.0.1 | (Catalog addition S107 — Phase 2 of match block-form impl arc.) Block-form `<match for=Type>` is missing the `on=expr` attribute AND no `<engine for=Type>` for the same `Type` is in scope (auto-implied `on=` per §18.0.1 line 9578-9580 requires a same-type engine for the most-local-semantics-friendly resolution). Add `on=expr` to the `<match>` opener or declare a compatible `<engine>` in scope. | Error |
 | E-MATCH-FOR-REQUIRED | §18.0.1 | A block-form `<match>` omits `for=`, and the compiler cannot prove the type of its `on=` to be one enum type (§18.0.1, amended S478: "`for=` MAY be omitted when `on=` is provably of one enum type"). Fix: name the enum — `<match for=Type on=…>`. An `on=` of a known non-enum type is E-TYPE-024 instead. **INTERIM (bootstrap):** the bootstrap proves only `on=@cell` (a program cell of an enum type), so it reports this for every other omitted `for=` (`g-boot-match-for-inference-residue-s478`). **Provenance:** ruling:user-voice-scrml.md S479 "⭐ RULED — S478 hand-off §3.A and §3.B, PA recs adopted" item 4 (*"`E-MATCH-FOR-REQUIRED` when it is unprovable"*). **Direction of change:** inert on the bootstrap's accept set (refused by name before); newly-rejecting on impl#1, which accepts the omission and does not emit it yet (impl#1-owed, S471 policy). Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (matchEnumFromOn). | Error |
