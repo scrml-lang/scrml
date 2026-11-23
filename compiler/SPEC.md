@@ -28329,6 +28329,37 @@ always pass all four arguments.
 > effect function was invoked for this run") is met. impl#1 emits that form; an object
 > evaluated once at the `^{}` site held the FIRST run's values for every later run.
 
+> **Bootstrap status (S482, s482-meta-runtime).** The bootstrap builds a runtime block that stands
+> where markup stands (an element's children, a `<program>` body). The block's scope ID (§22.10) is the
+> file's project-relative path spelled in `[A-Za-z0-9_]` (every other character, `_` included, written as
+> `_` and its code unit in hex) and the block's ordinal in the file, so it is deterministic and unique in
+> the document. The block renders impl#1's placeholder, a `<span data-scrml-meta="…">`. Its body runs
+> first where it stands, in source order with the statements around it, as impl#1's inline call does
+> (probed: `run1;meta1;run2;meta2;` on both implementations). Such a block stands in markup, so it is not a
+> §22.3 "top-level" block (file scope, "outside any … markup"); a runtime block at the file top outside
+> `<program>` — the one §22.3 times on `DOMContentLoaded` — is refused by name, as any statement there. It
+> runs again when a dependency changes.
+> The dependencies are exactly the reads §22.5.1 and §22.9 name: `meta.get("x")` and a `meta.bindings`
+> entry of a cell. A direct `@x` read in the body, or one in a function the body calls, is not a
+> dependency (impl#1 tracks only these two forms too, probed). A write the run makes itself never re-runs
+> it, as impl#1's re-entrancy guard. A `meta.emit` made while the placeholder is still in a detached
+> render (a mount builds its tree before inserting it) is handed to the gate after the insert, so the gate
+> judges the page `<form>` the block really stands in. The gate is impl#1's runtime gate, copied verbatim
+> (§22.12).
+> Literal names (ruling:user-voice-scrml.md-S481-meta-four item 2: *"accept literal names only for now,
+> resolved at compile time; a computed name gets a clear 'not supported yet' error"*; a literal naming no
+> cell: *"make it a compile error (E-SCOPE-001)"*). `meta.get` is typed as the cell it names. INTERIM
+> limits, each refused by name, never compiled wrong (`g-boot-meta-runtime-residue-s482`): a computed
+> name; `meta.subscribe`; `meta.types` and `reflect` in a runtime block (the runtime type registry); a
+> `meta.bindings` entry of a binding the bootstrap cannot see is constant; a runtime block in a logic
+> body, as an attribute value, inside `<svg>` / `<math>`, in a declaration's markup, or nested in another
+> block; and a callback (`meta.cleanup` / `meta.interval` / `meta.timeout`) that does more than declare
+> its own locals, branch, and call the block's `meta`. A timer ID is typed `string` (the bootstrap has
+> no opaque type; the runtime keys IDs per block, so a clear of another block's ID is a no-op).
+> **Direction of change:** newly-accepting against the S481 bootstrap, which refused every runtime block;
+> newly-rejecting against impl#1 for a literal naming no cell (`E-SCOPE-001`, ruled; no corpus or
+> conformance case has one).
+
 #### 22.5.1 The `meta` API Object
 
 The runtime SHALL construct a `meta` object and pass it to the effect function on every run.
@@ -28618,6 +28649,10 @@ setting `meta.runtime` is `true` (default: `true`). If `meta.runtime` is `false`
 
 - E-META-001 SHALL fire when a runtime `^{}` block is present and `meta.runtime` is `false`.
 
+> **Bootstrap status (S482).** No surface sets `meta.runtime` (impl#1 reads an option no caller passes), so
+> the bootstrap builds no setting and runtime blocks are always admitted (PA default, S481 design read Q9;
+> INTERIM until a manifest key is specified).
+
 ### 22.8 Phase Separation
 
 Compile-time meta (§22.4) executes during the compilation pass. Runtime meta (§22.5)
@@ -28731,7 +28766,7 @@ Where:
 
 | Code | Condition | Severity |
 |---|---|---|
-| E-META-001 | (1) Runtime variable referenced inside compile-time `^{}` meta context (§22.4); (2) Runtime `^{}` block used when `meta.runtime` is `false` (§22.5); (3) anything outside the §22.12 closed allow-list inside any `^{}` body (compile-time OR runtime) — a free identifier that is not a scrml construct, a local or captured binding, or a primitive (JS-host globals such as `bun`, `Bun`, `process`, `console`, `globalThis`, `Reflect`, `Function`, `eval`, `setInterval`, `fetch`, `document`, `Object`, `JSON`, `Math`, `String` are all in this class); a member access to `constructor` / `__proto__` / `prototype` / `__defineGetter__` / `__defineSetter__` / `__lookupGetter__` / `__lookupSetter__` on any value; a non-literal computed member key; or a refused construct (`this`, `import(…)`, a class, a tagged template, an object-literal getter / setter) (S457). The message names the identifier, member or construct and the allowed set. (Condition (3) emitted at `compiler/src/meta-checker.ts` and `compiler/src/meta-eval.ts` via `compiler/src/meta-allow-list.ts`.) **Provenance:** ruling:user-voice-scrml.md S457 "I don't want JS there. I would prefer scrml." + ruling:user-voice-scrml.md S458 "1a". ALSO (S458 final review F7, impl#1 status): a RUNTIME `^{}` inside an `<each>` row template — impl#1 emits no per-row `^{}` effect, so the row's `as` binding cannot be captured per row and the block would never run; refused with that cause (a compile-time `^{}` there is spliced into every row). | Error |
+| E-META-001 | (1) Runtime variable referenced inside compile-time `^{}` meta context (§22.4); (2) Runtime `^{}` block used when `meta.runtime` is `false` (§22.5); (3) anything outside the §22.12 closed allow-list inside any `^{}` body (compile-time OR runtime) — a free identifier that is not a scrml construct, a local or captured binding, or a primitive (JS-host globals such as `bun`, `Bun`, `process`, `console`, `globalThis`, `Reflect`, `Function`, `eval`, `setInterval`, `fetch`, `document`, `Object`, `JSON`, `Math`, `String` are all in this class); a member access to `constructor` / `__proto__` / `prototype` / `__defineGetter__` / `__defineSetter__` / `__lookupGetter__` / `__lookupSetter__` on any value; a non-literal computed member key; or a refused construct (`this`, `import(…)`, a class, a tagged template, an object-literal getter / setter) (S457). The message names the identifier, member or construct and the allowed set. (Condition (3) emitted at `compiler/src/meta-checker.ts` and `compiler/src/meta-eval.ts` via `compiler/src/meta-allow-list.ts`.) **Provenance:** ruling:user-voice-scrml.md S457 "I don't want JS there. I would prefer scrml." + ruling:user-voice-scrml.md S458 "1a". ALSO (S458 final review F7, impl#1 status): a RUNTIME `^{}` inside an `<each>` row template — impl#1 emits no per-row `^{}` effect, so the row's `as` binding cannot be captured per row and the block would never run; refused with that cause (a compile-time `^{}` there is spliced into every row). The bootstrap reports the same (S482; PA default, S481 design read Q7 — INTERIM: the capable alternative is a per-row effect, `g-boot-meta-runtime-residue-s482`), for an `<each>` row and a `for … lift` row alike. | Error |
 | E-META-002 | Invalid token inside `^{}` meta block (existing) | Error |
 | E-META-003 | `reflect()` called on unknown type in compile-time meta (existing) | Error |
 | E-META-004 | *Reserved.* Number unallocated; do not reuse — preserved for forensic search-hit stability against historical bug reports and design notes that may reference E-META-004. Future codes SHOULD start at E-META-011. | — |

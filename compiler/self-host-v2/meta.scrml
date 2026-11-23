@@ -1233,10 +1233,20 @@ ${
         return not;
     }
 
-    // §22.5.2: a cell's entry "SHALL return the same value as meta.get" — a dependency read;
-    // any other binding is the binding itself, read where the body reads it.
+    // §22.5.2: a cell's entry "SHALL return the same value as meta.get" — a dependency read. A
+    // constant binding (a file-scope `const`, a function, an import) is the binding itself: its
+    // value at run start is its value. A `let` — or a binding meta.scrml cannot see is constant
+    // (a body-top `${ … }` local, a server function) — would need §22.5.2's per-run snapshot
+    // ("the value that was current when the effect function was invoked for this run"), which is
+    // not built: refused by name (INTERIM).
     fn rtBinding(c: MC, e: AExpr, o: AExpr, n: string) -> RExpr {
-        if (c.env.cells.indexOf(n) < 0) return { e: ex(e, AExprK.Name(n)), c: c };
+        if (c.env.cells.indexOf(n) < 0) {
+            const d: MDecl | not = findDecl(c.env, n);
+            let constant: boolean = false;
+            if (d is given) constant = d.kind != 2;
+            if (!constant) return rtRefuse(c, e, "`meta.bindings." + n + "` — the entry of a `let` binding (or of one this compiler cannot see is constant: a body-top `" + "$" + "{ … }` local, a server function, a name not declared at file scope) is not built: §22.5.2 gives such an entry the value current when the run started, a snapshot the bootstrap does not take (INTERIM, g-boot-meta-runtime-residue-s482). Read the binding directly, or declare it `const` at file scope");
+            return { e: ex(e, AExprK.Name(n)), c: c };
+        }
         if (c.next < 0) return rtRefuse(c, e, "`meta.bindings." + n + "` — the caller gave the analysis no node ids (compile the program through the front end)");
         const at: AExpr = { nid: c.next, span: e.span, k: AExprK.At(n) };
         return { e: ex(e, AExprK.Call(caretMember(o, "get"), [at])), c: withNext(c, c.next + 1) };

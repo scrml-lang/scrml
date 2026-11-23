@@ -35,7 +35,22 @@ Base: origin/main ba34ad0ba (contains #2045). Scratch: ~/.cache/scrml/review/s48
   E-OPERATOR-OPERAND-TYPE, S440 Gotcha Q1; the bootstrap types meta.get as the cell) / 1 UNSUPPORTED (log) / 2 NOT-TWINNED.
 - corpus (71 `^{` programs, migrated as s481): base 19 OK → head 27 OK.
 
+- [x] 9535ff6d1 the compiler half (hook PASS 57848/0).
+- [x] records: SPEC §22.5 bootstrap status, §22.7 note (Q9), §22.11 E-META-001 (Q7); known-gaps:
+      g-boot-meta-runtime-unbuilt-s481 RESOLVED, new g-boot-meta-runtime-residue-s482 (MED) +
+      g-boot-meta-get-typed-cell-s482 (LOW owner Q), g-fix-seed-refuses-meta-block-s481 S482 note; coverage §22 rows.
+      meta.bindings of a let / body-top local refused by name (no per-run snapshot) + 2 tests.
+
+## Final gates (working tree = final content)
+- pretest rc 0. Bootstrap conformance base ba34ad0ba 816/3/628/517/0 → head 841/4/628/491/0 (PASS/FAIL/NT/UNSUP/CRASH):
+  25 UNSUPPORTED→PASS (all meta runtime), 1 UNSUPPORTED→FAIL (meta-proto-cell-name-pos), 0 PASS→other, CRASH 0.
+- impl#1 `conformance-corpus.test.js -t meta` 68/68. Emitted output (1964 cases, as written) base vs head: 26 diffs,
+  all meta runtime cases; 0 non-meta.
+- corpus (71): base 19 OK → head 28 OK; newly-rejecting 0 (every changed file was refused on base); E-SCOPE-001
+  literal-no-cell: 0.
+- CI checks: s34-census --check-new PASS, types-gate --check OK, snippet-gate 0 fail, claim-gate 0 fail,
+  corpus-compile-floor --check PASS, gen-md-shim current, e2e-render-map 259/0; gen-bootstrap-severity --check
+  exit 4 on base and head alike (bot-owned; no new codes).
+
 ## Remaining
-- SPEC §22 status notes; known-gaps (resolve g-boot-meta-runtime-unbuilt-s481, file g-boot-meta-runtime-residue-s482,
-  bindings snapshot, timer id type); bootstrap-spec-coverage rows.
-- final gates (pretest, full conformance base vs head, impl#1 -t meta, byte-compare non-meta, corpus, CI checks).
+- commit records; push; PR.

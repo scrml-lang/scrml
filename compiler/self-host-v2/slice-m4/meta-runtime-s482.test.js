@@ -129,6 +129,11 @@ describe("s482 — refused by name, never misread (INTERIM, g-boot-meta-runtime-
   test("reflect in a runtime block (the runtime type registry, phase 3)", () => one(`type U:struct = { n: string }\n<div>^{ const i = reflect(U); meta.emit(meta.get("label")); }</div>`, "E-BOOTSTRAP-UNSUPPORTED", "`reflect(…)` in a runtime `^{}` block"));
   test("meta.set as a value", () => one(`<div>^{ const v = meta.set("label", "y"); }</div>`, "E-BOOTSTRAP-UNSUPPORTED", "`meta.set(…)` used as a value"));
   test("a ^{} nested in a runtime block", () => one(`<div>^{ ^{ meta.emit("x"); } }</div>`, "E-BOOTSTRAP-UNSUPPORTED", "nested in a runtime"));
+  test("a meta.bindings entry of a `let` / a body-top local (no per-run snapshot, §22.5.2)", () => one(`\${ let v = 1; }\n<div>^{ meta.emit("<i>" + meta.bindings.v + "</i>"); }</div>`, "E-BOOTSTRAP-UNSUPPORTED", "`meta.bindings.v` — the entry of a `let` binding"));
+  test("§22.3: a block at the file top, outside <program> (a top-level block), is not built", () => {
+    const r = run(`^{ meta.emit("<p>top</p>"); }\n<program>\n<p>x</p>\n</program>\n`);
+    expect(errs(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
   test("a callback that writes a cell (a closure body is the bootstrap's)", () => {
     const r = run(P(`let <n:int=0/>\n<p>\${@n}</p>\n<div>^{ meta.timeout(1, () => { @n = 1; }); }</div>`));
     expect(errs(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
