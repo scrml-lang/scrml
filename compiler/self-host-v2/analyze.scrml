@@ -5973,7 +5973,7 @@ ${
         for (const c of body) { idles = idles.concat(idleOf(c)); }
         if (children.length == 0) {
             // s478: §51.0.R "Placement: ONLY at engine-root scope (sibling of state-children)"
-            for (const x of idles) st = addDiag(st, te.file, x.span, "E-IDLE-MISPLACED", "`<onIdle>` in `" + name + "`, which has no state-children — the watchdog sits at an engine's root, a sibling of its state-children (§51.0.R)");
+            for (const x of idles) { st = addDiag(st, te.file, x.span, "E-IDLE-MISPLACED", "`<onIdle>` in `" + name + "`, which has no state-children — the watchdog sits at an engine's root, a sibling of its state-children (§51.0.R)"); }
             return { graph: not, st: st };
         }
         const es: Sym | not = isEnumType(g, ty);
@@ -6187,7 +6187,7 @@ ${
             // s478: §51.0.R "`<onIdle>` is permitted on derived engines … the watchdog can
             // only fire when the source expression's value reaches the watchdog's `to=`
             // target" — that firing rule is not built (INTERIM)
-            for (const x of idleOf(c)) st = addDiag(st, file, x.span, "E-BOOTSTRAP-UNSUPPORTED", "`<onIdle>` on a derived value is not in the bootstrap yet — a derived engine's watchdog fires only when its source reaches the `to=` target (§51.0.R), which is not built; use `let` for a value the watchdog writes");
+            for (const x of idleOf(c)) { st = addDiag(st, file, x.span, "E-BOOTSTRAP-UNSUPPORTED", "`<onIdle>` on a derived value is not in the bootstrap yet — a derived engine's watchdog fires only when its source reaches the `to=` target (§51.0.R), which is not built; use `let` for a value the watchdog writes"); }
             for (const sc of stateChildOf(c)) {
                 for (const a of sc.attrs) {
                     if (a.name == "rule") st = addDiag(st, file, a.span, "E-DERIVED-ENGINE-NO-RULES", "`rule=` on the state-child `<" + sc.name + ">` of a derived value — a locked declaration whose initializer reads cells is derived (§66.9 rule 3), and a derived value's transitions are determined by its source, not authored (§51.0.J). Remove `rule=`, or write `let` before the `<` for a value seeded once from its initializer and then moved along its rules");
@@ -23491,7 +23491,7 @@ ${
                 // INTERIM (no SPEC code names a duplicate request id; `<#id>` would be ambiguous)
                 // r1 (review F4): an id no `<#…>` can name has no `<#id>` ambiguity to report
                 if (q.id == id && q.pend < 0) {
-                    if (isIdentifierText(id)) st = reqUnsupported(env, r.opener, "two `<request>`s are named `" + id + "` — `<#" + id + ">` would name either; give each request its own `id`", st)
+                    if (isIdentifierText(id)) st = reqUnsupported(env, r.opener, "two `<request>`s are named `" + id + "` — `<#" + id + ">` would name either; give each request its own `id`", st);
                     else st = reqUnsupported(env, r.opener, "two `<request>`s share the id `\"" + id + "\"`; give each request its own `id`", st);
                 }
             }
@@ -28299,11 +28299,11 @@ ${
     // dropped. Any other attribute is refused (it would be ignored).
     fn resolveErrors(env: Env, e: AElem, st0: AS) -> AS {
         let st: AS = st0;
-        let of: AAttr | not = not;
+        let ofAttr: AAttr | not = not;
         let all = false;
         for (const a of e.attrs) {
             if (a.name == "of") {
-                of = a;
+                ofAttr = a;
             } else if (a.name == "all" && isNoValue(a.value)) {
                 all = true;
             } else {
@@ -28315,10 +28315,10 @@ ${
                 return addDiag(st, env.file, k.span, "E-BOOTSTRAP-UNSUPPORTED", "a body inside `<errors of=…>` (the §55.8 body override) is not in the bootstrap — it would be dropped silently; write `<errors of=…/>` (the default rendering)");
             }
         }
-        if (of is not) return addDiag(st, env.file, e.span, "E-ERRORS-001", "`<errors>` needs `of=` — the value whose errors it renders: `<errors of=@signup.email/>` (§55.8)");
-        const x: AExpr | not = valueExpr(of.value);
+        if (ofAttr is not) return addDiag(st, env.file, e.span, "E-ERRORS-001", "`<errors>` needs `of=` — the value whose errors it renders: `<errors of=@signup.email/>` (§55.8)");
+        const x: AExpr | not = valueExpr(ofAttr.value);
         if (x is not || !isReactiveRoot(placeRoot(x))) {
-            return addDiag(st, env.file, of.span, "E-ERRORS-002", "`<errors of=…>` takes a `@`-rooted reference — a field (`@signup.email`), a declaration (`@signup`) or a validated top-level value (`@email`) (§55.8)");
+            return addDiag(st, env.file, ofAttr.span, "E-ERRORS-002", "`<errors of=…>` takes a `@`-rooted reference — a field (`@signup.email`), a declaration (`@signup`) or a validated top-level value (`@email`) (§55.8)");
         }
         const r: RX = resolveExpr(env, x, not, st);
         if (r.st.diags.length > st.diags.length) return r.st;
@@ -28328,13 +28328,13 @@ ${
         if (fv is given) {
             if (where == 2 && fieldValidatorsRefused(env, fv)) return r.st;
             if (where == 2 && !fieldCarriesValidators(env, fv)) {
-                return addDiag(r.st, env.file, of.span, "E-VALIDITY-NO-SURFACE", "`<errors of=" + exprLabel(x) + "/>` — `" + exprLabel(x) + "` is a top-level value that carries no validators, so it has no validity surface and no `errors` (§55.5.1 rule 2, §55.8)");
+                return addDiag(r.st, env.file, ofAttr.span, "E-VALIDITY-NO-SURFACE", "`<errors of=" + exprLabel(x) + "/>` — `" + exprLabel(x) + "` is a top-level value that carries no validators, so it has no validity surface and no `errors` (§55.5.1 rule 2, §55.8)");
             }
             return addElem(r.st, e.nid, ElemFact.MErrors(fv, all));
         }
         const dv: ValidityOf | not = declValidity(env, nf);
         if (dv is given) return addElem(r.st, e.nid, ElemFact.MErrors(dv, all));
-        return addDiag(r.st, env.file, of.span, "E-ERRORS-002", "`<errors of=" + exprLabel(x) + "/>` — `" + exprLabel(x) + "` is not a field, a declaration or a validated top-level value, so it has no `errors` (§55.8)");
+        return addDiag(r.st, env.file, ofAttr.span, "E-ERRORS-002", "`<errors of=" + exprLabel(x) + "/>` — `" + exprLabel(x) + "` is not a field, a declaration or a validated top-level value, so it has no `errors` (§55.8)");
     }
 
     fn isNoValue(v: AAttrValue) -> boolean {
@@ -30209,7 +30209,7 @@ ${
                         const es: Sym | not = isEnumType(env.g.types, fi.ty);
                         if (es is given) return { es: es, code: "", why: "", typeless: false };
                         if (maybeInner(fi.ty) is given) return { es: not, code: "E-BOOTSTRAP-UNSUPPORTED", why: "`<match on=@" + n + ">` over a `T | not` value (`" + typeName(fi.ty) + "`) — §18.0.1 defines no absence arm for the block form; discriminate the value first (`<div if=@" + n + ">…</div>`, §14.12.3) or match a value that is always present", typeless: false };
-                        return { es: not, code: "E-TYPE-024", why: "`<match on=@" + n + ">` without `for=` — `@" + n + "` is `" + typeName(fi.ty) + "`, not an enum: a block-form `<match>` is over an enum type (§18.0.1, §18.8.2)", typeless: fi.ty is Type.Str };
+                        return { es: not, code: "E-TYPE-024", why: "`<match on=@" + n + ">` without `for=` — `@" + n + "` is `" + typeName(fi.ty) + "`, not an enum: a block-form `<match>` is over an enum type (§18.0.1, §18.8.2)", typeless: fi.ty == Type.Str };
                     }
                 }
             }
@@ -31810,7 +31810,7 @@ ${
                         const la: AAttr | not = attrNamed(e.attrs, "else");
                         const why: string = " — a `${ }` block declaring a binding, a function or a type stands between it and the chain; no other construct may appear between chain members (§17.1.1). Move the declaration before the `if=` element or after the chain";
                         if (attrNamed(e.attrs, "if") is not) {
-                            if (ea is given) out = out.concat([newDiag("E-CTRL-002", "`else-if=` on `<" + e.tag + ">` has no preceding `if=` element at the same level" + why, file, ea.span)])
+                            if (ea is given) out = out.concat([newDiag("E-CTRL-002", "`else-if=` on `<" + e.tag + ">` has no preceding `if=` element at the same level" + why, file, ea.span)]);
                             else if (la is given) out = out.concat([newDiag("E-CTRL-001", "`else` on `<" + e.tag + ">` has no preceding `if=` element at the same level" + why, file, la.span)]);
                         }
                     }
@@ -47024,7 +47024,7 @@ ${
     fn pwSimple(es: AExpr[], bs: ABlock[], call: ASpan, w: PathW) -> PathW {
         let w1: PathW = w;
         for (const e of es) {
-            if (spanIn(call, e.span)) w1 = pwExpr(e, call, w1)
+            if (spanIn(call, e.span)) w1 = pwExpr(e, call, w1);
             else w1 = pwHit(w1, cfExpr(e, cf0()).exitAt);
         }
         for (const b of bs) {
@@ -47200,8 +47200,8 @@ ${
         const ss: AStmt[] = fs.f.body.stmts;
         const x: StmtFx = fx[at];
         let why: string = reason0;
-        if (x.browser != "") why = "the statement that makes the server call also uses " + x.browser + ", which needs the browser"
-        else if (x.client != "") why = "the statement that makes the server call calls `" + x.client + "`, which reads or writes client state"
+        if (x.browser != "") why = "the statement that makes the server call also uses " + x.browser + ", which needs the browser";
+        else if (x.client != "") why = "the statement that makes the server call calls `" + x.client + "`, which reads or writes client state";
         else if (x.write != "") why = "the statement that makes the server call writes `" + x.write + "`";
         if (why == "") why = "the statement that makes the server call cannot join the batch";
         let out: Diag[] = [];

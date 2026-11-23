@@ -1140,11 +1140,16 @@ ${
     //            the snippet invocation `render propName(…)` (§16.7), a name follows it.
     //   `some` — a word only after `is` (`x is some`, §42.2.2a), where it ENDS the expression
     //            (§7.2.2: "`not` / `given` / `some` end the expression").
+    // s482-selfhost-parse-residue — and `lin` (owner ruling S482, user-voice-scrml.md "RULED — `/`
+    // after `as` by adjacency; `lin` as a binding name", item 2: "allow it the way `as` and `from`
+    // now are"; SPEC §35.2): its keyword reading — the declaration `lin x = …` (§35.2), the
+    // parameter prefix `lin token: T` (§35.2.1) — always takes a NAME after the word, never a
+    // `.` or a `/`, so `lin.x` / `lin / 2` read the binding named `lin`.
     // `as` is NOT one: its keyword reading takes a bare variant after it (`return a as .Published;`,
     // §14.12.6.2), so `as .x` cannot be read as a member by the previous token alone — adjacency
-    // decides it (dotLastKind, S482 ruling).
+    // decides it, for `.` and for `/` (dotLastKind, S482 rulings).
     fn isContextualNameWord(name: string) -> boolean {
-        return name == "from" || name == "server" || name == "pure" || name == "render" || name == "some";
+        return name == "from" || name == "server" || name == "pure" || name == "render" || name == "some" || name == "lin";
     }
 
     // The previous token's kind as the `/`-and-`.` decisions (regexAllowedAfter) read it: a
@@ -1300,12 +1305,17 @@ ${
     // §14.12.6.2), so the previous token alone cannot decide `as .x`. ADJACENCY decides (owner ruling
     // S482, user-voice-scrml.md "RULED — `as.value`: adjacency decides"; the §7.2.2 rule 4 precedent):
     // a `.` TOUCHING `as` — no whitespace, newline or comment between — is member access on the name
-    // `as` (`as.value`, `as.f()`); a spaced `as .V` stays the bare-variant cast. Only the `.` decision
-    // changes: a `/` after `as` is decided by valueLastKind as before.
+    // `as` (`as.value`, `as.f()`); a spaced `as .V` stays the bare-variant cast.
+    // s482-selfhost-parse-residue — the same rule for `/` (owner ruling S482, user-voice-scrml.md
+    // "RULED — `/` after `as` by adjacency; `lin` as a binding name", item 1, PERMANENT: "it is your
+    // `.` ruling applied to `/`"): a `/` TOUCHING `as` is division on the name `as` (`as/2`); a
+    // spaced `as /re/` keeps the regular expression. A touching `//` / `/*` is a comment either way
+    // (classify reads comments first).
     fn dotLastKind(st: LexState, cur: Cursor) -> TokenKind | not {
         const k: TokenKind | not = valueLastKind(st);
         if (k is not) return k;
-        if (peekCode(cur, 0) != 46) return k;
+        const c0: int = peekCode(cur, 0);
+        if (c0 != 46 && c0 != 47) return k;
         if (keywordName(k) != "as") return k;
         if (st.tokens[st.tokens.length - 1].span.end != cur.pos) return k;
         return kIdent("as");
@@ -1438,7 +1448,8 @@ ${
     fn slashWhy(st: LexState) -> string {
         // s482: a member name (`a.if / 2`, `t.server / 2`) — every JavaScript reader divides
         if (lastIsMemberName(st)) return "";
-        const k: TokenKind | not = valueLastKind(st);
+        // s482-selfhost-parse-residue: a `/` touching `as` divides (dotLastKind) — the name `as`
+        const k: TokenKind | not = dotLastKind(st, st.cur);
         if (k is not) return "";
         const t: string = st.tokens[st.tokens.length - 1].text;
         const two: string = " (one JavaScript reading takes it for a division, another for the start of a regular expression)";
