@@ -11,5 +11,13 @@ Lane: finish item E of #2076 (construct initializers that read body-written stat
 4. INFO-1 — DONE. runtime.js `textContent`: a later non-trap throw is now passed to `reportLater`.
 
 ## State
-- WIP commit 1: all four items, plus tests.
-- Next: wait for #2076 to merge, rebase onto origin/main, then run the final gates.
+- Commit 1 (all four items and their tests) is rebased onto origin/main fc6cf01d2, which contains #2076.
+- Final gates on head:
+  - pretest: exit 0.
+  - bootstrap-conformance, base and head: PASS 845 / FAIL 4 / CRASH 0 on both, with 0 per-case bucket or emitted-code diffs.
+  - Corpus plus byte-compare over 2972 files (examples/, samples/, benchmarks/, conformance/cases/): 0 newly rejected, 0 newly accepted, 0 code changes, 0 output diffs.
+  - s34-census --check-new: PASS. types-gate: OK (182, unchanged). snippet-gate and claim-gate: 0 failed. corpus-compile-floor: PASS. gen-md-shim and severity: current.
+  - e2e-render-map: 259/0.
+  - ci-slices legs 1–6 of 6: 0 fail.
+  - Chromium: construct-init-place 5/5 and rcdata 5/5.
+- Red on base: in construct-init-read-s482.test.js, 9 of 13 tests fail on base. The 4 that pass are 2 refusals base also made, plus 2 unchanged legal shapes. The Chromium file fails 5 of 5 on base. The INFO-1 runtime probe on base drops the second throw.
