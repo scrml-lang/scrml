@@ -6077,10 +6077,15 @@ ${
     // initializer if it has not run (a held seed, a lazy derived value) — and, for a field of a
     // mounted declaration, the use-site values that feed it (`insts`); an instance constructs
     // and renders its declaration. Followed through the functions reached, to a fixed point.
+    // s482 (lane s482-handler-reach, g-boot-handler-reach-runs-binding-early-s482) — only the
+    // code that runs when `roots` runs is walked (runsNowNode): an event handler and a `bind:`
+    // write-back run on an event, after the body (§7.6 rule (b) S482), so what only they reach
+    // is not run early — it runs at its place, and they read it from there. (An `<effect>` /
+    // `<request>` body is still walked: both run during the body today.)
     fn reachOf(p: CoreProgram, insts: View[], roots: Node[]) -> int[] {
         if (roots.length == 0) return [];
-        let all: Node[] = roots;
-        let todo: Node[] = roots;
+        let all: Node[] = runsNowNodes(roots);
+        let todo: Node[] = all;
         let seenF: string[] = [];
         let seenD: int[] = [];
         let seenFn: int[] = [];
@@ -6122,10 +6127,107 @@ ${
                     }
                 }
             }
+            next = runsNowNodes(next);
             all = all.concat(next);
             todo = next;
         }
         return constsReached(p, all);
+    }
+
+    // s482 (lane s482-handler-reach) — §7.6 rule (b) S482: "Code that does not run in the body is
+    // not judged: an event handler …". A view (and a declaration's renders — a component's
+    // handlers) with the code that runs AFTER the body left out: every `on…` handler (View
+    // attribute On — in an element, an `<each>` row, a lifted gather row, a conditional arm,
+    // slot content) and a `bind:` attribute's write-back (it runs on the input event; the
+    // attribute's read stays — it shows the cell where it stands). A listener runs only on an
+    // event, and the program's DOM is inserted after its render (rt.insert, the render's last
+    // step), so no listener can run during the body. KEPT, fail closed — they run during the
+    // body today, so what they reach must still be initialized then: an `<effect>` (a body-top
+    // write of a dependency runs it there, g-boot-effect-fires-in-body-before-place-s482, an
+    // OPEN owner question) and a `<request>` (rt.requestOn runs its first load synchronously,
+    // where it stands — g-boot-request-runs-in-body-s482; skipping it read the later binding
+    // uninitialized, `NaN`). Nothing is dropped from what is PRINTED: this copy only decides
+    // what reachOf walks.
+    fn runsNowNodes(ns: Node[]) -> Node[] {
+        let out: Node[] = [];
+        for (const n of ns) { out = out.concat([runsNowNode(n)]); }
+        return out;
+    }
+
+    fn runsNowNode(n: Node) -> Node {
+        return match n {
+            .NView(v: v) :> Node.NView(runsNowView(v)),
+            .NDecl(d: d) :> Node.NDecl(runsNowDecl(d)),
+            // no-default-arm: only a view (or a declaration's renders) holds code that runs after the mount
+            _ :> n
+        };
+    }
+
+    fn runsNowDecl(d: Decl) -> Decl {
+        const rs: View[] | not = d.renders;
+        if (rs is not) return d;
+        return withRenders(d, runsNowViews(rs));
+    }
+
+    fn runsNowViews(vs: View[]) -> View[] {
+        let out: View[] = [];
+        for (const v of vs) { out = out.concat([runsNowView(v)]); }
+        return out;
+    }
+
+    fn runsNowView(v: View) -> View {
+        return match v {
+            .El(tag: t, attrs: a, kids: ks) :> View.El(t, runsNowAttrs(a), runsNowViews(ks)),
+            .Cond(arms: arms) :> View.Cond(runsNowArms(arms)),
+            .Each(src: s, bind: b, key: k, handles: h, row: r) :> View.Each(s, b, k, h, runsNowViews(r)),
+            .Instance(decl: d, attrs: a, slot: sl, alias: al) :> View.Instance(d, a, runsNowViews(sl), al),
+            .Gather(g: g, rows: rows, key: k) :> View.Gather(g, runsNowRows(rows), k),
+            .Request :> v,                 // kept: its first load runs where it stands (see above)
+            .Text :> v,
+            .RawText :> v,
+            .Dyn :> v,
+            .Slot :> v,
+            .Star :> v,
+            .Effect :> v,                  // kept: it can run during the body (see above)
+            .Run :> v,
+            .Init :> v,
+            .ResetOn :> v,
+            .Errors :> v,
+            .Reach :> v
+        };
+    }
+
+    fn runsNowAttrs(as0: Attr[]) -> Attr[] {
+        let out: Attr[] = [];
+        for (const a of as0) {
+            const r: Attr | not = runsNowAttr(a);
+            if (r is given) out = out.concat([r]);
+        }
+        return out;
+    }
+
+    fn runsNowAttr(a: Attr) -> Attr | not {
+        return match a {
+            .On :> not,
+            .Bind(kind: k, read: r, sink: s, write: w) :> Attr.Bind(k, r, s, { stmts: [] }),
+            .Static :> a,
+            .Bound :> a,
+            .Show :> a,
+            .ClassOn :> a,
+            .Gate :> a
+        };
+    }
+
+    fn runsNowArms(arms: CondArm[]) -> CondArm[] {
+        let out: CondArm[] = [];
+        for (const c of arms) { out = out.concat([{ test: c.test, body: runsNowViews(c.body) }]); }
+        return out;
+    }
+
+    fn runsNowRows(rows: GatherRow[]) -> GatherRow[] {
+        let out: GatherRow[] = [];
+        for (const r of rows) { out = out.concat([{ views: runsNowViews(r.views) }]); }
+        return out;
     }
 
     type CellRead:struct = { decl: int, idx: int }
