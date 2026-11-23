@@ -18,3 +18,12 @@ Scratch: ~/.cache/scrml/review/s482-meta-phase3/.
   the cell, unsubscribes on re-run / dispose; callback body = lamBodyCheck (as timers).
 
 ## Log
+- [x] c4a817163 compiler + runtime + tests (hook PASS). New test file red on base 21/23 (the 2 green are
+      invariants: TypeInfo not shipped without a runtime reflect; E-META-003). Fixtures moved off
+      `meta.subscribe` (now built) to a nested-in-runtime `^{}` (still refused): conformance-counter
+      refused/unsupported, doc-gate AHEAD (bootstrap-mode, round2).
+- Brief item 4 (callbacks that write cells) NOT built: a subscription callback writing its own cell would
+  re-queue itself inside one flush with no cap (the MetaEffect cap does not cover subscriptions) — refused
+  as before.
+- [ ] records: SPEC §22.4.2 impl#1 note, §22.5 bootstrap status (phase 3 paragraph), §22.5.4 ⚑ OPEN note;
+      known-gaps residue narrowed + absent-member S482 note; coverage §22.5 row.

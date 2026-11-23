@@ -28204,8 +28204,8 @@ Given a call `reflect(expr)` inside a `^{}` block:
   > **impl#1 status (S481).** impl#1 still reports `E-META-005` for this block (meta-checker.ts
   > `bodyMixesPhases` counts a PascalCase `reflect(User)` as a compile-time pattern); impl#1 is frozen (S471),
   > so this is a carried impl#1 divergence. The bootstrap classifies by this paragraph (meta.scrml
-  > `isCompileTime`); it builds compile-time `^{}` only, so it refuses such a block today as a runtime block
-  > not yet built (`E-BOOTSTRAP-UNSUPPORTED`), never as `E-META-005`.
+  > `isCompileTime`). Since S482 (s482-meta-phase3) it compiles such a block: the call is the §22.5.4
+  > registry lookup of that one type, never `E-META-005`.
 - `reflect(unknownLiteral)` where the literal does not match any known type name SHALL be a
   compile error (E-META-003: reflect() called on unknown type).
 - `reflect(variable)` where `variable` could hold an unknown type name at runtime SHALL
@@ -28369,15 +28369,32 @@ always pass all four arguments.
 > resolved at compile time; a computed name gets a clear 'not supported yet' error"*; a literal naming no
 > cell: *"make it a compile error (E-SCOPE-001)"*). `meta.get` is typed as the cell it names. INTERIM
 > limits, each refused by name, never compiled wrong (`g-boot-meta-runtime-residue-s482`): a computed
-> name; `meta.subscribe`; `meta.types` and `reflect` in a runtime block (the runtime type registry); a
+> name (for `meta.subscribe` too); `meta.types` read as a value rather than called (`meta.types.reflect(…)`); a
 > `meta.bindings` entry of a binding the bootstrap cannot see is constant; a runtime block in a logic
 > body, as an attribute value, inside `<svg>` / `<math>`, in a declaration's markup, or nested in another
 > block; and a callback (`meta.cleanup` / `meta.interval` / `meta.timeout`) that does more than declare
-> its own locals, branch, and call the block's `meta`. A timer ID is typed `string` (the bootstrap has
-> no opaque type; the runtime keys IDs per block, so a clear of another block's ID is a no-op).
+> its own locals, branch, and call the block's `meta` (a `meta.subscribe` callback likewise). A timer ID is
+> typed `string` (the bootstrap has no opaque type; the runtime keys IDs per block, so a clear of another
+> block's ID is a no-op).
 > **Direction of change:** newly-accepting against the S481 bootstrap, which refused every runtime block;
 > newly-rejecting against impl#1 for a literal naming no cell (`E-SCOPE-001`, ruled; no corpus or
 > conformance case has one).
+>
+> **Bootstrap status (S482, s482-meta-phase3).** `reflect(…)` and `meta.types.reflect(…)` in a runtime block
+> are built (§22.4.2 / §22.5.4; ruling:user-voice-scrml.md-S481-meta-four items 1 and 3). A type literal
+> (a type name, or a string naming a type) is looked up in a registry of that type alone. Any other argument
+> is looked up in a registry of every type in scope at the block, the five primitive names included, as
+> compile-time `reflect` resolves them. A literal lookup is typed `TypeInfo`. Any other lookup is typed
+> `TypeInfo | not`, so its members are read after a presence test. `meta.subscribe("x", f)` is built with a
+> literal cell name (ruling item 2). `f` takes no parameter or one, the cell's new value, typed as the cell.
+> The runtime calls it, in a batch, on each change of the cell after the subscription. The subscription
+> belongs to the run that made it: the next run of the block and its teardown end it, as do calls of the
+> returned unsubscribe function. The subscribed cell is not a dependency of the block. impl#1 keeps a
+> subscription past its run, so each re-run adds one; §22.5.1 is silent on the lifetime, and the bootstrap
+> applies the rule §22.5.1 gives `meta.cleanup` and the timers. impl#1's runtime registry entry carries no
+> `name`, and impl#1's runtime registry leaves out the primitive names. Both are impl#1 divergences from
+> this section's "SHALL be identical". **Direction of change:** newly-accepting against the S482 bootstrap,
+> which refused each of these by name.
 
 #### 22.5.1 The `meta` API Object
 
@@ -28551,9 +28568,10 @@ with `FieldInfo:struct = { name: string, type: string }`.
 > registry return name strings). **Direction of change:** inert for impl#1 (the rule now states what it
 > produces); meaning-changing only for a reader of the struck `{ name }` variant shape, which no
 > implementation returned. *(⚑ OPEN — owner question, S481: what a `TypeInfo`-typed read of the member a kind
-> does not carry (`fields` of an enum) yields — absent, as impl#1's entry has it, or the empty list. The
-> bootstrap's compile-time evaluator returns impl#1's entry as is (absent); the question binds the typed
-> runtime-`^{}` phase. Gap `g-boot-meta-typeinfo-absent-member-s481`.)*
+> does not carry (`fields` of an enum) yields — absent, as impl#1's entry has it, or the empty list. Since
+> S482 (s482-meta-phase3) the bootstrap gives the EMPTY list in both phases (the gap's recommendation, the
+> S481 design read's Q4 and the PA's phase-3 brief), so every entry carries all four `TypeInfo` members and a
+> typed read never fails. impl#1 leaves the member absent. Gap `g-boot-meta-typeinfo-absent-member-s481`.)*
 
 **The `meta.types` API:**
 
