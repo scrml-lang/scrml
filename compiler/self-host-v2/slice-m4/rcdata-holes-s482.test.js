@@ -224,6 +224,28 @@ fn boom(s: string) -> string { if (s == "yo") { return s.repeat(0 - s.length); }
     // once for the textarea's part, once for the `<p>`'s hole
     expect(reported).toEqual(["E-INDEX-OUT-OF-RANGE-RT", "E-INDEX-OUT-OF-RANGE-RT"]);
   }, 120000);
+
+  // s482 (lane s482-construct-init-fu, #2076 review INFO-1): two parts that throw an ordinary (non-trap)
+  // error — the first is rethrown after the content is written (as `text()` rethrows its hole's); the
+  // later one is reported, never dropped, as the flush reports the later of two `text()` holes' throws.
+  // Only a bootstrap defect throws a non-trap error, so this drives the runtime directly.
+  test("two ordinary throws: the first is rethrown, the second reported (not dropped)", async () => {
+    const rtm = await import("../slice-m1/runtime/runtime.js");
+    const el = { localName: "textarea", textContent: "", value: "" };
+    const e1 = new Error("first");
+    const e2 = new Error("second");
+    const reported = [];
+    const saved = globalThis.reportError;
+    globalThis.reportError = (e) => { reported.push(e); };
+    let thrown = null;
+    try {
+      rtm.textContent(new rtm.Scope(null), el, ["a ", () => { throw e1; }, " b ", () => { throw e2; }, " c"]);
+    } catch (e) { thrown = e; } finally { globalThis.reportError = saved; }
+    expect(thrown).toBe(e1);
+    expect(reported).toEqual([e2]);
+    expect(el.textContent).toBe("a  b  c");
+    expect(el.value).toBe("a  b  c");
+  });
 });
 
 describe("`bind:value` plus content — §34 W-RCDATA-BIND-VALUE-CONTENT-CONFLICT", () => {

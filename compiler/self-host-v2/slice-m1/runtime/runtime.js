@@ -4809,7 +4809,8 @@ export function text(scope, marker, fn) {
  * throw blanks only the hole that threw): a thunk that throws shows "" — as `text()` shows a throwing
  * hole — and the static text and the other values are still shown. A trap is reported once and ends
  * there; any other throw is rethrown after the content is written, as `text()` rethrows it after its
- * blank. The element's content is never blanked as a whole.
+ * blank — the first one; a later one is reported (`reportLater`), as the flush reports the later of
+ * two `text()` holes' throws (#2076 review INFO-1). The element's content is never blanked as a whole.
  */
 export function textContent(scope, el, parts) {
   const textarea = el.localName === "textarea";
@@ -4823,6 +4824,7 @@ export function textContent(scope, el, parts) {
       } catch (err) {
         if (isTrap(err)) reportLater(err);
         else if (failed === null) failed = { err };
+        else reportLater(err);                        // s482 (#2076 review INFO-1): a later one is reported, never dropped — as drainQueues reports the later of two `text()` holes' throws
       }
     }
     el.textContent = s;

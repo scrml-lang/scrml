@@ -1,16 +1,23 @@
 // construct-init-read-s482.test.js — lane s482-small-followups, item E (#2071 review INFO-1; gap
-// g-boot-nested-init-reads-body-write-s482).
+// g-boot-nested-init-reads-body-write-s482), and its follow-up, lane s482-construct-init-fu (#2076 review
+// MED-1 / LOW-1).
 //
 // §7.6 rule (b) S482: a file-scope initializer inside the content of an `if=` / `else-if=` / `else`
-// element, a component's slot content or a `<match>` arm that ACTS is E-FILE-SCOPE-INIT-IN-CONSTRUCT;
-// "One that does not act runs once, just after the construct: nothing can observe where it ran." That
-// holds only while what it reads is written by no body code. `${ n = 5; } <div if=(n > 0)>${ const k:
-// int = n + 0; }<p>${k}</p></div>` showed 1 in Chromium (source order: 5) — the content reads `k`, so the
-// printer ran it at module initialization, before `n = 5`. A read of a file-scope `let` or a program cell
-// that body code writes (a body-top statement, a display, an initializer or a seed, directly or through a
-// function it calls — not an event handler, an `<effect>` or a `<request>`) now counts as acting
-// (PA reading of ruling:user-voice-scrml.md-S481-nested-init-chain-comments item 1, prov=pa-ruled;
-// 0 of 2969 corpus files hold any non-acting file-scope initializer in a construct).
+// element, a component's slot content or a `<match>` arm that ACTS is E-FILE-SCOPE-INIT-IN-CONSTRUCT.
+// #2076 counted a read of anything body code writes, anywhere, as acting: the place was just AFTER the
+// construct, the construct's content read the binding before it, so the printer ran it at module
+// initialization. That still gave a wrong value through a `const` (`${ n = 5; } ${ const m = n; }
+// <p>${m}</p> <div if=(m > 0)>${ const k = m + 0; }…` showed m = 1, k = 1 — the early `k` pulled `m`
+// early too), and it refused a write AFTER the construct that nobody can observe.
+//
+// s482-construct-init-fu: "One that does not act runs once, just before the construct … it sees every
+// write the body makes before the construct, and none it makes after, as source order does." A read of
+// what code INSIDE the construct writes before the initializer (its attributes, an earlier chain member's
+// test, its content, a component used there) still counts as acting: source order runs that write first,
+// the place before the construct does not (PA reading of ruling:user-voice-scrml.md-S481-nested-init-
+// chain-comments item 1, narrowed; prov=pa-ruled; 0 corpus files hold a non-acting initializer in a
+// construct). compiler/tests/browser/construct-init-place-chromium-s482.browser.test.js repeats the
+// values in Chromium.
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
@@ -39,34 +46,127 @@ async function texts(src, ids, steps = []) {
   return ids.map((id) => String(run.body.querySelector("#" + id)?.textContent ?? "<none>"));
 }
 
-describe("a non-acting initializer in a construct that reads what the body writes is refused", () => {
-  test("the review's probe: `n` written by a body-top statement, read in `if=` content", async () => {
+describe("a write inside the construct, before the initializer, is refused", () => {
+  test("in the `if=` test (a function the test calls writes `n`)", async () => {
     const d = await errors(`<program>
+\${ let n: int = 1; }
+\${ function bump() -> int { n = 5; return 1; } }
+<div if=(bump() > 0)>\${ const k: int = n + 0; }<p id="s">\${k}</p></div>
+</program>
+`);
+    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(d[0].message).toContain("the initializer of `const k` reads `n`, which the program body writes inside that construct, before it");
+    expect(d[0].message).toContain("the content of an `if=` element (`<div if=…>`)");
+  }, 120000);
+
+  test("in a display of the content before it", async () => {
+    const d = await errors(`<program>
+\${ let n: int = 1; }
+\${ function bump() -> int { n = 5; return 0; } }
+<div if=(true)><p>\${bump()}</p>\${ const k: int = n + 0; }<p id="s">\${k}</p></div>
+</program>
+`);
+    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+  }, 120000);
+
+  test("in the test of an earlier member of the if-chain (the place is before the chain)", async () => {
+    const d = await errors(`<program>
+\${ let n: int = 1; }
+\${ function bump() -> int { n = 5; return 1; } }
+<div if=(bump() < 0)>x</div>
+<div else>\${ const k: int = n + 0; }<p id="s">\${k}</p></div>
+</program>
+`);
+    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(d[0].message).toContain("the content of an `else` element");
+  }, 120000);
+
+  test("in the renders of the component whose slot content holds it", async () => {
+    const d = await errors(`\${ let n: int = 1; }
+\${ function bump() -> int { n = 5; return 0; } }
+<card t:string="x">
+</> renders <div>\${bump()}<slot/></div>
+<program>
+<card><b>\${ const k: int = n * 2; }</b><p id="s">\${k}</p></card>
+</program>
+`);
+    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(d[0].message).toContain("slot content of `<card>`");
+  }, 120000);
+});
+
+describe("legal: the place is just before the construct — the source-order value", () => {
+  test("#2076 MED-1: read through a file-scope const — m and k both 5 (base: 1 and 1)", async () => {
+    const src = `<program>
+\${ let n: int = 1; }
+\${ n = 5; }
+\${ const m: int = n; }
+<p id="o">\${m}</p>
+<div if=(m > 0)>\${ const k: int = m + 0; }<p id="o2">\${k}</p></div>
+</program>
+`;
+    expect(await errors(src)).toEqual([]);
+    expect(await texts(src, ["o", "o2"])).toEqual(["5", "5"]);
+  }, 120000);
+
+  test("the #2071 probe: `n` written by a body-top statement before the construct (#2076 refused it)", async () => {
+    const src = `<program>
 \${ let n: int = 1; }
 \${ n = 5; }
 <div if=(n > 0)>\${ const k: int = n + 0; }<p id="s">\${k}</p></div>
 </program>
-`);
-    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
-    expect(d[0].message).toContain("the initializer of `const k` reads `n`, which the program body writes");
-    expect(d[0].message).toContain("the content of an `if=` element (`<div if=…>`)");
+`;
+    expect(await errors(src)).toEqual([]);
+    expect(await texts(src, ["s"])).toEqual(["5"]);
   }, 120000);
 
-  test("written through a function the body calls", async () => {
-    const d = await errors(`<program>
+  test("written through a function the body calls before the construct", async () => {
+    const src = `<program>
 \${ let n: int = 1; }
 \${ function bump() { n = 5; } }
 \${ bump(); }
 <div if=(n > 0)>\${ const k: int = n + 0; }<p id="s">\${k}</p></div>
 </program>
-`);
-    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+`;
+    expect(await errors(src)).toEqual([]);
+    expect(await texts(src, ["s"])).toEqual(["5"]);
   }, 120000);
 
-  // (a program cell read in a file-scope initializer is refused before this rule — E-BOOTSTRAP-UNSUPPORTED,
-  // INTERIM g-boot-file-scope-init-residue-s479 — so the cell half of the rule is not reachable yet)
+  test("#2076 LOW-1: a write after the construct, or after the initializer inside it, is not seen", async () => {
+    const after = `<program>
+\${ let n: int = 5; }
+<div if=(n > 0)>\${ const k: int = n + 0; }<p id="s">\${k}</p></div>
+\${ n = 9; }
+</program>
+`;
+    expect(await errors(after)).toEqual([]);
+    expect(await texts(after, ["s"])).toEqual(["5"]);
+    const inside = `<program>
+\${ let n: int = 5; }
+\${ function bump() -> int { n = 9; return 0; } }
+<div if=(true)>\${ const k: int = n + 0; }<p id="s">\${k}</p><p>\${bump()}</p></div>
+</program>
+`;
+    expect(await errors(inside)).toEqual([]);
+    expect(await texts(inside, ["s"])).toEqual(["5"]);
+  }, 120000);
+
+  test("in an `else` member, read through a const", async () => {
+    const src = `<program>
+\${ let n: int = 1; }
+\${ n = 5; }
+\${ const m: int = n; }
+<p id="o">\${m}</p>
+<div if=(m < 0)>x</div>
+<div else>\${ const k: int = m + 0; }<p id="o2">\${k}</p></div>
+</program>
+`;
+    expect(await errors(src)).toEqual([]);
+    expect(await texts(src, ["o", "o2"])).toEqual(["5", "5"]);
+  }, 120000);
+
   test("in a `<match>` arm and in slot content", async () => {
-    const arm = await errors(`<program>
+    const arm = `<program>
 \${ type Ph:enum = { Idle, Ready } }
 let <ph:Ph=.Idle/>
 \${ let n: int = 1; }
@@ -77,11 +177,10 @@ let <ph:Ph=.Idle/>
 </match>
 <p id="r">\${k}</p>
 </program>
-`);
-    expect(arm.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
-    expect(arm[0].message).toContain("reads `n`, which the program body writes");
-    expect(arm[0].message).toContain("the `<Idle>` arm of `<match for=Ph>`");
-    const slot = await errors(`<card t:string="x">
+`;
+    expect(await errors(arm)).toEqual([]);
+    expect(await texts(arm, ["r"])).toEqual(["5"]);
+    const slot = `<card t:string="x">
 </> renders <div>\${t}<slot/></div>
 <program>
 \${ let n: int = 1; }
@@ -89,17 +188,16 @@ let <ph:Ph=.Idle/>
 <card><b>\${ const k: int = n * 2; }</b></card>
 <p id="r">\${k}</p>
 </program>
-`);
-    expect(slot.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
-    expect(slot[0].message).toContain("slot content of `<card>`");
+`;
+    expect(await errors(slot)).toEqual([]);
+    expect(await texts(slot, ["r"])).toEqual(["10"]);
   }, 120000);
-});
 
-describe("legal: what it reads is written by no body code (where it runs cannot be observed)", () => {
-  test("`n` written by nobody: the value is the source-order value", async () => {
+  test("nested constructs: the place is before the outermost one", async () => {
     const src = `<program>
-\${ let n: int = 5; }
-<div if=(n > 0)>\${ const k: int = n + 0; }<p id="s">\${k}</p></div>
+\${ let n: int = 1; }
+\${ n = 5; }
+<section><div if=(n > 0)><div if=(n > 1)>\${ const k: int = n + 0; }<p id="s">\${k}</p></div></div></section>
 </program>
 `;
     expect(await errors(src)).toEqual([]);
