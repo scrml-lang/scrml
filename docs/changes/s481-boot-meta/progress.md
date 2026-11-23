@@ -112,4 +112,10 @@ Rulings: user-voice-scrml.md S480 census build order item 2; ruling:user-voice-s
 - [x] LOW-1 `const f = (c: C) => …` typed like a local fn (localTy); `let` residual filed g-boot-meta-let-lambda-typed-param-s482
 - [x] tests: meta-s481.test.js "s482 r5" (15 tests; 12 red on base 6cdb377e7)
 - [x] SPEC §22.4 "The compile-wide step total (S482)" + changing-method sentence
-- [ ] gates, push, PR body ### r5
+- [x] gates (head f1206e0cc): pretest exit 0; bootstrap conformance PASS 810 / FAIL 3 / UNS 517 / CRASH 0 vs main
+      a7f50def5 772 / 3 / 555 / 0 — 0 PASS->other, 0 non-meta transitions, meta PASS 39; impl#1 `-t meta` 68/68;
+      meta-s481 119/119; s34-census, types-gate (182, unchanged), snippet-gate, claim-gate, gen-md-shim,
+      corpus-compile-floor all PASS; byte-compare (1,958 cases) vs main 68 diffs all meta, 0 non-meta, 0 throws;
+      vs r4 head 6cdb377e7 0 diffs; 181 probes (r4rev p/**, r4 p/, r5 p/) max 6.1 s / 554 MB, 0 exit 2, 0 timeouts;
+      k1/k2/k4/k6 equal impl#1's JavaScript values
+- [ ] push + PR body ### r5
