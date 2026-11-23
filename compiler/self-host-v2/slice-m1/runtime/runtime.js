@@ -3818,6 +3818,26 @@ export function text(scope, marker, fn) {
   hole(scope, () => { t.data = display(fn()); }, () => { t.data = ""; });
 }
 
+/**
+ * s482 — the content of a raw-text / RCDATA element (`<textarea>`, `<title>`, `<xmp>`, …) that holds a
+ * `${}`: ONE text value, kept equal to `fn()`'s parts (static text and interpolated values, each shown
+ * as a text hole shows it) joined. The HTML parser reads such content as one text node, so it has no
+ * place for a per-part anchor. A `<textarea>`'s content is its default value; its current value is
+ * set too (SPEC §34 W-RCDATA-BIND-VALUE-CONTENT-CONFLICT: content in a `<textarea>` "compiles to a
+ * reactive `.value` bind"), so a change shows even after the user has typed.
+ */
+export function textContent(scope, el, fn) {
+  const textarea = el.localName === "textarea";
+  hole(scope, () => {
+    const s = fn().map(display).join("");
+    el.textContent = s;
+    if (textarea) el.value = s;
+  }, () => {
+    el.textContent = "";
+    if (textarea) el.value = "";
+  });
+}
+
 // ---------------------------------------------------------------------------
 // s473 — §5.2 "Data never chooses where a form posts or where the page goes
 // (S473)". Ruled (user-voice-scrml.md "S473 owner questions round 2" items 1

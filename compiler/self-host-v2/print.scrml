@@ -2963,6 +2963,11 @@ ${
     }
 
     fn buildEl(ctx: Ctx, v: View, tag: string, attrs: Attr[], ks: View[], path: int[], ns: string) -> Built {
+        // s482: the content of a raw-text / RCDATA element holding a `${}` is one text value, set on the
+        // element itself (wireHole → textContentJs): the element is printed empty and is its own hole
+        if (textContentKids(ns, tag, ks) is given) {
+            return { nodes: [HNode.HElem(tag, staticAttrs(attrs), [])], holes: [{ path: path, v: v, ns: ns }] };
+        }
         let kids: View[] = ks;
         if (isHtmlInNs(ns, tag.toLowerCase()) && dropsLeadingLf(tag)) kids = cutLeadingNewline(ks);
         const inner: Built = buildNodes(ctx, kids, path, elChildNs(ns, tag, attrs));
@@ -3002,6 +3007,79 @@ ${
             .Reach :> ks,
             .Gather :> ks
         };
+    }
+
+    // s482 (g-boot-rcdata-hole-anchor-s482) — the HTML parser reads the content of a raw-text / RCDATA
+    // element (`<textarea>`, `<title>`, and `<xmp>` `<iframe>` `<noembed>` `<noframes>` `<noscript>`; HTML
+    // §13.2.6.4.7) as ONE text node: a hole's `<!---->` anchor printed there is text, so the child-index
+    // path to it names no node and the mount threw (`<textarea>a ${@x} b</textarea>` rendered nothing).
+    // So when such an element (in the HTML namespace — an SVG `<title>` is markup) holds a `${}`, its
+    // content is one text value: the concatenation of its text and its interpolated values, in order,
+    // kept equal to that value by ONE hole on the element (rt.textContent). analyze mkRawNode refused
+    // every other child, so these kids are text and `${}` values only — `not` (printed as written)
+    // otherwise, and when there is no `${}`. `<textarea>`'s one dropped line ending is cut here, as the
+    // parser would cut it (§24.5 item 2: "treat the body as the written one without that line ending").
+    // `<plaintext>` is refused (analyze mkRepair); `<script>` / `<style>` are refused everywhere (§4.17).
+    fn textContentKids(ns: string, tag: string, ks: View[]) -> View[] | not {
+        const t: string = tag.toLowerCase();
+        if (!isHtmlInNs(ns, t) || !isTextContentTag(t)) return not;
+        let dyn: boolean = false;
+        for (const k of ks) {
+            const kind: int = textPartKind(k);
+            if (kind < 0) return not;
+            if (kind == 1) dyn = true;
+        }
+        if (!dyn) return not;
+        if (dropsLeadingLf(tag)) return cutLeadingNewline(ks);
+        return ks;
+    }
+
+    fn isTextContentTag(t: string) -> boolean {
+        return ["textarea", "title", "xmp", "iframe", "noembed", "noframes", "noscript"].indexOf(t) >= 0;
+    }
+
+    // 0 a text, 1 an interpolated value, -1 anything else
+    fn textPartKind(v: View) -> int {
+        return match v {
+            .Text(text: t) :> 0,
+            .Dyn(e: e) :> 1,
+            // no-default-arm: one question of a view — is it a part of a text value; every other form is not
+            _ :> -1
+        };
+    }
+
+    // The element's text value, wired on its hole: `rt.textContent(scope$, el, () => ["a ", x, " b"])`.
+    // A `<textarea>` with `bind:value` gets none — §34 W-RCDATA-BIND-VALUE-CONTENT-CONFLICT: "`bind:value`
+    // wins … and the reactive content interpolation is dropped" (analyze mkBindContent reports it).
+    fn textContentJs(ctx: Ctx, tag: string, attrs: Attr[], ks: View[], node: JsExpr) -> JsStmt[] {
+        const tc: View[] | not = textContentKids(ctx.ns, tag, ks);
+        if (tc is not) return [];
+        if (bindsValue(attrs)) return [];
+        let parts: JsExpr[] = [];
+        for (const k of tc) { parts = parts.concat(textPartJs(ctx, k)); }
+        return [sexpr(rtCall(ctx, "textContent", [scopeVar(), node, jthunk(JsExpr.JArray(parts))]))];
+    }
+
+    fn textPartJs(ctx: Ctx, v: View) -> JsExpr[] {
+        return match v {
+            .Text(text: t) :> [jstr(t)],
+            .Dyn(e: e) :> [exprJs(ctx, e)],
+            // no-default-arm: textContentKids admitted only text and `${}` values
+            _ :> []
+        };
+    }
+
+    fn bindsValue(attrs: Attr[]) -> boolean {
+        for (const a0 of attrs) {
+            const a: Attr = a0;
+            const b: boolean = match a {
+                .Bind(kind: k) :> bindProp(k) == "value",
+                // no-default-arm: one question of an attribute — is it a `bind:value`
+                _ :> false
+            };
+            if (b) return true;
+        }
+        return false;
     }
 
     fn cutTextView(cut: View, left: string, rest: View[]) -> View[] {
@@ -3148,7 +3226,7 @@ ${
         const node: JsExpr = jid(nodeVar(h.path));
         const v: View = h.v;
         return match v {
-            .El(attrs: attrs) :> only(attrsJs(ctx, attrs, node)),
+            .El(tag: t, attrs: attrs, kids: ks) :> only(attrsJs(ctx, attrs, node).concat(textContentJs(ctx, t, attrs, ks, node))),
             .Text :> only([]),
             .RawText :> only([]),
             .Dyn(e: e) :> only([sexpr(rtCall(ctx, "text", [scopeVar(), node, jthunk(exprJs(ctx, e))]))]),
@@ -6094,10 +6172,15 @@ ${
     // initializer if it has not run (a held seed, a lazy derived value) — and, for a field of a
     // mounted declaration, the use-site values that feed it (`insts`); an instance constructs
     // and renders its declaration. Followed through the functions reached, to a fixed point.
+    // s482 (lane s482-handler-reach, g-boot-handler-reach-runs-binding-early-s482) — only the
+    // code that runs when `roots` runs is walked (runsNowNode): an event handler and a `bind:`
+    // write-back run on an event, after the body (§7.6 rule (b) S482), so what only they reach
+    // is not run early — it runs at its place, and they read it from there. (An `<effect>` /
+    // `<request>` body is still walked: both run during the body today.)
     fn reachOf(p: CoreProgram, insts: View[], roots: Node[]) -> int[] {
         if (roots.length == 0) return [];
-        let all: Node[] = roots;
-        let todo: Node[] = roots;
+        let all: Node[] = runsNowNodes(roots);
+        let todo: Node[] = all;
         let seenF: string[] = [];
         let seenD: int[] = [];
         let seenFn: int[] = [];
@@ -6139,10 +6222,107 @@ ${
                     }
                 }
             }
+            next = runsNowNodes(next);
             all = all.concat(next);
             todo = next;
         }
         return constsReached(p, all);
+    }
+
+    // s482 (lane s482-handler-reach) — §7.6 rule (b) S482: "Code that does not run in the body is
+    // not judged: an event handler …". A view (and a declaration's renders — a component's
+    // handlers) with the code that runs AFTER the body left out: every `on…` handler (View
+    // attribute On — in an element, an `<each>` row, a lifted gather row, a conditional arm,
+    // slot content) and a `bind:` attribute's write-back (it runs on the input event; the
+    // attribute's read stays — it shows the cell where it stands). A listener runs only on an
+    // event, and the program's DOM is inserted after its render (rt.insert, the render's last
+    // step), so no listener can run during the body. KEPT, fail closed — they run during the
+    // body today, so what they reach must still be initialized then: an `<effect>` (a body-top
+    // write of a dependency runs it there, g-boot-effect-fires-in-body-before-place-s482, an
+    // OPEN owner question) and a `<request>` (rt.requestOn runs its first load synchronously,
+    // where it stands — g-boot-request-runs-in-body-s482; skipping it read the later binding
+    // uninitialized, `NaN`). Nothing is dropped from what is PRINTED: this copy only decides
+    // what reachOf walks.
+    fn runsNowNodes(ns: Node[]) -> Node[] {
+        let out: Node[] = [];
+        for (const n of ns) { out = out.concat([runsNowNode(n)]); }
+        return out;
+    }
+
+    fn runsNowNode(n: Node) -> Node {
+        return match n {
+            .NView(v: v) :> Node.NView(runsNowView(v)),
+            .NDecl(d: d) :> Node.NDecl(runsNowDecl(d)),
+            // no-default-arm: only a view (or a declaration's renders) holds code that runs after the mount
+            _ :> n
+        };
+    }
+
+    fn runsNowDecl(d: Decl) -> Decl {
+        const rs: View[] | not = d.renders;
+        if (rs is not) return d;
+        return withRenders(d, runsNowViews(rs));
+    }
+
+    fn runsNowViews(vs: View[]) -> View[] {
+        let out: View[] = [];
+        for (const v of vs) { out = out.concat([runsNowView(v)]); }
+        return out;
+    }
+
+    fn runsNowView(v: View) -> View {
+        return match v {
+            .El(tag: t, attrs: a, kids: ks) :> View.El(t, runsNowAttrs(a), runsNowViews(ks)),
+            .Cond(arms: arms) :> View.Cond(runsNowArms(arms)),
+            .Each(src: s, bind: b, key: k, handles: h, row: r) :> View.Each(s, b, k, h, runsNowViews(r)),
+            .Instance(decl: d, attrs: a, slot: sl, alias: al) :> View.Instance(d, a, runsNowViews(sl), al),
+            .Gather(g: g, rows: rows, key: k) :> View.Gather(g, runsNowRows(rows), k),
+            .Request :> v,                 // kept: its first load runs where it stands (see above)
+            .Text :> v,
+            .RawText :> v,
+            .Dyn :> v,
+            .Slot :> v,
+            .Star :> v,
+            .Effect :> v,                  // kept: it can run during the body (see above)
+            .Run :> v,
+            .Init :> v,
+            .ResetOn :> v,
+            .Errors :> v,
+            .Reach :> v
+        };
+    }
+
+    fn runsNowAttrs(as0: Attr[]) -> Attr[] {
+        let out: Attr[] = [];
+        for (const a of as0) {
+            const r: Attr | not = runsNowAttr(a);
+            if (r is given) out = out.concat([r]);
+        }
+        return out;
+    }
+
+    fn runsNowAttr(a: Attr) -> Attr | not {
+        return match a {
+            .On :> not,
+            .Bind(kind: k, read: r, sink: s, write: w) :> Attr.Bind(k, r, s, { stmts: [] }),
+            .Static :> a,
+            .Bound :> a,
+            .Show :> a,
+            .ClassOn :> a,
+            .Gate :> a
+        };
+    }
+
+    fn runsNowArms(arms: CondArm[]) -> CondArm[] {
+        let out: CondArm[] = [];
+        for (const c of arms) { out = out.concat([{ test: c.test, body: runsNowViews(c.body) }]); }
+        return out;
+    }
+
+    fn runsNowRows(rows: GatherRow[]) -> GatherRow[] {
+        let out: GatherRow[] = [];
+        for (const r of rows) { out = out.concat([{ views: runsNowViews(r.views) }]); }
+        return out;
     }
 
     type CellRead:struct = { decl: int, idx: int }

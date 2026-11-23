@@ -77,6 +77,7 @@ ${
             "W-MATCH-RULE-INERT" :> Severity.Warning,
             "W-NULLISH-NEVER-ABSENT" :> Severity.Warning,
             "W-PROGRAM-TITLE-NESTED" :> Severity.Warning,
+            "W-RCDATA-BIND-VALUE-CONTENT-CONFLICT" :> Severity.Warning,
             "W-REQUEST-ID-UNREFERENCEABLE" :> Severity.Warning,
             "W-SCHEMA-001" :> Severity.Warning,
             "W-SCHEMA-NO-TABLES-DECLARED" :> Severity.Warning,
