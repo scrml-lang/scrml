@@ -27091,6 +27091,7 @@ ${
 
     fn mkNode(g: Globals, sa: AS, file: string, n: ANode, c: MkCx) -> MkFault[] {
         const k: ANodeK = n.k;
+        if (c.raw != "") return mkRawNode(g, sa, file, n, c);
         return match k {
             .Elem(e: e) :> mkElem(g, sa, file, e, c),
             .Text(text: t) :> mkText(file, n, t, c),
@@ -27102,6 +27103,57 @@ ${
             .Css(c: x) :> [],
             .Gather(f: lf) :> mkBranch(g, sa, file, rowsOfBlock(lf.body), c)
         };
+    }
+
+    // s482 (g-boot-rcdata-hole-anchor-s482) — a child of an HTML raw-text / RCDATA element (`c.raw`:
+    // `<textarea>`, `<title>`, `<xmp>`, …). The parser reads that content as ONE text node, so the printer
+    // lowers it to one text value — the element's static text and its interpolated values, concatenated
+    // (print.scrml textContentKids) — and never prints a per-child anchor there. So its children are text
+    // and plain `${expr}` interpolations (SPEC §24.5 item 2: "an interpolated value inside one stays
+    // legal"); a declaration renders nothing and is placed after the element (lower.scrml lowerPlaced),
+    // a `#{}` block renders nothing. Every other child is refused, fail closed:
+    //  - an element of any kind (a use, an `<each>`, an `if=` element, `<*x/>`) — mkElem's `c.raw` check;
+    //  - an `<effect>` / `<request>` — written as an element, the same §24.5 refusal;
+    //  - a `${ for … lift }` — its rows are markup or values inserted at an anchor; a text-only one could be
+    //    one more part of the value, but it is not built (INTERIM, E-BOOTSTRAP-UNSUPPORTED).
+    fn mkRawNode(g: Globals, sa: AS, file: string, n: ANode, c: MkCx) -> MkFault[] {
+        const k: ANodeK = n.k;
+        return match k {
+            .Elem(e: e) :> mkElem(g, sa, file, e, c),
+            .Text(text: t) :> mkText(file, n, t, c),
+            .Interp(e: x) :> mkLitText(file, n, x, c),
+            .DeclNode(d: x) :> [],
+            .Css(c: x) :> [],
+            .Run(b: rb0) :> [],
+            .Effect(w: x) :> [{ nid: n.nid, file: file, span: n.span, code: "E-HTML-PARSER-REPAIR", msg: rawTextMsg("effect", c.raw) }],
+            .Request(r: x) :> [{ nid: n.nid, file: file, span: n.span, code: "E-HTML-PARSER-REPAIR", msg: rawTextMsg("request", c.raw) }],
+            .Gather(f: lf) :> [{ nid: n.nid, file: file, span: n.span, code: "E-BOOTSTRAP-UNSUPPORTED", msg: rawGatherMsg(c.raw) }]
+        };
+    }
+
+    // s482 — §34 W-RCDATA-BIND-VALUE-CONTENT-CONFLICT: a `<textarea>` with BOTH `bind:value` and a `${…}`
+    // in its content has two writers of its value; "`bind:value` wins … and the reactive content
+    // interpolation is dropped" (print.scrml textContentKids prints no content writer for a bound
+    // element). One report, at the first interpolation.
+    fn mkBindContent(file: string, e: AElem) -> MkFault[] {
+        if (!hasAttrCI(e.attrs, "bind:value")) return [];
+        for (const n of e.kids) {
+            const k: ANodeK = n.k;
+            const interp: boolean = match k {
+                .Interp(e: x) :> true,
+                // no-default-arm: one question of a child — is it an interpolation
+                _ :> false
+            };
+            if (interp) {
+                return [{ nid: n.nid, file: file, span: n.span, code: "W-RCDATA-BIND-VALUE-CONTENT-CONFLICT",
+                          msg: "`<textarea>` has BOTH `bind:value` and a `${…}` in its content: two writers of its value. `bind:value` (the two-way binding, §5.4) wins and the content is dropped (§34 W-RCDATA-BIND-VALUE-CONTENT-CONFLICT) — keep `bind:value` and remove the content, or remove `bind:value` and keep the content (a one-way value)" }];
+            }
+        }
+        return [];
+    }
+
+    fn rawGatherMsg(raw: string) -> string {
+        return "a `${ for … lift }` inside `<" + raw + ">` is not in the bootstrap: the HTML parser reads the content of `<" + raw + ">` as one text (HTML §13.2.6.4.7), so it is printed as one text value — its static text and its `${expr}` values — and a row can have no place in it (SPEC §24.5). Compute the text in a function and interpolate it: `${ rowsText(@xs) }`";
     }
 
     // fix round 1 of #1945 (MED-2): a branch's literal text (`<A>"text"</>`, an Interp of a string
@@ -27235,6 +27287,7 @@ ${
         // afresh (one report per fault, never a cascade down the subtree)
         let kc: MkCx = c;
         if (out.length > 0) kc = mkRoot(ns, c.depth);
+        if (t == "textarea" && isHtmlInNs(c.ns, t)) out = out.concat(mkBindContent(file, e));
         // s475: `<plaintext>` is one fault — what it holds is its text either way (one report, no cascade)
         if (t == "plaintext" && out.length > 0) return out;
         // s475: an HTML `<template>`'s content is parsed apart, "in template" — a root of its own
