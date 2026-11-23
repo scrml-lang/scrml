@@ -2165,6 +2165,21 @@ ${
     // their text is not markup); `<pre>` / `<code>` are raw content to their
     // closer (§4.17); `<!-- … -->` is a comment.
     export fn markupValueExtentAt(src: string, pos: int) -> int {
+        return markupExtentFrom(src, pos, false);
+    }
+
+    // s482-fu — the same extent for an element written as a `{ … }` attribute value
+    // (§19.6.2, `fallback={<div>…</>}`), which may also end at its terse `/}` closer: a
+    // `/` then `}` in the outermost element's body ends the element at the `}` (the
+    // value's closer, which the caller reads). The parser's markup-value reader uses it
+    // (parse.scrml markupAttrValueEnd), so the value's `}` is found by the element's
+    // structure — a `}` in a quoted attribute value, a `${ … }` slot or the body text
+    // does not end it.
+    export fn markupAttrValueExtentAt(src: string, pos: int) -> int {
+        return markupExtentFrom(src, pos, true);
+    }
+
+    fn markupExtentFrom(src: string, pos: int, terse: boolean) -> int {
         let i: int = pos;
         let depth: int = 0;
         for (; i < src.length; ) {
@@ -2199,6 +2214,8 @@ ${
                 i = ce + 3;
             } else if (c0 == 36 && c1 == 123) {
                 i = lexFrom(src, i + 1, LexStop.Balanced).end;
+            } else if (terse && depth == 1 && c0 == 47 && c1 == 125) {
+                return i + 1;
             } else {
                 i = i + 1;
             }
