@@ -20344,7 +20344,12 @@ tuple value (no-tuple, §59.7 / §14.11). Full grammar + product-exhaustiveness 
   g-impl1-match-miscompiles F12.) *(Status S482: built in the bootstrap — `compiler/self-host-v2`
   `APat.PAlt` / Core `Pattern.PAlt`, s482-match-alternation; each alternate is judged as an arm of its
   own would be, exhaustiveness is over their union, and an alternate naming a case an earlier arm or
-  alternate takes is E-TYPE-023. `.Ok` as an alternate on a failable result is refused there by name,
+  alternate takes is E-TYPE-023 — the named alternates of a wildcard alternation included
+  (`.B :> …, .B | _ :> …`). In a `match` on a failable result a wildcard alternation
+  (`.Denied | else :> …`) is the `else` for `.Ok` (§18.6) and the arm that names each error variant
+  it lists, which run its body; an error variant no arm names is still E-MATCH-ELSE-ABSORBS-ERROR
+  (§19.7.3: "the error variants SHALL be covered by arms that name them"), s482-alt-followups.
+  `.Ok` as an alternate on a failable result is refused there by name,
   INTERIM — g-boot-match-alt-ok-alternate-s482.)*
 - **A bare name is not an arm pattern.** An arm whose WHOLE pattern is a bare identifier —
   `err :> …` in a `match` or a `!{}` handler (§19.4.3; in a `!{}`, also its soft-deprecated
