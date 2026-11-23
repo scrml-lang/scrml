@@ -851,7 +851,8 @@ ${
         return match p {
             .PLit(lit: l) :> litBool(l),
             .PVariant :> -1,
-            .PWild :> -1
+            .PWild :> -1,
+            .PAlt :> -1
         };
     }
 
@@ -902,8 +903,22 @@ ${
         return match p {
             .PVariant(enumSym: es, idx: idx) :> variantTest(ctx, es, idx, on),
             .PLit(lit: l) :> litTest(ctx, l, on),
-            .PWild :> JsExpr.JBool(true)
+            .PWild :> JsExpr.JBool(true),
+            .PAlt(pats: ps) :> altTest(ctx, ps, on)
         };
+    }
+
+    // s482 (s482-match-alternation) — an alternation arm (§18.2 `.A | .B :> r`): one test
+    // per alternate, in written order, joined by `||` (`m$ === "A" || m$ === "B"`).
+    fn altTest(ctx: Ctx, ps: Pattern[], on: JsExpr) -> JsExpr {
+        if (ps.length == 0) return JsExpr.JBool(false);
+        let t: JsExpr = patTest(ctx, ps[0], on);
+        let i: int = 1;
+        for (; i < ps.length; ) {
+            t = JsExpr.JBin(JsOp.Or, t, patTest(ctx, ps[i], on));
+            i = i + 1;
+        }
+        return t;
     }
 
     // s469 (review HIGH-1) — the ABSENCE pattern tests `== null`, as `is not`
@@ -942,7 +957,8 @@ ${
         return match p {
             .PVariant(enumSym: es, idx: idx, binds: binds) :> variantBinds(ctx, es, idx, binds, on),
             .PLit :> [],
-            .PWild :> []
+            .PWild :> [],
+            .PAlt :> []
         };
     }
 
@@ -2521,7 +2537,8 @@ ${
         return match p {
             .PWild :> true,
             .PVariant :> false,
-            .PLit :> false
+            .PLit :> false,
+            .PAlt :> false
         };
     }
 

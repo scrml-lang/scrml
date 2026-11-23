@@ -1,0 +1,15 @@
+// §18.2 — the alternates of one arm SHALL NOT carry payload patterns: a binding in an alternate is E-MATCH-ALT-BINDING.
+<program>
+    type Shape:enum = { Circle(r: int), Square(r: int), Dot }
+
+    function size(s: Shape) -> int {
+        return match s {
+            .Circle(r) | .Square(r) :> r,
+            .Dot :> 0,
+        };
+    }
+
+    <main>
+        <p>${size(Shape.Dot)}</p>
+    </main>
+</program>

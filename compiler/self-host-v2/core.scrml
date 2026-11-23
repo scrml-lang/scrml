@@ -258,6 +258,11 @@ ${
         PVariant(enumSym: Sym, idx: int, binds: Sym[]),
         PLit(lit: Literal),
         PWild,
+        // s482 (s482-match-alternation) — an alternation arm (SPEC §18.2 `.A | .B :> r`):
+        // matches when any of `pats` does, tested in order. Each is a PVariant binding
+        // nothing (an alternate binds no payload — E-MATCH-ALT-BINDING) or a PLit; never a
+        // PWild (an alternation with a wildcard alternate is the wildcard arm) nor a PAlt.
+        PAlt(pats: Pattern[]),
     }
 
     // s444 — the host calls Core admits (a CLOSED set; see progress.md

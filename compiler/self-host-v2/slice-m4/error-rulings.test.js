@@ -603,12 +603,14 @@ describe("S452 ruling c — `!{}` arms take the `match` arm grammar; the leading
     expect(wMsgs(src)).toEqual([]);
   });
 
-  test("r2: no lint for a `|`-led unsupported alternation (`| .A | .B :>`) — no suggestion that drops `.B`", () => {
+  // s482 (s482-match-alternation): alternation is built; this one binds a payload in an alternate,
+  // so its one report is E-MATCH-ALT-BINDING (§18.2) — was E-PARSE-ARM "not yet supported"
+  test("r2: no lint for a `|`-led alternation that drew an error (`| .A(m) | .B :>`) — no suggestion that drops `.B`", () => {
     const piped = fnH(`            | .NotFound(m) | .Timeout :> @n = 1,\n            | _ :> @n = 2`);
     const plain = fnH(`            .NotFound(m) | .Timeout :> @n = 1,\n            _ :> @n = 2`);
-    expect(codes(plain)).toEqual(["E-PARSE-ARM"]);
-    // only the well-formed `| _ :>` arm lints; the alternation keeps its one E-PARSE-ARM
-    expect(codes(piped)).toEqual(["E-PARSE-ARM", "W-ARM-PIPE-LEGACY"]);
+    expect(codes(plain)).toEqual(["E-MATCH-ALT-BINDING"]);
+    // only the well-formed `| _ :>` arm lints; the alternation keeps its one E-MATCH-ALT-BINDING
+    expect(codes(piped)).toEqual(["E-MATCH-ALT-BINDING", "W-ARM-PIPE-LEGACY"]);
     expect(wMsgs(piped)).toEqual([`Arm '| _ :>' uses the deprecated leading '|'. A pattern arm is a match arm (§18.2): write '_ :>'. Run 'scrml fix' to rewrite every site (§19.4.5).`]);
   });
 });
@@ -734,10 +736,12 @@ describe("fix round r3 — fail-closed tx scan, every-path yield, no echoed conn
     }
   });
 
-  test("r3 LOW-D: `.A | .B :>` alternation is named as not yet supported (E-PARSE-ARM)", () => {
+  // s482 (s482-match-alternation): alternation is built — this head binds a payload in an
+  // alternate, which §18.2 makes E-MATCH-ALT-BINDING (it was E-PARSE-ARM "not yet supported")
+  test("r3 LOW-D: `.NotFound(m) | .Timeout :>` — an alternate binding a payload is E-MATCH-ALT-BINDING (§18.2)", () => {
     const src = go(`    function go() {\n        load("x") !{\n            .NotFound(m) | .Timeout :> @n = 1\n        }\n    }`);
-    expect(codes(src)).toContain("E-PARSE-ARM");
-    expect(msg(src, "E-PARSE-ARM")).toContain("alternation `|` between patterns");
+    expect(codes(src)).toContain("E-MATCH-ALT-BINDING");
+    expect(codes(src)).not.toContain("E-PARSE-ARM");
     expect(codes(src)).not.toContain("E-PARSE-EXPR");   // r4: no follow-on parse error
   });
 });

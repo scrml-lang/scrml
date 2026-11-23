@@ -1172,16 +1172,18 @@ ${
         let covered: int[] = [];
         let wild = false;
         for (const a of arms) {
-            const pr: ArmPat = armPat(a.pat);
-            if (a.whole is given && !pr.wild) out = out.concat(["C-E2: an Attempt arm binds the whole error but is not the wildcard (§18.6.1: `_ err`)"]);
-            if (pr.wild) {
-                wild = true;
-            } else if (pr.enumId != err.id || pr.idx < 0 || pr.idx >= vs.length) {
-                out = out.concat(["C-E2: an Attempt arm matches something other than a variant of `" + err.hint + "`"]);
-            } else {
-                // binds: none (the arm reads no payload), or one per payload field
-                if (pr.binds != 0 && pr.binds != vs[pr.idx].fields.length) out = out.concat(["C-E2: an Attempt arm binds " + pr.binds + " value(s) of a variant with " + vs[pr.idx].fields.length + " payload field(s)"]);
-                covered = covered.concat([pr.idx]);
+            // s482: an alternation arm (Pattern.PAlt, §18.2) is checked alternate by alternate
+            for (const pr of armPats(a.pat)) {
+                if (a.whole is given && !pr.wild) out = out.concat(["C-E2: an Attempt arm binds the whole error but is not the wildcard (§18.6.1: `_ err`)"]);
+                if (pr.wild) {
+                    wild = true;
+                } else if (pr.enumId != err.id || pr.idx < 0 || pr.idx >= vs.length) {
+                    out = out.concat(["C-E2: an Attempt arm matches something other than a variant of `" + err.hint + "`"]);
+                } else {
+                    // binds: none (the arm reads no payload), or one per payload field
+                    if (pr.binds != 0 && pr.binds != vs[pr.idx].fields.length) out = out.concat(["C-E2: an Attempt arm binds " + pr.binds + " value(s) of a variant with " + vs[pr.idx].fields.length + " payload field(s)"]);
+                    covered = covered.concat([pr.idx]);
+                }
             }
         }
         if (!wild) {
@@ -1338,8 +1340,33 @@ ${
         return match pat {
             .PWild :> { wild: true, enumId: -1, idx: -1, binds: 0 },
             .PVariant(enumSym: es, idx: i, binds: bs) :> { wild: false, enumId: es.id, idx: i, binds: bs.length },
-            .PLit(lit: x) :> { wild: false, enumId: -1, idx: -1, binds: 0 }
+            .PLit(lit: x) :> { wild: false, enumId: -1, idx: -1, binds: 0 },
+            // a PAlt is read through armPats; one nested in another is malformed (no variant)
+            .PAlt(pats: ps) :> { wild: false, enumId: -1, idx: -1, binds: 0 }
         };
+    }
+
+    // s482 — an arm's patterns: an alternation's alternates, else the pattern itself. An
+    // alternate that binds is malformed here (it reads as a wrong arity): an alternate
+    // binds nothing (§18.2, E-MATCH-ALT-BINDING).
+    fn armPats(pat: Pattern) -> ArmPat[] {
+        const ps: Pattern[] | not = match pat {
+            .PAlt(pats: xs) :> xs,
+            .PWild :> not,
+            .PVariant(enumSym: es) :> not,
+            .PLit(lit: x) :> not
+        };
+        if (ps is not) return [armPat(pat)];
+        let out: ArmPat[] = [];
+        for (const p of ps) {
+            const one: ArmPat = armPat(p);
+            if (one.binds > 0) {
+                out = out.concat([{ wild: false, enumId: -1, idx: -1, binds: one.binds }]);
+            } else {
+                out = out.concat([one]);
+            }
+        }
+        return out;
     }
 
     // =========================================================================
