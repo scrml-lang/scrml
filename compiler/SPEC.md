@@ -39719,7 +39719,7 @@ parentheses):
 A head with one top-level `;`, or more than two, is not a `for-head` and is a syntax error. `for ()` is a syntax
 error. A `for (… in …)` head is `E-CTRL-011` (§17.4).
 
-*(S482.)* `of` is a keyword only in rule 3's position, after a `for-binder`. Elsewhere it MAY be a binding name (`let of = …`, a parameter, a pattern binder, `for (const of of xs)`), as §7.2 admits every JavaScript name and no sentence reserves `of`. **Provenance:** spec:§49.2.4 rule 3 ("the contextual keyword `of`"); lane s482-selfhost-parse-residue under ruling:user-voice-scrml.md-S482-as-slash-lin-name (the `as` / `from` / `lin` class). **Direction of change: newly-accepting.** A touching `of.x` / `of/2` is not yet decided — g-boot-of-name-member-read-s482.
+*(S482.)* `of` is a keyword only in rule 3's position, after a `for-binder`. Elsewhere it MAY be a binding name (`let of = …`, a parameter, a pattern binder, `for (const of of xs)`), as §7.2 admits every JavaScript name and no sentence reserves `of`. **Provenance:** spec:§49.2.4 rule 3 ("the contextual keyword `of`") and §7.2; a PA lane decision, prov=pa-ruled — the s482-selfhost-parse-residue lane brief (*"admit as a binding name unless SPEC says otherwise; report"*). No owner ruling covers `of`: ruling:user-voice-scrml.md-S482-as-slash-lin-name rules `/` after `as` and `lin` as a binding name, not `of` *(provenance corrected S482, #2066 review LOW-1)*. **Direction of change: newly-accepting.** A touching `of.x` / `of/2` is not yet decided — the open owner question g-boot-of-name-member-read-s482.
 
 ### 49.2.5 The range form — `a..b` and `a..=b`
 
