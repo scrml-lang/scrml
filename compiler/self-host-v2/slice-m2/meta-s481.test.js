@@ -770,6 +770,46 @@ describe("s482 r6 — MED-1: a list read as a number or as text is JavaScript's 
   });
 });
 
+// s482-small-followups — g-boot-meta-literal-index-key-s482 (MED) and g-boot-meta-proto-member-s482 (LOW),
+// from the #2045 r6 report. A key that is not a number is JavaScript's PROPERTY KEY (its text): the canonical
+// text of an index is that index, "length" the length; any other text names a property the evaluator does
+// not model — refused by name. Before: `[1,2,3][" 1"]` gave 2, `["-0"]` 1, `"abc"["01"]` "b" (JavaScript:
+// undefined) and `[1,2,3]["length"]` undefined (JavaScript: 3); a record's `.constructor` /
+// `.hasOwnProperty` gave undefined where JavaScript gives the inherited function.
+describe("s482 — a literal index key is JavaScript's property key; inherited members are refused", () => {
+  // each value is bun's for the same JavaScript expression
+  const cases = [
+    [`[1, 2, 3]["1"]`, 2], [`"abc"["2"]`, "c"], [`[1, 2, 3]["length"]`, 3], [`"abc"["length"]`, 3],
+    [`[1, 2, 3]["3"]`, undefined], [`[1, 2, 3]["Infinity"]`, undefined], [`[1, 2, 3][1]`, 2], [`[1, 2, 3][1.5]`, undefined],
+    [`"abc"[1]`, "b"],
+    [`({ hasOwnProperty: 5 }).hasOwnProperty`, 5], [`({ a: 1 }).zzz`, undefined], [`({ a: 1 })["a"]`, 1],
+  ];
+  test("an index's canonical text indexes, `length` is the length (as in JavaScript)", () => {
+    const body = cases.map(([e], i) => `emit("<p>${i}:" + (${e}) + "</p>");`).join(" ");
+    const out = html(D(body));
+    for (let i = 0; i < cases.length; i++) expect(out).toContain(`<p>${i}:${String(cases[i][1])}</p>`);
+  }, 60000);
+  test("any other key of a list or a string is refused by name", () => {
+    for (const e of [`[1, 2, 3][" 1"]`, `[1, 2, 3]["-0"]`, `"abc"["01"]`, `[1, 2, 3]["1.0"]`, `[1, 2, 3]["map"]`, `"abc"["slice"]`]) {
+      expect(evalErr(D(`emit("<p>" + (${e}) + "</p>");`))).toContain("a key that is not an index's canonical text");
+    }
+  }, 60000);
+  test("a member every JavaScript object inherits is refused by name on a record, a list and a string", () => {
+    for (const e of [`({ a: 1 }).hasOwnProperty`, `({ a: 1 })["hasOwnProperty"]`, `({ a: 1 }).isPrototypeOf`, `({ a: 1 }).valueOf`, `({ a: 1 }).toString`, `[1].valueOf`, `"a".toString`]) {
+      expect(evalErr(D(`emit("<p>" + (${e}) + "</p>");`))).toContain("inherits that member from `Object.prototype`");
+    }
+    // a built-in method READ without a call is the function in JavaScript: refused by name; the call is unchanged
+    for (const e of [`[1].map`, `"a".slice`, `[1, 2].join`, `"a".trim`]) {
+      expect(evalErr(D(`emit("<p>" + (${e}) + "</p>");`))).toContain("without calling it");
+    }
+    expect(html(D(`emit("<p>" + [1, 2].map((x) => x * 2).join("-") + "|" + "abc".slice(1) + "</p>");`))).toContain("<p>2-4|bc</p>");
+    // `constructor` / `__proto__` / `__defineGetter__` are refused before evaluation (§22.12, E-META-001), unchanged
+    for (const e of [`({ a: 1 }).constructor`, `({ a: 1 })["constructor"]`, `({ a: 1 }).__proto__`]) {
+      expect(errs(run(D(`emit("<p>" + (${e}) + "</p>");`)))).toEqual(["E-META-001"]);
+    }
+  }, 60000);
+});
+
 describe("s482 r5 — LOW-1: a `const` arrow with annotated parameters is a typed position (§14.10)", () => {
   const T = (body) => P(`    type C:enum = { A, B }\n    type D:enum = { A, Zzz }\n<div id="m">^{ ${body} }</div>`);
   test("a call's bare variant the parameter's enum does not declare is E-TYPE-063", () => {
