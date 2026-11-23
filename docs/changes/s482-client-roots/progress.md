@@ -15,3 +15,4 @@ Branch `s482-client-roots` from origin/main 3e539ae73 (contains #2053).
 - Corpus (2968 files, base vs head): newly rejected 0, codes 0, html 0, server 0; 20 client.js diffs, every one a removed unreached function (+ its header/blank), no dangling reference.
 - Conformance base vs head: identical verdicts (PASS 778, FAIL 3, CRASH 0).
 - known-gaps: both records marked resolved-by=s482-client-roots.
+- SPEC §7.6 S481 r1 provenance: the 'Residue' sentence marked resolved (one sentence). CI gates PASS (s34-census, types-gate, snippet-gate, claim-gate, gen-md-shim, corpus-compile-floor, e2e-render-map). Chromium: probes + test programs load/click with no page error.
