@@ -265,3 +265,54 @@ describe("a `<*x/>` view's state bodies before the initializer (Chromium, #2082 
     expect(await load(out, ["o"])).toEqual({ errors: [], texts: ["5"] });
   }, 120000);
 });
+
+// #2082 r2 review HIGH-3 / HIGH-4 — mounting `<*phase/>` reads the viewed field (its seed runs there),
+// and a `<request>` that does not provably write runs at the mount (§6.7.7.3): code before the
+// initializer, in both. Head r2 compiled s01a and r02 in a construct and Chromium showed k = 1; each is
+// refused now (s482 r3). The controls (no construct) show the source-order value, 5.
+describe("a `<*x/>` field seed and a `<request>` before the initializer (Chromium, #2082 r2 HIGH-3, HIGH-4)", () => {
+  const PRE = `\${ let n: int = 1; }
+\${ function bumps() -> string { n = 5; return "s"; } }
+<program>
+`;
+  const S01A = (where) => PRE + `    type Phase:enum = { Idle, Loading }
+    \${ function pickp() -> Phase { n = 5; return .Idle; } }
+${where}
+    let <phase:Phase=(pickp())>
+        <Idle rule=.Loading>
+            <b>I</b>
+        </>
+        <Loading rule=.Idle : "Loading">
+    </>
+</program>
+`;
+  const R02 = (where) => PRE + `    let <r:string=""/>
+${where}
+    let <s:string=(bumps())/>
+</program>
+`;
+  test("s01a construct, `<*phase/>` whose seed writes: refused (head r2: Chromium k = 1)", () => {
+    const r = refused(S01A(`    <div if=(true)><span><*phase/></span>\${ const k: int = n + 0; }<p id="o">\${k}</p></div>`));
+    expect(r.exit).not.toBe(0);
+    expect(r.codes).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+  }, 120000);
+
+  test("s01a control (no construct): k = 5, source order", async () => {
+    if (skip()) return;
+    const out = build(S01A(`    <span><*phase/></span>\${ const k: int = n + 0; }<p id="o">\${k}</p>`));
+    expect(await load(out, ["o"])).toEqual({ errors: [], texts: ["5"] });
+  }, 120000);
+
+  test("r02 construct, `<request>` body reads a later cell: refused (head r2: Chromium k = 1)", () => {
+    const r = refused(R02(`    <div if=(true)><request id="rq" deps=[]>\${ @r = @s; }</>\${ const k: int = n + 0; }<p id="o">\${k}</p></div>`));
+    expect(r.exit).not.toBe(0);
+    // the `refused` scan also matches the tail of W-LIFECYCLE-011 (`@r` is never read) as "E-011"
+    expect(r.codes.filter((c) => c !== "E-011")).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+  }, 120000);
+
+  test("r02 control (no construct): the request runs at the mount, k = 5, source order", async () => {
+    if (skip()) return;
+    const out = build(R02(`    <request id="rq" deps=[]>\${ @r = @s; }</>\${ const k: int = n + 0; }<p id="o">\${k}</p>`));
+    expect(await load(out, ["o"])).toEqual({ errors: [], texts: ["5"] });
+  }, 120000);
+});

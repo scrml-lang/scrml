@@ -11583,7 +11583,7 @@ ${
         // called (§6.7.4 rule 3) — not on the initializer rule's direct-call `usesD`. s482 r2
         // (#2053 r1 review MED-A): ~~on `uses`~~ on `usesR` — a nested function declaration a
         // reached function never calls nor uses as a value adds nothing
-        out = out.concat(constructReadDiags(g, t, sum, writes, sites, lets, usesR));
+        out = out.concat(constructReadDiags(g, t, sum, writes, sites, lets));
         return out.concat(bodyReachDiags(g, t, sum, usesR, binds));
     }
 
@@ -11611,7 +11611,7 @@ ${
     // construct (a later one is E-SCOPE-001; one in the same construct is judged here itself).
     // Direction: newly-accepting against #2076 (corpus: 0 either way); prov=pa-ruled.
     // =========================================================================
-    fn constructReadDiags(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[], usesR: FxAtom[][]) -> Diag[] {
+    fn constructReadDiags(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[]) -> Diag[] {
         let out: Diag[] = [];
         const pfields: FieldInfo[] = programCells(g);
         for (const f of g.files) {
@@ -11672,7 +11672,7 @@ ${
                         const where: string = constructAt(t, tops, ci.span.start);
                         if ((where != "" || host != "") && initActWhat(c.init) == "") {
                             const lo: int = constructStart(t, tops, ci.span.start);
-                            const bw: BodyW = constructWrites(g, t, sum, writes, sites, lets, usesR, f.path, ps, pfields, lo, ci.span.start);
+                            const bw: BodyW = constructWrites(g, t, sum, writes, sites, lets, f.path, ps, pfields, lo, ci.span.start);
                             const r: string = initReadWritten(t, [c.init], bw, g.program.id, pfields, cells, lo, []);
                             if (r != "") {
                                 let kw: string = "const";
@@ -11759,8 +11759,8 @@ ${
     }
 
     // s482 (lane s482-place-fu) — whether code runs between `lo` and `hi` in the body's markup:
-    // an attribute value or a display there (not an event handler, an `<effect>`, a `<request>`),
-    // or a component used there.
+    // an attribute value or a display there (not an event handler or an `<effect>`; s482 r3: a
+    // `<request>` is), or a component used there (a `<*x/>` of a shared instance included).
     fn regionHasCode(t: Tables, items: AItem[], lo: int, hi: int) -> boolean {
         if (lo < 0) return true;
         for (const it of items) {
@@ -11843,26 +11843,26 @@ ${
 
     // What the code that runs between `lo` (constructStart) and `hi` (the initializer's position)
     // writes: the attribute values and content of the nodes there (not an event handler, an
-    // `<effect>`, a `<request>`), the file-scope initializers there, and — run where they are used —
-    // the code of each component used there (its renders and its cells' seeds, transitively); and
-    // ~~the seeds of the program cells whose place is at or after `lo` (one read there runs then)~~
-    // s482 (lane s482-place-fu, #2079 review LOW-1) the seed of a program cell whose place is
-    // between `lo` and `hi` (it runs there), or whose place is later but which that code uses — a
-    // read or a write, directly or through a function it calls, at any depth (usesR), or through
-    // another such seed: the use runs the seed there, before the initializer (§7.6 rule (b) S482,
-    // "a read of a seed before its place computes it then"). A cell declared after the construct
-    // that nothing there uses (`let <z:int=(bump())/>` after it) runs its seed after the
-    // initializer: it is not counted (it was, with no upper bound, and refused with a message
-    // that put the write inside the construct).
-    // s482 r2 (#2082 r1 review HIGH-2, MED-1): the walk is default-deny (regionScan) — the state-child
-    // bodies a `<*field/>` there renders are walked like a component's renders, and anything there the
-    // walk does not positively understand falls back to base's rule: every seed placed at or after `lo`.
+    // `<effect>`; s482 r3: a `<request>` IS — §6.7.7.3, it runs at the mount), the file-scope
+    // initializers there, and — run where they are used — the code of each component used there
+    // (its renders and its cells' seeds, transitively; s482 r3, #2082 r2 review MED-2: a `<*x/>`
+    // of a declaration's shared instance too — the mount runs that instance's seeds); and the
+    // seeds of the program cells whose place is at or after `lo` (one read there runs then).
+    // ~~s482 (lane s482-place-fu, #2079 review LOW-1) the seed of a program cell whose place is
+    // between `lo` and `hi`, or whose place is later but which that code uses~~ *(struck s482 r3,
+    // pa-ruled: three review rounds each found a seed the bounded `used` set missed — #2082 HIGH-1,
+    // r2 HIGH-3, MED-2 — so every seed placed at or after `lo` counts again, as on base; the
+    // after-construct `let <z=(bump())/>` is refused again: INTERIM, gap
+    // g-boot-construct-seed-bound-s482.)* s482 r2 (#2082 r1 review HIGH-2, MED-1): the walk is
+    // default-deny (regionScan) — the state-child bodies a `<*field/>` there renders are walked like
+    // a component's renders (the viewed field's own seed is a program cell's: counted below when
+    // its place is at or after `lo`), and anything there the walk does not positively understand
+    // fails closed (s482 r3): every write of the program body counts (bodyWritesOf, #2076).
     // `lo` < 0: all of the program body's code (bodyWritesOf, #2076).
-    fn constructWrites(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[], usesR: FxAtom[][], file: string, items: AItem[], pfields: FieldInfo[], lo: int, hi: int) -> BodyW {
+    fn constructWrites(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[], file: string, items: AItem[], pfields: FieldInfo[], lo: int, hi: int) -> BodyW {
         if (lo < 0) return bodyWritesOf(g, t, sum, writes, sites, lets, file, items, pfields);
         let blocks: ABlock[] = [];
         let uses: int[] = [];
-        let binds: int[] = [];
         let views: ViewW[] = [];
         let opaque: boolean = false;
         for (const it of items) {
@@ -11881,20 +11881,19 @@ ${
             if (n is given) {
                 blocks = blocks.concat(regionBlocks(n, lo, hi));
                 uses = unionIds(uses, regionUses(t, n, lo, hi));
-                binds = unionIds(binds, regionBindCells(t, g.program, pfields, n, lo, hi));
                 const sc: RegionScan = regionScan(t, n, lo, hi);
                 views = views.concat(placeViews(g, sc.views, file));
                 if (sc.opaque) opaque = true;
             }
         }
-        // the cells the code there uses (with the components' code, below) — a `bind:` there
-        // included: mounting the element reads its cell (#2082 review HIGH-1) — then the seeds they run
-        let used: int[] = unionIds(blocksCells(t, sum, usesR, file, blocks, g.program.id, pfields), binds);
+        // every program cell's seed placed at or after `lo` (base's rule — fail closed)
+        for (const fi of pfields) {
+            if (fi.span.start >= lo) blocks = blocks.concat(seedBlocks(fi.init));
+        }
         let bw: BodyW = blocksWrites(g, t, sum, writes, sites, lets, file, blocks, pfields);
         // s482 r2 (#2082 r1 review HIGH-2, MED-1) — the markup a `<*x/>` there renders (regionScan)
-        const va: ViewAcc = viewsWrites(g, t, sum, writes, sites, lets, usesR, pfields, views);
+        const va: ViewAcc = viewsWrites(g, t, sum, writes, sites, lets, pfields, views);
         bw = mergeBodyW(bw, va.bw);
-        used = unionIds(used, va.used);
         if (va.opaque) opaque = true;
         // the components used there, and those they use, each once
         let seen: int[] = [];
@@ -11914,58 +11913,24 @@ ${
                                 const rn: ANode = { nid: -1, span: r.span, k: ANodeK.Elem(r) };
                                 cb = cb.concat(bodyCodeBlocks(rn));
                                 next = unionIds(next, regionUses(t, rn, -1, 2147483647));
-                                used = unionIds(used, regionBindCells(t, g.program, pfields, rn, -1, 2147483647));
                                 const rs: RegionScan = regionScan(t, rn, -1, 2147483647);
                                 if (rs.opaque) opaque = true;
-                                const rv: ViewAcc = viewsWrites(g, t, sum, writes, sites, lets, usesR, pfields, placeViews(g, rs.views, ds.file));
+                                const rv: ViewAcc = viewsWrites(g, t, sum, writes, sites, lets, pfields, placeViews(g, rs.views, ds.file));
                                 bw = mergeBodyW(bw, rv.bw);
-                                used = unionIds(used, rv.used);
                                 next = unionIds(next, rv.uses);
                                 if (rv.opaque) opaque = true;
                             }
                             bw = mergeBodyW(bw, blocksWrites(g, t, sum, writes, sites, lets, ds.file, cb, pfields));
-                            used = unionIds(used, blocksCells(t, sum, usesR, ds.file, cb, g.program.id, pfields));
                         }
                     }
                 }
             }
             todo = next;
         }
-        // s482 (lane s482-place-fu) — the program cells' seeds that run between `lo` and `hi`: one
-        // whose place is there, or a later one used there; a seed run adds the cells it uses
-        let ran: int[] = [];
-        let grew: boolean = true;
-        for (; grew; ) {
-            grew = false;
-            for (const fi of pfields) {
-                const at: int = fi.span.start;
-                // default-deny: with something opaque there, every seed placed at or after `lo` (base)
-                if (ran.indexOf(fi.sym.id) < 0 && at >= lo && (at < hi || opaque || used.indexOf(fi.sym.id) >= 0)) {
-                    ran = ran.concat([fi.sym.id]);
-                    grew = true;
-                    const sb: ABlock[] = seedBlocks(fi.init);
-                    bw = mergeBodyW(bw, blocksWrites(g, t, sum, writes, sites, lets, file, sb, pfields));
-                    used = unionIds(used, blocksCells(t, sum, usesR, file, sb, g.program.id, pfields));
-                }
-            }
-        }
+        // default-deny: something there the walk does not positively understand — every write of
+        // the program body counts (#2076's rule)
+        if (opaque) bw = mergeBodyW(bw, bodyWritesOf(g, t, sum, writes, sites, lets, file, items, pfields));
         return bw;
-    }
-
-    // s482 (lane s482-place-fu) — the program cells (Sym ids) code uses, a read or a write: in the
-    // code itself, and through each function it names, at any depth (usesR, the "c:" atoms).
-    fn blocksCells(t: Tables, sum: Summary, usesR: FxAtom[][], file: string, blocks: ABlock[], prog: int, pfields: FieldInfo[]) -> int[] {
-        let out: int[] = [];
-        const six: SymIx = nodeSymIx(sum.nodes);
-        for (const b of blocks) {
-            out = unionIds(out, cellUsesDirect(t, b, prog, pfields, []));
-            for (const j of refTargets(sum.nodes, six, scanBlock({ t: t, file: file }, b, emptyScan()).refs, false)) {
-                for (const a of usesR[j]) {
-                    if (a.key.indexOf("c:") == 0) out = unionIds(out, [atomBinding(a.key)]);
-                }
-            }
-        }
-        return out;
     }
 
     fn unionIds(a: int[], b: int[]) -> int[] {
@@ -12028,33 +11993,6 @@ ${
         return out;
     }
 
-    // s482 r1 (#2082 review HIGH-1) — the program cells (Sym ids) named by a `bind:` on an element
-    // that starts between `lo` and `hi` in `n` (bindCellOf, as the seed-reach judgment reads one).
-    fn regionBindCells(t: Tables, prog: Sym, pfields: FieldInfo[], n: ANode, lo: int, hi: int) -> int[] {
-        if (n.span.end <= lo || n.span.start >= hi) return [];
-        const k: ANodeK = n.k;
-        let out: int[] = [];
-        const e: AElem | not = elemOfNodeK(k);
-        if (e is given) {
-            if (e.span.start >= lo) {
-                for (const a of e.attrs) {
-                    const c: int = bindCellOf(t, prog, pfields, a);
-                    if (c >= 0) out = unionIds(out, [c]);
-                }
-            }
-            for (const kid of e.kids) { out = unionIds(out, regionBindCells(t, prog, pfields, kid, lo, hi)); }
-        }
-        const gf: AFor | not = match k {
-            .Gather(f: x) :> x,
-            // no-default-arm: only an element or a gather holds nodes
-            _ :> not
-        };
-        if (gf is given) {
-            for (const r of gatherRows(gf)) { out = unionIds(out, regionBindCells(t, prog, pfields, r, lo, hi)); }
-        }
-        return out;
-    }
-
     // The declarations (Sym ids) of the component uses that start between `lo` and `hi` in `n`.
     fn regionUses(t: Tables, n: ANode, lo: int, hi: int) -> int[] {
         if (n.span.end <= lo || n.span.start >= hi) return [];
@@ -12066,6 +12004,9 @@ ${
                 const fct: ElemFact | not = elemFact(t.elems, e.nid);
                 const d: int = match fct {
                     .MUse(decl: d) :> d.id,
+                    // s482 r3 (#2082 r2 review MED-2) — `<*x/>` of a declaration's shared instance:
+                    // its mount runs that instance's seeds and its renders, as a use does
+                    .MStar(decl: d) :> d.id,
                     // no-default-arm: only a use runs a component's code
                     _ :> -1
                 };
@@ -12084,22 +12025,27 @@ ${
         return out;
     }
 
-    // s482 r2 (#2082 r1 review HIGH-2, MED-1) — the bounded walk is DEFAULT-DENY. regionBlocks /
-    // regionUses / regionBindCells read the code an element runs at mount from its attributes and
-    // its kids; that is the whole story only for the node kinds listed here. regionScan names, for
-    // the part of `n` between `lo` and `hi`, (a) the markup a `<*x/>` there renders that is NOT its
-    // kids — every state-child body of a `rule=` graph field (MStateView, all states: any may be the
-    // one held at mount), the inlined renders of a child field (MInline) — which the caller walks as
-    // it walks a component's renders; and (b) `opaque`: something there the walk does not
-    // positively understand, on which the caller falls back to base's rule (every seed placed at or
-    // after `lo` runs there). Understood, by ANodeK: Text, Interp, Run, Css (no hidden code);
-    // Effect, Request (they do not run at mount); Gather (its rows); Elem — by its ElemFact: MHtml,
-    // MUse (its renders: constructWrites' component loop; its slot content: its kids), MEach (its
-    // `in=` / `key=` values, its row template: its kids), MSlot, MDb, MSchema (kids), MMatch (its
-    // `on=` value; every arm's body), MStateView / MInline (the views above). Opaque: DeclNode (a
-    // declaration where markup stands), MStar (a declaration's shared instance — when its seeds
-    // run is not judged here), MErrors, an element with no fact, and an attribute whose value is
-    // code the walk does not read (a `{ }` block that is not an event handler, a quoted value or a
+    // s482 r2 (#2082 r1 review HIGH-2, MED-1) — the walk of the WRITES is DEFAULT-DENY. regionBlocks /
+    // regionUses read the code an element runs at mount from its attributes and its kids; that is
+    // the whole story only for the node kinds listed here. regionScan names, for the part of `n`
+    // between `lo` and `hi`, (a) the markup a `<*x/>` there renders that is NOT its kids — every
+    // state-child body of a `rule=` graph field (MStateView, all states: any may be the one held at
+    // mount), the inlined renders of a child field (MInline) — which the caller walks as it walks a
+    // component's renders; and (b) `opaque`: something there the walk does not positively
+    // understand, on which the caller fails closed (s482 r3: every write of the program body,
+    // bodyWritesOf). Understood, by ANodeK: Text, Interp, Run (code: bodyCodeBlocks); Css (a `#{}`
+    // bridge read is no code — it runs the bridge's seed, which is a program cell's and counted
+    // as one; its values are not evaluated as code); Effect (it does not run at mount); Request
+    // (s482 r3: it runs at mount — its body and attribute values are code, bodyCodeBlocks; it holds
+    // no markup); Gather (its rows); Elem — by its ElemFact: MHtml, MUse (its renders:
+    // constructWrites' component loop; its slot content: its kids), MStar (s482 r3, #2082 r2
+    // review MED-2: a declaration's shared instance — regionUses gives it to the component loop,
+    // which counts its seeds and its renders), MEach (its `in=` / `key=` values, its row template:
+    // its kids), MSlot, MDb, MSchema (kids), MMatch (its `on=` value; every arm's body), MStateView
+    // / MInline (the views above; a state view's field is a program cell, or a field of the
+    // instance a use constructs — its seed counted with those). Opaque: DeclNode (a declaration
+    // where markup stands), MErrors, an element with no fact, and an attribute whose value is code
+    // the walk does not read (a `{ }` block that is not an event handler, a quoted value or a
     // duration holding an interpolation).
     type ViewW:struct = { nodes: ANode[], decl: int, key: int, file: string }
     type RegionScan:struct = { views: ViewW[], opaque: boolean }
@@ -12127,6 +12073,7 @@ ${
             .Run(b: rb) :> noScan(),
             .Css(c: x) :> noScan(),
             .Effect(w: x) :> noScan(),
+            // s482 r3 — its body and attribute values are code (bodyCodeBlocks); it holds no markup
             .Request(r: x) :> noScan(),
             .DeclNode(d: x) :> (n.span.start >= lo ? opaqueScan() : noScan())
         };
@@ -12160,7 +12107,7 @@ ${
             .MMatch(m: m) :> scanArms(t, e, m, lo, hi),
             .MStateView(v: v) :> joinScan(kids, stateViewScan(e, v)),
             .MInline(v: v) :> joinScan(kids, { views: [{ nodes: v.nodes, decl: -1, key: e.nid, file: "" }], opaque: false }),
-            .MStar(decl: d) :> opaqueScan(),
+            .MStar(decl: d) :> kids,
             .MErrors(of: o) :> opaqueScan()
         };
     }
@@ -12219,13 +12166,12 @@ ${
         return out;
     }
 
-    // What the views (and the views they hold) run: their writes, the cells they use (a `bind:`
-    // included), the components they use, and whether any holds something opaque.
-    type ViewAcc:struct = { bw: BodyW, used: int[], uses: int[], opaque: boolean }
+    // What the views (and the views they hold) run: their writes, the components they use (a
+    // `<*x/>` of a shared instance included), and whether any holds something opaque.
+    type ViewAcc:struct = { bw: BodyW, uses: int[], opaque: boolean }
 
-    fn viewsWrites(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[], usesR: FxAtom[][], pfields: FieldInfo[], vs0: ViewW[]) -> ViewAcc {
+    fn viewsWrites(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[], pfields: FieldInfo[], vs0: ViewW[]) -> ViewAcc {
         let bw: BodyW = { lets: [], cells: [], cellNames: [] };
-        let used: int[] = [];
         let uses: int[] = [];
         let opaque: boolean = false;
         let seen: int[] = [];
@@ -12239,18 +12185,16 @@ ${
                     for (const vn of v.nodes) {
                         cb = cb.concat(bodyCodeBlocks(vn));
                         uses = unionIds(uses, regionUses(t, vn, -1, 2147483647));
-                        used = unionIds(used, regionBindCells(t, g.program, pfields, vn, -1, 2147483647));
                         const s: RegionScan = regionScan(t, vn, -1, 2147483647);
                         if (s.opaque) opaque = true;
                         next = next.concat(placeViews(g, s.views, v.file));
                     }
                     bw = mergeBodyW(bw, blocksWrites(g, t, sum, writes, sites, lets, v.file, cb, pfields));
-                    used = unionIds(used, blocksCells(t, sum, usesR, v.file, cb, g.program.id, pfields));
                 }
             }
             todo = next;
         }
-        return { bw: bw, used: used, uses: uses, opaque: opaque };
+        return { bw: bw, uses: uses, opaque: opaque };
     }
 
     fn bodyWritesOf(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[], file: string, items: AItem[], pfields: FieldInfo[]) -> BodyW {
@@ -12308,7 +12252,12 @@ ${
     }
 
     // The code of a body node that runs in the body: its `${}` statements, its displays and attribute
-    // values, a gather's loop — never an event handler, an `<effect>` or a `<request>`.
+    // values, a gather's loop — never an event handler or an `<effect>` (E-EFFECT-NO-DEPS: it does
+    // not run on mount). ~~or a `<request>`~~ s482 r3 (#2082 r2 review HIGH-4, MED-3, pa-ruled): a
+    // `<request>` that does not provably write runs at the mount (§6.7.7.1 "Scope", §6.7.7.3 rule 1;
+    // `deps=[]` is mount-only), synchronously, in mount order — its body and its attribute values
+    // (a server function's argument included: it is evaluated here) are code that runs there. One
+    // that provably writes does not run on mount; counting it anyway is merely conservative.
     fn bodyCodeBlocks(n: ANode) -> ABlock[] {
         const k: ANodeK = n.k;
         return match k {
@@ -12319,9 +12268,26 @@ ${
             .Text(text: x) :> [],
             .DeclNode(d: x) :> [],
             .Effect(w: x) :> [],
-            .Request(r: x) :> [],
+            .Request(r: r) :> requestBlocks(r),
             .Css(c: x) :> []
         };
+    }
+
+    fn requestBlocks(r: ARequest) -> ABlock[] {
+        let out: ABlock[] = [r.body];
+        for (const a of r.attrs) {
+            if (eventName(a.name) == "") {
+                const v: AAttrValue = a.value;
+                const x: AExpr | not = match v {
+                    .Bare(e: x) :> x,
+                    .Paren(e: x) :> x,
+                    // no-default-arm: only an expression value is code
+                    _ :> not
+                };
+                if (x is given) out = out.concat([exprBlock(x)]);
+            }
+        }
+        return out;
     }
 
     fn gatherCodeBlocks(f: AFor) -> ABlock[] {
