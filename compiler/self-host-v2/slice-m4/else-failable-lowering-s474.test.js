@@ -69,7 +69,7 @@ function compileClean(src) {
  * puts a failure value the compiler does not know about where the checker said none can be.
  */
 async function loadEdited(core, name, expose, edit) {
-  const out = printCore(core, name);
+  const out = printCore(core, name, expose);
   expect(out.refused).toEqual([]);
   const dir = mkdtempSync(join(tmpdir(), `else-lowering-${name}-`));
   copyFileSync(RUNTIME, join(dir, "scrml-runtime.js"));
@@ -132,7 +132,9 @@ describe("C-E2 backstop — a checker hole is refused at emission, never printed
 
 describe("printed JS — the `else` body is printed once, in the success branch", () => {
   test("value position: \"LOGGED IN\" appears once, and the failed branch ends in rt.unmatchedFailure (red on base)", () => {
-    const js = printCore(compileClean(P(VALUE)).core, "else-printed").js;
+    // s482 (s482-client-roots): `a` is named to the printer (exposed) — nothing in the program calls it,
+    // and an unreached function is not printed (§12.2 Trigger 6)
+    const js = printCore(compileClean(P(VALUE)).core, "else-printed", ["a"]).js;
     expect(js.split(`"LOGGED IN"`).length - 1).toBe(1);
     expect(js).toContain(`rt.unmatchedFailure(outcome.error, "AuthErr")`);
   });

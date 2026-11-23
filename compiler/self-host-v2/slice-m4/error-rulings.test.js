@@ -120,7 +120,9 @@ describe("§18.6.1 — the whole-error binder `| _ err :>`", () => {
     const arms = attemptOf(fn).arms;
     expect(arms.length).toBe(1);
     expect(arms[0].whole && arms[0].whole.hint).toBe("err");
-    const js = mods.print.printProgram(r.core, "t.client.js", "scrml-runtime.js").js;
+    // s482 (s482-client-roots): `caught` is reached by nothing in the program, so it is printed only
+    // when named to the printer's test entry (§12.2 Trigger 6 — an unreached function is not printed)
+    const js = mods.print.printProgramExposing(r.core, "t.client.js", "scrml-runtime.js", [fn.sym.id]).js;
     expect(js).toMatch(/const err\w* = \w+\.error;/);
   });
 

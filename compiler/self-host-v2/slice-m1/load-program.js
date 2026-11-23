@@ -72,9 +72,13 @@ export function expectNoPageErrors() {
 
 const RUNTIME = join(import.meta.dir, "runtime", "runtime.js");
 
-export function printCore(core, name) {
+// s482 (s482-client-roots): a function no code of the program reaches is not printed (§12.2
+// Trigger 6), so the functions a test calls directly (`expose`) are passed to the printer's
+// test-scaffolding entry, which counts them reached (print.scrml printProgramExposing).
+export function printCore(core, name, expose = []) {
   const { mods } = loadBootstrap();
-  return mods.print.printProgram(core, `${name}.client.js`, "scrml-runtime.js");
+  const keep = core.fns.filter((f) => expose.includes(f.sym.hint)).map((f) => f.sym.id);
+  return mods.print.printProgramExposing(core, `${name}.client.js`, "scrml-runtime.js", keep);
 }
 
 /**
@@ -90,7 +94,7 @@ export function warmLoadProgram() {
 }
 
 export async function loadProgram(core, name, expose = [], opts = {}) {
-  const out = printCore(core, name);
+  const out = printCore(core, name, expose);
   const dir = mkdtempSync(join(tmpdir(), `slice-m1-${name}-`));
   copyFileSync(RUNTIME, join(dir, "scrml-runtime.js"));
   copyHostFiles(core, dir, opts.stdlibRoot);

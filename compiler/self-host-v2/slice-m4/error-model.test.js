@@ -482,7 +482,8 @@ describe("S239 review fix round (114e6ef80)", () => {
   // an alias is a value, and the misuses are reported by what they are
   test("HIGH-2 — a function value (alias, return, argument) is never lowered as `null`", () => {
     const ok = `    function ok() -> int {\n        return 3;\n    }`;
-    const r = run(P(`${ok}\n    function go() {\n        const g = ok;\n        @n = g();\n    }`));
+    // s482 (s482-client-roots): `go` is reached (a button) — an unreached function is not printed (§12.2 Trigger 6)
+    const r = run(P(`${ok}\n    function go() {\n        const g = ok;\n        @n = g();\n    }`, ["go"]));
     expect(r.diags.filter((d) => d.severity === "Error")).toEqual([]);
     expect(mods.print.printProgram(r.core, "t.client.js", "scrml-runtime.js").js).toContain("const g = ok;");
     // returned from a function declared `-> int`: refused by name (a returned function value needs a declared function type)
