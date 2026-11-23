@@ -21742,21 +21742,36 @@ ${
                 cases = ra.alts;
                 ckeys = ra.keys;
             }
+            // s482-wmatch-alt-fix (#2075 review LOW-1): the duplicate check runs on sets of its
+            // own (`dCov`, `dNot`, `dLits`). A wildcard alternation (`.B | .C | _ :> …`) IS the
+            // wildcard arm (§18.2): its named alternates are checked for E-TYPE-023 but do NOT
+            // count as cases covered BEFORE the wildcard — else W-MATCH-001 ("the wildcard arm is
+            // unreachable", §18.6) fires on an arm that is reachable for the cases it names. This
+            // matches the failable path, which keeps them out of `coveredBefore` (resolveArms).
+            const wildAlt: boolean = idx == -1 && ra.alts.length > 0;
+            let dCov: int[] = covered;
+            let dNot: boolean = notSeen;
+            let dLits: string[] = lits;
             let ci: int = 0;
             for (const cx of cases) {
                 if (cx >= 0) {
-                    if (covered.indexOf(cx) >= 0) dup = true;
-                    covered = covered.concat([cx]);
+                    if (dCov.indexOf(cx) >= 0) dup = true;
+                    dCov = dCov.concat([cx]);
                 }
                 if (cx == -5) {
-                    if (notSeen) dup = true;
-                    notSeen = true;
+                    if (dNot) dup = true;
+                    dNot = true;
                 }
                 if (cx == -6 && ckeys[ci] != "") {
-                    if (lits.indexOf(ckeys[ci]) >= 0) dup = true;
-                    lits = lits.concat([ckeys[ci]]);
+                    if (dLits.indexOf(ckeys[ci]) >= 0) dup = true;
+                    dLits = dLits.concat([ckeys[ci]]);
                 }
                 ci = ci + 1;
+            }
+            if (!wildAlt) {
+                covered = dCov;
+                notSeen = dNot;
+                lits = dLits;
             }
             if (dup && !wild && isAlt) st = addDiag(st, env.file, a.span, "E-TYPE-023", "an alternate of this arm names a case that an earlier arm, or an earlier alternate of this arm, already takes, so that alternate is unreachable — drop it (§18.14.2 E-TYPE-023: duplicate match arm; §18.2 alternation)");
             if (dup && !wild && !isAlt) st = addDiag(st, env.file, a.span, "E-TYPE-023", "a second arm for the same case — the first arm already takes it, so this one is unreachable (§18.14.2 E-TYPE-023: duplicate match arm)");
