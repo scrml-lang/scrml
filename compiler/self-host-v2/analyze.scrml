@@ -11371,6 +11371,7 @@ ${
         // to its node), at every depth. Merely declaring it runs nothing.
         let ownBR: FxAtom[][] = [];
         let fnER: int[][] = [];
+        const pfields: FieldInfo[] = programCells(g);
         let i: int = 0;
         const six: SymIx = nodeSymIx(sum.nodes);
         for (const c of sum.nodes) {
@@ -11399,6 +11400,12 @@ ${
                 let kr: int = 0;
                 for (const id of bindingUsesDirect(t, fsrc.f.body, binds, held)) {
                     br = br.concat([ownAtom("b:" + id, i, kr)]);
+                    kr = kr + 1;
+                }
+                // s482 (lane s482-seed-reach) — the program cells the body uses: a read or a write runs
+                // the cell's seed when it has not run yet (bodyReachDiags judges what that seed reaches)
+                for (const cid of cellUsesDirect(t, fsrc.f.body, g.program.id, pfields, held)) {
+                    br = br.concat([ownAtom("c:" + cid, i, kr)]);
                     kr = kr + 1;
                 }
             }
@@ -11643,6 +11650,25 @@ ${
         return "makes a call";
     }
 
+    // s482 (lane s482-seed-reach) — the context of the body-run judgment: the program body's
+    // file-scope bindings with their places (`places`), and its cells (`cells`, BodyCell) — a
+    // cell read runs its seed (or its formula) where it is read when the seed has not run yet.
+    type BodyCx:struct = { g: Globals, t: Tables, sum: Summary, usesD: FxAtom[][], binds: int[], file: string, places: BodyPlace[], cells: BodyCell[], prog: int, pfields: FieldInfo[] }
+
+    // s482 (lane s482-seed-reach) — a program cell, for the later-place judgment: its place
+    // (`pos`, where its declaration stands — a seeded cell's seed is computed there, §7.6 rule (b)
+    // S482), its initializer (`init`: a seed, or a derived cell's formula) and whether it is
+    // DERIVED (a locked cell: "computed when it is read" — it has no place, every read may run
+    // its formula). A persisted cell is not listed: its seed is its stored value's default,
+    // computed at construction (INTERIM, g-boot-persist-seed-at-construction-s482), not where it
+    // is read.
+    type BodyCell:struct = { sym: int, name: string, pos: int, init: AAttrValue, derived: boolean }
+
+    // s482 (lane s482-seed-reach) — what a piece of code reaches that is not initialized yet where
+    // it runs: the binding (`bp`), the words for the path to it (`how`, " reads `k`," / " calls
+    // `g()`, which uses `k`," / " reads `@c` before its place, …"), and where that path starts.
+    type SeedReach:struct = { bp: BodyPlace, how: string, file: string, span: ASpan }
+
     fn bodyReachDiags(g: Globals, t: Tables, sum: Summary, usesD: FxAtom[][], binds: int[]) -> Diag[] {
         let out: Diag[] = [];
         for (const f of g.files) {
@@ -11659,14 +11685,222 @@ ${
                 };
                 const places: BodyPlace[] = bodyPlaces(g, f.path, ps);
                 if (places.length > 0) {
+                    const cx: BodyCx = { g: g, t: t, sum: sum, usesD: usesD, binds: binds, file: f.path, places: places, cells: bodyCells(g, ps), prog: g.program.id, pfields: programCells(g) };
                     for (const pi of ps) {
                         const n: ANode | not = markupOfItem(pi);
-                        if (n is given) out = out.concat(bodyNodeReach(g, t, sum, usesD, binds, f.path, places, n));
+                        if (n is given) out = out.concat(bodyNodeReach(cx, n));
+                    }
+                    // s482 (lane s482-seed-reach, item (b); ruling:user-voice-scrml.md-S481-run-order-
+                    // followups item 2) — a seed is user code that runs at its place (§7.6 rule (b) S482):
+                    // one reaching a binding whose place is later is E-SCOPE-001, as a statement there is
+                    for (const c of cx.cells) {
+                        if (!c.derived) {
+                            const r: SeedReach | not = cellReach(cx, c, c.pos, [c.sym]);
+                            if (r is given) out = out.concat([laterPlaceDiagHow(r.bp, "the seed of `@" + c.name + "`", " (computed at its place, §7.6 rule (b) S482)" + r.how, r.file, r.span)]);
+                        }
                     }
                 }
             }
         }
         return out;
+    }
+
+    // The program body's cells (BodyCell): each declaration item of the body that is a field of
+    // the program, with its place (the item's source start) — a persisted one left out.
+    fn bodyCells(g: Globals, items: AItem[]) -> BodyCell[] {
+        const fields: FieldInfo[] = programCells(g);
+        let out: BodyCell[] = [];
+        for (const it of items) {
+            const k: AItemK = it.k;
+            const d: ADecl | not = match k {
+                .DeclItem(d: x) :> x,
+                .ConstItem(c: x) :> not,
+                .ProgramItem(p: x) :> not,
+                .ImportItem(i: x) :> not,
+                .TypeItem(t: x) :> not,
+                .FnItem(f: x) :> not,
+                .MarkupItem(n: x) :> not
+            };
+            if (d is given && attrNamed(d.mods, "persist") is not) {
+                for (const fi of fields) {
+                    if (fi.nid == d.nid) out = out.concat([{ sym: fi.sym.id, name: d.name, pos: it.span.start, init: fi.init, derived: fi.wcap is not }]);
+                }
+            }
+        }
+        return out;
+    }
+
+    // The program declaration's fields (its cells), in field order.
+    fn programCells(g: Globals) -> FieldInfo[] {
+        for (const ds of g.decls) {
+            if (ds.isProgram && ds.info.sym.id == g.program.id) return ds.info.fields;
+        }
+        return [];
+    }
+
+    fn cellOfSym(cells: BodyCell[], sym: int) -> BodyCell | not {
+        for (const c of cells) { if (c.sym == sym) return c; }
+        return not;
+    }
+
+    // The program cell a `@name` node reads (its Sym id), else -1: the resolver's NField fact
+    // on a field of the program declaration.
+    fn progCellOf(t: Tables, e: AExpr, prog: int, fields: FieldInfo[]) -> int {
+        const f: NameFact | not = nameFact(t.names, e.nid);
+        const ix: int = match f {
+            .NField(decl: d, inst: x, idx: i) :> (d.id == prog ? i : -1),
+            // no-default-arm: one question — is it a read of a declaration field
+            _ :> -1
+        };
+        if (ix >= 0 && ix < fields.length) return fields[ix].sym.id;
+        // a write of the cell (atUsesInExpr): the field whose write capability it names
+        const cap: int = writeCapOf(effectFact(t.effects, e.nid));
+        if (cap < 0) return -1;
+        for (const fi of fields) {
+            const wc: Sym | not = fi.wcap;
+            if (wc is given && wc.id == cap) return fi.sym.id;
+        }
+        return -1;
+    }
+
+    // s482 (lane s482-seed-reach) — the `@name` nodes of code that USE a cell, at any depth (a
+    // nested function's body included, as nameExprsIn). A write counts as a read does: a write
+    // of a cell before its place runs its seed first (§7.6 rule (b) S482, "every seed runs
+    // once"; Chromium probe `w-write-early-log`: the seed read the later binding uninitialized
+    // and the page trapped).
+    // A write is the node the resolver put the write's effect on (an assignment, an edit call,
+    // `reset(@x)`): its `@x` target carries no read fact.
+    fn atUsesIn(t: Tables, b: ABlock) -> AExpr[] {
+        let out: AExpr[] = [];
+        for (const s of b.stmts) {
+            for (const e of stmtExprs(s)) { out = out.concat(atUsesInExpr(t, e)); }
+            for (const nb of nestedBlocks(s)) { out = out.concat(atUsesIn(t, nb)); }
+            const lf: AFn | not = localFnOf(s);
+            if (lf is given) out = out.concat(atUsesIn(t, lf.body));
+        }
+        return out;
+    }
+
+    fn atUsesInExpr(t: Tables, e: AExpr) -> AExpr[] {
+        let out: AExpr[] = [];
+        if (atName(e) != "" || writeCapOf(effectFact(t.effects, e.nid)) >= 0) out = [e];
+        for (const x of exprKids(e)) { out = out.concat(atUsesInExpr(t, x)); }
+        for (const b of exprBlocksIn(e)) { out = out.concat(atUsesIn(t, b)); }
+        return out;
+    }
+
+    // The write capability (its Sym id) a cell write's effect names, else -1.
+    fn writeCapOf(f: EffectFact | not) -> int {
+        return match f {
+            .EWrite(w: w) :> w.cap.id,
+            .EReset(w: w) :> w.cap.id,
+            .EEdits(w: w) :> w.cap.id,
+            .ERemove(w: w) :> w.cap.id,
+            .EElemAt(cap: c) :> c.id,
+            .EPosition(cap: c) :> c.id,
+            .ESpread(ws: ws) :> (ws.length > 0 ? ws[0].w.cap.id : -1),
+            .EAssignLocal(sym: x) :> -1,
+            .ELocalEdit(sym: x) :> -1,
+            not :> -1
+        };
+    }
+
+    // The program cells a function body uses (their Sym ids), outside the spans `held`.
+    fn cellUsesDirect(t: Tables, b: ABlock, prog: int, fields: FieldInfo[], held: ASpan[]) -> int[] {
+        let out: int[] = [];
+        for (const e of atUsesIn(t, b)) {
+            const id: int = progCellOf(t, e, prog, fields);
+            if (id >= 0 && out.indexOf(id) < 0 && !spanInAny(e.span, held)) out = out.concat([id]);
+        }
+        return out;
+    }
+
+    // s482 (lane s482-seed-reach, item (a); ruling:user-voice-scrml.md-S482-seed-read-early) —
+    // a read of cell `c` at `pos`, before its place (or of a derived cell, anywhere), runs its
+    // seed there (§7.6 rule (b) S482: "computes it then, on demand"): what that seed reaches —
+    // directly, through a function it calls, at any depth (usesR), or through another cell it
+    // reads before that cell's place — is judged as if it were written at `pos`. `seen`: the
+    // cells already on the path (a seeding cycle is another diagnostic's).
+    fn cellReach(cx: BodyCx, c: BodyCell, pos: int, seen: int[]) -> SeedReach | not {
+        const v: AAttrValue = c.init;
+        const x: AExpr | not = match v {
+            .Bare(e: y) :> y,
+            .Paren(e: y) :> y,
+            // no-default-arm: a block (below) or a literal value
+            _ :> not
+        };
+        if (x is given) {
+            return codeReach(cx, nameExprsInExpr(x), letWritesInExpr(cx.t, x, cx.binds, cx.file), atUsesInExpr(cx.t, x), scanExpr({ t: cx.t, file: cx.file }, x, emptyScan()).refs, heldSpansInExpr(x), pos, seen);
+        }
+        const bl: ABlock | not = match v {
+            .Braced(b: y) :> y,
+            // no-default-arm: an expression (above) or a literal value
+            _ :> not
+        };
+        if (bl is given) {
+            return codeReach(cx, nameExprsIn(bl), letWritesIn(cx.t, bl, cx.binds, cx.file), atUsesIn(cx.t, bl), scanBlock({ t: cx.t, file: cx.file }, bl, emptyScan()).refs, heldSpansIn(bl), pos, seen);
+        }
+        return not;
+    }
+
+    // A read of cell `c` at `pos` runs its initializer there when it has not run: a derived cell
+    // (computed when read), or a seeded one whose place is later than `pos`.
+    fn cellRunsAt(c: BodyCell, pos: int) -> boolean {
+        return c.derived || c.pos > pos;
+    }
+
+    fn cellHop(c: BodyCell, inner: SeedReach) -> string {
+        if (c.derived) return " reads `@" + c.name + "`, a derived value computed when it is read, and its formula" + inner.how;
+        return " uses `@" + c.name + "` before its place, so its seed is computed here (a read or a write of a cell runs its seed first if it has not run, §7.6 rule (b) S482), and that seed" + inner.how;
+    }
+
+    // The first later-place reach of code running at `pos`: a name of a binding whose place is
+    // later, a write of one, a read of a cell that runs its seed there (cellReach), or a function
+    // named — called, or handed on as a value (§6.7.4 rule 3) — whose reach (usesR) holds one.
+    fn codeReach(cx: BodyCx, names: AExpr[], writes: LetW[], ats: AExpr[], refs: FnRef[], defer: ASpan[], pos: int, seen: int[]) -> SeedReach | not {
+        for (const ne of names) {
+            if (!spanInAny(ne.span, defer)) {
+                const bp: BodyPlace | not = placeOfBinding(cx.places, constSymOfFact(nameFact(cx.t.names, ne.nid)));
+                if (bp is given && bp.pos > pos) return { bp: bp, how: " reads `" + bp.name + "`,", file: cx.file, span: ne.span };
+            }
+        }
+        for (const w of writes) {
+            const bw: BodyPlace | not = placeOfBinding(cx.places, w.sym);
+            if (bw is given && bw.pos > pos && !spanInAny(w.span, defer)) return { bp: bw, how: " writes `" + bw.name + "`,", file: cx.file, span: w.span };
+        }
+        for (const a of ats) {
+            if (!spanInAny(a.span, defer)) {
+                const c: BodyCell | not = cellOfSym(cx.cells, progCellOf(cx.t, a, cx.prog, cx.pfields));
+                if (c is given && seen.indexOf(c.sym) < 0 && cellRunsAt(c, pos)) {
+                    const inner: SeedReach | not = cellReach(cx, c, pos, seen.concat([c.sym]));
+                    if (inner is given) return { bp: inner.bp, how: cellHop(c, inner), file: cx.file, span: a.span };
+                }
+            }
+        }
+        for (const r of refs) {
+            const j: int = nodeIdx(cx.sum.nodes, r.sym);
+            // s482 r1: a function named as a value counts as called (§6.7.4 rule 3)
+            if (j >= 0 && !spanInAny(r.span, defer) && cx.sum.nodes[j].kind == CallableK.KFn) {
+                for (const ua of cx.usesD[j]) {
+                    let verb: string = " calls `" + cx.sum.nodes[j].label + "`";
+                    if (r.asValue) verb = " hands on `" + cx.sum.nodes[j].label.replace("()", "") + "` as a function value (counted as called — whatever receives it may call it, §6.7.4 rule 3)";
+                    let via: string = verb + ",";
+                    if (ua.root != j) via = verb + ", which reaches `" + cx.sum.nodes[ua.root].label + "`,";
+                    if (ua.key.indexOf("c:") == 0) {
+                        // s482 (lane s482-seed-reach) — the function reads a cell: its seed runs here
+                        const c: BodyCell | not = cellOfSym(cx.cells, atomBinding(ua.key));
+                        if (c is given && seen.indexOf(c.sym) < 0 && cellRunsAt(c, pos)) {
+                            const inner: SeedReach | not = cellReach(cx, c, pos, seen.concat([c.sym]));
+                            if (inner is given) return { bp: inner.bp, how: via + " which" + cellHop(c, inner), file: r.file, span: r.span };
+                        }
+                    } else {
+                        const bp: BodyPlace | not = placeOfBinding(cx.places, atomBinding(ua.key));
+                        if (bp is given && bp.pos > pos) return { bp: bp, how: via + " which uses `" + bp.name + "`,", file: r.file, span: r.span };
+                    }
+                }
+            }
+        }
+        return not;
     }
 
     // The program body's file-scope bindings, each with its place (where its `${ }` stands —
@@ -11699,12 +11933,12 @@ ${
         return not;
     }
 
-    fn bodyNodeReach(g: Globals, t: Tables, sum: Summary, usesD: FxAtom[][], binds: int[], file: string, places: BodyPlace[], n: ANode) -> Diag[] {
+    fn bodyNodeReach(cx: BodyCx, n: ANode) -> Diag[] {
         const k: ANodeK = n.k;
         return match k {
-            .Elem(e: e) :> bodyElemReach(g, t, sum, usesD, binds, file, places, e),
-            .Interp(e: x) :> bodyExprReach(g, t, sum, usesD, binds, file, places, x, n.span.start, "this display"),
-            .Run(b: rb) :> bodyBlockReach(g, t, sum, usesD, binds, file, places, rb, n.span.start),
+            .Elem(e: e) :> bodyElemReach(cx, e),
+            .Interp(e: x) :> bodyExprReach(cx, x, n.span.start, "this display"),
+            .Run(b: rb) :> bodyBlockReach(cx, rb, n.span.start),
             .Text(text: x) :> [],
             .DeclNode(d: x) :> [],
             .Effect(w: x) :> [],
@@ -11714,7 +11948,7 @@ ${
         };
     }
 
-    fn bodyElemReach(g: Globals, t: Tables, sum: Summary, usesD: FxAtom[][], binds: int[], file: string, places: BodyPlace[], e: AElem) -> Diag[] {
+    fn bodyElemReach(cx: BodyCx, e: AElem) -> Diag[] {
         let out: Diag[] = [];
         for (const a of e.attrs) {
             if (a.name.indexOf("on") != 0) {
@@ -11725,69 +11959,28 @@ ${
                     // no-default-arm: only an expression value is a display of its value
                     _ :> not
                 };
-                if (x is given) out = out.concat(bodyExprReach(g, t, sum, usesD, binds, file, places, x, a.span.start, "this attribute value"));
+                if (x is given) out = out.concat(bodyExprReach(cx, x, a.span.start, "this attribute value"));
             }
         }
-        for (const kid of e.kids) { out = out.concat(bodyNodeReach(g, t, sum, usesD, binds, file, places, kid)); }
+        for (const kid of e.kids) { out = out.concat(bodyNodeReach(cx, kid)); }
         return out;
     }
 
-    // One display: a bare name of a later binding (direct), or a call (outside a function value)
-    // of a function whose direct reach (usesD) holds one.
-    fn bodyExprReach(g: Globals, t: Tables, sum: Summary, usesD: FxAtom[][], binds: int[], file: string, places: BodyPlace[], e: AExpr, pos: int, what: string) -> Diag[] {
-        const defer: ASpan[] = heldSpansInExpr(e);
-        for (const ne of nameExprsInExpr(e)) {
-            if (!spanInAny(ne.span, defer)) {
-                const bp: BodyPlace | not = placeOfBinding(places, constSymOfFact(nameFact(t.names, ne.nid)));
-                if (bp is given && bp.pos > pos) return [laterPlaceDiag(bp, what, "reads", "", file, ne.span)];
-            }
-        }
-        for (const w of letWritesInExpr(t, e, binds, file)) {
-            const bw: BodyPlace | not = placeOfBinding(places, w.sym);
-            if (bw is given && bw.pos > pos && !spanInAny(w.span, defer)) return [laterPlaceDiag(bw, what, "writes", "", file, w.span)];
-        }
-        return bodyCallReach(sum, usesD, places, scanExpr({ t: t, file: file }, e, emptyScan()).refs, defer, pos, what, file);
-    }
-
-    fn bodyBlockReach(g: Globals, t: Tables, sum: Summary, usesD: FxAtom[][], binds: int[], file: string, places: BodyPlace[], b: ABlock, pos: int) -> Diag[] {
-        const defer: ASpan[] = heldSpansIn(b);
-        const what: string = "this statement";
-        for (const ne of nameExprsIn(b)) {
-            if (!spanInAny(ne.span, defer)) {
-                const bp: BodyPlace | not = placeOfBinding(places, constSymOfFact(nameFact(t.names, ne.nid)));
-                if (bp is given && bp.pos > pos) return [laterPlaceDiag(bp, what, "reads", "", file, ne.span)];
-            }
-        }
-        for (const w of letWritesIn(t, b, binds, file)) {
-            const bw: BodyPlace | not = placeOfBinding(places, w.sym);
-            if (bw is given && bw.pos > pos && !spanInAny(w.span, defer)) return [laterPlaceDiag(bw, what, "writes", "", file, w.span)];
-        }
-        return bodyCallReach(sum, usesD, places, scanBlock({ t: t, file: file }, b, emptyScan()).refs, defer, pos, what, file);
-    }
-
-    fn bodyCallReach(sum: Summary, usesD: FxAtom[][], places: BodyPlace[], refs: FnRef[], defer: ASpan[], pos: int, what: string, file: string) -> Diag[] {
-        for (const r of refs) {
-            const j: int = nodeIdx(sum.nodes, r.sym);
-            // s482 r1: a function named as a value counts as called (§6.7.4 rule 3)
-            if (j >= 0 && !spanInAny(r.span, defer) && sum.nodes[j].kind == CallableK.KFn) {
-                for (const ua of usesD[j]) {
-                    const bp: BodyPlace | not = placeOfBinding(places, atomBinding(ua.key));
-                    if (bp is given && bp.pos > pos) {
-                        let verb: string = " calls `" + sum.nodes[j].label + "`";
-                        if (r.asValue) verb = " hands on `" + sum.nodes[j].label.replace("()", "") + "` as a function value (counted as called — whatever receives it may call it, §6.7.4 rule 3)";
-                        let via: string = verb + ",";
-                        if (ua.root != j) via = verb + ", which reaches `" + sum.nodes[ua.root].label + "`,";
-                        return [laterPlaceDiag(bp, what, "uses", via, r.file, r.span)];
-                    }
-                }
-            }
-        }
+    // One display: a bare name of a later binding (direct), a read of a cell that runs its seed
+    // here (s482 lane s482-seed-reach), or a function named whose reach (usesR) holds one.
+    fn bodyExprReach(cx: BodyCx, e: AExpr, pos: int, what: string) -> Diag[] {
+        const r: SeedReach | not = codeReach(cx, nameExprsInExpr(e), letWritesInExpr(cx.t, e, cx.binds, cx.file), atUsesInExpr(cx.t, e), scanExpr({ t: cx.t, file: cx.file }, e, emptyScan()).refs, heldSpansInExpr(e), pos, []);
+        if (r is given) return [laterPlaceDiagHow(r.bp, what, r.how, r.file, r.span)];
         return [];
     }
 
-    fn laterPlaceDiag(bp: BodyPlace, what: string, verb: string, via: string, file: string, span: ASpan) -> Diag {
-        let how: string = " " + verb + " `" + bp.name + "`,";
-        if (via != "") how = via + " which " + verb + " `" + bp.name + "`,";
+    fn bodyBlockReach(cx: BodyCx, b: ABlock, pos: int) -> Diag[] {
+        const r: SeedReach | not = codeReach(cx, nameExprsIn(b), letWritesIn(cx.t, b, cx.binds, cx.file), atUsesIn(cx.t, b), scanBlock({ t: cx.t, file: cx.file }, b, emptyScan()).refs, heldSpansIn(b), pos, []);
+        if (r is given) return [laterPlaceDiagHow(r.bp, "this statement", r.how, r.file, r.span)];
+        return [];
+    }
+
+    fn laterPlaceDiagHow(bp: BodyPlace, what: string, how: string, file: string, span: ASpan) -> Diag {
         return newDiag("E-SCOPE-001", "`" + bp.name + "` is used before it is initialized — " + what + how + " and the `${ }` declaring `" + bp.name + "` comes later in the program body. The body runs once, top to bottom, in source order (§7.6 rule (b), S481), so `" + bp.name + "` is not initialized when " + what + " runs. Declare `" + bp.name + "` before it", file, span);
     }
 
