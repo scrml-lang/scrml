@@ -51,9 +51,11 @@ describe("item 15 — §18.10: `| <non-pattern>` after an arm pattern is E-SYNTA
     expect(codes(FN(`.Admin | ok :> "admin",\n        _ :> "x"`))).toEqual(["E-SYNTAX-011"]);
     expect(codes(FN(`.Admin | isOn(p) :> "admin",\n        _ :> "x"`))).toEqual(["E-SYNTAX-011"]);
   });
-  test("a `|` between two patterns stays alternation (not built: E-PARSE-ARM, by name)", () => {
+  // s482 (s482-match-alternation): alternation is built — these heads now compile clean (they were
+  // one E-PARSE-ARM "not yet supported" each)
+  test("a `|` between two patterns stays alternation (built, s482: no E-PARSE-ARM)", () => {
     const c = codes(FN(`.Admin | .Editor :> "staff",\n        .Viewer :> "viewer"`));
-    expect(c).toContain("E-PARSE-ARM");
+    expect(c).toEqual([]);
     expect(c).not.toContain("E-SYNTAX-011");
     expect(codes(FN(`.Admin | _ :> "any"`))).not.toContain("E-SYNTAX-011");
   });
@@ -61,10 +63,10 @@ describe("item 15 — §18.10: `| <non-pattern>` after an arm pattern is E-SYNTA
     expect(codes(FN(`.Admin if p.active :> "admin",\n        _ :> "x"`))).toContain("E-SYNTAX-011");
   });
   // fix round 1 of #1945 (review MED-1): §18.2 `variant-pattern ::= … | TypeName ('.' | '::') VariantName`
-  test("qualified-alt: `Role.Admin | Role.Editor :>` is alternation (E-PARSE-ARM), not a guard", () => {
+  test("qualified-alt: `Role.Admin | Role.Editor :>` is alternation (built, s482), not a guard", () => {
     for (const alt of ["Role.Admin | Role.Editor", ".Admin | Role.Editor", "Role::Admin | Role::Editor"]) {
       const c = codes(FN(`${alt} :> "staff",\n        .Viewer :> "viewer"`));
-      expect(c).toContain("E-PARSE-ARM");
+      expect(c).toEqual([]);
       expect(c).not.toContain("E-SYNTAX-011");
     }
   });

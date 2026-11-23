@@ -167,6 +167,29 @@ ${
         PBare(bind: ABind),
         PNot,
         PLit(e: AExpr),
+        // s482 (s482-match-alternation) — an alternation `.A | .B :> r` (§18.2:
+        // "An arm pattern MAY list several alternates separated by `|` … at ANY
+        // arm position"): `alts`, two or more, in written order, each one of the
+        // patterns above (never a PAlt — the parser flattens). An alternate binds
+        // nothing: a payload binding, the whole-value binder or a bare name in an
+        // alternate is E-MATCH-ALT-BINDING / E-PARSE-ARM at the parser, which
+        // keeps the alternate without its binders. Positional `_` discards stay
+        // (`.P(_) | .Q(_)`, §18.2 "Only POSITIONAL `_` discards … are
+        // permitted") — analyze holds each to §18.7's arity. One arm, one body:
+        // analyze reads the alternates as the cases of that one arm (patAlts).
+        PAlt(alts: APat[]),
+    }
+    // The alternates of an arm pattern: a PAlt's, else the pattern itself.
+    export fn patAlts(p: APat) -> APat[] {
+        return match p {
+            .PAlt(alts: xs) :> xs,
+            .PName(name: n) :> [p],
+            .PWild :> [p],
+            .PWhole(bind: b) :> [p],
+            .PBare(bind: b) :> [p],
+            .PNot :> [p],
+            .PLit(e: x) :> [p]
+        };
     }
     // A binder: a name, or `_` (binds nothing).
     export type ABind:struct = { nid: int, span: ASpan, name: string }

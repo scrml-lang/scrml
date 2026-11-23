@@ -38,7 +38,7 @@ ${
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, IfForm, AEffect, ARequest, AType, AParam, AFn,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, AConst, FileAst, Diag, ASql, ASqlMode,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, AForeign,
-             mkSpan } from "./ast.scrml";
+             mkSpan, patAlts } from "./ast.scrml";
     import { Severity } from "./severity.scrml";
     import { Node, allNodes } from "./walk.scrml";
     import { FieldInfo, DeclInfo, HandleInfo, TypeInfo, FnInfo, WriteFact, SpreadWrite, SnapField, AttrKind, HtmlAttrPair, ValInfo, GateInfo,
@@ -3477,6 +3477,7 @@ ${
         const es: Sym | not = m.es;
         if (idx >= 0 && es is given) return Pattern.PVariant(es, idx, binds);
         if (idx == -1) return Pattern.PWild;
+        if (idx == -7) return plainAltPat(c, m, a);
         if (idx == -5) return Pattern.PLit(Literal.Absent);
         if (idx == -6) {
             const lit: Literal | not = plainLit(c, a.pat);
@@ -3485,9 +3486,41 @@ ${
         return not;
     }
 
+    // s482 (s482-match-alternation) — an alternation arm (§18.2) as ONE Core pattern: one
+    // test per alternate (Pattern.PAlt, printed as their `||`), in written order — a variant
+    // (its positional `_` discards bind nothing) or a literal. A `not` alternate is the
+    // match's leading absence arm, which runs first (absentArmAt), so it is not repeated
+    // here. Not (the arm is dropped) when an alternate did not resolve — analyze reported it.
+    fn plainAltPat(c: LC, m: PlainMatch, a: AArm) -> Pattern | not {
+        const xs: APat[] = patAlts(a.pat);
+        const idxs: int[] = armAltsOf(c.t, a);
+        if (idxs.length != xs.length) return not;
+        const es: Sym | not = m.es;
+        let out: Pattern[] = [];
+        let k: int = 0;
+        for (const x of xs) {
+            const ix: int = idxs[k];
+            if (ix >= 0) {
+                if (es is not) return not;
+                out = out.concat([Pattern.PVariant(es, ix, [])]);
+            } else if (ix == -6) {
+                const lit: Literal | not = plainLit(c, x);
+                if (lit is not) return not;
+                out = out.concat([Pattern.PLit(lit)]);
+            } else if (ix != -5) {
+                return not;
+            }
+            k = k + 1;
+        }
+        if (out.length == 0) return not;
+        if (out.length == 1) return out[0];
+        return Pattern.PAlt(out);
+    }
+
     fn plainLit(c: LC, p: APat) -> Literal | not {
         const x: AExpr | not = match p {
             .PLit(e: e) :> e,
+            .PAlt(alts: xs) :> not,
             .PNot :> not,
             .PName(name: n) :> not,
             .PWild :> not,
@@ -3548,7 +3581,8 @@ ${
         return match p {
             .PWild :> true,
             .PVariant(enumSym: x) :> false,
-            .PLit(lit: l) :> false
+            .PLit(lit: l) :> false,
+            .PAlt(pats: ps) :> false
         };
     }
 
@@ -3558,6 +3592,8 @@ ${
         let i = 0;
         for (const a of arms) {
             if (armIdxOf(c.t, a) == -5) return i;
+            // s482: an alternation with a `not` alternate (`.A | not :> …`, §18.2) is the absence arm too
+            if (armIdxOf(c.t, a) == -7 && armAltsOf(c.t, a).indexOf(-5) >= 0) return i;
             i = i + 1;
         }
         let j = 0;
@@ -3930,6 +3966,15 @@ ${
                 out = out.concat([{ pat: Pattern.PWild, body: armBody(c, h, a), value: armValue(c, h, a), whole: wholeSym(c, a) }]);
             } else if (idx >= 0 && !deadTransportArm(c, h, idx)) {
                 out = out.concat([{ pat: Pattern.PVariant(effErr(c, h), idx, armBindSyms(c, a)), body: armBody(c, h, a), value: armValue(c, h, a), whole: not }]);
+            } else if (idx == -7) {
+                // s482 — an alternation (§18.2): one failure arm testing each alternate's variant
+                // (a `.Transport` alternate the call cannot raise is left out, as its own arm would be)
+                let ps: Pattern[] = [];
+                for (const ix of armAltsOf(c.t, a)) {
+                    if (ix >= 0 && !deadTransportArm(c, h, ix)) ps = ps.concat([Pattern.PVariant(effErr(c, h), ix, [])]);
+                }
+                if (ps.length == 1) out = out.concat([{ pat: ps[0], body: armBody(c, h, a), value: armValue(c, h, a), whole: not }]);
+                if (ps.length > 1) out = out.concat([{ pat: Pattern.PAlt(ps), body: armBody(c, h, a), value: armValue(c, h, a), whole: not }]);
             }
         }
         return out;
@@ -3953,11 +3998,24 @@ ${
         };
     }
 
+    // s482 — an alternation arm's per-alternate indices (analyze's FArm `alts`), [] otherwise.
+    fn armAltsOf(t: Tables, a: AArm) -> int[] {
+        const f: FailFact | not = failFact(t.fails, a.nid);
+        return match f {
+            .FArm(alts: xs) :> xs,
+            .FHandled(h: x) :> [],
+            .FFail(err: x) :> [],
+            .FPlain(m: pm) :> [],
+            not :> []
+        };
+    }
+
     // The arm's binders' Syms (the binder minted one per written binder, `_` included).
     fn armBindSyms(c: LC, a: AArm) -> Sym[] {
         const p: APat = a.pat;
         const bs: ABind[] = match p {
             .PName(binds: b) :> b,
+            .PAlt(alts: xs) :> [],
             .PWild :> [],
             .PWhole(bind: b) :> [b],
             .PBare(bind: b) :> [b],

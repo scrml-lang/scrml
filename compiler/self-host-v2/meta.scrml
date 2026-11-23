@@ -56,7 +56,7 @@ ${
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, AConst, FileAst, Diag, ASql,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, ALift, AForeign, IfForm,
-             AMeta, metaOf, metaCallee, mkSpan, newDiag } from "./ast.scrml";
+             AMeta, metaOf, metaCallee, mkSpan, newDiag, patAlts } from "./ast.scrml";
     import { Fragment, FragLim, parseFragment } from "./parse.scrml";
     import { emitNsHtml, emitFoldName, emitStandardElement, emitAttrNameVerdict, emitAttrValueVerdict,
              emitNamedValueVerdict, emitChildNs } from "./emit-gate.scrml";
@@ -899,6 +899,34 @@ ${
         return { e: ex(e, AExprK.Handled({ subject: subj, how: AHow.Guard(r.arms) })), c: r.c };
     }
 
+    type RAltM:struct = { alts: APat[], c: MC }
+
+    // s482 — an alternation's alternates, each literal one rewritten as a literal arm's pattern is (mArms).
+    fn mAlts(c0: MC, xs: APat[]) -> RAltM {
+        let c: MC = c0;
+        let out: APat[] = [];
+        for (const y0 of xs) {
+            const y: APat = y0;
+            const lit: AExpr | not = match y {
+                .PLit(e: z) :> z,
+                .PAlt(alts: ys) :> not,
+                .PName(name: n) :> not,
+                .PWild :> not,
+                .PWhole(bind: b) :> not,
+                .PBare(bind: b) :> not,
+                .PNot :> not
+            };
+            if (lit is given) {
+                const r: RExpr = mExpr(c, lit);
+                c = r.c;
+                out = out.concat([APat.PLit(r.e)]);
+            } else {
+                out = out.concat([y]);
+            }
+        }
+        return { alts: out, c: c };
+    }
+
     fn mArms(c0: MC, arms: AArm[]) -> RArms {
         let c: MC = c0;
         let out: AArm[] = [];
@@ -909,6 +937,12 @@ ${
                     const r: RExpr = mExpr(c, x);
                     c = r.c;
                     pat = APat.PLit(r.e);
+                },
+                // s482 — an alternation (§18.2): each literal alternate, as a literal arm's
+                .PAlt(alts: xs) :> {
+                    const ra: RAltM = mAlts(c, xs);
+                    c = ra.c;
+                    pat = APat.PAlt(ra.alts);
                 },
                 .PName(name: n) :> {},
                 .PWild :> {},
@@ -1800,12 +1834,32 @@ ${
         };
     }
 
+    fn fAltLits(env: MEnv, x0: FX, xs: APat[]) -> FX {
+        let x: FX = x0;
+        for (const y0 of xs) {
+            const y: APat = y0;
+            const lit: AExpr | not = match y {
+                .PLit(e: z) :> z,
+                .PAlt(alts: ys) :> not,
+                .PName(name: n) :> not,
+                .PWild :> not,
+                .PWhole(bind: b) :> not,
+                .PBare(bind: b) :> not,
+                .PNot :> not
+            };
+            if (lit is given) x = fExpr(env, x, lit);
+        }
+        return x;
+    }
+
     fn fArms(env: MEnv, x0: FX, arms: AArm[]) -> FX {
         let x: FX = x0;
         for (const a of arms) {
             let binds: string[] = [];
             match a.pat {
                 .PLit(e: e) :> { x = fExpr(env, x, e); },
+                // s482 — an alternation binds nothing; its literal alternates are read
+                .PAlt(alts: xs) :> { x = fAltLits(env, x, xs); },
                 .PName(binds: bs) :> { for (const b of bs) { binds = binds.concat([b.name]); } },
                 .PWhole(bind: b) :> { binds = [b.name]; },
                 .PBare(bind: b) :> { binds = [b.name]; },
@@ -3619,9 +3673,22 @@ ${
             .PNot :> { hit: isAbsent(v), s: s },
             .PLit(e: e) :> litTest(env, e, v, s),
             .PName(name: n, binds: bs) :> nameTest(n, bs, v, s),
+            .PAlt(alts: xs) :> altArmTest(env, xs, v, s),
             .PWhole(bind: b) :> { hit: false, s: failS(s, "a `match` arm that binds the whole value is not a form the compile-time evaluator evaluates") },
             .PBare(bind: b) :> { hit: false, s: failS(s, "a `match` arm that is a bare binder is not a form the compile-time evaluator evaluates") }
         };
+    }
+
+    // s482 — an alternation (§18.2): the first alternate that takes `v`, in written order.
+    fn altArmTest(env: MEnv, xs: APat[], v: MV, s0: MS) -> ArmTest {
+        let s: MS = s0;
+        for (const x of xs) {
+            const t: ArmTest = armTest(env, x, v, s);
+            s = t.s;
+            if (s.err != "") return { hit: false, s: s };
+            if (t.hit) return { hit: true, s: s };
+        }
+        return { hit: false, s: s };
     }
 
     fn litTest(env: MEnv, e: AExpr, v: MV, s: MS) -> ArmTest {
