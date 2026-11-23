@@ -11597,7 +11597,7 @@ ${
     // error naming the construct; refusing means nobody is surprised"*), prov=pa-ruled.
     // ~~One that READS a file-scope `let` or a program cell that body code writes — anywhere~~
     // s482 (lane s482-construct-init-fu, #2076 review MED-1 / LOW-1) — the initializer's place is now
-    // just BEFORE the construct (lower.scrml lowerPlaced / placeBefore). Put after it, the construct's
+    // just BEFORE the construct (lower.scrml lowerPlaced). Put after it, the construct's
     // content read the binding before its place, so the printer ran it at module initialization,
     // before the whole body, with every binding its initializer reads (`${ n = 5; } ${ const m = n; }
     // <div if=(m > 0)>${ const k = m + 0; }…` showed m = 1 and k = 1). Placed before, it sees every
@@ -11639,7 +11639,7 @@ ${
                         // no-default-arm: one question of an item — is it a file-scope binding
                         _ :> false
                     };
-                    if (isConst && constructAt(t, tops, ci.span.start) != "") cands = cands.concat([ci]);
+                    if (isConst && (constructAt(t, tops, ci.span.start) != "" || placeHostAt(t, tops, ci.span.start) != "")) cands = cands.concat([ci]);
                 }
                 const cells: BodyCell[] = bodyCells(g, ps);
                 for (const ci of cands) {
@@ -11653,9 +11653,24 @@ ${
                         .FnItem(f: x) :> not,
                         .MarkupItem(n: x) :> not
                     };
+                    // s482 (lane s482-place-fu, #2079 review PRE-2) — an initializer inside an element
+                    // whose content holds no place (`<textarea>`, `<title>`, …: placeHostAt) is put just
+                    // before that element too. It is not a construct: it renders once, in place, so one
+                    // that acts is legal — unless code inside the element runs before it (an attribute
+                    // value, an earlier display): source order runs that code first, the place before
+                    // the element does not, and either may observe the other.
+                    const host: string = placeHostAt(t, tops, ci.span.start);
+                    if (c is given && constructAt(t, tops, ci.span.start) == "" && host != "" && initActWhat(c.init) != "") {
+                        const lo0: int = constructStart(t, tops, ci.span.start);
+                        if (regionHasCode(t, ps, lo0, ci.span.start)) {
+                            let kw0: string = "const";
+                            if (c.mutable) kw0 = "let";
+                            out = out.concat([newDiag("E-FILE-SCOPE-INIT-IN-CONSTRUCT", "the initializer of `" + kw0 + " " + c.name + "` " + initActWhat(c.init) + ", and it is written inside " + host + " after code there (an attribute value or a display) — the content of " + host + " is text and holds no place, so the initializer runs just before that element (§7.6 rule (b)), before that code, not after it as written. Declare `" + c.name + "` before that element, or before the code in it", f.path, c.span)]);
+                        }
+                    }
                     if (c is given) {
                         const where: string = constructAt(t, tops, ci.span.start);
-                        if (where != "" && initActWhat(c.init) == "") {
+                        if ((where != "" || host != "") && initActWhat(c.init) == "") {
                             const lo: int = constructStart(t, tops, ci.span.start);
                             const bw: BodyW = constructWrites(g, t, sum, writes, sites, lets, usesR, f.path, ps, pfields, lo, ci.span.start);
                             const r: string = initReadWritten(t, [c.init], bw, g.program.id, pfields, cells, lo, []);
@@ -11664,7 +11679,9 @@ ${
                                 if (c.mutable) kw = "let";
                                 let before: string = " inside that construct, before it";
                                 if (lo < 0) before = "";
-                                out = out.concat([newDiag("E-FILE-SCOPE-INIT-IN-CONSTRUCT", "the initializer of `" + kw + " " + c.name + "` reads " + r + ", which the program body writes" + before + ", and it is written inside " + where + " — a file-scope initializer runs once, in the program body's one run (§7.6 rule (b)), not when, or each time, that content renders, so whether it sees that write depends on where it runs: it has no place here. Declare `" + c.name + "` before that element, or compute the value where the content needs it", f.path, c.span)]);
+                                if (where == "") {
+                                    out = out.concat([newDiag("E-FILE-SCOPE-INIT-IN-CONSTRUCT", "the initializer of `" + kw + " " + c.name + "` reads " + r + ", which the program body writes inside " + host + ", before it — the content of " + host + " is text and holds no place, so the initializer runs just before that element (§7.6 rule (b)), before that write, not after it as written. Declare `" + c.name + "` before that element, or before the write", f.path, c.span)]);
+                                } else out = out.concat([newDiag("E-FILE-SCOPE-INIT-IN-CONSTRUCT", "the initializer of `" + kw + " " + c.name + "` reads " + r + ", which the program body writes" + before + ", and it is written inside " + where + " — a file-scope initializer runs once, in the program body's one run (§7.6 rule (b)), not when, or each time, that content renders, so whether it sees that write depends on where it runs: it has no place here. Declare `" + c.name + "` before that element, or compute the value where the content needs it", f.path, c.span)]);
                             }
                         }
                     }
@@ -11679,11 +11696,14 @@ ${
     type BodyW:struct = { lets: int[], cells: int[], cellNames: string[] }
 
     // s482 (lane s482-construct-init-fu) — the start of the construct a place at `pos` is put just
-    // before (lower.scrml lowerPlaced / placeBefore): the outermost `if=` / `else-if=` / `else`
+    // before (lower.scrml lowerPlaced): the outermost `if=` / `else-if=` / `else`
     // element (an if-chain's first member), component use or `<match>` on the path from the body's
     // top nodes, descending only through what renders once, in place (an HTML element that holds no
-    // raw or parser-text content, a `<db>` block). -1 when the place is put elsewhere (after some
-    // other element): then every body write counts, as in #2076 (fail closed).
+    // raw or parser-text content, a `<db>` block). ~~-1 when the place is put elsewhere (after some
+    // other element): then every body write counts, as in #2076 (fail closed).~~ s482 (lane
+    // s482-place-fu, #2079 review PRE-2): any other element the descent stops at — one whose
+    // content holds no place (`<textarea>`, `<title>`, raw content, `<each>`, …) — is the start
+    // too: lowerPlaced puts the place just before it. -1 when `pos` is in no element.
     fn constructStart(t: Tables, ns: ANode[], pos: int) -> int {
         let i: int = 0;
         for (; i < ns.length; ) {
@@ -11697,16 +11717,57 @@ ${
                     .MMatch(m: m) :> 1,
                     .MHtml :> 2,
                     .MDb :> 3,
-                    // no-default-arm: any other element keeps the place after it (lowerPlaced)
+                    // no-default-arm: any other element gets the place just before it (lowerPlaced)
                     _ :> 0
                 };
                 if (kind == 1) return e.span.start;
                 if (kind == 3 || (kind == 2 && !parserTextElem(e))) return constructStart(t, e.kids, pos);
-                return -1;
+                return e.span.start;
             }
             i = i + 1;
         }
         return -1;
+    }
+
+    // s482 (lane s482-place-fu, #2079 review PRE-2) — the element, named for a message, whose
+    // content holds no place and in which a place at `pos` stands, when no construct does: the
+    // element the constructStart descent stops at that is not a construct (`<textarea>`, `<title>`
+    // — the RCDATA elements; raw `<pre>` / `<code>` content and `<script>` / `<style>` hold no
+    // declaration). lowerPlaced puts the place just before it. "" when there is none.
+    fn placeHostAt(t: Tables, ns: ANode[], pos: int) -> string {
+        for (const n of ns) {
+            const e: AElem | not = elemOfNodeK(n.k);
+            if (e is given && e.span.start <= pos && pos < e.span.end) {
+                if (attrNamed(e.attrs, "if") is given || attrNamed(e.attrs, "else-if") is given || attrNamed(e.attrs, "else") is given) return "";
+                const fct: ElemFact | not = elemFact(t.elems, e.nid);
+                const kind: int = match fct {
+                    .MUse(decl: d) :> 1,
+                    .MMatch(m: m) :> 1,
+                    .MHtml :> 2,
+                    .MDb :> 3,
+                    // no-default-arm: any other element holds no place
+                    _ :> 0
+                };
+                if (kind == 1) return "";
+                if (kind == 3 || (kind == 2 && !parserTextElem(e))) return placeHostAt(t, e.kids, pos);
+                let tag: string = e.tag;
+                if (e.star) tag = "*" + e.tag;
+                return "`<" + tag + ">`";
+            }
+        }
+        return "";
+    }
+
+    // s482 (lane s482-place-fu) — whether code runs between `lo` and `hi` in the body's markup:
+    // an attribute value or a display there (not an event handler, an `<effect>`, a `<request>`),
+    // or a component used there.
+    fn regionHasCode(t: Tables, items: AItem[], lo: int, hi: int) -> boolean {
+        if (lo < 0) return true;
+        for (const it of items) {
+            const n: ANode | not = markupOfItem(it);
+            if (n is given && (regionBlocks(n, lo, hi).length > 0 || regionUses(t, n, lo, hi).length > 0)) return true;
+        }
+        return false;
     }
 
     // The first member of the if-chain whose `else-if=` / `else` member is ns[i] (lower.scrml
