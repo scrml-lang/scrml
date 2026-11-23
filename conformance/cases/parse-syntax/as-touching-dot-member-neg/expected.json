@@ -1,0 +1,22 @@
+{
+  "id": "parse-syntax-as-touching-dot-member-neg",
+  "description": "§14.12.6.2 (S482) — `return a as.Published;` with a parameter named `as` (a struct with a field `Published`): the `.` touches `as`, so it is member access on the name `as`, not the bare variant of an `as .V` cast. The statement is `return a` followed by `as.Published` with no `;` between — E-STMT-MISSING-SEMICOLON.",
+  "language-version": "1.0",
+  "spec": "§14.12.6.2, §7.2.2",
+  "source-test": "compiler/self-host-v2/slice-m4/as-adjacency-s482.test.js",
+  "provenance": "lane:s482-selfhost-parse-residue (#2060 review LOW-2; g-impl1-as-touching-dot-cast-s482)",
+  "rationale": "§14.12.6.2: \"a `.` touching `as` — no whitespace, line break or comment between them — is member access on the name `as` (`as.value`, `as.f()`), and a `.` separated from `as` by any of those begins the bare variant of the cast\". ruling:user-voice-scrml.md-S482-as-adjacency — \"a `.` touching `as` with no space is member access; a spaced `as .V` stays a bare variant.\" §7.2.2: a `;` ends every statement that is not block-like.",
+  "expect": {
+    "codes": ["E-STMT-MISSING-SEMICOLON"]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-as-touching-dot-cast-s482",
+      "fails": {
+        "codes": [
+          "missing:E-STMT-MISSING-SEMICOLON"
+        ]
+      }
+    }
+  }
+}
