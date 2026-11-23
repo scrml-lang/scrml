@@ -1750,10 +1750,15 @@ ${
         if (qualPatStartAt(tp)) return true;
         if (a.cls == TC.Punct && tk(a, ".") && (b.cls == TC.Ident || b.cls == TC.Keyword) && touching(a, b)) return true;
         if (a.cls == TC.Punct && tk(a, ":") && tk(b, ":") && touching(a, b)) return true;
-        if ((a.cls == TC.Ident || a.cls == TC.Keyword) && (a.v == "_" || a.v == "else" || a.v == "not")) return true;
-        if (a.cls == TC.Str || a.cls == TC.Num) return true;
-        if ((a.cls == TC.Keyword || a.cls == TC.Ident) && (a.v == "true" || a.v == "false")) return true;
-        return a.cls == TC.Punct && tk(a, "-") && b.cls == TC.Num && touching(a, b);
+        if ((a.cls == TC.Ident || a.cls == TC.Keyword) && (a.v == "_" || a.v == "else")) return true;
+        // s482-alt-followups (LOW-3) — `not` and a literal are a pattern only where parsePattern
+        // reads one: followed by the arm separator or by another `|`. `1 | 2 + 3 :>` /
+        // `"a" | "b" + "c" :>` is the §18.10 guard ("a `|` after an arm pattern … followed by
+        // something that is not a pattern"), E-SYNTAX-011 — not an alternate that fails to parse.
+        if ((a.cls == TC.Ident || a.cls == TC.Keyword) && a.v == "not") return sepAt(tp, 1) || altBarAt(tp, 1);
+        if (a.cls == TC.Str || a.cls == TC.Num) return sepAt(tp, 1) || altBarAt(tp, 1);
+        if ((a.cls == TC.Keyword || a.cls == TC.Ident) && (a.v == "true" || a.v == "false")) return sepAt(tp, 1) || altBarAt(tp, 1);
+        return a.cls == TC.Punct && tk(a, "-") && b.cls == TC.Num && touching(a, b) && (sepAt(tp, 2) || altBarAt(tp, 2));
     }
 
     fn capName(t: PTok) -> boolean {

@@ -21537,7 +21537,10 @@ ${
             // already takes is unreachable (§18.14.2 E-TYPE-023), reported once per arm
             let cases: int[] = [idx];
             let ckeys: string[] = [ra.key];
-            if (idx == -7) {
+            // s482-alt-followups (INFO-1): a wildcard alternation's (-1 with alternates) cases are
+            // its alternates too — `.B :> …, .B | _ :> …` names `.B` twice (its `_` adds no case)
+            const isAlt: boolean = idx == -7 || ra.alts.length > 0;
+            if (isAlt) {
                 cases = ra.alts;
                 ckeys = ra.keys;
             }
@@ -21557,8 +21560,8 @@ ${
                 }
                 ci = ci + 1;
             }
-            if (dup && !wild && idx == -7) st = addDiag(st, env.file, a.span, "E-TYPE-023", "an alternate of this arm names a case that an earlier arm, or an earlier alternate of this arm, already takes, so that alternate is unreachable — drop it (§18.14.2 E-TYPE-023: duplicate match arm; §18.2 alternation)");
-            if (dup && !wild && idx != -7) st = addDiag(st, env.file, a.span, "E-TYPE-023", "a second arm for the same case — the first arm already takes it, so this one is unreachable (§18.14.2 E-TYPE-023: duplicate match arm)");
+            if (dup && !wild && isAlt) st = addDiag(st, env.file, a.span, "E-TYPE-023", "an alternate of this arm names a case that an earlier arm, or an earlier alternate of this arm, already takes, so that alternate is unreachable — drop it (§18.14.2 E-TYPE-023: duplicate match arm; §18.2 alternation)");
+            if (dup && !wild && !isAlt) st = addDiag(st, env.file, a.span, "E-TYPE-023", "a second arm for the same case — the first arm already takes it, so this one is unreachable (§18.14.2 E-TYPE-023: duplicate match arm)");
             if (idx == -1) wild = true;
             st = addFail(st, a.nid, FailFact.FArm(idx, ra.alts));
             let inner: Sym[] = [];
@@ -21680,9 +21683,11 @@ ${
                 st = addDiag(st, env.file, a.span, "E-SYNTAX-010", afterWildMsg(wildWhole));
             } else if ((ra.idx >= 0 && covered.indexOf(ra.idx) >= 0) || (ra.idx == -2 && okSeen)) {
                 st = addDiag(st, env.file, a.span, "E-TYPE-023", "a second arm for the same variant — the first arm already takes it, so this one is unreachable (§18.8.1 E-TYPE-023: duplicate match arm)");
-            } else if (ra.idx == -7 && altCasesDup(ra.alts, covered)) {
+            } else if ((ra.idx == -7 || ra.idx == -1) && altCasesDup(ra.alts, covered)) {
                 // s482 — an alternate naming a variant an earlier arm, or an earlier alternate of
-                // this arm, already takes (§18.2, §18.8.1)
+                // this arm, already takes (§18.2, §18.8.1). s482-alt-followups (INFO-1): a
+                // wildcard alternation's named alternates too (`.B :> …, .B | _ :> …`) — that `.B`
+                // is as unreachable as in `.B | .C` (§18.14.2); a plain `_` / `else` has no alternates
                 st = addDiag(st, env.file, a.span, "E-TYPE-023", "an alternate of this arm names a variant that an earlier arm, or an earlier alternate of this arm, already takes, so that alternate is unreachable — drop it (§18.8.1 E-TYPE-023: duplicate match arm; §18.2 alternation)");
             }
             // s475 r1 (review F2): pattern errors only (`ra.patErr`, and the duplicate check just
@@ -21691,7 +21696,17 @@ ${
             if (!last && (ra.patErr || hasErrorDiag(st.diags.slice(d0)))) armErr = true;
             if (!last && ra.idx >= 0) coveredBefore = coveredBefore.concat([ra.idx]);
             if (!last && ra.idx == -7) coveredBefore = coveredBefore.concat(altVariants(ra.alts));
-            if (ra.idx == -1) {
+            if (ra.idx == -1 && altBindingRecovered(a)) {
+                // s482-alt-followups (LOW-2) — the parser reported E-MATCH-ALT-BINDING on this
+                // wildcard alternation and kept it without its binders (`.NotFound | _ e` read as
+                // `.NotFound | _`, a placeholder body): judging the rewrite would report a second
+                // error the author did not write (E-MATCH-ELSE-ABSORBS-ERROR, E-TYPE-020). The arm
+                // is taken to cover every case left, as in a `!{}` (§19.4.5) — one report; the
+                // Error already stops the build, so nothing is absorbed at run time.
+                okSeen = true;
+                wild = true;
+                last = true;
+            } else if (ra.idx == -1) {
                 const okPrior: boolean = okSeen;
                 okSeen = true;                // a plain wildcard takes the success value too (§19.7.3)
                 // s474 — in a `match` on a failable result a plain `_` / `else` is the
@@ -21714,8 +21729,40 @@ ${
             if (ra.idx == -2) okSeen = true;
             if (ra.idx >= 0) covered = covered.concat([ra.idx]);
             if (ra.idx == -7) covered = covered.concat(altVariants(ra.alts));
+            // s482-alt-followups (LOW-1) — a wildcard alternation (`.Denied | else :> …`) is the
+            // wildcard arm (§18.2), so in a `match` its `_` / `else` covers `.Ok` only (§18.6) —
+            // but the error variants its OTHER alternates name are handled by this arm (§19.7.3:
+            // "the error variants SHALL be covered by arms that name them"; ruling:
+            // user-voice-scrml.md S474 "`else` on a failable match", "Errors need an explicit arm"): covered here,
+            // and lowered as a failure arm into this arm's body (lower.scrml errArms). An error
+            // variant no arm names is still E-MATCH-ELSE-ABSORBS-ERROR (coverDiags). Not
+            // `coveredBefore`: this arm is not "before" the wildcard, it is the wildcard, and it is
+            // reachable for the variants it names (no W-MATCH-001).
+            if (ra.idx == -1) covered = covered.concat(altVariants(ra.alts));
         }
         return { st: st, covered: covered, wild: wild, okSeen: okSeen, absorb: absorb, absorbSpan: absorbSpan, okBefore: okBefore, coveredBefore: coveredBefore, armErr: armErr };
+    }
+
+    // s482-alt-followups (LOW-2) — the arm the parser rewrote after E-MATCH-ALT-BINDING
+    // (parse.scrml parseArms): an alternation whose body is the Recovered placeholder spanning
+    // from the arm's own start (a body that failed to parse starts after the `:>`).
+    fn altBindingRecovered(a: AArm) -> boolean {
+        const p: APat = a.pat;
+        const alt: boolean = match p {
+            .PAlt(alts: xs) :> true,
+            .PName(name: n) :> false,
+            .PWild :> false,
+            .PWhole(bind: b) :> false,
+            .PBare(bind: b) :> false,
+            .PNot :> false,
+            .PLit(e: x) :> false
+        };
+        if (!alt) return false;
+        const body: AArmBody = a.body;
+        return match body {
+            .ArmExpr(e: x) :> recoveredInit(x) && x.span.start == a.span.start,
+            .ArmBlock(b: b) :> false
+        };
     }
 
     // s482 — the variant indices an alternation's alternates name (its -3s, unresolved, left out).
