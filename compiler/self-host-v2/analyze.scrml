@@ -11727,7 +11727,449 @@ ${
         // called (§6.7.4 rule 3) — not on the initializer rule's direct-call `usesD`. s482 r2
         // (#2053 r1 review MED-A): ~~on `uses`~~ on `usesR` — a nested function declaration a
         // reached function never calls nor uses as a value adds nothing
+        out = out.concat(constructReadDiags(g, t, sum, writes, sites, lets));
         return out.concat(bodyReachDiags(g, t, sum, usesR, binds));
+    }
+
+    // =========================================================================
+    // s482 (lane s482-small-followups, item E — #2071 review INFO-1) — §7.6 rule (b) S482: a
+    // file-scope initializer inside a construct's content that does not act runs once, and "nothing
+    // can observe where it ran" only while no body code writes what it reads where the write's
+    // effect depends on where the initializer runs. Such a read is counted as acting:
+    // E-FILE-SCOPE-INIT-IN-CONSTRUCT, naming the binding and the construct. A PA reading of the S481
+    // ruling (ruling:user-voice-scrml.md-S481-nested-init-chain-comments item 1: *"make it a compile
+    // error naming the construct; refusing means nobody is surprised"*), prov=pa-ruled.
+    // ~~One that READS a file-scope `let` or a program cell that body code writes — anywhere~~
+    // s482 (lane s482-construct-init-fu, #2076 review MED-1 / LOW-1) — the initializer's place is now
+    // just BEFORE the construct (lower.scrml lowerPlaced / placeBefore). Put after it, the construct's
+    // content read the binding before its place, so the printer ran it at module initialization,
+    // before the whole body, with every binding its initializer reads (`${ n = 5; } ${ const m = n; }
+    // <div if=(m > 0)>${ const k = m + 0; }…` showed m = 1 and k = 1). Placed before, it sees every
+    // write the body makes before the construct and none after it, as in source order. The only
+    // write whose effect depends on where it runs is one made INSIDE the construct — its attributes,
+    // its content (a component's own code included) — before the initializer: source order runs it
+    // first, the place does not. So only those writes count (constructWrites): one after the
+    // construct (`p/e-after`) is no longer refused, nor one before it. A read of a cell whose seed or
+    // formula runs when it is read follows that seed or formula (initReadWritten). A read of another
+    // file-scope binding needs no following: its value was fixed at its own place, before the
+    // construct (a later one is E-SCOPE-001; one in the same construct is judged here itself).
+    // Direction: newly-accepting against #2076 (corpus: 0 either way); prov=pa-ruled.
+    // =========================================================================
+    fn constructReadDiags(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[]) -> Diag[] {
+        let out: Diag[] = [];
+        const pfields: FieldInfo[] = programCells(g);
+        for (const f of g.files) {
+            for (const it of f.items) {
+                const k: AItemK = it.k;
+                const ps: AItem[] = match k {
+                    .ProgramItem(p: p) :> p.items,
+                    .ConstItem(c: x) :> [],
+                    .DeclItem(d: x) :> [],
+                    .ImportItem(i: x) :> [],
+                    .TypeItem(t: x) :> [],
+                    .FnItem(f: x) :> [],
+                    .MarkupItem(n: x) :> []
+                };
+                let tops: ANode[] = [];
+                for (const pi of ps) {
+                    const n: ANode | not = markupOfItem(pi);
+                    if (n is given) tops = tops.concat([n]);
+                }
+                let cands: AItem[] = [];
+                for (const ci of ps) {
+                    const ck: AItemK = ci.k;
+                    const isConst: boolean = match ck {
+                        .ConstItem(c: x) :> true,
+                        // no-default-arm: one question of an item — is it a file-scope binding
+                        _ :> false
+                    };
+                    if (isConst && constructAt(t, tops, ci.span.start) != "") cands = cands.concat([ci]);
+                }
+                const cells: BodyCell[] = bodyCells(g, ps);
+                for (const ci of cands) {
+                    const ck: AItemK = ci.k;
+                    const c: AConst | not = match ck {
+                        .ConstItem(c: x) :> x,
+                        .ProgramItem(p: x) :> not,
+                        .DeclItem(d: x) :> not,
+                        .ImportItem(i: x) :> not,
+                        .TypeItem(t: x) :> not,
+                        .FnItem(f: x) :> not,
+                        .MarkupItem(n: x) :> not
+                    };
+                    if (c is given) {
+                        const where: string = constructAt(t, tops, ci.span.start);
+                        if (where != "" && initActWhat(c.init) == "") {
+                            const lo: int = constructStart(t, tops, ci.span.start);
+                            const bw: BodyW = constructWrites(g, t, sum, writes, sites, lets, f.path, ps, pfields, lo, ci.span.start);
+                            const r: string = initReadWritten(t, [c.init], bw, g.program.id, pfields, cells, lo, []);
+                            if (r != "") {
+                                let kw: string = "const";
+                                if (c.mutable) kw = "let";
+                                let before: string = " inside that construct, before it";
+                                if (lo < 0) before = "";
+                                out = out.concat([newDiag("E-FILE-SCOPE-INIT-IN-CONSTRUCT", "the initializer of `" + kw + " " + c.name + "` reads " + r + ", which the program body writes" + before + ", and it is written inside " + where + " — a file-scope initializer runs once, in the program body's one run (§7.6 rule (b)), not when, or each time, that content renders, so whether it sees that write depends on where it runs: it has no place here. Declare `" + c.name + "` before that element, or compute the value where the content needs it", f.path, c.span)]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    // What the program body's code writes: file-scope `let`s (`lets`, Sym ids) and program cells
+    // (`cells`, the cells' Sym ids; `cellNames`, their `@name` labels).
+    type BodyW:struct = { lets: int[], cells: int[], cellNames: string[] }
+
+    // s482 (lane s482-construct-init-fu) — the start of the construct a place at `pos` is put just
+    // before (lower.scrml lowerPlaced / placeBefore): the outermost `if=` / `else-if=` / `else`
+    // element (an if-chain's first member), component use or `<match>` on the path from the body's
+    // top nodes, descending only through what renders once, in place (an HTML element that holds no
+    // raw or parser-text content, a `<db>` block). -1 when the place is put elsewhere (after some
+    // other element): then every body write counts, as in #2076 (fail closed).
+    fn constructStart(t: Tables, ns: ANode[], pos: int) -> int {
+        let i: int = 0;
+        for (; i < ns.length; ) {
+            const e: AElem | not = elemOfNodeK(ns[i].k);
+            if (e is given && e.span.start <= pos && pos < e.span.end) {
+                if (attrNamed(e.attrs, "if") is given) return e.span.start;
+                if (attrNamed(e.attrs, "else-if") is given || attrNamed(e.attrs, "else") is given) return chainStartAt(ns, i);
+                const fct: ElemFact | not = elemFact(t.elems, e.nid);
+                const kind: int = match fct {
+                    .MUse(decl: d) :> 1,
+                    .MMatch(m: m) :> 1,
+                    .MHtml :> 2,
+                    .MDb :> 3,
+                    // no-default-arm: any other element keeps the place after it (lowerPlaced)
+                    _ :> 0
+                };
+                if (kind == 1) return e.span.start;
+                if (kind == 3 || (kind == 2 && !parserTextElem(e))) return constructStart(t, e.kids, pos);
+                return -1;
+            }
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    // The first member of the if-chain whose `else-if=` / `else` member is ns[i] (lower.scrml
+    // chainEnd, read backwards: blank text between members, then the `if=` element).
+    fn chainStartAt(ns: ANode[], i: int) -> int {
+        let j: int = i - 1;
+        for (; j >= 0; ) {
+            const e: AElem | not = elemOfNodeK(ns[j].k);
+            if (e is given) {
+                if (attrNamed(e.attrs, "if") is given) return e.span.start;
+                if (attrNamed(e.attrs, "else-if") is not) return ns[i].span.start;
+            } else if (!blankTextNode(ns[j])) {
+                return ns[i].span.start;
+            }
+            j = j - 1;
+        }
+        return ns[i].span.start;
+    }
+
+    fn blankTextNode(n: ANode) -> boolean {
+        const k: ANodeK = n.k;
+        return match k {
+            .Text(text: x) :> x.trim() == "",
+            .Css(c: x) :> true,
+            // no-default-arm: only blank text (and a `#{}` block) sits between chain members
+            _ :> false
+        };
+    }
+
+    // `<pre>` / `<code>` raw content and the elements the HTML parser reads as text (`<textarea>`,
+    // `<title>`, `<script>`, `<style>`) — lower.scrml isRawContentElem / isTextOnlyElem: a place in
+    // one is put after it.
+    fn parserTextElem(e: AElem) -> boolean {
+        if (e.star || e.tag.length == 0) return false;
+        const first: string = e.tag.substring(0, 1);
+        if (first >= "A" && first <= "Z") return false;
+        const x: string = e.tag.toLowerCase();
+        return x == "pre" || x == "code" || x == "textarea" || x == "title" || x == "script" || x == "style";
+    }
+
+    // What the code that runs between `lo` (constructStart) and `hi` (the initializer's position)
+    // writes: the attribute values and content of the nodes there (not an event handler, an
+    // `<effect>`, a `<request>`), the file-scope initializers there, and — run where they are used —
+    // the code of each component used there (its renders and its cells' seeds, transitively); and
+    // the seeds of the program cells whose place is at or after `lo` (one read there runs then).
+    // `lo` < 0: all of the program body's code (bodyWritesOf, #2076).
+    fn constructWrites(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[], file: string, items: AItem[], pfields: FieldInfo[], lo: int, hi: int) -> BodyW {
+        if (lo < 0) return bodyWritesOf(g, t, sum, writes, sites, lets, file, items, pfields);
+        let blocks: ABlock[] = [];
+        let uses: int[] = [];
+        for (const it of items) {
+            const k: AItemK = it.k;
+            const c: AConst | not = match k {
+                .ConstItem(c: x) :> x,
+                .ProgramItem(p: x) :> not,
+                .DeclItem(d: x) :> not,
+                .ImportItem(i: x) :> not,
+                .TypeItem(t: x) :> not,
+                .FnItem(f: x) :> not,
+                .MarkupItem(n: x) :> not
+            };
+            if (c is given && it.span.start >= lo && it.span.start < hi) blocks = blocks.concat([exprBlock(c.init)]);
+            const n: ANode | not = markupOfItem(it);
+            if (n is given) {
+                blocks = blocks.concat(regionBlocks(n, lo, hi));
+                uses = unionIds(uses, regionUses(t, n, lo, hi));
+            }
+        }
+        for (const fi of pfields) {
+            if (fi.span.start >= lo) blocks = blocks.concat(seedBlocks(fi.init));
+        }
+        let bw: BodyW = blocksWrites(g, t, sum, writes, sites, lets, file, blocks, pfields);
+        // the components used there, and those they use, each once
+        let seen: int[] = [];
+        let todo: int[] = uses;
+        for (; todo.length > 0; ) {
+            let next: int[] = [];
+            for (const d of todo) {
+                if (seen.indexOf(d) < 0) {
+                    seen = seen.concat([d]);
+                    for (const ds of g.decls) {
+                        const ad: ADecl | not = ds.d;
+                        if (ds.info.sym.id == d && !ds.isProgram && ad is given) {
+                            let cb: ABlock[] = [];
+                            for (const fi2 of ds.info.fields) { cb = cb.concat(seedBlocks(fi2.init)); }
+                            const r: AElem | not = ad.renders;
+                            if (r is given) {
+                                const rn: ANode = { nid: -1, span: r.span, k: ANodeK.Elem(r) };
+                                cb = cb.concat(bodyCodeBlocks(rn));
+                                next = unionIds(next, regionUses(t, rn, -1, 2147483647));
+                            }
+                            bw = mergeBodyW(bw, blocksWrites(g, t, sum, writes, sites, lets, ds.file, cb, pfields));
+                        }
+                    }
+                }
+            }
+            todo = next;
+        }
+        return bw;
+    }
+
+    fn unionIds(a: int[], b: int[]) -> int[] {
+        let out: int[] = a;
+        for (const x of b) { if (out.indexOf(x) < 0) out = out.concat([x]); }
+        return out;
+    }
+
+    fn mergeBodyW(a: BodyW, b: BodyW) -> BodyW {
+        let ns: string[] = a.cellNames;
+        for (const x of b.cellNames) { if (ns.indexOf(x) < 0) ns = ns.concat([x]); }
+        return { lets: unionIds(a.lets, b.lets), cells: unionIds(a.cells, b.cells), cellNames: ns };
+    }
+
+    // A seed (or a formula) that is code: an expression, or a `{ }` block.
+    fn seedBlocks(v: AAttrValue) -> ABlock[] {
+        return match v {
+            .Bare(e: x) :> [exprBlock(x)],
+            .Paren(e: x) :> [exprBlock(x)],
+            .Braced(b: b) :> [b],
+            // no-default-arm: a quoted string, a duration, no value — no code
+            _ :> []
+        };
+    }
+
+    // bodyCodeBlocks of the part of `n` between `lo` and `hi`: an element that starts there gives its
+    // attribute values (it is wired there); one that holds `lo` gives only what is inside.
+    fn regionBlocks(n: ANode, lo: int, hi: int) -> ABlock[] {
+        if (n.span.end <= lo || n.span.start >= hi) return [];
+        const k: ANodeK = n.k;
+        return match k {
+            .Elem(e: e) :> regionElemBlocks(e, lo, hi),
+            .Gather(f: gf) :> regionGatherBlocks(n, gf, lo, hi),
+            // no-default-arm: any other node is code whole, there (bodyCodeBlocks), or none
+            _ :> regionLeaf(n, lo)
+        };
+    }
+
+    fn regionLeaf(n: ANode, lo: int) -> ABlock[] {
+        if (n.span.start < lo) return [];
+        return bodyCodeBlocks(n);
+    }
+
+    fn regionGatherBlocks(n: ANode, f: AFor, lo: int, hi: int) -> ABlock[] {
+        if (n.span.start < lo) {
+            let out: ABlock[] = [];
+            for (const r of gatherRows(f)) { out = out.concat(regionBlocks(r, lo, hi)); }
+            return out;
+        }
+        return gatherCodeBlocks(f);
+    }
+
+    fn regionElemBlocks(e: AElem, lo: int, hi: int) -> ABlock[] {
+        let out: ABlock[] = [];
+        if (e.span.start >= lo) {
+            const bare: AElem = { nid: e.nid, span: e.span, star: e.star, tag: e.tag, attrs: e.attrs, kids: [], binds: e.binds, parens: e.parens };
+            out = bodyElemBlocks(bare);
+        }
+        for (const kid of e.kids) { out = out.concat(regionBlocks(kid, lo, hi)); }
+        return out;
+    }
+
+    // The declarations (Sym ids) of the component uses that start between `lo` and `hi` in `n`.
+    fn regionUses(t: Tables, n: ANode, lo: int, hi: int) -> int[] {
+        if (n.span.end <= lo || n.span.start >= hi) return [];
+        const k: ANodeK = n.k;
+        let out: int[] = [];
+        const e: AElem | not = elemOfNodeK(k);
+        if (e is given) {
+            if (e.span.start >= lo) {
+                const fct: ElemFact | not = elemFact(t.elems, e.nid);
+                const d: int = match fct {
+                    .MUse(decl: d) :> d.id,
+                    // no-default-arm: only a use runs a component's code
+                    _ :> -1
+                };
+                if (d >= 0) out = out.concat([d]);
+            }
+            for (const kid of e.kids) { out = unionIds(out, regionUses(t, kid, lo, hi)); }
+        }
+        const gf: AFor | not = match k {
+            .Gather(f: x) :> x,
+            // no-default-arm: only an element or a gather holds nodes
+            _ :> not
+        };
+        if (gf is given) {
+            for (const r of gatherRows(gf)) { out = unionIds(out, regionUses(t, r, lo, hi)); }
+        }
+        return out;
+    }
+
+    fn bodyWritesOf(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[], file: string, items: AItem[], pfields: FieldInfo[]) -> BodyW {
+        let blocks: ABlock[] = [];
+        for (const it of items) {
+            const k: AItemK = it.k;
+            const c: AConst | not = match k {
+                .ConstItem(c: x) :> x,
+                .ProgramItem(p: x) :> not,
+                .DeclItem(d: x) :> not,
+                .ImportItem(i: x) :> not,
+                .TypeItem(t: x) :> not,
+                .FnItem(f: x) :> not,
+                .MarkupItem(n: x) :> not
+            };
+            if (c is given) blocks = blocks.concat([exprBlock(c.init)]);
+            const n: ANode | not = markupOfItem(it);
+            if (n is given) blocks = blocks.concat(bodyCodeBlocks(n));
+        }
+        // a cell's seed runs in the body too (§7.6 rule (b) S482: at its place)
+        for (const fi of pfields) { blocks = blocks.concat(seedBlocks(fi.init)); }
+        return blocksWrites(g, t, sum, writes, sites, lets, file, blocks, pfields);
+    }
+
+    // What `blocks` (code of `file`) write, directly or through a function they call.
+    fn blocksWrites(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[], file: string, blocks: ABlock[], pfields: FieldInfo[]) -> BodyW {
+        let ls: int[] = [];
+        let cs: int[] = [];
+        let names: string[] = [];
+        const six: SymIx = nodeSymIx(sum.nodes);
+        for (const b of blocks) {
+            for (const w of letWritesIn(t, b, lets, file)) { if (ls.indexOf(w.sym) < 0) ls = ls.concat([w.sym]); }
+            for (const a of atUsesIn(t, b)) {
+                if (writeCapOf(effectFact(t.effects, a.nid)) >= 0) {
+                    const cs0: int = progCellOf(t, a, g.program.id, pfields);
+                    if (cs0 >= 0 && cs.indexOf(cs0) < 0) cs = cs.concat([cs0]);
+                }
+            }
+            for (const j of refTargets(sum.nodes, six, scanBlock({ t: t, file: file }, b, emptyScan()).refs, false)) {
+                for (const a of writes[j]) {
+                    const w: LetW = sites[a.root][a.pos];
+                    if (ls.indexOf(w.sym) < 0) ls = ls.concat([w.sym]);
+                }
+                for (const a of sum.writes[j]) {
+                    if (a.key.indexOf("w:@") == 0 && names.indexOf(a.key.substring(2)) < 0) names = names.concat([a.key.substring(2)]);
+                }
+            }
+        }
+        return { lets: ls, cells: cs, cellNames: names };
+    }
+
+    fn exprBlock(e: AExpr) -> ABlock {
+        const st: AStmt = { nid: -1, span: e.span, k: AStmtK.Eval(e) };
+        return { nid: -1, span: e.span, stmts: [st] };
+    }
+
+    // The code of a body node that runs in the body: its `${}` statements, its displays and attribute
+    // values, a gather's loop — never an event handler, an `<effect>` or a `<request>`.
+    fn bodyCodeBlocks(n: ANode) -> ABlock[] {
+        const k: ANodeK = n.k;
+        return match k {
+            .Elem(e: e) :> bodyElemBlocks(e),
+            .Interp(e: x) :> [exprBlock(x)],
+            .Run(b: rb) :> [rb],
+            .Gather(f: gf) :> gatherCodeBlocks(gf),
+            .Text(text: x) :> [],
+            .DeclNode(d: x) :> [],
+            .Effect(w: x) :> [],
+            .Request(r: x) :> [],
+            .Css(c: x) :> []
+        };
+    }
+
+    fn gatherCodeBlocks(f: AFor) -> ABlock[] {
+        const st: AStmt = { nid: -1, span: f.span, k: AStmtK.For(f) };
+        let out: ABlock[] = [{ nid: -1, span: f.span, stmts: [st] }];
+        for (const r of gatherRows(f)) { out = out.concat(bodyCodeBlocks(r)); }
+        return out;
+    }
+
+    fn bodyElemBlocks(e: AElem) -> ABlock[] {
+        let out: ABlock[] = [];
+        for (const a of e.attrs) {
+            if (eventName(a.name) == "") {
+                const v: AAttrValue = a.value;
+                const x: AExpr | not = match v {
+                    .Bare(e: x) :> x,
+                    .Paren(e: x) :> x,
+                    // no-default-arm: only an expression value is code
+                    _ :> not
+                };
+                if (x is given) out = out.concat([exprBlock(x)]);
+            }
+        }
+        for (const kid of e.kids) { out = out.concat(bodyCodeBlocks(kid)); }
+        return out;
+    }
+
+    // The first thing a (non-acting) initializer reads that the body writes, shown for a message
+    // (`` `n` `` / `` `@c` ``); "" when it reads none. s482 (s482-construct-init-fu): a read of a
+    // program cell whose seed would run at that read — a derived cell's formula (it runs at every
+    // read), or the seed of a cell whose place is at or after `lo` (not run yet when the place before
+    // the construct is reached) — follows what that seed or formula reads (`seen`: cells followed).
+    fn initReadWritten(t: Tables, inits: AExpr[], bw: BodyW, prog: int, pfields: FieldInfo[], cells: BodyCell[], lo: int, seen: int[]) -> string {
+        let more: AExpr[] = [];
+        let seen2: int[] = seen;
+        for (const init of inits) {
+            const b: ABlock = exprBlock(init);
+            for (const ne of nameExprsIn(b)) {
+                const id: int = constSymOfFact(nameFact(t.names, ne.nid));
+                if (id >= 0 && bw.lets.indexOf(id) >= 0) return "`" + letNameOf(t, id) + "`";
+            }
+            for (const a of atUsesIn(t, b)) {
+                const cs: int = progCellOf(t, a, prog, pfields);
+                if (cs >= 0) {
+                    for (const fi of pfields) {
+                        if (fi.sym.id == cs && (bw.cells.indexOf(cs) >= 0 || bw.cellNames.indexOf("@" + fi.sym.hint) >= 0)) return "`@" + fi.sym.hint + "`";
+                    }
+                    const bc: BodyCell | not = cellOfSym(cells, cs);
+                    if (bc is given && seen2.indexOf(cs) < 0 && (bc.derived || (lo >= 0 && bc.pos >= lo))) {
+                        seen2 = seen2.concat([cs]);
+                        const x: AExpr | not = valueExpr(bc.init);
+                        if (x is given) more = more.concat([x]);
+                    }
+                }
+            }
+        }
+        if (more.length == 0) return "";
+        const r: string = initReadWritten(t, more, bw, prog, pfields, cells, lo, seen2);
+        if (r != "") return r + " (through the seed or formula of a cell it reads)";
+        return "";
     }
 
     // =========================================================================
@@ -21681,28 +22123,46 @@ ${
             // already takes is unreachable (§18.14.2 E-TYPE-023), reported once per arm
             let cases: int[] = [idx];
             let ckeys: string[] = [ra.key];
-            if (idx == -7) {
+            // s482-alt-followups (INFO-1): a wildcard alternation's (-1 with alternates) cases are
+            // its alternates too — `.B :> …, .B | _ :> …` names `.B` twice (its `_` adds no case)
+            const isAlt: boolean = idx == -7 || ra.alts.length > 0;
+            if (isAlt) {
                 cases = ra.alts;
                 ckeys = ra.keys;
             }
+            // s482-wmatch-alt-fix (#2075 review LOW-1): the duplicate check runs on sets of its
+            // own (`dCov`, `dNot`, `dLits`). A wildcard alternation (`.B | .C | _ :> …`) IS the
+            // wildcard arm (§18.2): its named alternates are checked for E-TYPE-023 but do NOT
+            // count as cases covered BEFORE the wildcard — else W-MATCH-001 ("the wildcard arm is
+            // unreachable", §18.6) fires on an arm that is reachable for the cases it names. This
+            // matches the failable path, which keeps them out of `coveredBefore` (resolveArms).
+            const wildAlt: boolean = idx == -1 && ra.alts.length > 0;
+            let dCov: int[] = covered;
+            let dNot: boolean = notSeen;
+            let dLits: string[] = lits;
             let ci: int = 0;
             for (const cx of cases) {
                 if (cx >= 0) {
-                    if (covered.indexOf(cx) >= 0) dup = true;
-                    covered = covered.concat([cx]);
+                    if (dCov.indexOf(cx) >= 0) dup = true;
+                    dCov = dCov.concat([cx]);
                 }
                 if (cx == -5) {
-                    if (notSeen) dup = true;
-                    notSeen = true;
+                    if (dNot) dup = true;
+                    dNot = true;
                 }
                 if (cx == -6 && ckeys[ci] != "") {
-                    if (lits.indexOf(ckeys[ci]) >= 0) dup = true;
-                    lits = lits.concat([ckeys[ci]]);
+                    if (dLits.indexOf(ckeys[ci]) >= 0) dup = true;
+                    dLits = dLits.concat([ckeys[ci]]);
                 }
                 ci = ci + 1;
             }
-            if (dup && !wild && idx == -7) st = addDiag(st, env.file, a.span, "E-TYPE-023", "an alternate of this arm names a case that an earlier arm, or an earlier alternate of this arm, already takes, so that alternate is unreachable — drop it (§18.14.2 E-TYPE-023: duplicate match arm; §18.2 alternation)");
-            if (dup && !wild && idx != -7) st = addDiag(st, env.file, a.span, "E-TYPE-023", "a second arm for the same case — the first arm already takes it, so this one is unreachable (§18.14.2 E-TYPE-023: duplicate match arm)");
+            if (!wildAlt) {
+                covered = dCov;
+                notSeen = dNot;
+                lits = dLits;
+            }
+            if (dup && !wild && isAlt) st = addDiag(st, env.file, a.span, "E-TYPE-023", "an alternate of this arm names a case that an earlier arm, or an earlier alternate of this arm, already takes, so that alternate is unreachable — drop it (§18.14.2 E-TYPE-023: duplicate match arm; §18.2 alternation)");
+            if (dup && !wild && !isAlt) st = addDiag(st, env.file, a.span, "E-TYPE-023", "a second arm for the same case — the first arm already takes it, so this one is unreachable (§18.14.2 E-TYPE-023: duplicate match arm)");
             if (idx == -1) wild = true;
             st = addFail(st, a.nid, FailFact.FArm(idx, ra.alts));
             let inner: Sym[] = [];
@@ -21824,9 +22284,11 @@ ${
                 st = addDiag(st, env.file, a.span, "E-SYNTAX-010", afterWildMsg(wildWhole));
             } else if ((ra.idx >= 0 && covered.indexOf(ra.idx) >= 0) || (ra.idx == -2 && okSeen)) {
                 st = addDiag(st, env.file, a.span, "E-TYPE-023", "a second arm for the same variant — the first arm already takes it, so this one is unreachable (§18.8.1 E-TYPE-023: duplicate match arm)");
-            } else if (ra.idx == -7 && altCasesDup(ra.alts, covered)) {
+            } else if ((ra.idx == -7 || ra.idx == -1) && altCasesDup(ra.alts, covered)) {
                 // s482 — an alternate naming a variant an earlier arm, or an earlier alternate of
-                // this arm, already takes (§18.2, §18.8.1)
+                // this arm, already takes (§18.2, §18.8.1). s482-alt-followups (INFO-1): a
+                // wildcard alternation's named alternates too (`.B :> …, .B | _ :> …`) — that `.B`
+                // is as unreachable as in `.B | .C` (§18.14.2); a plain `_` / `else` has no alternates
                 st = addDiag(st, env.file, a.span, "E-TYPE-023", "an alternate of this arm names a variant that an earlier arm, or an earlier alternate of this arm, already takes, so that alternate is unreachable — drop it (§18.8.1 E-TYPE-023: duplicate match arm; §18.2 alternation)");
             }
             // s475 r1 (review F2): pattern errors only (`ra.patErr`, and the duplicate check just
@@ -21835,7 +22297,17 @@ ${
             if (!last && (ra.patErr || hasErrorDiag(st.diags.slice(d0)))) armErr = true;
             if (!last && ra.idx >= 0) coveredBefore = coveredBefore.concat([ra.idx]);
             if (!last && ra.idx == -7) coveredBefore = coveredBefore.concat(altVariants(ra.alts));
-            if (ra.idx == -1) {
+            if (ra.idx == -1 && altBindingRecovered(a)) {
+                // s482-alt-followups (LOW-2) — the parser reported E-MATCH-ALT-BINDING on this
+                // wildcard alternation and kept it without its binders (`.NotFound | _ e` read as
+                // `.NotFound | _`, a placeholder body): judging the rewrite would report a second
+                // error the author did not write (E-MATCH-ELSE-ABSORBS-ERROR, E-TYPE-020). The arm
+                // is taken to cover every case left, as in a `!{}` (§19.4.5) — one report; the
+                // Error already stops the build, so nothing is absorbed at run time.
+                okSeen = true;
+                wild = true;
+                last = true;
+            } else if (ra.idx == -1) {
                 const okPrior: boolean = okSeen;
                 okSeen = true;                // a plain wildcard takes the success value too (§19.7.3)
                 // s474 — in a `match` on a failable result a plain `_` / `else` is the
@@ -21858,8 +22330,40 @@ ${
             if (ra.idx == -2) okSeen = true;
             if (ra.idx >= 0) covered = covered.concat([ra.idx]);
             if (ra.idx == -7) covered = covered.concat(altVariants(ra.alts));
+            // s482-alt-followups (LOW-1) — a wildcard alternation (`.Denied | else :> …`) is the
+            // wildcard arm (§18.2), so in a `match` its `_` / `else` covers `.Ok` only (§18.6) —
+            // but the error variants its OTHER alternates name are handled by this arm (§19.7.3:
+            // "the error variants SHALL be covered by arms that name them"; ruling:
+            // user-voice-scrml.md S474 "`else` on a failable match", "Errors need an explicit arm"): covered here,
+            // and lowered as a failure arm into this arm's body (lower.scrml errArms). An error
+            // variant no arm names is still E-MATCH-ELSE-ABSORBS-ERROR (coverDiags). Not
+            // `coveredBefore`: this arm is not "before" the wildcard, it is the wildcard, and it is
+            // reachable for the variants it names (no W-MATCH-001).
+            if (ra.idx == -1) covered = covered.concat(altVariants(ra.alts));
         }
         return { st: st, covered: covered, wild: wild, okSeen: okSeen, absorb: absorb, absorbSpan: absorbSpan, okBefore: okBefore, coveredBefore: coveredBefore, armErr: armErr };
+    }
+
+    // s482-alt-followups (LOW-2) — the arm the parser rewrote after E-MATCH-ALT-BINDING
+    // (parse.scrml parseArms): an alternation whose body is the Recovered placeholder spanning
+    // from the arm's own start (a body that failed to parse starts after the `:>`).
+    fn altBindingRecovered(a: AArm) -> boolean {
+        const p: APat = a.pat;
+        const alt: boolean = match p {
+            .PAlt(alts: xs) :> true,
+            .PName(name: n) :> false,
+            .PWild :> false,
+            .PWhole(bind: b) :> false,
+            .PBare(bind: b) :> false,
+            .PNot :> false,
+            .PLit(e: x) :> false
+        };
+        if (!alt) return false;
+        const body: AArmBody = a.body;
+        return match body {
+            .ArmExpr(e: x) :> recoveredInit(x) && x.span.start == a.span.start,
+            .ArmBlock(b: b) :> false
+        };
     }
 
     // s482 — the variant indices an alternation's alternates name (its -3s, unresolved, left out).
@@ -27860,8 +28364,9 @@ ${
     // a `#{}` block renders nothing. Every other child is refused, fail closed:
     //  - an element of any kind (a use, an `<each>`, an `if=` element, `<*x/>`) — mkElem's `c.raw` check;
     //  - an `<effect>` / `<request>` — written as an element, the same §24.5 refusal;
-    //  - a `${ for … lift }` — its rows are markup or values inserted at an anchor; a text-only one could be
-    //    one more part of the value, but it is not built (INTERIM, E-BOOTSTRAP-UNSUPPORTED).
+    //  - a `${ for … lift }` / a `${ if … }` lowered to one — rawGather: markup rows are elements there
+    //    (E-HTML-PARSER-REPAIR, §24.5); a text-only one could be one more part of the value, but it is not
+    //    built (INTERIM, E-BOOTSTRAP-UNSUPPORTED, g-boot-rcdata-text-lift-s482).
     fn mkRawNode(g: Globals, sa: AS, file: string, n: ANode, c: MkCx) -> MkFault[] {
         const k: ANodeK = n.k;
         return match k {
@@ -27873,8 +28378,26 @@ ${
             .Run(b: rb0, meta: mt) :> mkMetaRun(g, sa, file, n, mt, c),   // s482 r1 (MED-1): a runtime block's placeholder span is text here — refused
             .Effect(w: x) :> [{ nid: n.nid, file: file, span: n.span, code: "E-HTML-PARSER-REPAIR", msg: rawTextMsg("effect", c.raw) }],
             .Request(r: x) :> [{ nid: n.nid, file: file, span: n.span, code: "E-HTML-PARSER-REPAIR", msg: rawTextMsg("request", c.raw) }],
-            .Gather(f: lf) :> [{ nid: n.nid, file: file, span: n.span, code: "E-BOOTSTRAP-UNSUPPORTED", msg: rawGatherMsg(c.raw) }]
+            .Gather(f: lf) :> rawGather(file, n, lf, c.raw)
         };
+    }
+
+    // s482 (#2069 review LOW-1) — a `${ for … lift }`, or a `${ if … }` lowered to one (a branch that lifts
+    // markup or is a markup value, parse.scrml parseTier0If), inside a raw-text / RCDATA element. A row that
+    // is MARKUP is an element inside that element: §24.5 item 2 ("an element (with any hole in it) inside an
+    // HTML raw-text or RCDATA element … the parser reads that content as text") — E-HTML-PARSER-REPAIR,
+    // PERMANENT. Rows that are only values (`lift s`) could be one more part of the element's text value;
+    // that is not built (INTERIM, g-boot-rcdata-text-lift-s482).
+    fn rawGather(file: string, n: ANode, lf: AFor, raw: string) -> MkFault[] {
+        const what: string = isTier0If(lf) ? "a `${ if … }`" : "a `${ for … lift }`";
+        if (gatherRows(lf).length > 0) {
+            return [{ nid: n.nid, file: file, span: n.span, code: "E-HTML-PARSER-REPAIR", msg: rawRowMsg(what, raw) }];
+        }
+        return [{ nid: n.nid, file: file, span: n.span, code: "E-BOOTSTRAP-UNSUPPORTED", msg: rawGatherMsg(what, raw) }];
+    }
+
+    fn rawRowMsg(what: string, raw: string) -> string {
+        return what + " whose row or branch is markup puts an element inside `<" + raw + ">`: the HTML parser reads the content of `<" + raw + ">` as raw text (HTML §13.2.6.4.7), so the element and every hole in it never reach the page (SPEC §24.5) — move it out of the `<" + raw + ">`, or compute the text in a function and interpolate that (an interpolated value inside one is fine): `${ rowsText(@xs) }`";
     }
 
     // s482 — §34 W-RCDATA-BIND-VALUE-CONTENT-CONFLICT: a `<textarea>` with BOTH `bind:value` and a `${…}`
@@ -27898,8 +28421,8 @@ ${
         return [];
     }
 
-    fn rawGatherMsg(raw: string) -> string {
-        return "a `${ for … lift }` inside `<" + raw + ">` is not in the bootstrap: the HTML parser reads the content of `<" + raw + ">` as one text (HTML §13.2.6.4.7), so it is printed as one text value — its static text and its `${expr}` values — and a row can have no place in it (SPEC §24.5). Compute the text in a function and interpolate it: `${ rowsText(@xs) }`";
+    fn rawGatherMsg(what: string, raw: string) -> string {
+        return what + " that lifts text values inside `<" + raw + ">` is not in the bootstrap (INTERIM, g-boot-rcdata-text-lift-s482): the HTML parser reads the content of `<" + raw + ">` as one text (HTML §13.2.6.4.7), so it is printed as one text value — its static text and its `${expr}` values — and a row can have no place in it (SPEC §24.5). Compute the text in a function and interpolate it: `${ rowsText(@xs) }`";
     }
 
     // fix round 1 of #1945 (MED-2): a branch's literal text (`<A>"text"</>`, an Interp of a string

@@ -2922,8 +2922,9 @@ ${
     }
 
     // s481 — lowerNodes, with a View.Init for each admitted file-scope binding at its place
-    // (§7.6 S481). A place inside an if-chain (§17.1.1) — written inside a member — is put after
-    // the chain (one BETWEEN members is refused: analyze programChainGaps, E-CTRL-001).
+    // (§7.6 S481). A place inside an if-chain (§17.1.1) — written inside a member — is put ~~after~~
+    // just before the chain (s482, s482-construct-init-fu: lowerPlaced) (one BETWEEN members is
+    // refused: analyze programChainGaps, E-CTRL-001).
     fn lowerMarked(c: LC, ns: ANode[], marks: ConstMark[]) -> View[] {
         let out: View[] = [];
         let m: int = 0;
@@ -2935,6 +2936,12 @@ ${
             }
             const j: int = chainEnd(ns, i);
             if (j > i + 1) {
+                // s482 (lane s482-construct-init-fu, #2076 review MED-1): a place written inside a
+                // member is put just BEFORE the chain — placeBefore
+                for (; m < marks.length && marks[m].at <= j && marks[m].pos >= ns[i].span.start && marks[m].pos < ns[j - 1].span.end; ) {
+                    out = out.concat(initView(c, marks[m].nid));
+                    m = m + 1;
+                }
                 out = out.concat([chainView(c, ns, i, j)]);
                 i = j;
             } else {
@@ -2967,10 +2974,19 @@ ${
     // initializer runs ONCE (§7.6). s482 (ruling:user-voice-scrml.md-S481-nested-init-chain-
     // comments item 1): one that ACTS is refused there (analyze constructInitDiags,
     // E-FILE-SCOPE-INIT-IN-CONSTRUCT; in a row, E-BOOTSTRAP-UNSUPPORTED), so only one that does
-    // not act reaches here, and it is put just after the construct (unobservable). (`<match>`
-    // arms cannot hold a declaration; `<pre>` / `<code>` content is raw text.) s482: so is one
-    // inside an element the HTML parser reads as text (`<textarea>`, `<title>`, `<script>`,
-    // `<style>` — isTextOnlyElem): an anchor there is text, not a comment (#2041 r2 review LOW-1).
+    // not act reaches here, and it is put ~~just after the construct~~ (s482, lane
+    // s482-construct-init-fu — #2076 review MED-1) just BEFORE the construct (placeBefore; §7.6 rule
+    // (b) S482: "runs once, just before the construct"): after it, the construct's own
+    // content read the binding before its place, so the printer ran it at module initialization —
+    // and with it every binding its initializer reads (`${ n = 5; } ${ const m = n; } <div if=(m > 0)>
+    // ${ const k = m + 0; }…` showed m = 1 and k = 1, not 5). Before it, every write the body makes
+    // before the construct is seen, as in source order, and none after it; what it cannot place is a
+    // write made INSIDE the construct, before the initializer — analyze constructReadDiags refuses
+    // that. (`<pre>` / `<code>` content is raw text.) s482: one inside an element the HTML parser
+    // reads as text (`<textarea>`, `<title>`, `<script>`, `<style>` — isTextOnlyElem) is put just
+    // after that element: an anchor there is text, not a comment (#2041 r2 review LOW-1). Any other
+    // element whose content does not render once in place keeps the place after it (not a §7.6
+    // construct: analyze does not judge it).
     fn lowerPlaced(c: LC, n: ANode, ms: ConstMark[]) -> View[] {
         const e: AElem | not = elemOf(n);
         if (e is given) {
@@ -2993,16 +3009,36 @@ ${
                 if (kind == 1 && !isRawContentElem(e) && !isTextOnlyElem(e)) return [View.El(e.tag, noValidate(c, e).concat(htmlAttrs(c, e.attrs)), placedNodes(c, e.kids, ms))];
                 if (kind == 2) return placedNodes(c, e.kids, ms);
             }
+            if (placeBefore(c, e)) {
+                let pre: View[] = [];
+                for (const mk0 of ms) { pre = pre.concat(initView(c, mk0.nid)); }
+                return pre.concat(lowerNode(c, n));
+            }
         }
         let out: View[] = lowerNode(c, n);
         for (const mk of ms) { out = out.concat(initView(c, mk.nid)); }
         return out;
     }
 
+    // s482 (lane s482-construct-init-fu) — a §7.6 rule (b) construct, the places inside which are
+    // put just before it: an `if=` / `else-if=` / `else` element, a component use (slot content),
+    // a `<match>` (its arms) — the constructs analyze constructAt names.
+    fn placeBefore(c: LC, e: AElem) -> boolean {
+        if (hasAttrNamed(e, "if") || hasAttrNamed(e, "else-if") || hasAttrNamed(e, "else")) return true;
+        const f: ElemFact | not = elemFact(c.t.elems, e.nid);
+        return match f {
+            .MUse(decl: d) :> true,
+            .MMatch(m: m) :> true,
+            // no-default-arm: one question of an element — is it a construct §7.6 names
+            _ :> false
+        };
+    }
+
     // lowerNodes over an element's children, each place `ms` (in source order) put before the
     // first child that starts after it, or inside the child that holds it (lowerPlaced). A
-    // place within an if-chain's span lands after the chain (one between two members is
-    // refused: analyze programChainGaps, at every level since r2).
+    // place within an if-chain's span lands ~~after~~ just before the chain (s482,
+    // s482-construct-init-fu: lowerPlaced) (one between two members is refused: analyze
+    // programChainGaps, at every level since r2).
     fn placedNodes(c: LC, ns: ANode[], ms: ConstMark[]) -> View[] {
         let out: View[] = [];
         let m: int = 0;
@@ -3014,11 +3050,12 @@ ${
             }
             const j: int = chainEnd(ns, i);
             if (j > i + 1) {
-                out = out.concat([chainView(c, ns, i, j)]);
+                // s482 (lane s482-construct-init-fu): before the chain — placeBefore
                 for (; m < ms.length && ms[m].pos < ns[j - 1].span.end; ) {
                     out = out.concat(initView(c, ms[m].nid));
                     m = m + 1;
                 }
+                out = out.concat([chainView(c, ns, i, j)]);
                 i = j;
             } else {
                 let inner: ConstMark[] = [];
@@ -3979,18 +4016,29 @@ ${
                 out = out.concat([{ pat: Pattern.PWild, body: armBody(c, h, a), value: armValue(c, h, a), whole: wholeSym(c, a) }]);
             } else if (idx >= 0 && !deadTransportArm(c, h, idx)) {
                 out = out.concat([{ pat: Pattern.PVariant(effErr(c, h), idx, armBindSyms(c, a)), body: armBody(c, h, a), value: armValue(c, h, a), whole: not }]);
-            } else if (idx == -7) {
+            } else if (idx == -7 || (idx == -1 && isMatch)) {
                 // s482 — an alternation (§18.2): one failure arm testing each alternate's variant
                 // (a `.Transport` alternate the call cannot raise is left out, as its own arm would be)
-                let ps: Pattern[] = [];
-                for (const ix of armAltsOf(c.t, a)) {
-                    if (ix >= 0 && !deadTransportArm(c, h, ix)) ps = ps.concat([Pattern.PVariant(effErr(c, h), ix, [])]);
-                }
+                // s482-alt-followups (LOW-1) — and, in a `match`, a WILDCARD alternation
+                // (`.Denied | else :> …`): its `_` / `else` is the success value's arm (matchOk),
+                // and the error variants its other alternates name run the same body here (analyze
+                // counts them covered, resolveArms). A plain `_` / `else` has no alternates: no arm.
+                const ps: Pattern[] = altErrPats(c, h, armAltsOf(c.t, a));
                 if (ps.length == 1) out = out.concat([{ pat: ps[0], body: armBody(c, h, a), value: armValue(c, h, a), whole: not }]);
                 if (ps.length > 1) out = out.concat([{ pat: Pattern.PAlt(ps), body: armBody(c, h, a), value: armValue(c, h, a), whole: not }]);
             }
         }
         return out;
+    }
+
+    // s482 — the failure patterns of an alternation's named error alternates, in source order
+    // (its wildcard / unresolved alternates, and a `.Transport` the call cannot raise, left out).
+    fn altErrPats(c: LC, h: HandledFact, alts: int[]) -> Pattern[] {
+        let ps: Pattern[] = [];
+        for (const ix of alts) {
+            if (ix >= 0 && !deadTransportArm(c, h, ix)) ps = ps.concat([Pattern.PVariant(effErr(c, h), ix, [])]);
+        }
+        return ps;
     }
 
     // The whole-error binder's Sym (the binder minted it; `_ _` binds nothing visible but still has one).

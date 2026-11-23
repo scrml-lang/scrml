@@ -153,4 +153,26 @@ renders <div class="box"><textarea>\${label} n=\${@n}!</textarea></div>
     expect(s.map((x) => x.errors)).toEqual([[], []]);
     expect(s.map((x) => x.ta)).toEqual([["L n=1!", "a 1 row", "b 1 row"], ["L n=2!", "a 2 row", "b 2 row"]]);
   }, 120000);
+
+  // s482 (#2069 review LOW-3; SPEC §19.17 — a throw blanks the hole that threw): each `${}` part is its own
+  // hole. A part that traps shows "" — as a `<p>`'s text hole does — the trap is reported, and the static
+  // text and the other parts stay. Base blanked the whole element (textarea value "", title "").
+  test("one throwing part blanks only itself: the static text and the other parts stay", async () => {
+    if (skip()) return;
+    const out = build(`<program>
+let <x:string="hi"/>
+fn boom(s: string) -> string { if (s == "yo") { return s.repeat(0 - s.length); } return s; }
+<title>T \${boom(@x)} \${@x} end</title>
+<textarea id="t">static-a \${boom(@x)} static-b \${@x}</textarea>
+<button id="b" onclick=@x = "yo">b</button>
+</program>
+`);
+    const s = await load(out, [{ fill: ["#t", "typed"] }, { click: "#b" }]);
+    expect(s[0].errors).toEqual([]);
+    expect(s.map((x) => x.ta)).toEqual([["static-a hi static-b hi"], ["typed"], ["static-a  static-b yo"]]);
+    // document.title collapses white space ("T  yo end" is read as "T yo end")
+    expect(s.map((x) => x.title)).toEqual(["T hi hi end", "T hi hi end", "T yo end"]);
+    expect(s[2].errors.length).toBe(2);
+    expect(s[2].errors.every((e) => e.includes("E-INDEX-OUT-OF-RANGE-RT"))).toBe(true);
+  }, 120000);
 });
