@@ -58,7 +58,19 @@ Scratch: ~/.cache/scrml/review/s482-meta-phase3/.
       MED-2: `MetaEffect.deliver` runs the subscriptions a change queued before the re-run disposes them.
       LOW-3: `metaNestedRegs` refuses a meta registration inside any meta callback by name.
       Hook: first attempt failed on shard-1 MEMORY ceiling (not a test); retried unchanged, PASS.
-- [ ] LOW-1 (happy-dom unregister in afterAll in both files; meta-runtime Chromium server on node:http), LOW-2
+- [x] (commit after ab54bf918) LOW-1 (happy-dom unregister in afterAll in both files; meta-runtime Chromium server on node:http), LOW-2
       (built-in TypeInfo/FieldInfo noted in messages where a user type shadows it — aliasNote / shownStruct; shadowing
       kept, as the built-in `Error` enum), records (SPEC §22.5 r1 status paragraph; gap residue bullets; new
       g-boot-meta-reflect-registry-scope-s482 for MED-1, INTERIM, owner question).
+
+### r1 final gates (head vs origin/main d64e7e060; every run under a systemd-run MemoryMax scope)
+- New r1 tests red on c4804a601: HIGH-1 compile (6 tests), LOW-3, LOW-2, MED-2 runtime + shipping: fail. The HIGH-1
+  runtime backstop test on base loops without bound (the review's hang): killed at MemoryMax=3G. An earlier run of it
+  on base without a ceiling grew to 25 GB before PA killed it; that was the base runtime hanging as the review
+  measured, not the fix. On head the same test finishes (calls = 100, one console.error).
+- pretest rc 0. bootstrap-conformance main 845/4/628/491/0 → head 845/4/628/491/0, 0 per-case line diffs, CRASH 0.
+- impl#1 corpus-bridge -t meta 68/68; meta-emit gate drift test 3/0; sync --check in sync.
+- meta-phase3 + meta-runtime + meta-s481 with SCRML_BROWSER_TESTS=1, both orders: 208/0 and 208/0.
+- byte-compare 1968 conformance cases main vs head: 0 diffs. Corpus (76 `^{` files, fixS66 and raw): 3 OK → 3 OK, 0 diffs.
+- s34-census --check-new PASS; types-gate OK 182 unchanged; gen-bootstrap-severity current; corpus-compile-floor PASS;
+  snippet-gate 120/0 (9 spec-ahead); claim-gate 0 failed; gen-md-shim current; e2e-render-map 259/0.
