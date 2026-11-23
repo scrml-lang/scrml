@@ -11583,7 +11583,7 @@ ${
         // called (§6.7.4 rule 3) — not on the initializer rule's direct-call `usesD`. s482 r2
         // (#2053 r1 review MED-A): ~~on `uses`~~ on `usesR` — a nested function declaration a
         // reached function never calls nor uses as a value adds nothing
-        out = out.concat(constructReadDiags(g, t, sum, writes, sites, lets));
+        out = out.concat(constructReadDiags(g, t, sum, writes, sites, lets, usesR));
         return out.concat(bodyReachDiags(g, t, sum, usesR, binds));
     }
 
@@ -11611,7 +11611,7 @@ ${
     // construct (a later one is E-SCOPE-001; one in the same construct is judged here itself).
     // Direction: newly-accepting against #2076 (corpus: 0 either way); prov=pa-ruled.
     // =========================================================================
-    fn constructReadDiags(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[]) -> Diag[] {
+    fn constructReadDiags(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[], usesR: FxAtom[][]) -> Diag[] {
         let out: Diag[] = [];
         const pfields: FieldInfo[] = programCells(g);
         for (const f of g.files) {
@@ -11657,7 +11657,7 @@ ${
                         const where: string = constructAt(t, tops, ci.span.start);
                         if (where != "" && initActWhat(c.init) == "") {
                             const lo: int = constructStart(t, tops, ci.span.start);
-                            const bw: BodyW = constructWrites(g, t, sum, writes, sites, lets, f.path, ps, pfields, lo, ci.span.start);
+                            const bw: BodyW = constructWrites(g, t, sum, writes, sites, lets, usesR, f.path, ps, pfields, lo, ci.span.start);
                             const r: string = initReadWritten(t, [c.init], bw, g.program.id, pfields, cells, lo, []);
                             if (r != "") {
                                 let kw: string = "const";
@@ -11751,9 +11751,17 @@ ${
     // writes: the attribute values and content of the nodes there (not an event handler, an
     // `<effect>`, a `<request>`), the file-scope initializers there, and — run where they are used —
     // the code of each component used there (its renders and its cells' seeds, transitively); and
-    // the seeds of the program cells whose place is at or after `lo` (one read there runs then).
+    // ~~the seeds of the program cells whose place is at or after `lo` (one read there runs then)~~
+    // s482 (lane s482-place-fu, #2079 review LOW-1) the seed of a program cell whose place is
+    // between `lo` and `hi` (it runs there), or whose place is later but which that code uses — a
+    // read or a write, directly or through a function it calls, at any depth (usesR), or through
+    // another such seed: the use runs the seed there, before the initializer (§7.6 rule (b) S482,
+    // "a read of a seed before its place computes it then"). A cell declared after the construct
+    // that nothing there uses (`let <z:int=(bump())/>` after it) runs its seed after the
+    // initializer: it is not counted (it was, with no upper bound, and refused with a message
+    // that put the write inside the construct).
     // `lo` < 0: all of the program body's code (bodyWritesOf, #2076).
-    fn constructWrites(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[], file: string, items: AItem[], pfields: FieldInfo[], lo: int, hi: int) -> BodyW {
+    fn constructWrites(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[], usesR: FxAtom[][], file: string, items: AItem[], pfields: FieldInfo[], lo: int, hi: int) -> BodyW {
         if (lo < 0) return bodyWritesOf(g, t, sum, writes, sites, lets, file, items, pfields);
         let blocks: ABlock[] = [];
         let uses: int[] = [];
@@ -11775,9 +11783,8 @@ ${
                 uses = unionIds(uses, regionUses(t, n, lo, hi));
             }
         }
-        for (const fi of pfields) {
-            if (fi.span.start >= lo) blocks = blocks.concat(seedBlocks(fi.init));
-        }
+        // the cells the code there uses (with the components' code, below), then the seeds they run
+        let used: int[] = blocksCells(t, sum, usesR, file, blocks, g.program.id, pfields);
         let bw: BodyW = blocksWrites(g, t, sum, writes, sites, lets, file, blocks, pfields);
         // the components used there, and those they use, each once
         let seen: int[] = [];
@@ -11799,13 +11806,47 @@ ${
                                 next = unionIds(next, regionUses(t, rn, -1, 2147483647));
                             }
                             bw = mergeBodyW(bw, blocksWrites(g, t, sum, writes, sites, lets, ds.file, cb, pfields));
+                            used = unionIds(used, blocksCells(t, sum, usesR, ds.file, cb, g.program.id, pfields));
                         }
                     }
                 }
             }
             todo = next;
         }
+        // s482 (lane s482-place-fu) — the program cells' seeds that run between `lo` and `hi`: one
+        // whose place is there, or a later one used there; a seed run adds the cells it uses
+        let ran: int[] = [];
+        let grew: boolean = true;
+        for (; grew; ) {
+            grew = false;
+            for (const fi of pfields) {
+                const at: int = fi.span.start;
+                if (ran.indexOf(fi.sym.id) < 0 && at >= lo && (at < hi || used.indexOf(fi.sym.id) >= 0)) {
+                    ran = ran.concat([fi.sym.id]);
+                    grew = true;
+                    const sb: ABlock[] = seedBlocks(fi.init);
+                    bw = mergeBodyW(bw, blocksWrites(g, t, sum, writes, sites, lets, file, sb, pfields));
+                    used = unionIds(used, blocksCells(t, sum, usesR, file, sb, g.program.id, pfields));
+                }
+            }
+        }
         return bw;
+    }
+
+    // s482 (lane s482-place-fu) — the program cells (Sym ids) code uses, a read or a write: in the
+    // code itself, and through each function it names, at any depth (usesR, the "c:" atoms).
+    fn blocksCells(t: Tables, sum: Summary, usesR: FxAtom[][], file: string, blocks: ABlock[], prog: int, pfields: FieldInfo[]) -> int[] {
+        let out: int[] = [];
+        const six: SymIx = nodeSymIx(sum.nodes);
+        for (const b of blocks) {
+            out = unionIds(out, cellUsesDirect(t, b, prog, pfields, []));
+            for (const j of refTargets(sum.nodes, six, scanBlock({ t: t, file: file }, b, emptyScan()).refs, false)) {
+                for (const a of usesR[j]) {
+                    if (a.key.indexOf("c:") == 0) out = unionIds(out, [atomBinding(a.key)]);
+                }
+            }
+        }
+        return out;
     }
 
     fn unionIds(a: int[], b: int[]) -> int[] {
