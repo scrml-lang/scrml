@@ -204,6 +204,9 @@ export class Cell {
     this.pend = null;
     // s478: a `debounced=` / `throttled=` cell's timing record (§6.13; `timed`) — null otherwise
     this.timing = null;
+    // s482 — a seed HELD for its place in the program body's run (`hold`, §7.6 rule (b) S482):
+    // construction leaves it owed; `seed` runs it at its place, a read or a write earlier runs it then.
+    this.held = false;
     // s478 (s478-boot-channel-ops): a §38 channel cell's op sink (`channel`) — called with the
     // §38.4.2 op of each committed write (`syncOp`, or null: a whole-value write) — null otherwise
     this.sync = null;
@@ -229,6 +232,8 @@ export class Cell {
   }
   /** The write itself, once it is let through. */
   land(v) {
+    // s482: a held seed written before its place runs first — every seed runs, once (§7.6 S482)
+    if (this.held && this.pending !== null && this.pending !== SEEDING) this.settle();
     this.pending = null;
     if (Object.is(v, this.value)) return;
     const prev = this.value;
@@ -242,7 +247,9 @@ export class Cell {
   /** Run an owed seed now (on first demand, or when construction ends). */
   settle() {
     const init = this.pending;
-    if (init === SEEDING) throw new Error("a `let` initializer reads itself while the program is being constructed (a seeding cycle)");
+    // s482 r1 (#2053 review INFO): a seed runs at its place in the body's run, or on an earlier read
+    if (init === SEEDING) throw new Error("a cell's initializer reads itself, directly or through another cell's initializer, while it is being computed — at its place in the program body's run, or on a read before that place (a seeding cycle)");
+    this.held = false;
     this.pending = SEEDING;
     try { this.value = untrack(init); } finally { if (this.pending === SEEDING) this.pending = null; }
   }
@@ -1293,9 +1300,41 @@ export function construct(inst, body) {
   if (constructing === 0) {
     const due = owed;
     owed = [];
-    for (const c of due) if (c.pending !== null) c.settle();
+    // s482: a held seed is computed at its place in the program body's run (`seed`), not here
+    for (const c of due) if (c.pending !== null && !c.held) c.settle();
   }
   return inst;
+}
+
+/**
+ * s482 — §7.6 rule (b) S482 (ruling:user-voice-scrml.md-S481-run-order-followups item 1): "each seed
+ * is computed at its place in the sequence; records are still created at construction, so component
+ * identity (L12) is unchanged; a read of a seed before its place computes it early, on demand."
+ * `hold(x)` — called by the program's factory, inside its construction — marks the seeds still owed
+ * in `x` (a field's cell, or an instance record and the records it mounts) as HELD: the end of the
+ * construction leaves them owed. `seed` / `seedAll` run them at their place; a read (`get` / `peek`)
+ * or a write before it runs them then.
+ */
+export function hold(x) {
+  if (x instanceof Cell) {
+    if (x.pending !== null && x.pending !== SEEDING) x.held = true;
+    return;
+  }
+  if (x instanceof Instance) {
+    for (const f of x.fields) hold(f);
+    for (const k of x.kids) hold(k);
+  }
+}
+
+/** s482 — a held seed's place: run it now, unless it already ran (a read or a write ran it early). */
+export function seed(c) {
+  if (c instanceof Cell && c.pending !== null && c.pending !== SEEDING) c.settle();
+}
+
+/** s482 — an instance's place: every seed it holds, and those of the records it mounts, in field order. */
+export function seedAll(inst) {
+  for (const f of inst.fields) seed(f);
+  for (const k of inst.kids) seedAll(k);
 }
 
 /** Allocate an instance record owned by `parentScope`. The factory seeds its fields. */

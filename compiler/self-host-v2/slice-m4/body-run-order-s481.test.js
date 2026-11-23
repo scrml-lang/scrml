@@ -110,10 +110,10 @@ let <c:int=(start)/>
     expect(await texts(src, ["c"])).toEqual(["3"]);
   }, 120000);
 
-  test("a component's use-site value, seeded at construction, reads the binding set (not undefined)", async () => {
-    // the instances the body mounts unconditionally are constructed with the program (§66.7.6
-    // L12 (b)), so `o` is set before construction; where a use-site value sits in the sequence is
-    // the open owner question (§66.7.6 rule 5 vs S481) — both instances read 1 today
+  test("a component's use-site value is seeded at the instance's place (S482; was INTERIM: both read 1 at construction)", async () => {
+    // s482 (§7.6 rule (b) / §66.7.6 rule 5 S482, ruling:user-voice-scrml.md-S481-run-order-followups
+    // item 1): "each seed is computed at its place in the sequence; records are still created at
+    // construction" — the first instance's seed runs before the write, the second's after it
     const src = `<card n:int=0>
     let <m:int=(n)/>
 </> renders <span>\${m}</span>
@@ -124,10 +124,13 @@ let <c:int=(start)/>
 <div id="c"><card n=(o[0])/></div>
 </program>
 `;
-    expect(await texts(src, ["a", "c"])).toEqual(["1", "1"]);
+    expect(await texts(src, ["a", "c"])).toEqual(["1", "10"]);
   }, 120000);
 
-  test("a display before the place, through a function, reads the binding set", async () => {
+  // s482 (item B): this was the INTERIM (the binding ran at module initialization, early, and
+  // both displays showed 7). Ruled S481 (ruling:user-voice-scrml.md-S481-run-order-followups
+  // item 2): "E-SCOPE-001, the S479 file-scope-initializer rule extended to body code".
+  test("a display before the place, through a function, is E-SCOPE-001 (S482; was INTERIM: set early)", async () => {
     const src = `<program>
 \${
     function seven() -> int { return 7; }
@@ -138,7 +141,10 @@ let <c:int=(start)/>
 <p id="c">\${k}</p>
 </program>
 `;
-    expect(await texts(src, ["a", "c"])).toEqual(["7", "7"]);
+    const file = join(dir, `later${n++}.scrml`);
+    writeFileSync(file, src);
+    const res = await compileSource(file);
+    expect(res.diagnostics.filter((d) => d.severity === "error").map((d) => d.code)).toEqual(["E-SCOPE-001"]);
   }, 120000);
 
   test("a derived cell over a free value: e02 (with a CSS bridge) / e03 keep their values", async () => {
@@ -334,7 +340,10 @@ describe("§7.6 S481 r1 — what forces a binding early", () => {
     expect(await texts(src, ["c"])).toEqual(["5"]);
   }, 120000);
 
-  test("b3: a component mounted after the place still forces it early (INTERIM — the ⚑ on use-site values; flips when it is ruled)", async () => {
+  // s482: FLIPPED — ruling:user-voice-scrml.md-S481-run-order-followups item 1 ("each seed is
+  // computed at its place in the sequence"): the card's seed runs at its mount, after `k`'s place,
+  // so `k` runs in its place (5), not at module initialization (1, the S481 INTERIM).
+  test("b3: a component mounted after the place no longer forces it early (S482 flip; was INTERIM 1 / 1)", async () => {
     const src = `<card n:int=0>
     let <m:int=(n)/>
 </> renders <span>\${m}</span>
@@ -346,7 +355,7 @@ describe("§7.6 S481 r1 — what forces a binding early", () => {
 <div id="d"><card n=(k)/></div>
 </program>
 `;
-    expect(await texts(src, ["c", "d"])).toEqual(["1", "1"]);
+    expect(await texts(src, ["c", "d"])).toEqual(["5", "5"]);
   }, 120000);
 });
 
@@ -457,17 +466,28 @@ ${LOG}
     expect(await texts(src, ["a", "c"])).toEqual(["1", "11 11"]);
   }, 120000);
 
-  test("INTERIM: inside an `if=` element the place is just after that element (runs once, unconditionally)", async () => {
+  // s482 (lane s482-runorder-followups, item C): these two were the INTERIM (the acting
+  // initializer ran once, just after the construct). Ruled S481
+  // (ruling:user-voice-scrml.md-S481-nested-init-chain-comments item 1): "make it a compile error
+  // naming the construct" — E-FILE-SCOPE-INIT-IN-CONSTRUCT. One that does not act keeps the
+  // INTERIM place (after the construct), which nothing can observe.
+  async function codesOf(src) {
+    const file = join(dir, `cons${n++}.scrml`);
+    writeFileSync(file, src);
+    const res = await compileSource(file);
+    return res.diagnostics.filter((d) => d.severity === "error").map((d) => d.code);
+  }
+  test("inside an `if=` element an acting initializer is refused (S482, was INTERIM: ran after the element)", async () => {
     const src = `<program>
 ${LOG}
 let <flag:boolean=false/>
 <div id="w"><p id="a" if=(@flag)>\${ const a: int = note("a"); }yes</p><p id="y">y\${log}</p></div>
 </program>
 `;
-    expect(await texts(src, ["y"])).toEqual(["ya"]);
+    expect(await codesOf(src)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
   }, 120000);
 
-  test("INTERIM: inside a component's slot content the place is just after the instance", async () => {
+  test("inside a component's slot content an acting initializer is refused (S482, was INTERIM: ran after the instance)", async () => {
     const src = `<card n:int=0>
 </> renders <div class="card"><slot/></div>
 <program>
@@ -475,7 +495,16 @@ ${LOG}
 <div id="w"><card><p id="in">in\${log}</p>\${ const a: int = note("a"); }</card><p id="y">y\${log}</p></div>
 </program>
 `;
-    expect(await texts(src, ["in", "y"])).toEqual(["in", "ya"]);
+    expect(await codesOf(src)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+  }, 120000);
+
+  test("inside an `if=` element one that does not act runs just after the element (unobservable)", async () => {
+    const src = `<program>
+let <flag:boolean=false/>
+<div id="w"><p id="a" if=(@flag)>\${ const a: int = 2 + 3; }yes</p><p id="y">y\${a}</p></div>
+</program>
+`;
+    expect(await texts(src, ["y"])).toEqual(["y5"]);
   }, 120000);
 
   test("a nested unread initializer reaching a server-only helper stays server-only (no client leak)", async () => {

@@ -3142,7 +3142,7 @@ ${
             .Star(decl: d, inst: i) :> starJs(ctx, d, i, node),
             .Effect(deps: ds, body: b) :> effectJs(ctx, ds, b),
             .Run(body: b, hoist: hs) :> runJs(ctx, b, hs),
-            .Init(k: x) :> only([]),                                       // s481: never reached (bodyInits)
+            .Init(k: x) :> only(seedPlaceJs(ctx, x)),                     // s482: a held cell's place (bodyInits keeps only those)
             .Request(target: t, deps: ds, body: b, mount: m, state: st, handle: h, cls: k) :> requestJs(ctx, t, ds, b, m, st, h, k),
             .ResetOn(triggers: ds, reset: b, rank: r) :> resetOnJs(ctx, ds, b, r),
             .Errors(of: x, all: a) :> only([sexpr(rtCall(ctx, "errors", [scopeVar(), node, jthunk(jmcall(surfaceJs(ctx, x), "messages", [])), JsExpr.JBool(a)]))]),
@@ -3961,6 +3961,9 @@ ${
         let stmts: JsStmt[] = [];
         if (ctx.prebuilt) {
             stmts = [JsStmt.SConst(iv, kidSlot(ctx, kid, dsym.hint))];
+            // s482: an instance the program body mounts, holding a live seed (held by the
+            // program's factory, holdJs): its seeds run here, at its place in the body's run
+            if (isProgramTid(ctx.p, tid) && liveSeedDecl(ctx.p, d)) stmts = stmts.concat([sexpr(rtCall(ctx, "seedAll", [jid(iv)]))]);
         } else {
             stmts = [JsStmt.SConst(iv, createJs(ctx, d, attrs, scopeVar()))];
             if (alias is given) {
@@ -4181,8 +4184,67 @@ ${
             k = k + 1;
         }
         body = body.concat(kidsJs(fctx, d));
+        if (d.sym.id == ctx.p.program.id) body = body.concat(holdJs(fctx, d));
         const run: JsExpr = rtCall(ctx, "construct", [jid("inst$"), JsExpr.JArrow([], body)]);
         return JsStmt.SFunc(nameOf(ctx.names, NameKey.Factory(d.sym.id)), params, [JsStmt.SReturn(run)]);
+    }
+
+    // s482 — §7.6 rule (b) S482 (ruling:user-voice-scrml.md-S481-run-order-followups item 1:
+    // "each seed is computed at its place in the sequence; records are still created at
+    // construction"): the program's factory HOLDS the seeds whose place matters —
+    // `rt.hold(<cell>)` for each held program cell (bodyInits left its View.Init in the renders),
+    // `rt.hold(inst$.kids[k])` for each instance the body mounts unconditionally whose record holds
+    // a live seed (liveSeedDecl) — so the end of the construction leaves them owed; the render
+    // runs each at its place (seedPlaceJs, instanceJs `rt.seedAll`).
+    fn holdJs(fctx: Ctx, d: Decl) -> JsStmt[] {
+        const views: View[] | not = d.renders;
+        if (views is not) return [];
+        let out: JsStmt[] = [];
+        for (const id of initsIn(views)) {
+            let i: int = 0;
+            for (const f of d.fields) {
+                if (f.sym.id == id) out = out.concat([sexpr(rtCall(fctx, "hold", [fieldCell(jid("inst$"), d, i)]))]);
+                i = i + 1;
+            }
+        }
+        let k: int = 0;
+        for (const v of mountedInstances(views)) {
+            const kd: Decl | not = kidDeclOf(fctx.p, v);
+            if (kd is given && liveSeedDecl(fctx.p, kd)) {
+                out = out.concat([sexpr(rtCall(fctx, "hold", [JsExpr.JIndex(jmember(jid("inst$"), "kids"), JsExpr.JAnnot(jnum(k), kd.sym.hint))]))]);
+            }
+            k = k + 1;
+        }
+        return out;
+    }
+
+    // The program's own render (its template id, declJs: "scrml:" + the declaration's key).
+    fn isProgramTid(p: CoreProgram, tid: string) -> boolean {
+        for (const d of p.decls) {
+            if (d.sym.id == p.program.id) return tid == "scrml:" + d.key;
+        }
+        return false;
+    }
+
+    fn kidDeclOf(p: CoreProgram, v: View) -> Decl | not {
+        const id: int = viewInstanced(v);
+        for (const d of p.decls) { if (d.sym.id == id) return d; }
+        return not;
+    }
+
+    // s482 — a held program cell's place: `rt.seed(<cell>)` runs its seed now, unless a read or a
+    // write before the place already ran it.
+    fn seedPlaceJs(ctx: Ctx, k: Sym) -> JsStmt[] {
+        for (const d of ctx.p.decls) {
+            if (d.sym.id == ctx.p.program.id) {
+                let i: int = 0;
+                for (const f of d.fields) {
+                    if (f.sym.id == k.id) return [sexpr(rtCall(ctx, "seed", [fieldCell(jid("inst$"), d, i)]))];
+                    i = i + 1;
+                }
+            }
+        }
+        return [];
     }
 
     // s478 — a graph field's `<onIdle after= to=>` watchdog (§51.0.R):
@@ -5407,16 +5469,18 @@ ${
     //  - IN SEQUENCE: a body-top statement assigning the binding (`k = init`), run in its
     //    place among the body's statements and displays; the binding is declared (only) at
     //    module level. Unless code that runs BEFORE the place reaches it:
-    //  - EARLY: cell construction (§66.7.6 — the program's field initializers, every other
-    //    declaration the program constructs (constructedDecls: one no instance mounts, which
-    //    never runs, does not count — r1 M2), the use-site values of the instances the body
-    //    mounts unconditionally),
-    //    a §25.7 CSS bridge, an earlier view, or a function any of those
-    //    calls, reaches the binding. Its initializer runs at module initialization, before
-    //    construction, as before S481, so it is never read before it is set. (INTERIM:
-    //    when an earlier body-top statement writes what it reads, that order is not the
-    //    source's; the seed-place question is the owner's — §66.7.6 rule 5.) Whatever an
-    //    early binding's initializer reaches is early too.
+    //  - EARLY: code that runs before the place reaches the binding. s482: the program's seeds
+    //    and those of the instances the body mounts run at their PLACE (heldFields /
+    //    liveSeedDecl, ruling S481 run-order-followups item 1), so construction no longer
+    //    counts; what does — the construction of a declaration the body does not mount
+    //    (constructedElsewhere: a shared reference, a function's lift), a seed not held, a
+    //    §25.7 CSS bridge, an earlier view, a read of a seed / lazy derived value whose
+    //    initializer reaches it, or a function any of those calls (reachOf). A direct reach
+    //    from an earlier display or statement is E-SCOPE-001 (analyze bodyReachDiags, S482), so
+    //    what is left is a reach through a function value. Its initializer runs at module
+    //    initialization, as before S481, so it is never read before it is set (INTERIM: when
+    //    an earlier body-top statement writes what it reads, that order is not the source's).
+    //    Whatever an early binding's initializer reaches is early too.
     //  - SERVER ONLY: no client code reads it and server code does — it stays out of the
     //    client artifact (the server artifact evaluates what it reads, rule (b)). So does one
     //    no code reads whose initializer reaches server-only code (serverInits, r1 H1): the
@@ -5502,14 +5566,19 @@ ${
 
     // r2 (MED-1) — each place in `vs`, at any depth: an in-sequence one (`seq`) becomes the
     // body-top statement assigning its binding; any other is dropped.
-    fn placeInits(p0: CoreProgram, vs: View[], seq: int[]) -> View[] {
+    // s482: a held program cell's place (`held`) stays a View.Init — printed `rt.seed(<cell>)`
+    // (wireHole); any other cell's is dropped (its seed is computed at construction: nothing
+    // can observe where — heldFields).
+    fn placeInits(p0: CoreProgram, vs: View[], seq: int[], held: int[]) -> View[] {
         let out: View[] = [];
         for (const v of vs) {
             const h: int[] = initOf(v);
             if (h.length == 0) {
                 const ks: View[] = elKids(v);
-                if (ks.length > 0 && initsIn(ks).length > 0) out = out.concat([withElKids(v, placeInits(p0, ks, seq))]);
+                if (ks.length > 0 && initsIn(ks).length > 0) out = out.concat([withElKids(v, placeInits(p0, ks, seq, held))]);
                 else out = out.concat([v]);
+            } else if (hasInt(held, h[0])) {
+                out = out.concat([v]);
             } else if (hasInt(seq, h[0])) {
                 const k: CoreConst | not = findConst(p0, h[0]);
                 if (k is given) out = out.concat([View.Run(block([Stmt.Assign(k.sym, k.init, [])]), [])]);
@@ -5689,19 +5758,28 @@ ${
         // server functions AND the functions only server code reaches (serverOnly0)
         for (const sf1 of p0.fns) { if (hasInt(serverOnly0, sf1.sym.id)) sroots = sroots.concat([Node.NFn(sf1)]); }
         const serverRead: int[] = constsReached(p0, sroots);
-        // what runs before the body: construction (§66.7.6) and the §25.7 CSS bridges
+        // s482 (§7.6 rule (b) S482, ruling:user-voice-scrml.md-S481-run-order-followups item 1):
+        // "each seed is computed at its place in the sequence; records are still created at
+        // construction … a read of a seed before its place computes it early, on demand". The
+        // program's seeds are HELD for their place (heldFields; a cell's place is its declaration),
+        // and so are those of each instance the body mounts unconditionally (liveSeedDecl; its
+        // place is its mount) — so neither reaches anything before the body. What still runs
+        // before it: the construction of a declaration the body does not mount (a shared
+        // reference, an instance a function lifts — constructedElsewhere), a seed that is not
+        // held (a persisted cell's default), and the §25.7 CSS bridges; and a READ of a seed, or
+        // of a lazy derived value, before its place runs its initializer then (reachOf follows
+        // cell reads into their initializers, and instances into their declarations).
+        const held: int[] = heldFields(pd, marked);
+        const insts: View[] = programInstances(pd);
         let pre: Node[] = [];
-        for (const f of pd.fields) { pre = pre.concat([Node.NField(f)]); }
-        // r1 (M2): only the declarations the program constructs — one no instance mounts
-        // never runs, so it reaches nothing before the place
-        const built: int[] = constructedDecls(p0);
-        for (const d1 of p0.decls) { if (d1.sym.id != p.program.id && hasInt(built, d1.sym.id)) pre = pre.concat([Node.NDecl(d1)]); }
-        // the instances the body mounts unconditionally are constructed with the program
-        // (L12 (b)): their use-site values run at construction, before the body
-        for (const mi of mountedInstances(bare)) { pre = pre.concat([Node.NView(mi)]); }
+        for (const f of pd.fields) {
+            if (f.wcap is given && f.init is given && !hasInt(held, f.sym.id)) pre = pre.concat([Node.NField(f)]);
+        }
+        const elsewhere: int[] = constructedElsewhere(p0);
+        for (const d1 of p0.decls) { if (hasInt(elsewhere, d1.sym.id)) pre = pre.concat([Node.NDecl(d1)]); }
         const css: CoreCss | not = p0.css;
         if (css is given) { for (const cv of css.vars) { pre = pre.concat([Node.NExpr(cv.read)]); } }
-        let reached: int[] = constsReached(p0, pre);
+        let reached: int[] = reachOf(p0, insts, pre);
         const stat: int[] = staticInits(p0, marked);
         let early: int[] = [];
         let seq: int[] = [];
@@ -5710,7 +5788,12 @@ ${
         for (; i < order.length && left > 0; ) {
             const v: View = order[i];
             const here: int[] = initOf(v);
-            if (here.length > 0) {
+            const fh: Field | not = fieldOfSym(pd, here);
+            if (fh is given) {
+                // a program cell's place: a held seed runs here (what it reaches is reached here)
+                left = left - 1;
+                if (hasInt(held, fh.sym.id)) reached = unionInts(reached, reachOf(p0, insts, [Node.NField(fh)]));
+            } else if (here.length > 0) {
                 const id: int = here[0];
                 left = left - 1;
                 if (hasInt(stat, id)) {
@@ -5725,7 +5808,7 @@ ${
                     if (kc is given && (hasInt(clientRead, id) || initActs(kc.init))) seq = seq.concat([id]);
                 }
             }
-            if (left > 0) reached = unionInts(reached, constsReached(p0, [Node.NView(v)]));
+            if (left > 0) reached = unionInts(reached, reachOf(p0, insts, [Node.NView(v)]));
             i = i + 1;
         }
         // an early binding's initializer runs before the body: what it reaches is early too
@@ -5737,7 +5820,7 @@ ${
                 const k: CoreConst | not = findConst(p0, e);
                 if (k is given) roots = roots.concat([Node.NExpr(k.init)]);
             }
-            const dep: int[] = constsReached(p0, roots);
+            const dep: int[] = reachOf(p0, insts, roots);
             let keep: int[] = [];
             for (const s of seq) {
                 if (hasInt(dep, s)) {
@@ -5749,7 +5832,7 @@ ${
             }
             seq = keep;
         }
-        return { p: withProgramRenders(p, placeInits(p0, rs, seq)), seq: seq };
+        return { p: withProgramRenders(p, placeInits(p0, rs, seq, held)), seq: seq };
     }
 
     // s481 — the file-scope bindings the client artifact holds: those its code reads, and
@@ -5858,14 +5941,16 @@ ${
         return out;
     }
 
-    // s481 r1 (#2041 review M2) — the declarations the program constructs: the program; every
-    // declaration an instance (a mount, a `<*>` star) names in a constructed declaration's
-    // renders, in any function (a lift) or in a shared reference — wherever it stands
-    // (conditional or not: a conditional mount can run before a place). One nothing names is
-    // never constructed, so its code never runs.
-    fn constructedDecls(p: CoreProgram) -> int[] {
-        let out: int[] = [p.program.id];
-        for (const s of sharedRefs(Node.NProgram(p))) { if (!hasInt(out, s.id)) out = out.concat([s.id]); }
+    // s481 r1 (#2041 review M2) — the declarations the program constructs ... s482: only those it
+    // constructs OUTSIDE the body's own run — a shared reference (wherever it stands), an
+    // instance a function names (a lift: the function may run before a place), and every
+    // declaration one of those constructs, transitively. An instance the program body mounts
+    // (unconditionally, or in a branch / row) is constructed and rendered at its place in the
+    // run, so its declaration's code is reached there (reachOf, as the order walk passes it).
+    // One nothing names is never constructed, so its code never runs.
+    fn constructedElsewhere(p: CoreProgram) -> int[] {
+        let out: int[] = [];
+        for (const s of sharedRefs(Node.NProgram(p))) { if (s.id != p.program.id && !hasInt(out, s.id)) out = out.concat([s.id]); }
         for (const f of p.fns) { out = unionInts(out, instancedIn(Node.NFn(f))); }
         let changed = true;
         for (; changed; ) {
@@ -5880,7 +5965,165 @@ ${
                 }
             }
         }
+        let res: int[] = [];
+        for (const x of out) { if (x != p.program.id) res = res.concat([x]); }
+        return res;
+    }
+
+    // s482 — the program cells whose seed is HELD for its place (§7.6 rule (b) S482): a writable
+    // cell (a seeded field) with a written initializer that can be observed running where it
+    // runs (seedLive: it acts, or reads a binding or a cell), whose place is in the body's run
+    // (`marked`: a View.Init lower put at its declaration). A persisted cell's seed is its stored
+    // value's default — computed at construction, as before (INTERIM, stated in §7.6 rule (b) S482 r1:
+    // g-boot-persist-seed-at-construction-s482). Any other seed computes the same
+    // value wherever it runs.
+    fn heldFields(pd: Decl, marked: int[]) -> int[] {
+        let out: int[] = [];
+        for (const f of pd.fields) {
+            const init: Expr | not = f.init;
+            if (f.wcap is given && f.persist is not && init is given && hasInt(marked, f.sym.id) && seedLive(init)) out = out.concat([f.sym.id]);
+        }
         return out;
+    }
+
+    fn seedLive(e: Expr) -> boolean {
+        if (initActs(e)) return true;
+        for (const n of allNodes(Node.NExpr(e))) {
+            if (localReadOf(n) >= 0 || isPlaceNode(n)) return true;
+        }
+        return false;
+    }
+
+    fn isPlaceNode(n: Node) -> boolean {
+        return match n {
+            .NPlace(pl: x) :> true,
+            // no-default-arm: one question — is it a cell (or local path) read or write
+            _ :> false
+        };
+    }
+
+    // s482 — does a declaration's record hold a seed whose place matters (seedLive), itself or in
+    // a record it mounts unconditionally, at any depth? Such an instance, mounted unconditionally
+    // by the program body, is HELD (`rt.hold`) and seeded at its mount (`rt.seedAll`).
+    export fn liveSeedDecl(p: CoreProgram, d: Decl) -> boolean {
+        return liveSeedIn(p, d, []);
+    }
+
+    fn liveSeedIn(p: CoreProgram, d: Decl, seen: int[]) -> boolean {
+        if (hasInt(seen, d.sym.id)) return false;
+        for (const f of d.fields) {
+            const init: Expr | not = f.init;
+            if (f.wcap is given && f.persist is not && init is given && seedLive(init)) return true;
+        }
+        const views: View[] | not = d.renders;
+        if (views is not) return false;
+        for (const v of mountedInstances(views)) {
+            const kd: int = viewInstanced(v);
+            for (const d2 of p.decls) {
+                if (d2.sym.id == kd && liveSeedIn(p, d2, seen.concat([d.sym.id]))) return true;
+            }
+        }
+        return false;
+    }
+
+    // The program cell whose place `here` (initOf) is, else `not`.
+    fn fieldOfSym(pd: Decl, here: int[]) -> Field | not {
+        if (here.length == 0) return not;
+        for (const f of pd.fields) { if (f.sym.id == here[0]) return f; }
+        return not;
+    }
+
+    // Every instance view the program body holds, at any depth (a branch, a row, slot content).
+    fn programInstances(pd: Decl) -> View[] {
+        let out: View[] = [];
+        for (const n of allNodes(Node.NDecl(pd))) {
+            const v: View | not = instanceViewOf(n);
+            if (v is given) out = out.concat([v]);
+        }
+        return out;
+    }
+
+    fn instanceViewOf(n: Node) -> View | not {
+        return match n {
+            .NView(v: v) :> (viewInstanced(v) >= 0 ? v : not),
+            // no-default-arm: one question — is it an instance view
+            _ :> not
+        };
+    }
+
+    // s482 — the file-scope bindings code under `roots` reaches when it runs (constsReached),
+    // and also through what that code sets running on the way (S482 "a read of a seed before its
+    // place computes it early, on demand"): a read or a write of a cell runs the cell's
+    // initializer if it has not run (a held seed, a lazy derived value) — and, for a field of a
+    // mounted declaration, the use-site values that feed it (`insts`); an instance constructs
+    // and renders its declaration. Followed through the functions reached, to a fixed point.
+    fn reachOf(p: CoreProgram, insts: View[], roots: Node[]) -> int[] {
+        if (roots.length == 0) return [];
+        let all: Node[] = roots;
+        let todo: Node[] = roots;
+        let seenF: string[] = [];
+        let seenD: int[] = [];
+        let seenFn: int[] = [];
+        for (; todo.length > 0; ) {
+            let walk: Node[] = todo;
+            for (const fid of fnClosureThroughConsts(p, todo)) {
+                if (!hasInt(seenFn, fid)) {
+                    seenFn = seenFn.concat([fid]);
+                    for (const f of p.fns) { if (f.sym.id == fid) walk = walk.concat([Node.NFn(f)]); }
+                }
+            }
+            let next: Node[] = [];
+            for (const r of walk) {
+                for (const n of allNodes(r)) {
+                    const cf: CellRead | not = cellReadOf(n);
+                    if (cf is given) {
+                        for (const d of p.decls) {
+                            if (d.sym.id == cf.decl) {
+                                let k: int = 0;
+                                for (const f of d.fields) {
+                                    const key: string = cf.decl + ":" + k;
+                                    if ((cf.idx < 0 || cf.idx == k) && seenF.indexOf(key) < 0) {
+                                        seenF = seenF.concat([key]);
+                                        next = next.concat([Node.NField(f)]);
+                                    }
+                                    k = k + 1;
+                                }
+                                if (cf.decl != p.program.id && !hasInt(seenD, -1 - cf.decl)) {
+                                    seenD = seenD.concat([-1 - cf.decl]);
+                                    for (const iv of insts) { if (viewInstanced(iv) == cf.decl) next = next.concat([Node.NView(iv)]); }
+                                }
+                            }
+                        }
+                    }
+                    const di: int = nodeInstanced(n);
+                    if (di >= 0 && di != p.program.id && !hasInt(seenD, di)) {
+                        seenD = seenD.concat([di]);
+                        for (const d2 of p.decls) { if (d2.sym.id == di) next = next.concat([Node.NDecl(d2)]); }
+                    }
+                }
+            }
+            all = all.concat(next);
+            todo = next;
+        }
+        return constsReached(p, all);
+    }
+
+    type CellRead:struct = { decl: int, idx: int }
+
+    // A read or a write of a declaration's field (`idx`; -1: the whole record).
+    fn cellReadOf(n: Node) -> CellRead | not {
+        return match n {
+            .NPlace(pl: pl) :> cellPlaceRead(pl),
+            // no-default-arm: one question — is it a cell place
+            _ :> not
+        };
+    }
+
+    fn cellPlaceRead(pl: Place) -> CellRead | not {
+        return match pl {
+            .Cell(decl: d, inst: i, path: ps) :> (ps.length > 0 ? { decl: d.id, idx: ps[0].idx } : { decl: d.id, idx: -1 }),
+            .LocalPath(sym: s) :> not
+        };
     }
 
     fn instancedIn(root: Node) -> int[] {

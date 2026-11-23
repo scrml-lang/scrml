@@ -1,0 +1,9 @@
+// §17.1.1 (S482) — a `//` comment or a `#{}` style block between if-chain members does not break the chain.
+<program>
+    <flag:boolean=false/>
+
+    <p id="a" if=(@flag)>yes</p>
+    // a note between members
+    #{ .q { color: red; } }
+    <p id="b" else>no</p>
+</program>
