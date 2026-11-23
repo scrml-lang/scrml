@@ -31,7 +31,7 @@ ${
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, RequestState, ReqClass, FieldRole, Field,
              Decl, Fn, HostFn, HostBind, HostSrc, HostArg, HostProp, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator, Persist, PersistStore, Timing, IdleWatch,
              Failable, OkArm, ErrArm, ServerFn, SqlQuery, SqlMode, Param, LoopHead, EachHead, RangeHead, CssUnit, CoreCss, CssVar,
-             Gather, Lifted, GatherRow, PathStep, CoreConst, HeadTitle, CoreMeta, ForeignSlice, CoreChannel,
+             Gather, Lifted, GatherRow, PathStep, CoreConst, HeadTitle, CoreMeta, ForeignSlice, CoreChannel, DbLoad,
              findDecl, findTypeDef, typeDefSym, capOwner, findFn, findServerFn, mountedInstances, block, mkSym } from "./core.scrml";
     import { Node, nodeKids, allNodes, sharedRefs, boundSyms, assignedSyms, requestHandles } from "./walk.scrml";
     import { JsOp, JsUnOp, JsExpr, JsProp, JsStmt, JsLoopHead, JsForInit,
@@ -5749,15 +5749,13 @@ ${
         const serverOnly0: int[] = serverOnlyFns(p0).concat(reachedOnlyByServer(p0));
         let croots: Node[] = [];
         for (const d0 of p0.decls) { croots = croots.concat([Node.NDecl(d0)]); }
-        croots = croots.concat(clientFnRoots(p0, serverOnly0, keep));     // s482: the reached ones (§12.2 Trigger 6)
+        croots = croots.concat(clientFnRoots(p0, serverOnly0, keep, si));     // s482: the reached ones (§12.2 Trigger 6)
         let clientRead: int[] = [];
         for (const k0 of constsReadIn(p0, croots)) { clientRead = clientRead.concat([k0.sym.id]); }
-        let sroots: Node[] = [];
-        for (const sf of p0.server) { sroots = sroots.concat([Node.NServerFn(sf)]); }
         // r2 (#2041 re-review INFO-5): the same server roots as clientConsts / serverInits — the
         // server functions AND the functions only server code reaches (serverOnly0)
-        for (const sf1 of p0.fns) { if (hasInt(serverOnly0, sf1.sym.id)) sroots = sroots.concat([Node.NFn(sf1)]); }
-        const serverRead: int[] = constsReached(p0, sroots);
+        // s482 r1 (#2061 review H1): and the server-only initializers (serverRoots)
+        const serverRead: int[] = constsReached(p0, serverRoots(p0, serverOnly0, si));
         // s482 (§7.6 rule (b) S482, ruling:user-voice-scrml.md-S481-run-order-followups item 1):
         // "each seed is computed at its place in the sequence; records are still created at
         // construction … a read of a seed before its place computes it early, on demand". The
@@ -5845,10 +5843,8 @@ ${
         if (read.length == p.consts.length) return read;
         let rid: int[] = [];
         for (const k of read) { rid = rid.concat([k.sym.id]); }
-        let sroots: Node[] = [];
-        for (const sf of p.server) { sroots = sroots.concat([Node.NServerFn(sf)]); }
-        for (const f of p.fns) { if (hasInt(serverOnly, f.sym.id)) sroots = sroots.concat([Node.NFn(f)]); }
-        const sread: int[] = constsReached(p, sroots);
+        // s482 r1 (#2061 review H1): server code includes the server-only initializers (serverRoots)
+        const sread: int[] = constsReached(p, serverRoots(p, serverOnly, si));
         let out: CoreConst[] = [];
         for (const k2 of p.consts) {
             if (hasInt(rid, k2.sym.id)) {
@@ -5884,6 +5880,14 @@ ${
     }
 
     // s482 — `keep`: as clientLiveFns'.
+    // s482 r1 (#2061 review H1): a FIXED POINT. Each round judges "the client reads" from the
+    // client roots WITHOUT the initializers already found server-only (clientLiveFns `si`), and
+    // "server code reads" WITH them (serverRoots): the first round (none known) counts every
+    // acting initializer as client code, as before; each later one can only add bindings (a
+    // round starts from the last one's, and dropping client roots only shrinks what the client
+    // reads), so it ends. At the fixed point the set agrees with what printProgram and the server
+    // artifact use it for — the client runs none of these initializers, nor anything only they
+    // reach (clientLiveFns), and the server runs every one (print-server.scrml serverConsts).
     fn serverInitsExposing(p1: CoreProgram, keep: int[]) -> int[] {
         if (p1.consts.length == 0) return [];
         let p: CoreProgram = p1;
@@ -5892,20 +5896,28 @@ ${
             const rs: View[] | not = pd.renders;
             if (rs is given) p = withProgramRenders(p1, withoutInits(rs));
         }
+        let si: int[] = [];
+        let more = true;
+        for (; more; ) {
+            const next: int[] = serverInitsRound(p, keep, si);
+            more = next.length > si.length;
+            si = next;
+        }
+        return si;
+    }
+
+    fn serverInitsRound(p: CoreProgram, keep: int[], prev: int[]) -> int[] {
         const serverOnly: int[] = serverOnlyFns(p).concat(reachedOnlyByServer(p));
         let croots: Node[] = [];
         for (const d of p.decls) { croots = croots.concat([Node.NDecl(d)]); }
-        croots = croots.concat(clientFnRoots(p, serverOnly, keep));       // s482: the reached ones (§12.2 Trigger 6)
+        croots = croots.concat(clientFnRoots(p, serverOnly, keep, prev));     // s482: the reached ones (§12.2 Trigger 6)
         let cread: int[] = [];
         for (const k0 of constsReadIn(p, croots)) { cread = cread.concat([k0.sym.id]); }
-        let sroots: Node[] = [];
-        for (const sf of p.server) { sroots = sroots.concat([Node.NServerFn(sf)]); }
-        for (const f2 of p.fns) { if (hasInt(serverOnly, f2.sym.id)) sroots = sroots.concat([Node.NFn(f2)]); }
-        const sread: int[] = constsReached(p, sroots);
+        const sread: int[] = constsReached(p, serverRoots(p, serverOnly, prev));
         // the bindings only server code reads
         let held: int[] = [];
         for (const s of sread) { if (!hasInt(cread, s)) held = held.concat([s]); }
-        let out: int[] = [];
+        let out: int[] = prev;
         let changed = true;
         for (; changed; ) {
             changed = false;
@@ -5925,7 +5937,10 @@ ${
                 }
             }
         }
-        return out;
+        // Core order (print-server.scrml serverConsts prints them so; a round's additions follow)
+        let ordered: int[] = [];
+        for (const k2 of p.consts) { if (hasInt(out, k2.sym.id)) ordered = ordered.concat([k2.sym.id]); }
+        return ordered;
     }
 
     fn withoutInits(rs: View[]) -> View[] {
@@ -6191,8 +6206,13 @@ ${
     export fn printProgramExposing(p1: CoreProgram, jsFile: string, runtimeFile: string, keep: int[]) -> Output {
         const ill: string[] = coreRefusal(p1);
         if (ill.length > 0) return { js: "", html: "", refused: ill, routes: [] };
-        const si: int[] = serverInitsExposing(p1, keep);
-        const plan: InitPlan = bodyInits(p1, si, keep);
+        // s482 r1 (#2061 review M1/M2): §12.2 Trigger 6 / §41.9 — the nested functions nothing
+        // reaches and the components nothing constructs are not in the program the artifacts are
+        // printed from (shakeProgram; print-server.scrml shakes the same way, so both artifacts
+        // judge one program)
+        const ps: CoreProgram = shakeProgram(p1, keep);
+        const si: int[] = serverInitsExposing(ps, keep);
+        const plan: InitPlan = bodyInits(ps, si, keep);
         const p: CoreProgram = plan.p;
         // S478 ruling item 26 (1): a LIBRARY entry (no `<program>`, §21.5) is analyzed as a
         // library, but §21.5's output — "no HTML output … a JS module with the exported bindings
@@ -6217,7 +6237,7 @@ ${
         for (const d0 of p.decls) { clientRoots = clientRoots.concat([Node.NDecl(d0)]); }
         // s482 (g-boot-dead-client-fn-ships-server-const-s481): the functions the client can run
         // (clientLiveFns) — an unreached one is not printed, so nothing it reads is held here
-        const liveFns: int[] = clientLiveFns(p, keep);
+        const liveFns: int[] = clientLiveFns(p, keep, si);
         for (const f0 of p.fns) { if (!hasInt(serverOnly0, f0.sym.id) && hasInt(liveFns, f0.sym.id)) clientRoots = clientRoots.concat([Node.NFn(f0)]); }
         body = body.concat(seqConstStmts(ctx, clientConsts(p, clientRoots, serverOnly0, si), plan.seq));
         body = body.concat(requestSlotStmts(ctx, p));          // s475 (S3b)
@@ -6228,7 +6248,8 @@ ${
             templates = templates.concat(r.templates);
         }
         // s454 (U1b): the routes of the server functions the client calls
-        const called: ServerFn[] = calledServerFns(p);
+        // s482 r1 (#2061 review M3): those the client CAN call (calledServerFnsWith)
+        const called: ServerFn[] = calledServerFnsWith(p, keep, si);
         let routes: RouteOut[] = [];
         if (called.length > 0) body = body.concat([JsStmt.SBlank, JsStmt.SComment("server routes (the client half of each call — the server artifact holds the other half)")]);
         for (const sf of called) {
@@ -6370,11 +6391,37 @@ ${
     // The ServerFns a ServerCall names, in program order, each once.
     // s473: and every `<db>` cell's load (CoreProgram.loads) — the client calls it at boot.
     export fn calledServerFns(p: CoreProgram) -> ServerFn[] {
+        return calledServerFnsWith(p, [], serverInits(p));
+    }
+
+    // s482 r1 (#2061 review M3) — ~~a ServerCall anywhere in the program~~: one in code that
+    // can RUN. A server function only an unreached client function calls (§12.2 Trigger 6 — the
+    // function is in neither artifact) got a route, and the client its route descriptor: an
+    // endpoint no shipped code calls, its path published. FAIL CLOSED: only the code known never
+    // to run is left out — a function the client cannot run (clientLiveFns) that server code
+    // does not reach either (serverOnlyFns / reachedOnlyByServer, or a server-only initializer's
+    // reach); a component nothing constructs and a nested function nothing reaches are already
+    // gone (shakeProgram). Every declaration, server function and file-scope initializer is
+    // still read. `keep` / `si`: as clientLiveFns'.
+    export fn calledServerFnsWith(p: CoreProgram, keep: int[], si: int[]) -> ServerFn[] {
         let ids: int[] = [];
         for (const ld of p.loads) { if (!hasInt(ids, ld.fn.id)) ids = ids.concat([ld.fn.id]); }
-        for (const n of allNodes(Node.NProgram(p))) {
-            const s: Sym | not = nodeServerCall(n);
-            if (s is given) { if (!hasInt(ids, s.id)) ids = ids.concat([s.id]); }
+        const live: int[] = clientLiveFns(p, keep, si);
+        const serverOnly: int[] = serverOnlyFns(p).concat(reachedOnlyByServer(p));
+        const siFns: int[] = fnClosureThroughConsts(p, siRoots(p, si));
+        let roots: Node[] = [];
+        for (const d of p.decls) { roots = roots.concat([Node.NDecl(d)]); }
+        for (const f of p.fns) {
+            const id: int = f.sym.id;
+            if (hasInt(live, id) || hasInt(serverOnly, id) || hasInt(siFns, id)) roots = roots.concat([Node.NFn(f)]);
+        }
+        for (const sf0 of p.server) { roots = roots.concat([Node.NServerFn(sf0)]); }
+        for (const k of p.consts) { roots = roots.concat([Node.NExpr(k.init)]); }
+        for (const r of roots) {
+            for (const n of allNodes(r)) {
+                const s: Sym | not = nodeServerCall(n);
+                if (s is given) { if (!hasInt(ids, s.id)) ids = ids.concat([s.id]); }
+            }
         }
         let out: ServerFn[] = [];
         for (const sf of p.server) { if (hasInt(ids, sf.sym.id)) out = out.concat([sf]); }
@@ -6459,21 +6506,28 @@ ${
     // against S472 "a value read only by server code never reaches the client artifact".
     // The roots, read FAIL-CLOSED (counted reached when in doubt — dropping a function the client
     // needs is a runtime ReferenceError):
-    //  - every declaration (the program, each component — used or not): its fields' initializers,
-    //    views, attributes, handlers, effects and wiring;
+    //  - every declaration of `p` (the program, and each component the program can construct —
+    //    shakeProgram has dropped the others, §41.9): its fields' initializers, views,
+    //    attributes, handlers, effects and wiring;
     //  - each channel's `onclient:*` hooks (§38.10.2 — named by Sym, not by a call);
     //  - the §25.7 CSS bridges' reads (cssVarStmts prints them in the client);
     //  - the initializer of every file-scope binding no server code reads whose initializer may
-    //    act (initActs): the client runs such a binding when no artifact reads it (clientConsts,
-    //    bodyInits — S481 "every file-scope initializer runs"), so what it calls is client code
-    //    (a server-only one, serverInits, is counted too: over-inclusion only keeps a function);
+    //    act (initActs) and that is not server-only (`si`, serverInits): the client runs such a
+    //    binding when no artifact reads it (clientConsts, bodyInits — S481 "every file-scope
+    //    initializer runs"), so what it calls is client code. s482 r1 (#2061 review H1): ~~a
+    //    server-only one is counted too: over-inclusion only keeps a function~~ — a server-only
+    //    initializer runs in the SERVER artifact (print-server.scrml serverConsts), so it roots
+    //    nothing here, and the bindings it reads are server-read (siRoots counted as server
+    //    code): a function only it reaches, and a constant only that function reads, is not in
+    //    the client artifact. (`si` = [] counts every acting initializer — serverInitsExposing's
+    //    first, over-inclusive round.)
     //  - `keep`: the functions a caller of printProgramExposing names (test scaffolding that calls
     //    a function directly — slice-m1/load-program.js `expose`); empty on every compile;
     //  - a `kind="tool"` program keeps every function (its functions are all server-placed and
     //    printed by printTool; nothing here judges them).
     // A function only an unreached function reaches is unreached too. Exports (§21) do not
     // matter here: the client artifact exports nothing (a library entry is refused above).
-    fn clientLiveFns(p: CoreProgram, keep: int[]) -> int[] {
+    fn clientLiveFns(p: CoreProgram, keep: int[], si: int[]) -> int[] {
         if (p.tool is given) {
             let all: int[] = [];
             for (const f0 of p.fns) { all = all.concat([f0.sym.id]); }
@@ -6490,24 +6544,227 @@ ${
         const css: CoreCss | not = p.css;
         if (css is given) { for (const cv of css.vars) { roots = roots.concat([Node.NExpr(cv.read)]); } }
         const serverOnly: int[] = serverOnlyFns(p).concat(reachedOnlyByServer(p));
-        let sroots: Node[] = [];
-        for (const sf of p.server) { sroots = sroots.concat([Node.NServerFn(sf)]); }
-        for (const f1 of p.fns) { if (hasInt(serverOnly, f1.sym.id)) sroots = sroots.concat([Node.NFn(f1)]); }
-        const sread: int[] = constsReached(p, sroots);
+        const sread: int[] = constsReached(p, serverRoots(p, serverOnly, si));
         for (const k of p.consts) {
-            if (!hasInt(sread, k.sym.id) && initActs(k.init)) roots = roots.concat([Node.NExpr(k.init)]);
+            if (!hasInt(si, k.sym.id) && !hasInt(sread, k.sym.id) && initActs(k.init)) roots = roots.concat([Node.NExpr(k.init)]);
         }
         return fnClosureThroughConsts(p, roots);
+    }
+
+    // s482 r1 (#2061 review H1) — the code the SERVER artifact runs, as roots: the server
+    // functions, the functions only server code reaches (`serverOnly`), and the initializers of
+    // the server-only bindings (`si`, serverInits — print-server.scrml serverConsts runs them at
+    // module initialization). What clientLiveFns / clientConsts / bodyInits / serverInits judge
+    // "server code reads" from.
+    fn serverRoots(p: CoreProgram, serverOnly: int[], si: int[]) -> Node[] {
+        let sroots: Node[] = [];
+        for (const sf of p.server) { sroots = sroots.concat([Node.NServerFn(sf)]); }
+        for (const f of p.fns) { if (hasInt(serverOnly, f.sym.id)) sroots = sroots.concat([Node.NFn(f)]); }
+        return sroots.concat(siRoots(p, si));
+    }
+
+    fn siRoots(p: CoreProgram, si: int[]) -> Node[] {
+        let out: Node[] = [];
+        for (const k of p.consts) { if (hasInt(si, k.sym.id)) out = out.concat([Node.NExpr(k.init)]); }
+        return out;
     }
 
     // s482 — the client functions as roots: every function that is not server-only (`serverOnly`)
     // and that the client can run (clientLiveFns). What clientConsts / bodyInits / serverInits
     // judge "the client reads" from, and what printProgram prints.
-    fn clientFnRoots(p: CoreProgram, serverOnly: int[], keep: int[]) -> Node[] {
-        const live: int[] = clientLiveFns(p, keep);
+    fn clientFnRoots(p: CoreProgram, serverOnly: int[], keep: int[], si: int[]) -> Node[] {
+        const live: int[] = clientLiveFns(p, keep, si);
         let out: Node[] = [];
         for (const f of p.fns) { if (!hasInt(serverOnly, f.sym.id) && hasInt(live, f.sym.id)) out = out.concat([Node.NFn(f)]); }
         return out;
+    }
+
+    // =========================================================================
+    // s482 r1 (s482-client-roots; #2061 review M1/M2) — §12.2 Trigger 6 ("Functions that are
+    // never called … are tree-shaken out of all output") and §41.9 ("only the components and
+    // values that are actually referenced … are included in the compiled output") applied to
+    // what clientLiveFns cannot drop by itself: a NESTED function (Stmt.LocalFn, §7.3.1) is
+    // printed with its enclosing function, and a COMPONENT declaration was a client root whether
+    // or not anything constructed it — so a dead one shipped the constants it (or a function only
+    // it calls) reads. `p` without them: each function body keeps the nested functions it reaches
+    // (prunedBody), and `decls` keeps the program, every non-user declaration, and each component
+    // live code can construct (liveDecls). Both printers start from it (printProgramExposing,
+    // print-server.scrml printServerBuild), so the two artifacts judge one program. A tool is
+    // returned as it is (printTool prints every function; nothing here judges it).
+    // =========================================================================
+    export fn shakeProgram(p: CoreProgram, keep: int[]) -> CoreProgram {
+        if (p.tool is given) return p;
+        let fs: Fn[] = [];
+        for (const f of p.fns) { fs = fs.concat([prunedFn(f)]); }
+        const p1: CoreProgram = withDeclsFns(p, p.decls, fs, p.loads);
+        const live: int[] = liveDecls(p1, keep);
+        if (live.length == p1.decls.length) return p1;
+        let ds: Decl[] = [];
+        let gone: int[] = [];
+        for (const d of p1.decls) {
+            if (hasInt(live, d.sym.id)) {
+                ds = ds.concat([d]);
+            } else {
+                for (const fl of d.fields) { gone = gone.concat([fl.sym.id]); }
+            }
+        }
+        // a dropped component's `<db>` cells are loaded by no one (their routes go too)
+        let lds: DbLoad[] = [];
+        for (const ld of p1.loads) { if (!hasInt(gone, ld.cell.id)) lds = lds.concat([ld]); }
+        return withDeclsFns(p1, ds, p1.fns, lds);
+    }
+
+    fn withDeclsFns(p: CoreProgram, ds: Decl[], fs: Fn[], lds: DbLoad[]) -> CoreProgram {
+        return { program: p.program, decls: ds, types: p.types, fns: fs, server: p.server, dbs: p.dbs, reset: p.reset, sqlError: p.sqlError,
+                 serverCallError: p.serverCallError, css: p.css, consts: p.consts, loads: lds, envelopes: p.envelopes, head: p.head,
+                 tool: p.tool, endpoints: p.endpoints, channels: p.channels };
+    }
+
+    // The declarations live code can construct, a fixed point from the program and every
+    // non-user declaration: a component is constructed only by a mount (View.Instance /
+    // View.Star — instancedIn) or a reference to its shared instance (InstRef.Shared, through a
+    // Kid / HandleOf too — sharedRefs; every cell read, write, init, validity, effect and gate
+    // dependency names its instance by an InstRef child), and §41.9 "Dynamic component references
+    // … are not possible in scrml's markup syntax", so the reference set is complete. Read
+    // FAIL-CLOSED: the code scanned is every live declaration, every function the client can run
+    // counting EVERY acting initializer as a root (clientLiveFns with no server-only set), every
+    // function server code reaches, every server function, and every file-scope initializer;
+    // and a component holding a `<db>` cell some load fills is kept.
+    fn liveDecls(p: CoreProgram, keep: int[]) -> int[] {
+        let live: int[] = [p.program.id];
+        for (const d of p.decls) {
+            if (d.kind != DeclKind.User && !hasInt(live, d.sym.id)) live = live.concat([d.sym.id]);
+        }
+        let cells: int[] = [];
+        for (const ld of p.loads) { cells = cells.concat([ld.cell.id]); }
+        for (const d1 of p.decls) {
+            for (const fl of d1.fields) {
+                if (hasInt(cells, fl.sym.id) && !hasInt(live, d1.sym.id)) live = live.concat([d1.sym.id]);
+            }
+        }
+        if (live.length == p.decls.length) return live;
+        let sroots: Node[] = [];
+        for (const sf of p.server) { sroots = sroots.concat([Node.NServerFn(sf)]); }
+        let fixed: Node[] = sroots;
+        for (const k of p.consts) { fixed = fixed.concat([Node.NExpr(k.init)]); }
+        const css: CoreCss | not = p.css;
+        if (css is given) { for (const cv of css.vars) { fixed = fixed.concat([Node.NExpr(cv.read)]); } }
+        let changed = true;
+        for (; changed; ) {
+            changed = false;
+            let ds: Decl[] = [];
+            for (const d2 of p.decls) { if (hasInt(live, d2.sym.id)) ds = ds.concat([d2]); }
+            const pl: CoreProgram = withDeclsFns(p, ds, p.fns, p.loads);
+            const fns: int[] = clientLiveFns(pl, keep, []).concat(serverOnlyFns(pl)).concat(fnClosureThroughConsts(pl, sroots));
+            let roots: Node[] = fixed;
+            for (const d3 of ds) { roots = roots.concat([Node.NDecl(d3)]); }
+            for (const f of p.fns) { if (hasInt(fns, f.sym.id)) roots = roots.concat([Node.NFn(f)]); }
+            let named: int[] = [];
+            for (const r of roots) {
+                named = unionInts(named, instancedIn(r));
+                for (const s of sharedRefs(r)) { if (!hasInt(named, s.id)) named = named.concat([s.id]); }
+            }
+            for (const d4 of p.decls) {
+                if (hasInt(named, d4.sym.id) && !hasInt(live, d4.sym.id)) {
+                    live = live.concat([d4.sym.id]);
+                    changed = true;
+                }
+            }
+        }
+        return live;
+    }
+
+    // A function whose body keeps only the nested functions it reaches (prunedBody).
+    fn prunedFn(f: Fn) -> Fn {
+        return { sym: f.sym, params: f.params, body: prunedBody(f.body), pure: f.pure, err: f.err, waits: f.waits, host: f.host };
+    }
+
+    // A function body without the nested function declarations (Stmt.LocalFn, which stand only at
+    // the top level of a function body — core.scrml) it never reaches: one is reached when a
+    // statement of the body names it (a call, a value, a read — namedIn, at any depth), or a
+    // reached nested function does (its own body pruned first, so a nested function only a dead
+    // one names is dead too). The same rule as analyze.scrml's `usesR` (#2053): a nested function
+    // declaration a function never calls nor uses as a value adds nothing. FAIL CLOSED: a
+    // declaration anywhere else (not at the top of the body) is left in its statement, and that
+    // statement's names count.
+    fn prunedBody(b: Block) -> Block {
+        let named: int[] = [];
+        let locals: Fn[] = [];
+        for (const st of b.stmts) {
+            const lf: Fn | not = stmtLocalFn(st);
+            if (lf is given) {
+                locals = locals.concat([prunedFn(lf)]);
+            } else {
+                named = namedIn(Node.NStmt(st), named);
+            }
+        }
+        if (locals.length == 0) return b;
+        let reached: int[] = [];
+        let more = true;
+        for (; more; ) {
+            more = false;
+            for (const l of locals) {
+                if (hasInt(named, l.sym.id) && !hasInt(reached, l.sym.id)) {
+                    reached = reached.concat([l.sym.id]);
+                    named = namedIn(Node.NFn(l), named);
+                    more = true;
+                }
+            }
+        }
+        let out: Stmt[] = [];
+        for (const st2 of b.stmts) {
+            const lf2: Fn | not = stmtLocalFn(st2);
+            if (lf2 is given) {
+                if (hasInt(reached, lf2.sym.id)) {
+                    for (const l2 of locals) { if (l2.sym.id == lf2.sym.id) out = out.concat([Stmt.LocalFn(l2)]); }
+                }
+            } else {
+                out = out.concat([st2]);
+            }
+        }
+        return { stmts: out };
+    }
+
+    // Every Sym a node tree names as a callee (a Call, an Attempt's FCall), a function value
+    // (FnRef) or a local read (Local, a LocalPath place).
+    fn namedIn(root: Node, acc: int[]) -> int[] {
+        let out: int[] = acc;
+        for (const n of allNodes(root)) {
+            const c: Sym | not = nodePlainCallee(n);
+            if (c is given) {
+                if (!hasInt(out, c.id)) out = out.concat([c.id]);
+            } else {
+                const id: int = localReadOf(n);
+                if (id >= 0 && !hasInt(out, id)) out = out.concat([id]);
+            }
+        }
+        return out;
+    }
+
+    fn stmtLocalFn(s: Stmt) -> Fn | not {
+        return match s {
+            .LocalFn(f: f) :> f,
+            .Let(sym: x) :> not,
+            .Assign(local: x) :> not,
+            .Write(cap: x) :> not,
+            .Commit(writes: x) :> not,
+            .If(cond: x) :> not,
+            .Return(e: x) :> not,
+            .Eval(e: x) :> not,
+            .Suspend(bind: x) :> not,
+            .ResetSurface(of: x) :> not,
+            .Defer(body: x) :> not,
+            .Unpersist(decl: x) :> not,
+            .Attempt(result: x) :> not,
+            .Fail(err: x) :> not,
+            .Join(k: x) :> not,
+            .Jump(k: x) :> not,
+            .Loop(label: x) :> not,
+            .Break(target: x) :> not,
+            .Continue(target: x) :> not,
+            .Gather(g: x) :> not,
+            .Lift(into: x) :> not
+        };
     }
 
     // The Fns (not ServerFns) a node tree calls.

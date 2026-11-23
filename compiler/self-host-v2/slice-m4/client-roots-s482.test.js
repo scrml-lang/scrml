@@ -338,3 +338,152 @@ let <out:string=""/>
     expect(res.serverJs).toBeUndefined();
   }, 120000);
 });
+
+// =============================================================================
+// D — r1 (#2061 adversarial review H1 / M1 / M2 / M3): what the first round still shipped.
+// Red on base 62d36cabd (and on the round-0 head e7e78f7ed) — each names what it printed.
+// =============================================================================
+describe("D — r1: server-only initializers, nested functions, components, routes", () => {
+  test("d1 (H1, probe o1): a function only a server-only initializer calls is not in the client, nor the constant only it reads; the server still runs the initializer", async () => {
+    const res = await compile(`<program db="./app.db">
+\${
+    const SECRET: string = "zz-secret-salt";
+    const S2: string = "zz-second-secret";
+    function mix(s: string) -> string { return s + SECRET; }
+    type Row:struct = { name: string }
+    function label(id: int) -> string {
+        const r: Row = ?{\`SELECT name FROM users WHERE id = \${id}\`}.get() !{ _ :> { return "none"; } };
+        return mix(r.name);
+    }
+    function combine() -> string { return mix("a") + S2; }
+    const unused: string = combine();
+}
+let <out:string=""/>
+<button id="go" onclick={ @out = label(1) !{ .Transport(t) :> return }; }>go</button>
+<p id="c">\${@out}</p>
+</program>
+`);
+    expect(res.client.js).not.toContain("zz-");                // base: `const S2 = "zz-second-secret"`
+    expect(fnDecl(res.client.js, "combine")).toBe(false);      // base: `function combine()`
+    expect(res.serverJs).toMatch(/^const unused = combine\(\);/m);
+    expect(res.serverJs).toMatch(/function combine\(/);
+    expect(res.serverJs).toContain("zz-second-secret");
+    expect(await texts(res, ["c"])).toEqual([""]);
+  }, 120000);
+
+  test("d2 (H1, the fixed point's second round): a binding only that function reads, with an acting initializer, runs on the server only", async () => {
+    const res = await compile(`<program db="./app.db">
+\${
+    const SECRET: string = "zz-secret-salt";
+    function mix(s: string) -> string { return s + SECRET; }
+    function tagged(s: string) -> string { return "{" + s + "}"; }
+    const X: string = tagged("zz-x-marker");
+    type Row:struct = { name: string }
+    function label(id: int) -> string {
+        const r: Row = ?{\`SELECT name FROM users WHERE id = \${id}\`}.get() !{ _ :> { return "none"; } };
+        return mix(r.name);
+    }
+    function combine() -> string { return mix("a") + X; }
+    const unused: string = combine();
+}
+<p id="c">ok</p>
+</program>
+`);
+    expect(res.client.js).not.toContain("zz-");                // base: X, its initializer and combine
+    expect(fnDecl(res.client.js, "tagged")).toBe(false);
+    expect(fnDecl(res.client.js, "combine")).toBe(false);
+    expect(res.serverJs).toContain("zz-x-marker");
+    expect(res.serverJs).toMatch(/^const unused = combine\(\);/m);
+    expect(await texts(res, ["c"])).toEqual(["ok"]);
+  }, 120000);
+
+  test("d3 (M1, probe o3): a nested function its outer function never reaches is not printed, nor the constant only it reads", async () => {
+    const res = await compile(`<program db="./app.db">
+\${
+    const API_KEY: string = "zz-sk-nested";
+    type Row:struct = { name: string }
+    function label(id: int) -> string {
+        const r: Row = ?{\`SELECT name FROM users WHERE id = \${id}\`}.get() !{ _ :> { return "none"; } };
+        return r.name + API_KEY;
+    }
+    function live(k: int) -> int {
+        function deadNested() -> string { return \`k=\${API_KEY}\`; }
+        function deadToo() -> string { return deadNested(); }
+        function inc(x: int) -> int { return x + 1; }
+        function twice(x: int) -> int { return inc(inc(x)); }
+        return twice(k);
+    }
+}
+let <n:int=0/>
+<button id="go" onclick={ @n = live(@n); }>go</button>
+<p id="c">\${live(5)}</p>
+</program>
+`);
+    expect(res.client.js).not.toContain("zz-sk-nested");      // base: `const API_KEY = …`
+    expect(fnDecl(res.client.js, "deadNested")).toBe(false);  // base: printed inside live
+    expect(fnDecl(res.client.js, "deadToo")).toBe(false);
+    expect(fnDecl(res.client.js, "twice")).toBe(true);        // reached by a call
+    expect(fnDecl(res.client.js, "inc")).toBe(true);          // reached only through twice
+    expect(await texts(res, ["c"])).toEqual(["7"]);
+  }, 120000);
+
+  // (A nested function used as a VALUE is refused by the bootstrap — E-BOOTSTRAP-UNSUPPORTED,
+  // §7.3.1 INTERIM — so prunedBody's value rule, a FnRef naming it, has no compiling probe here;
+  // it counts as reached, as analyze's usesR counts one.)
+
+  test("d5 (M2, probe o4): a component nothing constructs is not printed, nor what only its view reaches; a used one is", async () => {
+    const res = await compile(`\${
+    const API_KEY: string = "zz-sk-comp";
+    function peek() -> string { return API_KEY; }
+    function shown() -> string { return "shown"; }
+}
+<ghost t:string="">
+</> renders <span>\${peek()}</span>
+<ghost2 t:string="">
+</> renders <ghost t=""/>
+<used t:string="">
+</> renders <span id="u">\${shown()}</span>
+<program db="./app.db">
+\${
+    type Row:struct = { name: string }
+    function label(id: int) -> string {
+        const r: Row = ?{\`SELECT name FROM users WHERE id = \${id}\`}.get() !{ _ :> { return "none"; } };
+        return r.name + API_KEY;
+    }
+}
+let <out:string=""/>
+<button id="go" onclick={ @out = label(1) !{ .Transport(t) :> return }; }>go</button>
+<used t=""/>
+<p id="c">\${@out}</p>
+</program>
+`);
+    expect(res.client.js).not.toContain("zz-sk-comp");         // base: `const API_KEY = …` (ghost's view reaches peek)
+    expect(fnDecl(res.client.js, "peek")).toBe(false);
+    expect(res.client.js).not.toMatch(/render_ghost/);         // neither ghost nor ghost2 (only ghost2 mounts ghost)
+    expect(fnDecl(res.client.js, "shown")).toBe(true);
+    expect(await texts(res, ["u", "c"])).toEqual(["shown", ""]);
+  }, 120000);
+
+  test("d6 (M3, probe o2): a server function only an unreached client function calls gets no route, and the client no route descriptor", async () => {
+    const res = await compile(`<program db="./app.db">
+\${
+    type Row:struct = { name: string }
+    function secretRow(id: int) -> string {
+        const r: Row = ?{\`SELECT name FROM users WHERE id = \${id}\`}.get() !{ _ :> { return "none"; } };
+        return r.name;
+    }
+    function dead() -> string { return secretRow(1) !{ .Transport(t) :> return "x" }; }
+}
+let <out:string=""/>
+<p id="c">\${@out}</p>
+</program>
+`);
+    expect(res.client.js).not.toContain("route$secretRow");    // base: the descriptor
+    expect(res.client.js).not.toContain("/_scrml/call/");
+    expect(fnDecl(res.client.js, "dead")).toBe(false);
+    // base: a server artifact whose manifest routes secretRow; now nothing is routed and nothing
+    // runs at module initialization, so there is no server half
+    expect(res.serverJs).toBeUndefined();
+    expect(await texts(res, ["c"])).toEqual([""]);
+  }, 120000);
+});
