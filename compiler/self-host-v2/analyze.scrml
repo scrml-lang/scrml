@@ -50715,13 +50715,16 @@ ${
                     // (it can fire a DOM event whose handler writes one — probe p-5wwuPb looped 100
                     // times a click). Unproven, so refused: directly, through a scrml wrapper at any
                     // depth, or handed on as a value (INTERIM, g-boot-meta-runtime-residue-s482).
-                    const hc: string[] = hostChain(s, t, r.sym);
+                    // s482 r3 (#2080 r2 review MED-1): a stdlib `import:host` wrapper of an
+                    // allow-listed module (pureHostFile) is proven and not refused.
+                    const hr: HostReach = hostChain(s, t, r.sym);
+                    const hc: string[] = hr.chain;
                     // a `<host>`-backed function itself named as a value is the binder's refusal
                     // (fnNameRef: "a host-backed function … used as a value is not in the bootstrap")
                     if (hc.length > 0 && !(r.asValue && hc.length == 1)) {
-                        let how: string = " calls `" + hc[hc.length - 1] + "`, a `<host>`-backed function (§21.3.1), through `" + chainText(hc) + "`";
-                        if (hc.length == 1) how = " calls `" + hc[0] + "`, a `<host>`-backed function (§21.3.1)";
-                        if (r.asValue) how = " hands `" + r.name.replace("()", "") + "` on as a function value, and it reaches `" + hc[hc.length - 1] + "`, a `<host>`-backed function (§21.3.1), through `" + chainText(hc) + "`";
+                        let how: string = " calls `" + hc[hc.length - 1] + "`, " + hr.what + ", through `" + chainText(hc) + "`";
+                        if (hc.length == 1) how = " calls `" + hc[0] + "`, " + hr.what;
+                        if (r.asValue) how = " hands `" + r.name.replace("()", "") + "` on as a function value, and it reaches `" + hc[hc.length - 1] + "`, " + hr.what + ", through `" + chainText(hc) + "`";
                         out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", who + how + " — host code is outside the analysis (it can write a cell, e.g. by firing a DOM event whose handler writes one), so the compiler cannot prove the callback writes no reactive cell, and the rule fails closed (§6.7.4 rule 4): " + why, r.file, r.span)]);
                     }
                 }
@@ -50734,12 +50737,53 @@ ${
     }
 
     // s482 r2 (#2080 r1 review HIGH-1r) — the chain of display labels (`ck()` … `clickB()`) from
-    // callable `from` down to the first `<host src>`-backed function it reaches through the
-    // references its body makes (calls and function values), transitively; [] — none.
-    // A query on the summary alone, for any rule that must treat host code as unproven: the
-    // `<effect>` no-write rule takes it next (ruling:user-voice-scrml.md-S482-effect-host-call,
+    // callable `from` down to the first UNPROVEN host-backed function it reaches through the
+    // references its body makes (calls and function values), transitively; chain [] — none.
+    // `what` names that function's kind for the diagnostic. A query on the summary alone, for
+    // any rule that must treat host code as unproven: the `<effect>` no-write rule takes it
+    // next, allow-list and all (ruling:user-voice-scrml.md-S482-effect-host-call,
     // g-boot-effect-host-call-hang-s482).
-    fn hostChain(s: Summary, t: Tables, from: int) -> string[] {
+    //
+    // s482 r3 (#2080 r2 review MED-1) — WHICH host code is unproven:
+    //   - a `<host>` binding of a user file (`<host src>` or a targeted `<host>`; HostFn.bind
+    //     given) — ALWAYS unproven: its JS is the author's, and can do anything (fire a DOM
+    //     event whose handler writes a cell);
+    //   - a stdlib `import:host` wrapper (§21.3.1.1; HostFn.bind `not`, `module`/`file` the
+    //     stdlib host file it calls) — unproven UNLESS that file is on PURE_HOST_FILES below;
+    //     the diagnostic names the stdlib module (`scrml:<module>`), never a `<host>` the
+    //     author did not write.
+    // PURE_HOST_FILES (pureHostFile) — the stdlib host files whose JS provably cannot call
+    // back into page code or dispatch a DOM event: each export takes only `number` / `string` /
+    // `int` values (no function, no object the page made), touches no DOM / global but `Math` /
+    // `Number` / a module-local RegExp, imports nothing, and returns a value:
+    //   - `math/host.js` (scrml:math): floor/ceil/trunc/round*/abs/min/max/isNaN over `Math` /
+    //     `Number`; parseInt/parseFloat/toNumber read a string by code unit / a local RegExp;
+    //     the only side effect is a thrown E-INT-CONVERSION-RT trap (no cell write);
+    //   - `random/host.js` (scrml:random): random/randomInt over `Math.random()` only.
+    // A new entry needs the same reading of its file's JS (the effect lane reuses this list).
+    // Every other stdlib host module (e.g. the scrml:compiler wrappers) stays fail-closed.
+    type HostReach:struct = { chain: string[], what: string }
+
+    fn pureHostFile(module: string, file: string) -> boolean {
+        return file == "host.js" && (module == "math" || module == "random");
+    }
+
+    // "" — `sym` is not an unproven host-backed function; else how the diagnostic names it.
+    fn unprovenHostWhat(t: Tables, sym: int) -> string {
+        for (const f of t.fns) {
+            if (f.sym.id == sym) {
+                const h: HostFn | not = f.host;
+                if (h is not) return "";
+                if (h.bind is given) return "a `<host>`-backed function (§21.3.1)";
+                if (h.module != "" && pureHostFile(h.module, h.file)) return "";
+                if (h.module != "") return "a host-backed function of the stdlib module `scrml:" + h.module + "` (its `import:host` file `" + h.file + "`, §21.3.1.1), which is not on the compiler's list of stdlib host files proven to call back into no page code";
+                return "a host-backed function (§21.3.1)";
+            }
+        }
+        return "";
+    }
+
+    fn hostChain(s: Summary, t: Tables, from: int) -> HostReach {
         let seen: int[] = [];
         let todo: int[] = [from];
         let via: int[] = [-1];
@@ -50750,14 +50794,15 @@ ${
                 seen = seen.concat([id]);
                 const i: int = nodeIdx(s.nodes, id);
                 if (i >= 0) {
-                    if (hostBackedSym(t, id)) {
+                    const what: string = unprovenHostWhat(t, id);
+                    if (what != "") {
                         let out: string[] = [];
                         let k: int = at;
                         for (; k >= 0; ) {
                             out = [s.nodes[nodeIdx(s.nodes, todo[k])].label].concat(out);
                             k = via[k];
                         }
-                        return out;
+                        return { chain: out, what: what };
                     }
                     for (const r of s.nodes[i].f.scan.refs) {
                         todo = todo.concat([r.sym]);
@@ -50767,7 +50812,7 @@ ${
             }
             at = at + 1;
         }
-        return [];
+        return { chain: [], what: "" };
     }
 
     // s478 (s478-boot-fn-type) — what a function value's type cannot carry in the bootstrap,
@@ -55408,8 +55453,17 @@ ${
         // the composed program will run
         // s475-boot-literal-carriers: only when some carrier's failure set is not its declared enum (ARun.retype)
         if (r1.retype) r1 = analyzeRun(files, entry, keyBase, routeBase, nextId >= 0, r1.carriers);
-        if (nsNotes.length > 0) return withNotes(r1.tp, nsNotes);
-        if (r1.plans.length == 0 || hasErrorDiag(r1.tp.diags)) return withNotes(withNotes(r1.tp, epNotes), r1.unused);
+        // s482 r3 (#2080 r2 review LOW-1): the re-read's notes join every other list — never an
+        // early return that drops `epNotes`, the lint or the plan composition. The lint
+        // (W-UNUSED-BINDING) is judged only over a compile with no Error, so an Error among the
+        // notes withholds it, as an Error in the run does (analyzeRun); a non-Error note leaves
+        // the composition to run and joins its diagnostics.
+        const tp1: TypedProgram = withNotes(r1.tp, nsNotes);
+        if (r1.plans.length == 0 || hasErrorDiag(tp1.diags)) {
+            let un1: Diag[] = r1.unused;
+            if (hasErrorDiag(nsNotes)) un1 = [];
+            return withNotes(withNotes(tp1, epNotes), un1);
+        }
         const r2: ARun = analyzeRun(composeFiles(files, r1.plans, next), entry, keyBase, routeBase, false, r1.carriers);
         // the plans' warnings join the composed program's diagnostics, and no diagnostic names the
         // synthesized batch (`#F`, `F#batch` — review L2): it is "F (its composed server batch)"
@@ -55417,6 +55471,7 @@ ${
         for (const p of r1.plans) { notes = notes.concat(p.notes); }
         let ds: Diag[] = [];
         for (const d of r2.tp.diags.concat(notes)) { ds = ds.concat([newDiag(d.code, batchNamesOut(r1.plans, d.message), d.file, d.span)]); }
+        ds = ds.concat(nsNotes);
         // s480: the lint of the files as written (r1), only when the composed program has no Error
         let un: Diag[] = [];
         if (!hasErrorDiag(ds)) un = r1.unused;

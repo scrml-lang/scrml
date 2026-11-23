@@ -24,6 +24,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { loadM2, frontEnd } from "./harness.js";
+import { frontEndStdlib } from "../slice-m2/lowered.js";
 
 const RUNTIME = join(import.meta.dir, "..", "slice-m1", "runtime", "runtime.js");
 
@@ -242,6 +243,67 @@ describe("s482 r2 — a callback reaching a `<host>`-backed function is unproven
     hostRefused("", `<div>^{ meta.cleanup(() => { const z = clickB(); }); }</div>`, "the callback of `meta.cleanup(…)` calls `clickB()`");
     const r = run(HOSTP("function inc(x: int) -> int { return x + 1; }", SUB("const z = inc(v);")));
     expect(errMsgs(r)).toEqual([]);
+  });
+});
+
+// s482 r3 (re-review of #2080 r2) — MED-1: r2's host rule caught the stdlib `import:host` wrappers
+// too (`scrml:math` floor, `scrml:random` randomInt), refusing ordinary callbacks and blaming a `<host>`
+// the author never wrote. A user `<host>` binding stays unproven; a stdlib wrapper is proven only when
+// its host file is on the allow-list (analyze.scrml pureHostFile: math/host.js, random/host.js), and any
+// other stdlib host module is refused naming the module.
+const STDP = (pre, fns, blk, extra = "") => `${pre}<program>\n${fns}\nlet <n:int=0/>\n${extra}<div id="o">^{ ${blk} }</div>\n<button id="b" onclick=\${() => { @n = @n + 1; }}>b</button>\n</program>\n`;
+const stdRun = (...a) => frontEndStdlib(mods, [{ path: "app.scrml", src: STDP(...a) }], "app.scrml");
+const stdClean = (...a) => {
+  const r = stdRun(...a);
+  expect(errMsgs(r)).toEqual([]);
+  expect(r.stdlib.refused).toEqual([]);
+  expect(print(r).js).toContain("metaEffect");
+  return r;
+};
+const MATH = `import { floor } from "scrml:math";\n`;
+
+describe("s482 r3 — an allow-listed stdlib host wrapper in a callback is proven (MED-1)", () => {
+  test("`floor` direct, through a helper, and `randomInt` direct compile in a subscribe callback", () => {
+    stdClean(MATH, "", "meta.subscribe(\"n\", (v) => { const z = floor(2.5); meta.emit(`<p>${v}:${z}</p>`); });");
+    stdClean(MATH, "function half(k: number) -> int { return floor(k / 2.0); }", "meta.subscribe(\"n\", (v) => { const z = half(1.0 * v); meta.emit(`<p>${v}:${z}</p>`); });");
+    stdClean(`import { randomInt } from "scrml:random";\n`, "", "meta.subscribe(\"n\", (v) => { const z = randomInt(1, 6); meta.emit(`<p>${v}:${z}</p>`); });");
+  });
+
+  test("`floor` in an interval callback, and via meta.get of a derived cell whose formula calls it", () => {
+    stdClean(MATH, "", "meta.interval(1000, () => { const z = floor(2.5); meta.emit(`<p>${z}</p>`); });");
+    stdClean(MATH, "", "meta.subscribe(\"n\", (v) => { const z = meta.get(\"h\"); meta.emit(`<p>${v}:${z}</p>`); });", "<h:int=(floor(1.0 * @n / 2.0))/>\n");
+  });
+
+  test("a user `<host>` stays refused beside it, still named `<host>`-backed; the proven floor adds no report", () => {
+    const src = `<host src="./glue.js">\n  clickB() -> int\n</host>\n` + STDP(MATH, "function both() -> int { return floor(2.5) + clickB(); }", "meta.subscribe(\"n\", (v) => { const a = floor(1.5); const z = both(); meta.emit(`<p>${v}:${z}:${a}</p>`); });");
+    const r = frontEndStdlib(mods, [{ path: "app.scrml", src }], "app.scrml");
+    expect(errs(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(errMsgs(r)[0]).toContain("calls `clickB()`, a `<host>`-backed function (§21.3.1), through `both() → clickB()`");
+  });
+
+  test("a stdlib host module NOT on the allow-list stays fail-closed, and the message names the module, not `<host>`", () => {
+    const STD = "scrml:hb/index.scrml";
+    const r = frontEnd(mods, [
+      { path: STD, src: 'import:host { hf } from "./h.js";\n${\n    export fn f(x: int) -> int {\n        return hf(x);\n    }\n}\n' },
+      { path: "app.scrml", src: `import { f } from "scrml:hb";\n<program>\nlet <n:int=0/>\n<div id="o">^{ meta.subscribe("n", (v) => { const z = f(v); meta.emit(\`<p>\${z}</p>\`); }); }</div>\n<button id="b" onclick=\${() => { @n = @n + 1; }}>b</button>\n</program>\n` },
+    ], "app.scrml", { stdlibPaths: [STD] });
+    expect(errs(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(errMsgs(r)[0]).toContain("calls `f()`, a host-backed function of the stdlib module `scrml:hb`");
+    expect(errMsgs(r)[0]).not.toContain("`<host>`");
+  });
+});
+
+// s482 r3 (re-review of #2080 r2) — LOW-1: the namespace re-read's notes returned early, dropping the
+// endpoint arm notes (epNotes) — every list is attached now.
+describe("s482 r3 — a namespace-member refusal drops no other diagnostic (LOW-1)", () => {
+  test("an `<endpoint>` arm's refusal (epNotes) is reported beside the namespace-member refusal", () => {
+    const r = frontEnd(mods, [
+      { path: "lib.scrml", src: "export function one() -> int { return 1; }\n" },
+      { path: "app.scrml", src: `import * as m from "./lib.scrml";\n<program>\ntype M:enum = { Go }\nlet <n:int=0/>\n<endpoint path="/x" method="POST" accepts=M>\n  <Go : { __proto__: 1 }>\n</endpoint>\n<div id="o">^{ const z = m.one(); meta.emit(\`<p>\${z}</p>\`); }</div>\n</program>\n` },
+    ]);
+    const ms = errMsgs(r).join("\n");
+    expect(ms).toContain("`m.one` — a namespace-import member (`import * as m`)");
+    expect(ms).toContain("prototype machinery");
   });
 });
 

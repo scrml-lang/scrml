@@ -93,3 +93,14 @@ Scratch: ~/.cache/scrml/review/s482-meta-phase3/.
 - byte-compare 1968 conformance cases: 0 diffs. Corpus 959 files: 0 diffs; `^{` files (76, fixS66 / raw): 0 diffs.
 - s34-census --check-new PASS; types-gate OK 182 unchanged; corpus-compile-floor PASS; e2e-render-map 259/0;
   meta-phase3 + meta-runtime + meta-s481 with SCRML_BROWSER_TESTS=1: 214/0.
+
+## r3 (fix round, re-review of #2080 @ 03f1288d3)
+- [x] MED-1: `hostChain` returns `{ chain, what }` and stops only at an UNPROVEN host function
+      (`unprovenHostWhat`): a user `<host>` binding always; a stdlib `import:host` wrapper unless its host file
+      is on `pureHostFile` (math/host.js, random/host.js — each read: no DOM, no callback, imports nothing).
+      Any other stdlib host module is refused naming `scrml:<module>`. Allow-list documented beside `hostChain`
+      and in g-boot-effect-host-call-hang-s482 (the effect lane reuses it). SPEC §22.5.1 bootstrap note amended.
+- [x] LOW-1: `analyzeExpanded` no longer returns early on `nsNotes`: they join the run's diagnostics, `epNotes`
+      are attached, the lint is withheld only when the notes hold an Error, and a non-Error note joins the
+      composed run's diagnostics.
+- [x] pre-existing block-body host-call stale value (review B11b) filed in g-boot-effect-host-call-hang-s482 (3).

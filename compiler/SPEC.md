@@ -28407,7 +28407,9 @@ always pass all four arguments.
 > may write a cell, at any depth, is refused. So is a writing function passed as a value. A call that the
 > analysis cannot resolve, such as a call through a local, fails closed. So does a call that reaches a
 > `<host src>`-backed function (§21.3.1) — directly, through a wrapper, or as a value — because host code
-> has no write summary (S482 r2). A `meta.subscribe` /
+> has no write summary (S482 r2). A stdlib `import:host` wrapper (§21.3.1.1) is held to this only when its
+> host file is off the compiler's allow-list of host files proven to call back into no page code
+> (`scrml:math`, `scrml:random` are on it), and that refusal names the stdlib module (S482 r3). A `meta.subscribe` /
 > `meta.interval` / `meta.timeout` / `meta.cleanup` inside a callback is refused, because it would register
 > again on each call. Each refusal is E-BOOTSTRAP-UNSUPPORTED and INTERIM, because §22.5.1 is silent on
 > both points. The runtime backstop runs a subscription at most 100 times in one flush, as it does a block
