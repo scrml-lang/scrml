@@ -1,0 +1,11 @@
+{
+  "id": "body-top-display-reaches-later-binding-neg",
+  "description": "§7.6 rule (b) (S482) — the display `${g()}` runs before the `${ const k … }` written after it, and `g` reads `k`: E-SCOPE-001 (the S479 initializer rule extended to body code).",
+  "language-version": "1.0",
+  "spec": "§7.6 rule (b) (S482)",
+  "source-test": "compiler/self-host-v2/slice-m4/runorder-followups-s482.test.js",
+  "rationale": "§7.6 rule (b) (S482): \"A display — an interpolation, an attribute value that is not an event handler, a component's use-site value — or a body-top statement, at any depth of the `<program>` body, that reaches a file-scope binding whose place in the run comes after it — directly, or through a function it calls, at any depth — SHALL be `E-SCOPE-001`\". ruling:user-voice-scrml.md-S481-run-order-followups item 2 — \"E-SCOPE-001, the S479 file-scope-initializer rule extended to body code\" (owner: \"yes, adopt your recs on all three\").",
+  "expect": {
+    "codes": ["E-SCOPE-001"]
+  }
+}

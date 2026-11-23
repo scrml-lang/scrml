@@ -1,0 +1,9 @@
+// §7.6 rule (b) (S482) — a display that calls a function reaching a binding whose place comes later is E-SCOPE-001.
+<program>
+${
+    function seven() -> int { return 7; }
+    function g() -> int { return k; }
+}
+<p id="a">${g()}</p>
+${ const k: int = seven(); }
+</program>

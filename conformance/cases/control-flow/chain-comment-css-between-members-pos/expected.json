@@ -1,0 +1,29 @@
+{
+  "id": "control-flow-chain-comment-css-between-members-pos",
+  "description": "§17.1.1 (S482) — a `//` comment and a `#{}` style block between an `if=` member and its `else` do not break the chain: the program compiles (no E-CTRL-001) and the `else` member renders while the flag is false.",
+  "language-version": "1.0",
+  "spec": "§17.1.1",
+  "source-test": "compiler/self-host-v2/slice-m4/runorder-followups-s482.test.js",
+  "rationale": "§17.1.1 (S482): \"Nor SHALL a `//` comment or a `#{ }` style block (§9.1) between chain members break a chain, for the same reason: neither has content or behaviour where it stands.\" ruling:user-voice-scrml.md-S481-nested-init-chain-comments item 2 — \"neither breaks the chain. Neither has content or behaviour, the same reason S471 gave for HTML comments. This accepts more programs.\" (owner: \"aprove both, lets wrap\").",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CTRL-001", "E-CTRL-002"],
+    "domAnchored": [
+      { "selector": "#b", "text": "no" }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-chain-comment-css-s482",
+      "fails": {
+        "codes": [
+          "emitted:E-CTRL-001=1",
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-SCOPE-001=1",
+          "emitted:E-STATE-UNDECLARED=1",
+          "forbidden:E-CTRL-001"
+        ]
+      }
+    }
+  }
+}

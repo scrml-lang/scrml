@@ -11343,7 +11343,7 @@ ${
     type LetW:struct = { sym: int, name: string, span: ASpan, file: string }
 
     fn fileScopePass(g: Globals, t: Tables, sum: Summary) -> Diag[] {
-        let out: Diag[] = [];
+        let out: Diag[] = constructInitDiags(g, t);
         let lets: int[] = [];
         let binds: int[] = [];
         for (const c of g.consts) {
@@ -11365,6 +11365,13 @@ ${
         // (`const g = () => Z;` stored, not called): E-SCOPE-001 is not proven for it.
         let ownBD: FxAtom[][] = [];
         let fnED: int[][] = [];
+        // s482 r2 (#2053 r1 review MED-A) — the BODY-RUN dimension (bodyReachDiags): what a body
+        // reaches when it runs — function values counted as called where they stand (§6.7.4 rule 3)
+        // — outside its nested function DECLARATIONS (heldSpansIn). A nested declaration is its own
+        // callable: what it reads counts only through a call of it or its use as a value (an edge
+        // to its node), at every depth. Merely declaring it runs nothing.
+        let ownBR: FxAtom[][] = [];
+        let fnER: int[][] = [];
         let i: int = 0;
         const six: SymIx = nodeSymIx(sum.nodes);
         for (const c of sum.nodes) {
@@ -11372,7 +11379,9 @@ ${
             let ws: LetW[] = [];
             let bs: FxAtom[] = [];
             let bd: FxAtom[] = [];
+            let br: FxAtom[] = [];
             let defer: ASpan[] = [];
+            let held: ASpan[] = [];
             const fsrc: FnSrc | not = fnSrcOfSym(g, c.f.sym);
             if (c.kind == CallableK.KFn && fsrc is given) {
                 ws = letWritesIn(t, fsrc.f.body, lets, fsrc.info.file);
@@ -11387,9 +11396,17 @@ ${
                     bd = bd.concat([ownAtom("b:" + id, i, kd)]);
                     kd = kd + 1;
                 }
+                held = heldSpansIn(fsrc.f.body);
+                let kr: int = 0;
+                for (const id of bindingUsesDirect(t, fsrc.f.body, binds, held)) {
+                    br = br.concat([ownAtom("b:" + id, i, kr)]);
+                    kr = kr + 1;
+                }
             }
             ownBD = ownBD.concat([bd]);
             fnED = fnED.concat([directCallTargets(sum.nodes, c.f.scan.refs, defer)]);
+            ownBR = ownBR.concat([br]);
+            fnER = fnER.concat([heldRefTargets(six, c.f.scan.refs, held)]);
             let wa: FxAtom[] = [];
             let k2: int = 0;
             for (const w of ws) {
@@ -11408,6 +11425,7 @@ ${
         const writes: FxAtom[][] = closeDim(ownW, fnE);
         const uses: FxAtom[][] = closeDim(ownB, fnE);
         const usesD: FxAtom[][] = closeDim(ownBD, fnED);
+        const usesR: FxAtom[][] = closeDim(ownBR, fnER);
         const servers: FxAtom[][] = closeDim(ownS, fnE);
         // §48.3.3 — a `fn` body's own write of a file-scope `let`
         for (const fs of g.fns) {
@@ -11453,7 +11471,325 @@ ${
             if (kc.ok) out = out.concat(initReachDiags(g, t, sum, fnE, servers, uses, usesD, binds, kc, ci));
             ci = ci + 1;
         }
+        // s482 r1 (#2053 review MED-1): body code is judged with function values counted as
+        // called (§6.7.4 rule 3) — not on the initializer rule's direct-call `usesD`. s482 r2
+        // (#2053 r1 review MED-A): ~~on `uses`~~ on `usesR` — a nested function declaration a
+        // reached function never calls nor uses as a value adds nothing
+        return out.concat(bodyReachDiags(g, t, sum, usesR, binds));
+    }
+
+    // =========================================================================
+    // s482 (lane s482-runorder-followups, item B) — §7.6 rule (b) S481: "The program body runs
+    // once, top to bottom, in source order". Ruled S481 (ruling:user-voice-scrml.md-S481-run-
+    // order-followups item 2): a display or a statement of the program body that reaches a
+    // file-scope binding whose PLACE in that run comes later — directly, or through a function
+    // it calls, at any depth — is *"E-SCOPE-001, the S479 file-scope-initializer rule extended
+    // to body code"*: the binding is not initialized when the display or statement runs.
+    // s482 r1 (#2053 review MED-1; prov=pa-ruled S482 r1, conditional — measured 0 newly
+    // rejected): ~~judged through DIRECT calls only (usesD)~~ — a function value body code names
+    // or writes (an argument, a record field, a value assigned; a function expression) counts as
+    // called where it stands, as §6.7.4 rule 3 counts one ("whatever receives it may call it"),
+    // and so does one inside a function it reaches, at any depth: ~~the closure `uses`~~ the
+    // closure `usesR` (fileScopePass; s482 r2, #2053 r1 review MED-A — `uses` also counted a
+    // nested function declaration a reached function never calls), the refs scan without the
+    // `asValue` filter, and nested function declarations held back (heldSpansIn) in the body
+    // code and in every function it reaches. `${ out = run(g); }` with `run` calling `g` and `g` reading a later `k` had
+    // compiled and run `k` before the body (k = 1, not 5). It over-refuses a function value
+    // handed on and never called while the body runs (`${ apply(g) }`, `apply` ignoring it) —
+    // the analysis cannot tell; the corpus holds none. "Body code":
+    // an interpolation, an attribute value that is not an event handler (`on…`) — a component's
+    // use-site value included — and a `${ }` statement, at any depth of the `<program>` body
+    // (a conditional branch, an `<each>` row and slot content render in that run too when they
+    // show at mount). Not judged here: an event handler (it runs on the event, after the body),
+    // an `<effect>` / `<request>` (they run after the mount), and a component's own `renders`
+    // (its place in the run is its instance's; the printer runs the binding early for it).
+    // A binding declared outside the body (an imported file, outside `<program>`) is initialized
+    // before the body: it has no later place.
+    // =========================================================================
+    type BodyPlace:struct = { sym: int, name: string, pos: int }
+
+    // =========================================================================
+    // s482 (lane s482-runorder-followups, item C) — §7.6 rule (b) S482: a file-scope initializer
+    // that ACTS (a call, a write, a query, a foreign block), written inside the content of an
+    // `if=` / `else-if=` / `else` element or inside a component's slot content, has no single
+    // place in the body's one run (the content renders when, and as often as, the branch shows,
+    // or where the component puts its `<slot/>`), and a file-scope initializer runs ONCE. Ruled
+    // S481 (ruling:user-voice-scrml.md-S481-nested-init-chain-comments item 1): *"make it a
+    // compile error naming the construct; refusing means nobody is surprised. The capable
+    // alternative, an initializer scoped to the branch, is a different feature."* —
+    // E-FILE-SCOPE-INIT-IN-CONSTRUCT. One that does not act (a literal, arithmetic over bindings)
+    // stays legal: running it once, just after the construct, cannot be observed. Inside an
+    // `<each>` row a declaration is refused already (E-BOOTSTRAP-UNSUPPORTED). s482 r1 (#2053
+    // review HIGH-1): a `<match>` arm is such a construct too (the ruling names `<match>`) — a
+    // `${ }` written directly in an arm is a parse error, but one in an element of an arm is not.
+    // =========================================================================
+    fn constructInitDiags(g: Globals, t: Tables) -> Diag[] {
+        let out: Diag[] = [];
+        for (const f of g.files) {
+            for (const it of f.items) {
+                const k: AItemK = it.k;
+                const ps: AItem[] = match k {
+                    .ProgramItem(p: p) :> p.items,
+                    .ConstItem(c: x) :> [],
+                    .DeclItem(d: x) :> [],
+                    .ImportItem(i: x) :> [],
+                    .TypeItem(t: x) :> [],
+                    .FnItem(f: x) :> [],
+                    .MarkupItem(n: x) :> []
+                };
+                let tops: ANode[] = [];
+                for (const pi of ps) {
+                    const n: ANode | not = markupOfItem(pi);
+                    if (n is given) tops = tops.concat([n]);
+                }
+                for (const ci of ps) {
+                    const ck: AItemK = ci.k;
+                    const c: AConst | not = match ck {
+                        .ConstItem(c: x) :> x,
+                        .ProgramItem(p: x) :> not,
+                        .DeclItem(d: x) :> not,
+                        .ImportItem(i: x) :> not,
+                        .TypeItem(t: x) :> not,
+                        .FnItem(f: x) :> not,
+                        .MarkupItem(n: x) :> not
+                    };
+                    if (c is given) {
+                        const where: string = constructAt(t, tops, ci.span.start);
+                        if (where != "") {
+                            const acts: string = initActWhat(c.init);
+                            if (acts != "") {
+                                let kw: string = "const";
+                                if (c.mutable) kw = "let";
+                                out = out.concat([newDiag("E-FILE-SCOPE-INIT-IN-CONSTRUCT", "the initializer of `" + kw + " " + c.name + "` " + acts + ", and it is written inside " + where + " — a file-scope initializer runs once, in the program body's one run (§7.6 rule (b)), not when, or each time, that content renders, so it has no place here. Declare `" + c.name + "` before that element, or compute the value where the content needs it", f.path, c.span)]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
         return out;
+    }
+
+    // The construct whose content holds source position `pos`, named for a message: the
+    // innermost `if=` / `else-if=` / `else` element, component use (slot content) or `<match>`
+    // arm on the path from the body's top nodes down to `pos`; "" when there is none.
+    fn constructAt(t: Tables, ns: ANode[], pos: int) -> string {
+        for (const n of ns) {
+            const e: AElem | not = elemOfNodeK(n.k);
+            if (e is given && e.span.start <= pos && pos < e.span.end) {
+                const inner: string = constructAt(t, e.kids, pos);
+                if (inner != "") return inner;
+                if (attrNamed(e.attrs, "if") is given) return "the content of an `if=` element (`<" + e.tag + " if=…>`)";
+                if (attrNamed(e.attrs, "else-if") is given) return "the content of an `else-if=` element (`<" + e.tag + " else-if=…>`)";
+                if (attrNamed(e.attrs, "else") is given) return "the content of an `else` element (`<" + e.tag + " else>`)";
+                const fct: ElemFact | not = elemFact(t.elems, e.nid);
+                const use: boolean = match fct {
+                    .MUse(decl: d) :> true,
+                    // no-default-arm: only a component use has slot content
+                    _ :> false
+                };
+                if (use) return "the slot content of `<" + e.tag + ">`";
+                // s482 r1 (#2053 review HIGH-1) — a `<match>` arm renders only while its variant
+                // is the matched value: the arm (a kid element of `<match>`) holding `pos`.
+                if (!e.star && e.tag == "match") {
+                    for (const ak of e.kids) {
+                        const ae: AElem | not = elemOfNodeK(ak.k);
+                        if (ae is given && ae.span.start <= pos && pos < ae.span.end) return "the `<" + ae.tag + ">` arm of " + matchShown(e);
+                    }
+                }
+                return "";
+            }
+        }
+        return "";
+    }
+
+    // A `<match>` element named for a message: `<match for=T>` when it names its type, else `<match>`.
+    fn matchShown(e: AElem) -> string {
+        const fa: AAttr | not = attrNamed(e.attrs, "for");
+        if (fa is given) {
+            const tn: string = bareName(fa.value);
+            if (tn != "") return "`<match for=" + tn + ">`";
+        }
+        return "`<match>`";
+    }
+
+    // What an initializer does that can be observed (§7.6 rule (b): "no call, no write") — a
+    // call, a write, a query, a foreign block — described for a message; "" when it does none.
+    // A function value's body does not run where it stands.
+    fn initActWhat(e: AExpr) -> string {
+        if (isLambda(e)) return "";
+        const k: AExprK = e.k;
+        const own: string = match k {
+            .Call(callee: c) :> callWhat(c),
+            .Assign(target: x) :> "writes a value",
+            .Sql(q: x) :> "runs a `?{}` query",
+            .Foreign(f: x) :> "runs a foreign `_={ }=` block",
+            // no-default-arm: every other expression acts only through its parts
+            _ :> ""
+        };
+        if (own != "") return own;
+        for (const x of exprKids(e)) {
+            const w: string = initActWhat(x);
+            if (w != "") return w;
+        }
+        for (const b of exprBlocks(e)) {
+            if (b.stmts.length > 0) return "runs a block of statements";
+        }
+        return "";
+    }
+
+    fn callWhat(c: AExpr) -> string {
+        const n: string = exprName(c);
+        if (n != "") return "calls `" + n + "`";
+        return "makes a call";
+    }
+
+    fn bodyReachDiags(g: Globals, t: Tables, sum: Summary, usesD: FxAtom[][], binds: int[]) -> Diag[] {
+        let out: Diag[] = [];
+        for (const f of g.files) {
+            for (const it of f.items) {
+                const k: AItemK = it.k;
+                const ps: AItem[] = match k {
+                    .ProgramItem(p: p) :> p.items,
+                    .ConstItem(c: x) :> [],
+                    .DeclItem(d: x) :> [],
+                    .ImportItem(i: x) :> [],
+                    .TypeItem(t: x) :> [],
+                    .FnItem(f: x) :> [],
+                    .MarkupItem(n: x) :> []
+                };
+                const places: BodyPlace[] = bodyPlaces(g, f.path, ps);
+                if (places.length > 0) {
+                    for (const pi of ps) {
+                        const n: ANode | not = markupOfItem(pi);
+                        if (n is given) out = out.concat(bodyNodeReach(g, t, sum, usesD, binds, f.path, places, n));
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    // The program body's file-scope bindings, each with its place (where its `${ }` stands —
+    // the item's source start: a declaration nested in an element is hoisted to an item after
+    // that element, but keeps its own span).
+    fn bodyPlaces(g: Globals, file: string, items: AItem[]) -> BodyPlace[] {
+        let out: BodyPlace[] = [];
+        for (const it of items) {
+            const k: AItemK = it.k;
+            const c: AConst | not = match k {
+                .ConstItem(c: x) :> x,
+                .ProgramItem(p: x) :> not,
+                .DeclItem(d: x) :> not,
+                .ImportItem(i: x) :> not,
+                .TypeItem(t: x) :> not,
+                .FnItem(f: x) :> not,
+                .MarkupItem(n: x) :> not
+            };
+            if (c is given) {
+                for (const kc of g.consts) {
+                    if (kc.ok && kc.nid == c.nid && kc.file == file) out = out.concat([{ sym: kc.sym.id, name: kc.name, pos: it.span.start }]);
+                }
+            }
+        }
+        return out;
+    }
+
+    fn placeOfBinding(places: BodyPlace[], sym: int) -> BodyPlace | not {
+        for (const p of places) { if (p.sym == sym) return p; }
+        return not;
+    }
+
+    fn bodyNodeReach(g: Globals, t: Tables, sum: Summary, usesD: FxAtom[][], binds: int[], file: string, places: BodyPlace[], n: ANode) -> Diag[] {
+        const k: ANodeK = n.k;
+        return match k {
+            .Elem(e: e) :> bodyElemReach(g, t, sum, usesD, binds, file, places, e),
+            .Interp(e: x) :> bodyExprReach(g, t, sum, usesD, binds, file, places, x, n.span.start, "this display"),
+            .Run(b: rb) :> bodyBlockReach(g, t, sum, usesD, binds, file, places, rb, n.span.start),
+            .Text(text: x) :> [],
+            .DeclNode(d: x) :> [],
+            .Effect(w: x) :> [],
+            .Request(r: x) :> [],
+            .Css(c: x) :> [],
+            .Gather(f: x) :> []
+        };
+    }
+
+    fn bodyElemReach(g: Globals, t: Tables, sum: Summary, usesD: FxAtom[][], binds: int[], file: string, places: BodyPlace[], e: AElem) -> Diag[] {
+        let out: Diag[] = [];
+        for (const a of e.attrs) {
+            if (a.name.indexOf("on") != 0) {
+                const v: AAttrValue = a.value;
+                const x: AExpr | not = match v {
+                    .Bare(e: x) :> x,
+                    .Paren(e: x) :> x,
+                    // no-default-arm: only an expression value is a display of its value
+                    _ :> not
+                };
+                if (x is given) out = out.concat(bodyExprReach(g, t, sum, usesD, binds, file, places, x, a.span.start, "this attribute value"));
+            }
+        }
+        for (const kid of e.kids) { out = out.concat(bodyNodeReach(g, t, sum, usesD, binds, file, places, kid)); }
+        return out;
+    }
+
+    // One display: a bare name of a later binding (direct), or a call (outside a function value)
+    // of a function whose direct reach (usesD) holds one.
+    fn bodyExprReach(g: Globals, t: Tables, sum: Summary, usesD: FxAtom[][], binds: int[], file: string, places: BodyPlace[], e: AExpr, pos: int, what: string) -> Diag[] {
+        const defer: ASpan[] = heldSpansInExpr(e);
+        for (const ne of nameExprsInExpr(e)) {
+            if (!spanInAny(ne.span, defer)) {
+                const bp: BodyPlace | not = placeOfBinding(places, constSymOfFact(nameFact(t.names, ne.nid)));
+                if (bp is given && bp.pos > pos) return [laterPlaceDiag(bp, what, "reads", "", file, ne.span)];
+            }
+        }
+        for (const w of letWritesInExpr(t, e, binds, file)) {
+            const bw: BodyPlace | not = placeOfBinding(places, w.sym);
+            if (bw is given && bw.pos > pos && !spanInAny(w.span, defer)) return [laterPlaceDiag(bw, what, "writes", "", file, w.span)];
+        }
+        return bodyCallReach(sum, usesD, places, scanExpr({ t: t, file: file }, e, emptyScan()).refs, defer, pos, what, file);
+    }
+
+    fn bodyBlockReach(g: Globals, t: Tables, sum: Summary, usesD: FxAtom[][], binds: int[], file: string, places: BodyPlace[], b: ABlock, pos: int) -> Diag[] {
+        const defer: ASpan[] = heldSpansIn(b);
+        const what: string = "this statement";
+        for (const ne of nameExprsIn(b)) {
+            if (!spanInAny(ne.span, defer)) {
+                const bp: BodyPlace | not = placeOfBinding(places, constSymOfFact(nameFact(t.names, ne.nid)));
+                if (bp is given && bp.pos > pos) return [laterPlaceDiag(bp, what, "reads", "", file, ne.span)];
+            }
+        }
+        for (const w of letWritesIn(t, b, binds, file)) {
+            const bw: BodyPlace | not = placeOfBinding(places, w.sym);
+            if (bw is given && bw.pos > pos && !spanInAny(w.span, defer)) return [laterPlaceDiag(bw, what, "writes", "", file, w.span)];
+        }
+        return bodyCallReach(sum, usesD, places, scanBlock({ t: t, file: file }, b, emptyScan()).refs, defer, pos, what, file);
+    }
+
+    fn bodyCallReach(sum: Summary, usesD: FxAtom[][], places: BodyPlace[], refs: FnRef[], defer: ASpan[], pos: int, what: string, file: string) -> Diag[] {
+        for (const r of refs) {
+            const j: int = nodeIdx(sum.nodes, r.sym);
+            // s482 r1: a function named as a value counts as called (§6.7.4 rule 3)
+            if (j >= 0 && !spanInAny(r.span, defer) && sum.nodes[j].kind == CallableK.KFn) {
+                for (const ua of usesD[j]) {
+                    const bp: BodyPlace | not = placeOfBinding(places, atomBinding(ua.key));
+                    if (bp is given && bp.pos > pos) {
+                        let verb: string = " calls `" + sum.nodes[j].label + "`";
+                        if (r.asValue) verb = " hands on `" + sum.nodes[j].label.replace("()", "") + "` as a function value (counted as called — whatever receives it may call it, §6.7.4 rule 3)";
+                        let via: string = verb + ",";
+                        if (ua.root != j) via = verb + ", which reaches `" + sum.nodes[ua.root].label + "`,";
+                        return [laterPlaceDiag(bp, what, "uses", via, r.file, r.span)];
+                    }
+                }
+            }
+        }
+        return [];
+    }
+
+    fn laterPlaceDiag(bp: BodyPlace, what: string, verb: string, via: string, file: string, span: ASpan) -> Diag {
+        let how: string = " " + verb + " `" + bp.name + "`,";
+        if (via != "") how = via + " which " + verb + " `" + bp.name + "`,";
+        return newDiag("E-SCOPE-001", "`" + bp.name + "` is used before it is initialized — " + what + how + " and the `${ }` declaring `" + bp.name + "` comes later in the program body. The body runs once, top to bottom, in source order (§7.6 rule (b), S481), so `" + bp.name + "` is not initialized when " + what + " runs. Declare `" + bp.name + "` before it", file, span);
     }
 
     // s479 (s479-file-scope-follow; #1962 review LOW-1) — a callable as its source names it: a
@@ -11614,6 +11950,31 @@ ${
         return out;
     }
 
+    // s482 r1 — the spans of body code that do NOT count as run when the body runs, for the
+    // later-place judgment (bodyReachDiags): a nested function declaration only (its own
+    // callable: a call or a value of it is an edge). A function value's body — an arrow function,
+    // a block lambda — counts as run where it stands (§6.7.4 rule 3), unlike deferredSpansIn.
+    fn heldSpansIn(b: ABlock) -> ASpan[] {
+        let out: ASpan[] = [];
+        for (const s of b.stmts) {
+            const lf: AFn | not = localFnOf(s);
+            if (lf is given) {
+                out = out.concat([lf.span]);
+            } else {
+                for (const e of stmtExprs(s)) { out = out.concat(heldSpansInExpr(e)); }
+                for (const nb of nestedBlocks(s)) { out = out.concat(heldSpansIn(nb)); }
+            }
+        }
+        return out;
+    }
+
+    fn heldSpansInExpr(e: AExpr) -> ASpan[] {
+        let out: ASpan[] = [];
+        for (const x of exprKids(e)) { out = out.concat(heldSpansInExpr(x)); }
+        for (const b of exprBlocksIn(e)) { out = out.concat(heldSpansIn(b)); }
+        return out;
+    }
+
     fn spanInAny(s: ASpan, spans: ASpan[]) -> boolean {
         for (const d of spans) {
             if (d.start <= s.start && s.end <= d.end) return true;
@@ -11642,6 +12003,17 @@ ${
         for (const r of refs) {
             const j: int = nodeIdx(nodes, r.sym);
             if (j >= 0 && !r.asValue && !spanInAny(r.span, defer)) out = out.concat([j]);
+        }
+        return out;
+    }
+
+    // s482 r2 — the callables a body CALLS or names as a value (§6.7.4 rule 3) outside the spans
+    // `held` (heldSpansIn: its nested function declarations, each its own callable).
+    fn heldRefTargets(ix: SymIx, refs: FnRef[], held: ASpan[]) -> int[] {
+        let out: int[] = [];
+        for (const r of refs) {
+            const j: int = ixGet(ix, r.sym);
+            if (j >= 0 && !spanInAny(r.span, held)) out = out.concat([j]);
         }
         return out;
     }

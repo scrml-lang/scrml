@@ -1,0 +1,10 @@
+// §7.6 rule (b) (S482) — a file-scope initializer that acts, written inside `if=` content, is E-FILE-SCOPE-INIT-IN-CONSTRUCT.
+<program>
+${
+    let log: string = "";
+    function note(s: string) -> int { log = log + s; return 7; }
+}
+<flag:boolean=true/>
+<p id="a" if=(@flag)>${ const a: int = note("a"); }yes</p>
+<p id="r">${log}</p>
+</program>
