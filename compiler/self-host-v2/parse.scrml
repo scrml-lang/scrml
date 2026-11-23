@@ -8727,6 +8727,9 @@ ${
         if (isWord(t, "type")) return parseTypeDecl(t, start, exported);
         if (isWord(t, "function")) return parseFn(t, start, exported, false, false);
         if (isWord(t, "fn")) return parseFn(t, start, exported, true, false);
+        // s482 (g-boot-contextual-implicit-decl-s482): a keywordless declaration analysis proved
+        // (PNs.kw) — `server = 5;` names a binding `server` (bindNameTok), not the modifier
+        if (!exported && kwDeclAhead(t)) return parseKwConstItem(t, start);
         // s451 (U1a): the DEPRECATED `server` modifier (§52.10: "During the
         // deprecation window, the parser SHALL accept `server function`
         // declarations and emit `W-DEPRECATED-SERVER-MODIFIER`" — the warning is
@@ -8901,7 +8904,10 @@ ${
     // would be, with that item's treatment and refusals (constPass), not a body-top local.
     fn kwDeclAhead(tp: TP) -> boolean {
         const t: PTok = cur(tp);
-        return t.cls == TC.Ident && tp.ns.kw.indexOf(t.start) >= 0 && isP(adv(tp), "=");
+        // s482 (g-boot-contextual-implicit-decl-s482, #2066 review LOW-2): a contextual word that binds as a
+        // name (bindNameTok: `from`, `as`, `some`, `lin`, `of`, …) is a keywordless declaration's name too —
+        // analysis proved it (PNs.kw), and §35.2's S482 sentence reads `lin = 5;` as the name
+        return bindNameTok(t) && tp.ns.kw.indexOf(t.start) >= 0 && isP(adv(tp), "=");
     }
 
     fn parseKwConstItem(tp: TP, start: int) -> RItems {
