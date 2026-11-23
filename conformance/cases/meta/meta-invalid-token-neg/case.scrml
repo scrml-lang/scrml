@@ -1,4 +1,6 @@
+<program>
 ^{
-  meta.emit("start")
+  meta.emit("start");
   )
 }
+</program>

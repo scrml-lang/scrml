@@ -1,4 +1,6 @@
+<program>
 ^{
-  const F = emit.constructor
-  emit("<p>x</p>")
+  const F = emit.constructor;
+  emit("<p>x</p>");
 }
+</program>

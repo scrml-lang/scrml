@@ -1,5 +1,7 @@
+<program>
 ^{
-  const k = "constr" + "uctor"
-  const F = emit[k]
-  emit("<p>x</p>")
+  const k = "constr" + "uctor";
+  const F = emit[k];
+  emit("<p>x</p>");
 }
+</program>

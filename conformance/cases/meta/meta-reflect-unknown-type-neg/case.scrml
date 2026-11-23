@@ -1,4 +1,6 @@
+<program>
 ^{
-  const x = reflect(NoSuchType)
-  emit("<p>x</p>")
+  const x = reflect(NoSuchType);
+  emit("<p>x</p>");
 }
+</program>

@@ -1,3 +1,5 @@
+<program>
 ^{
-  emit("<p id=\"x\">hi</p>")
+  emit("<p id=\"x\">hi</p>");
 }
+</program>

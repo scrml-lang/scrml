@@ -1,4 +1,6 @@
+<program>
 ${ const MyComponent = <div class="card"/> }
 ^{
-  lift(MyComponent)
+  lift(MyComponent);
 }
+</program>

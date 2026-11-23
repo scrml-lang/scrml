@@ -1,4 +1,6 @@
+<program>
 ^{
-  console.log("hi")
-  meta.emit("<p>x</p>")
+  console.log("hi");
+  meta.emit("<p>x</p>");
 }
+</program>

@@ -3,7 +3,7 @@
 <form id="pf">
 <div id="host">
 ^{
-  meta.emit("<p id=\"hint\" class=\"h\">Enter <b>your</b> name</p>")
+  meta.emit("<p id=\"hint\" class=\"h\">Enter <b>your</b> name</p>");
 }
 </div>
 </form>

@@ -14,7 +14,7 @@
 //   §7.2 admits every JavaScript name, and no SPEC sentence reserves one (§20.3a: "`render` SHALL NOT be
 //   a reserved identifier"). `pure` / `render` / `some` are also names before `.` and `/` (lex.scrml
 //   isContextualNameWord); `as` is not — its keyword reading takes a bare variant (`a as .Published`,
-//   §14.12.6.2), so `as.x` is an owner question (the binding itself is accepted).
+//   §14.12.6.2); `as.x` is decided by adjacency (S482 ruling, as-adjacency-s482.test.js).
 // F3 (INFO) — a spread `...` lexes as three Dots; the word after it is the spread's operand, never a
 //   member name (lex.scrml lastIsMemberName), so `[... typeof /re/]` opens a regular expression.
 //
@@ -141,7 +141,7 @@ describe("F2 — `as`, `pure`, `render`, `some` are binding names (§18, §7.2, 
     expect(ds.filter((d) => d.severity === "Error")).toEqual([]);
     expect(ds.map((d) => d.code)).toContain("W-IS-SOME-DEPRECATED");
     expect(errorsOf([LIB, { path: "s.scrml", src: prog(`    import * as m from "./b.scrml";\n    fn c() -> int { return m.a; }`) }])).toEqual([]);
-    // `as` keeps its bare-variant reading (§14.12.6.2) — it is NOT a name before `.` (owner question)
+    // a SPACED `as .V` keeps its bare-variant reading (§14.12.6.2; a touching `as.x` is a member — as-adjacency-s482.test.js)
     expect(lexed("return a as .Published;")).toEqual(["Keyword:return", "Ident:a", "Keyword:as", "BareVariant:.Published", "Semicolon:;", "Eof:"]);
   });
   test("the values run: each word read as the name it binds", async () => {

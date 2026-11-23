@@ -1,3 +1,5 @@
+<program>
 ^{
-  emit("<p>" + compiler.version + "</p>")
+  emit("<p>" + compiler.version + "</p>");
 }
+</program>

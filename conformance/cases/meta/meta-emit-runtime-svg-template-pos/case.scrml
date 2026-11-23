@@ -2,7 +2,7 @@
 <label> = "hi"
 <div id="host">
 ^{
-  meta.emit("<svg id=\"sv\"><template><circle r=\"1\"></circle></template></svg><p id=\"after\">after</p>")
+  meta.emit("<svg id=\"sv\"><template><circle r=\"1\"></circle></template></svg><p id=\"after\">after</p>");
 }
 </div>
 </program>
