@@ -73,7 +73,7 @@ describe("the artifact: no anchor inside an RCDATA element; one text value on th
   test("`a ${@x} b` — the textarea is printed empty and wired by ONE rt.textContent", async () => {
     const res = await compile(MIXED);
     expect(contents(res.client.html, "textarea")).toEqual([""]);
-    expect(res.client.js).toContain('rt.textContent(scope$, n$0, () => ["a ", inst$.fields[0 /* x */].get(), " b"]);');
+    expect(res.client.js).toContain('rt.textContent(scope$, n$0, ["a ", () => inst$.fields[0 /* x */].get(), " b"]);');
     expect(res.client.js).not.toContain("rt.at(root$, 0, 1)");
   }, 120000);
 
@@ -84,7 +84,7 @@ let <x:string="hi"/>
 </program>
 `);
     expect(contents(res.client.html, "textarea")).toEqual([""]);
-    expect(res.client.js).toContain("rt.textContent(scope$, n$0, () => [inst$.fields[0 /* x */].get()]);");
+    expect(res.client.js).toContain("rt.textContent(scope$, n$0, [() => inst$.fields[0 /* x */].get()]);");
   }, 120000);
 
   test("`<title>Page ${@n} of 3</title>` — no anchor in the title", async () => {
@@ -94,7 +94,7 @@ let <n:int=1/>
 </program>
 `);
     expect(contents(res.client.html, "title")).toEqual([""]);
-    expect(res.client.js).toContain('rt.textContent(scope$, n$0, () => ["Page ", inst$.fields[0 /* n */].get(), " of 3"]);');
+    expect(res.client.js).toContain('rt.textContent(scope$, n$0, ["Page ", () => inst$.fields[0 /* n */].get(), " of 3"]);');
   }, 120000);
 
   test("raw-text `<xmp>` / `<noscript>` with a `${}` take the same form", async () => {
@@ -105,8 +105,8 @@ let <x:string="hi"/>
 `);
     expect(contents(res.client.html, "xmp")).toEqual([""]);
     expect(contents(res.client.html, "noscript")).toEqual([""]);
-    expect(res.client.js).toContain('rt.textContent(scope$, n$0, () => ["a ", inst$.fields[0 /* x */].get()]);');
-    expect(res.client.js).toContain('rt.textContent(scope$, n$1, () => ["b ", inst$.fields[0 /* x */].get()]);');
+    expect(res.client.js).toContain('rt.textContent(scope$, n$0, ["a ", () => inst$.fields[0 /* x */].get()]);');
+    expect(res.client.js).toContain('rt.textContent(scope$, n$1, ["b ", () => inst$.fields[0 /* x */].get()]);');
   }, 120000);
 
   test("only static text, and an SVG `<title>` (markup, not RCDATA), print as before", async () => {
@@ -195,6 +195,37 @@ let <s:string="!"/>
   }, 120000);
 });
 
+// s482 (#2069 review LOW-3; §19.17 "a throw blanks the hole"): each `${}` part is its own hole — a part
+// that throws shows "", as a `<p>`'s text hole does, and the static text and the other parts stay.
+describe("a throwing part blanks only itself", () => {
+  const src = `<program>
+let <x:string="hi"/>
+fn boom(s: string) -> string { if (s == "yo") { return s.repeat(0 - s.length); } return s; }
+<textarea id="t">static-a \${boom(@x)} static-b \${@x}</textarea>
+<p id="o">static-a \${boom(@x)} static-b</p>
+<button id="b" onclick=@x = "yo">b</button>
+</program>
+`;
+  test("each value is its own thunk in the artifact", async () => {
+    const res = await compile(src);
+    expect(res.client.js).toContain('rt.textContent(scope$, n$0, ["static-a ", () => boom(inst$.fields[0 /* x */].get()), " static-b ", () => inst$.fields[0 /* x */].get()]);');
+  }, 120000);
+
+  test("after the throw: `static-a  static-b yo` (the `<p>` the same), not an empty element; the trap is reported", async () => {
+    expect((await run(src, [], ["o"])).ta).toEqual([{ value: "static-a hi static-b hi", text: "static-a hi static-b hi" }]);
+    // a trap is reported through reportError (§19.17 "Every trap SHALL be reported"): caught here
+    const reported = [];
+    const saved = globalThis.reportError;
+    globalThis.reportError = (e) => { reported.push(e.code); };
+    let r;
+    try { r = await run(src, [{ click: "#b" }], ["o"]); } finally { globalThis.reportError = saved; }
+    expect(r.ta).toEqual([{ value: "static-a  static-b yo", text: "static-a  static-b yo" }]);
+    expect(r.ids).toEqual(["static-a  static-b"]);
+    // once for the textarea's part, once for the `<p>`'s hole
+    expect(reported).toEqual(["E-INDEX-OUT-OF-RANGE-RT", "E-INDEX-OUT-OF-RANGE-RT"]);
+  }, 120000);
+});
+
 describe("`bind:value` plus content — §34 W-RCDATA-BIND-VALUE-CONTENT-CONFLICT", () => {
   const src = `<program>
 let <x:string="hi"/>
@@ -247,11 +278,51 @@ function note(v: int) { }
 `, "error")).toContain("E-HTML-PARSER-REPAIR");
   }, 120000);
 
-  test("a `${ for … lift }` in a textarea: E-BOOTSTRAP-UNSUPPORTED (INTERIM)", async () => {
-    expect(await codes(`<program>
+  test("a `${ for … lift }` of text values in a textarea: E-BOOTSTRAP-UNSUPPORTED (INTERIM, g-boot-rcdata-text-lift-s482)", async () => {
+    const res = await result(`<program>
 <xs:string[]=(["a", "b"])/>
 <textarea id="t">L \${ for (x of @xs) { lift x; } }</textarea>
 </program>
-`, "error")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+`);
+    const errs = res.diagnostics.filter((d) => d.severity === "error");
+    expect(errs.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(errs[0].message).toContain("a `${ for … lift }` that lifts text values inside `<textarea>`");
+    expect(errs[0].message).toContain("g-boot-rcdata-text-lift-s482");
+  }, 120000);
+
+  // s482 (#2069 review LOW-1): markup rows are an element inside the RCDATA element — §24.5 item 2, PERMANENT
+  // (E-HTML-PARSER-REPAIR), and the message names the construct written: a `${ if … }` is not a `for`.
+  test("a `${ if … }` lifting markup in a textarea: E-HTML-PARSER-REPAIR naming the `if`", async () => {
+    const res = await result(`<program>
+<x:string="hi"/>
+<textarea id="t">\${ if (@x == "hi") { lift <b>q</b>; } }</textarea>
+</program>
+`);
+    const errs = res.diagnostics.filter((d) => d.severity === "error");
+    expect(errs.map((d) => d.code)).toEqual(["E-HTML-PARSER-REPAIR"]);
+    expect(errs[0].message).toContain("a `${ if … }` whose row or branch is markup puts an element inside `<textarea>`");
+    expect(errs[0].message).not.toContain("for … lift");
+  }, 120000);
+
+  test("a value-form `${ if … }` with markup branches in a title: E-HTML-PARSER-REPAIR naming the `if`", async () => {
+    const res = await result(`<program>
+<x:string="hi"/>
+<title>t \${ if (@x == "hi") { <b/> } else { <i/> } }</title>
+</program>
+`);
+    const errs = res.diagnostics.filter((d) => d.severity === "error");
+    expect(errs.map((d) => d.code)).toEqual(["E-HTML-PARSER-REPAIR"]);
+    expect(errs[0].message).toContain("a `${ if … }` whose row or branch is markup puts an element inside `<title>`");
+  }, 120000);
+
+  test("a `${ for … lift <b> }` in a textarea: E-HTML-PARSER-REPAIR", async () => {
+    const res = await result(`<program>
+<xs:string[]=(["a", "b"])/>
+<textarea id="t">\${ for (s of @xs) { lift <b>\${s}</b>; } }</textarea>
+</program>
+`);
+    const errs = res.diagnostics.filter((d) => d.severity === "error");
+    expect(errs.map((d) => d.code)).toEqual(["E-HTML-PARSER-REPAIR"]);
+    expect(errs[0].message).toContain("a `${ for … lift }` whose row or branch is markup");
   }, 120000);
 });

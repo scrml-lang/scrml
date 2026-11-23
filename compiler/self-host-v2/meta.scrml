@@ -3318,7 +3318,7 @@ ${
         return match v {
             .VStr(s: x) :> strMember(x, n, s),
             .VTape(xs: xs) :> tapeMember(xs, n, s),
-            .VRec(keys: ks, vals: vs) :> vr(recGet(ks, vs, n), recScan(s, ks, n)),
+            .VRec(keys: ks, vals: vs) :> recMember(ks, vs, n, recScan(s, ks, n), "`." + n + "`"),
             .VNot :> bad(s, "reads `." + n + "` of `not` (a TypeError)"),
             .VUndef :> bad(s, "reads `." + n + "` of an absent value (a TypeError)"),
             // no-default-arm: a number, a boolean, a function, a variant — no member a body reads
@@ -3328,12 +3328,53 @@ ${
 
     fn strMember(x: string, n: string, s: MS) -> MR {
         if (n == "length") return vr(MV.VNum(x.length), s);
+        if (isObjectProtoName(n)) return protoRead("a string", "`." + n + "`", s);
+        if (isStringProtoName(n)) return methodRead("a string", n, s);
         return vr(MV.VUndef, s);
     }
 
     fn tapeMember(xs: MV[], n: string, s: MS) -> MR {
         if (n == "length") return vr(MV.VNum(xs.length), s);
+        if (isObjectProtoName(n)) return protoRead("a list", "`." + n + "`", s);
+        if (isArrayProtoName(n)) return methodRead("a list", n, s);
         return vr(MV.VUndef, s);
+    }
+
+    // s482-small-followups (g-boot-meta-proto-member-s482) — a built-in method of a list or a string
+    // READ, not called (`xs.map`): JavaScript gives the function, the evaluator has no function value
+    // for it (it gave undefined) — refused by name. A call (`xs.map(f)`) is tapeMethod / strMethod.
+    fn methodRead(what: string, n: string, s: MS) -> MR {
+        return bad(s, "reads `." + n + "` of " + what + " without calling it — in JavaScript that is the built-in method itself (a function), which the compile-time evaluator does not hand out as a value; call it (`." + n + "(…)`) or wrap the call in a function");
+    }
+
+    // ECMA-262 Array.prototype's string-named members (bun 1.4), `length` / `constructor` aside.
+    fn isArrayProtoName(n: string) -> boolean {
+        return ["at", "concat", "copyWithin", "entries", "every", "fill", "filter", "find", "findIndex", "findLast", "findLastIndex", "flat", "flatMap", "forEach", "includes", "indexOf", "join", "keys", "lastIndexOf", "map", "pop", "push", "reduce", "reduceRight", "reverse", "shift", "slice", "some", "sort", "splice", "toLocaleString", "toReversed", "toSorted", "toSpliced", "toString", "unshift", "values", "with"].indexOf(n) >= 0;
+    }
+
+    // ECMA-262 String.prototype's string-named members, with Annex B's (bun 1.4), `length` / `constructor` aside.
+    fn isStringProtoName(n: string) -> boolean {
+        return ["anchor", "at", "big", "blink", "bold", "charAt", "charCodeAt", "codePointAt", "concat", "endsWith", "fixed", "fontcolor", "fontsize", "includes", "indexOf", "isWellFormed", "italics", "lastIndexOf", "link", "localeCompare", "match", "matchAll", "normalize", "padEnd", "padStart", "repeat", "replace", "replaceAll", "search", "slice", "small", "split", "startsWith", "strike", "sub", "substr", "substring", "sup", "toLocaleLowerCase", "toLocaleUpperCase", "toLowerCase", "toString", "toUpperCase", "toWellFormed", "trim", "trimEnd", "trimLeft", "trimRight", "trimStart", "valueOf"].indexOf(n) >= 0;
+    }
+
+    // s482-small-followups (g-boot-meta-proto-member-s482) — a record's member `n` (`shown`: how the
+    // read is written, for the message): its own field, else — for a name every JavaScript object
+    // inherits (`constructor`, `hasOwnProperty`, … — isObjectProtoName) — refused by name: JavaScript
+    // gives the inherited function there, where the evaluator's record has no such member and gave
+    // undefined. Any other missing name is undefined, as in JavaScript.
+    fn recMember(ks: string[], vs: MV[], n: string, s: MS, shown: string) -> MR {
+        if (ks.indexOf(n) < 0 && isObjectProtoName(n)) return protoRead("a record", shown, s);
+        return vr(recGet(ks, vs, n), s);
+    }
+
+    fn protoRead(what: string, shown: string, s: MS) -> MR {
+        return bad(s, "reads " + shown + " of " + what + " — every JavaScript object inherits that member from `Object.prototype` (a function there), which the compile-time evaluator does not model; read a field the value has");
+    }
+
+    // The members every JavaScript object inherits from `Object.prototype` (ECMA-262 §20.1.3, and
+    // Annex B's `__proto__` / `__defineGetter__` / … accessors).
+    fn isObjectProtoName(n: string) -> boolean {
+        return ["constructor", "hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable", "toLocaleString", "toString", "valueOf", "__proto__", "__defineGetter__", "__defineSetter__", "__lookupGetter__", "__lookupSetter__"].indexOf(n) >= 0;
     }
 
     // A record's keys searched for `n` (THE BINDINGS' rule for a search: charged).
@@ -3892,16 +3933,54 @@ ${
     fn recIndex(ks: string[], vs: MV[], k: MV, s: MS) -> MR {
         const t: SR = textOf(k, s);
         if (t.s.err != "") return vr(MV.VUndef, t.s);
-        return vr(recGet(ks, vs, t.str), recScan(t.s, ks, t.str));
+        return recMember(ks, vs, t.str, recScan(t.s, ks, t.str), "the key `\"" + t.str + "\"`");
     }
 
-    // `x[k]` on a list (`xs`) or a string (`str`): the key read as a number, a list
-    // through its text — charged BEFORE it is read (S482 r6)
+    // `x[k]` on a list (`xs`) or a string (`str`) — charged BEFORE it is read (S482 r6). A number
+    // key is the index. Any other key is JavaScript's PROPERTY KEY, its text (s482-small-followups,
+    // g-boot-meta-literal-index-key-s482): the canonical text of an index (`"1"`, the text
+    // `String(n)` gives for an integer n ≥ 0) is that index, `"length"` is the length, and every
+    // other text names a property — a built-in method (`"map"`, `"constructor"`), or nothing (`" 1"`,
+    // `"01"`, `"-0"`) — which the evaluator does not model, so it is refused by name. Before, the key
+    // was read as a number: `[1,2,3][" 1"]` gave 2 and `"abc"["01"]` gave "b" (JavaScript: undefined),
+    // `[1,2,3]["length"]` gave undefined (JavaScript: 3).
     fn idxOf(k: MV, s0: MS, isList: boolean, xs: MV[], str: string) -> MR {
         const s: MS = chargeW(s0, numW(k));
         if (s.err != "") return vr(MV.VUndef, s);
-        if (isList) return vr(atIndex(xs, toNum(k)), s);
-        return vr(charAtV(str, toNum(k)), s);
+        const kk: MV = k;
+        const num: boolean = match kk {
+            .VNum(n: x) :> true,
+            // no-default-arm: one question of a key — is it a number
+            _ :> false
+        };
+        if (num) {
+            if (isList) return vr(atIndex(xs, toNum(k)), s);
+            return vr(charAtV(str, toNum(k)), s);
+        }
+        const t: SR = textOf(k, s);
+        if (t.s.err != "") return vr(MV.VUndef, t.s);
+        const ix: number = canonIndex(t.str);
+        if (ix >= 0) {
+            if (isList) return vr(atIndex(xs, ix), t.s);
+            return vr(charAtV(str, ix), t.s);
+        }
+        if (t.str == "length") {
+            if (isList) return vr(MV.VNum(xs.length), t.s);
+            return vr(MV.VNum(str.length), t.s);
+        }
+        let what: string = "a string";
+        if (isList) what = "a list";
+        return bad(t.s, "indexes " + what + " with the key `\"" + t.str + "\"` — a key that is not an index's canonical text (`\"1\"`, not `\" 1\"`, `\"01\"` or `\"-0\"`) or `\"length\"` names a property in JavaScript (a built-in method, or nothing), which the compile-time evaluator does not model; index with a number, or read `.length`");
+    }
+
+    // The index a property key's text names, else -1: the canonical text of an integer ≥ 0 — the
+    // text `String(n)` gives for it (`"1"`, never `" 1"`, `"01"`, `"1.0"`, `"-0"`).
+    fn canonIndex(t: string) -> number {
+        if (t == "") return -1;
+        const n: number = strNum(t);
+        if (String(n) != t) return -1;
+        if (n != Math.floor(n) || n < 0) return -1;
+        return n;
     }
 
     fn atIndex(xs: MV[], n: number) -> MV {

@@ -11583,7 +11583,205 @@ ${
         // called (§6.7.4 rule 3) — not on the initializer rule's direct-call `usesD`. s482 r2
         // (#2053 r1 review MED-A): ~~on `uses`~~ on `usesR` — a nested function declaration a
         // reached function never calls nor uses as a value adds nothing
+        out = out.concat(constructReadDiags(g, t, sum, writes, sites, lets));
         return out.concat(bodyReachDiags(g, t, sum, usesR, binds));
+    }
+
+    // =========================================================================
+    // s482 (lane s482-small-followups, item E — #2071 review INFO-1) — §7.6 rule (b) S482: a
+    // file-scope initializer inside a construct's content that does not act runs once, and "nothing
+    // can observe where it ran" only while what it reads is written by no body code. One that READS a
+    // file-scope `let` or a program cell that body code writes — a body-top statement, a display, an
+    // initializer or a seed, directly or through a function it calls (not an event handler, an
+    // `<effect>` or a `<request>`: they run after the body) — sees that write or not depending on
+    // where it runs: `${ n = 5; } <div if=(n > 0)>${ const k: int = n + 0; }<p>${k}</p></div>` showed
+    // 1, source order gives 5 (`p/z-place-in-taken-if`). Such a read is counted as acting:
+    // E-FILE-SCOPE-INIT-IN-CONSTRUCT, naming the binding and the construct. A PA reading of the S481
+    // ruling (ruling:user-voice-scrml.md-S481-nested-init-chain-comments item 1: *"make it a compile
+    // error naming the construct; refusing means nobody is surprised"*), prov=pa-ruled; measured 0 of
+    // 2969 corpus files hold any non-acting file-scope initializer in a construct.
+    // =========================================================================
+    fn constructReadDiags(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[]) -> Diag[] {
+        let out: Diag[] = [];
+        const pfields: FieldInfo[] = programCells(g);
+        for (const f of g.files) {
+            for (const it of f.items) {
+                const k: AItemK = it.k;
+                const ps: AItem[] = match k {
+                    .ProgramItem(p: p) :> p.items,
+                    .ConstItem(c: x) :> [],
+                    .DeclItem(d: x) :> [],
+                    .ImportItem(i: x) :> [],
+                    .TypeItem(t: x) :> [],
+                    .FnItem(f: x) :> [],
+                    .MarkupItem(n: x) :> []
+                };
+                let tops: ANode[] = [];
+                for (const pi of ps) {
+                    const n: ANode | not = markupOfItem(pi);
+                    if (n is given) tops = tops.concat([n]);
+                }
+                let cands: AItem[] = [];
+                for (const ci of ps) {
+                    const ck: AItemK = ci.k;
+                    const isConst: boolean = match ck {
+                        .ConstItem(c: x) :> true,
+                        // no-default-arm: one question of an item — is it a file-scope binding
+                        _ :> false
+                    };
+                    if (isConst && constructAt(t, tops, ci.span.start) != "") cands = cands.concat([ci]);
+                }
+                let bw: BodyW = { lets: [], cells: [], cellNames: [] };
+                if (cands.length > 0) bw = bodyWritesOf(g, t, sum, writes, sites, lets, f.path, ps, pfields);
+                for (const ci of cands) {
+                    const ck: AItemK = ci.k;
+                    const c: AConst | not = match ck {
+                        .ConstItem(c: x) :> x,
+                        .ProgramItem(p: x) :> not,
+                        .DeclItem(d: x) :> not,
+                        .ImportItem(i: x) :> not,
+                        .TypeItem(t: x) :> not,
+                        .FnItem(f: x) :> not,
+                        .MarkupItem(n: x) :> not
+                    };
+                    if (c is given) {
+                        const where: string = constructAt(t, tops, ci.span.start);
+                        if (where != "" && initActWhat(c.init) == "") {
+                            const r: string = initReadWritten(t, c.init, bw, g.program.id, pfields);
+                            if (r != "") {
+                                let kw: string = "const";
+                                if (c.mutable) kw = "let";
+                                out = out.concat([newDiag("E-FILE-SCOPE-INIT-IN-CONSTRUCT", "the initializer of `" + kw + " " + c.name + "` reads " + r + ", which the program body writes, and it is written inside " + where + " — a file-scope initializer runs once, in the program body's one run (§7.6 rule (b)), not when, or each time, that content renders, so whether it sees that write depends on where it runs: it has no place here. Declare `" + c.name + "` before that element, or compute the value where the content needs it", f.path, c.span)]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    // What the program body's code writes: file-scope `let`s (`lets`, Sym ids) and program cells
+    // (`cells`, the cells' Sym ids; `cellNames`, their `@name` labels).
+    type BodyW:struct = { lets: int[], cells: int[], cellNames: string[] }
+
+    fn bodyWritesOf(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[], file: string, items: AItem[], pfields: FieldInfo[]) -> BodyW {
+        let blocks: ABlock[] = [];
+        for (const it of items) {
+            const k: AItemK = it.k;
+            const c: AConst | not = match k {
+                .ConstItem(c: x) :> x,
+                .ProgramItem(p: x) :> not,
+                .DeclItem(d: x) :> not,
+                .ImportItem(i: x) :> not,
+                .TypeItem(t: x) :> not,
+                .FnItem(f: x) :> not,
+                .MarkupItem(n: x) :> not
+            };
+            if (c is given) blocks = blocks.concat([exprBlock(c.init)]);
+            const n: ANode | not = markupOfItem(it);
+            if (n is given) blocks = blocks.concat(bodyCodeBlocks(n));
+        }
+        // a cell's seed runs in the body too (§7.6 rule (b) S482: at its place)
+        for (const fi of pfields) {
+            const v: AAttrValue = fi.init;
+            const x: AExpr | not = match v {
+                .Bare(e: x) :> x,
+                .Paren(e: x) :> x,
+                // no-default-arm: only an expression seed is code
+                _ :> not
+            };
+            if (x is given) blocks = blocks.concat([exprBlock(x)]);
+        }
+        let ls: int[] = [];
+        let cs: int[] = [];
+        let names: string[] = [];
+        const six: SymIx = nodeSymIx(sum.nodes);
+        for (const b of blocks) {
+            for (const w of letWritesIn(t, b, lets, file)) { if (ls.indexOf(w.sym) < 0) ls = ls.concat([w.sym]); }
+            for (const a of atUsesIn(t, b)) {
+                if (writeCapOf(effectFact(t.effects, a.nid)) >= 0) {
+                    const cs0: int = progCellOf(t, a, g.program.id, pfields);
+                    if (cs0 >= 0 && cs.indexOf(cs0) < 0) cs = cs.concat([cs0]);
+                }
+            }
+            for (const j of refTargets(sum.nodes, six, scanBlock({ t: t, file: file }, b, emptyScan()).refs, false)) {
+                for (const a of writes[j]) {
+                    const w: LetW = sites[a.root][a.pos];
+                    if (ls.indexOf(w.sym) < 0) ls = ls.concat([w.sym]);
+                }
+                for (const a of sum.writes[j]) {
+                    if (a.key.indexOf("w:@") == 0 && names.indexOf(a.key.substring(2)) < 0) names = names.concat([a.key.substring(2)]);
+                }
+            }
+        }
+        return { lets: ls, cells: cs, cellNames: names };
+    }
+
+    fn exprBlock(e: AExpr) -> ABlock {
+        const st: AStmt = { nid: -1, span: e.span, k: AStmtK.Eval(e) };
+        return { nid: -1, span: e.span, stmts: [st] };
+    }
+
+    // The code of a body node that runs in the body: its `${}` statements, its displays and attribute
+    // values, a gather's loop — never an event handler, an `<effect>` or a `<request>`.
+    fn bodyCodeBlocks(n: ANode) -> ABlock[] {
+        const k: ANodeK = n.k;
+        return match k {
+            .Elem(e: e) :> bodyElemBlocks(e),
+            .Interp(e: x) :> [exprBlock(x)],
+            .Run(b: rb) :> [rb],
+            .Gather(f: gf) :> gatherCodeBlocks(gf),
+            .Text(text: x) :> [],
+            .DeclNode(d: x) :> [],
+            .Effect(w: x) :> [],
+            .Request(r: x) :> [],
+            .Css(c: x) :> []
+        };
+    }
+
+    fn gatherCodeBlocks(f: AFor) -> ABlock[] {
+        const st: AStmt = { nid: -1, span: f.span, k: AStmtK.For(f) };
+        let out: ABlock[] = [{ nid: -1, span: f.span, stmts: [st] }];
+        for (const r of gatherRows(f)) { out = out.concat(bodyCodeBlocks(r)); }
+        return out;
+    }
+
+    fn bodyElemBlocks(e: AElem) -> ABlock[] {
+        let out: ABlock[] = [];
+        for (const a of e.attrs) {
+            if (eventName(a.name) == "") {
+                const v: AAttrValue = a.value;
+                const x: AExpr | not = match v {
+                    .Bare(e: x) :> x,
+                    .Paren(e: x) :> x,
+                    // no-default-arm: only an expression value is code
+                    _ :> not
+                };
+                if (x is given) out = out.concat([exprBlock(x)]);
+            }
+        }
+        for (const kid of e.kids) { out = out.concat(bodyCodeBlocks(kid)); }
+        return out;
+    }
+
+    // The first thing a (non-acting) initializer reads that the body writes, shown for a message
+    // (`` `n` `` / `` `@c` ``); "" when it reads none.
+    fn initReadWritten(t: Tables, init: AExpr, bw: BodyW, prog: int, pfields: FieldInfo[]) -> string {
+        const b: ABlock = exprBlock(init);
+        for (const ne of nameExprsIn(b)) {
+            const id: int = constSymOfFact(nameFact(t.names, ne.nid));
+            if (id >= 0 && bw.lets.indexOf(id) >= 0) return "`" + letNameOf(t, id) + "`";
+        }
+        for (const a of atUsesIn(t, b)) {
+            const cs: int = progCellOf(t, a, prog, pfields);
+            if (cs >= 0) {
+                for (const fi of pfields) {
+                    if (fi.sym.id == cs && (bw.cells.indexOf(cs) >= 0 || bw.cellNames.indexOf("@" + fi.sym.hint) >= 0)) return "`@" + fi.sym.hint + "`";
+                }
+            }
+        }
+        return "";
     }
 
     // =========================================================================
@@ -27778,8 +27976,9 @@ ${
     // a `#{}` block renders nothing. Every other child is refused, fail closed:
     //  - an element of any kind (a use, an `<each>`, an `if=` element, `<*x/>`) — mkElem's `c.raw` check;
     //  - an `<effect>` / `<request>` — written as an element, the same §24.5 refusal;
-    //  - a `${ for … lift }` — its rows are markup or values inserted at an anchor; a text-only one could be
-    //    one more part of the value, but it is not built (INTERIM, E-BOOTSTRAP-UNSUPPORTED).
+    //  - a `${ for … lift }` / a `${ if … }` lowered to one — rawGather: markup rows are elements there
+    //    (E-HTML-PARSER-REPAIR, §24.5); a text-only one could be one more part of the value, but it is not
+    //    built (INTERIM, E-BOOTSTRAP-UNSUPPORTED, g-boot-rcdata-text-lift-s482).
     fn mkRawNode(g: Globals, sa: AS, file: string, n: ANode, c: MkCx) -> MkFault[] {
         const k: ANodeK = n.k;
         return match k {
@@ -27791,8 +27990,26 @@ ${
             .Run(b: rb0, meta: mt) :> mkMetaRun(g, sa, file, n, mt, c),   // s482 r1 (MED-1): a runtime block's placeholder span is text here — refused
             .Effect(w: x) :> [{ nid: n.nid, file: file, span: n.span, code: "E-HTML-PARSER-REPAIR", msg: rawTextMsg("effect", c.raw) }],
             .Request(r: x) :> [{ nid: n.nid, file: file, span: n.span, code: "E-HTML-PARSER-REPAIR", msg: rawTextMsg("request", c.raw) }],
-            .Gather(f: lf) :> [{ nid: n.nid, file: file, span: n.span, code: "E-BOOTSTRAP-UNSUPPORTED", msg: rawGatherMsg(c.raw) }]
+            .Gather(f: lf) :> rawGather(file, n, lf, c.raw)
         };
+    }
+
+    // s482 (#2069 review LOW-1) — a `${ for … lift }`, or a `${ if … }` lowered to one (a branch that lifts
+    // markup or is a markup value, parse.scrml parseTier0If), inside a raw-text / RCDATA element. A row that
+    // is MARKUP is an element inside that element: §24.5 item 2 ("an element (with any hole in it) inside an
+    // HTML raw-text or RCDATA element … the parser reads that content as text") — E-HTML-PARSER-REPAIR,
+    // PERMANENT. Rows that are only values (`lift s`) could be one more part of the element's text value;
+    // that is not built (INTERIM, g-boot-rcdata-text-lift-s482).
+    fn rawGather(file: string, n: ANode, lf: AFor, raw: string) -> MkFault[] {
+        const what: string = isTier0If(lf) ? "a `${ if … }`" : "a `${ for … lift }`";
+        if (gatherRows(lf).length > 0) {
+            return [{ nid: n.nid, file: file, span: n.span, code: "E-HTML-PARSER-REPAIR", msg: rawRowMsg(what, raw) }];
+        }
+        return [{ nid: n.nid, file: file, span: n.span, code: "E-BOOTSTRAP-UNSUPPORTED", msg: rawGatherMsg(what, raw) }];
+    }
+
+    fn rawRowMsg(what: string, raw: string) -> string {
+        return what + " whose row or branch is markup puts an element inside `<" + raw + ">`: the HTML parser reads the content of `<" + raw + ">` as raw text (HTML §13.2.6.4.7), so the element and every hole in it never reach the page (SPEC §24.5) — move it out of the `<" + raw + ">`, or compute the text in a function and interpolate that (an interpolated value inside one is fine): `${ rowsText(@xs) }`";
     }
 
     // s482 — §34 W-RCDATA-BIND-VALUE-CONTENT-CONFLICT: a `<textarea>` with BOTH `bind:value` and a `${…}`
@@ -27816,8 +28033,8 @@ ${
         return [];
     }
 
-    fn rawGatherMsg(raw: string) -> string {
-        return "a `${ for … lift }` inside `<" + raw + ">` is not in the bootstrap: the HTML parser reads the content of `<" + raw + ">` as one text (HTML §13.2.6.4.7), so it is printed as one text value — its static text and its `${expr}` values — and a row can have no place in it (SPEC §24.5). Compute the text in a function and interpolate it: `${ rowsText(@xs) }`";
+    fn rawGatherMsg(what: string, raw: string) -> string {
+        return what + " that lifts text values inside `<" + raw + ">` is not in the bootstrap (INTERIM, g-boot-rcdata-text-lift-s482): the HTML parser reads the content of `<" + raw + ">` as one text (HTML §13.2.6.4.7), so it is printed as one text value — its static text and its `${expr}` values — and a row can have no place in it (SPEC §24.5). Compute the text in a function and interpolate it: `${ rowsText(@xs) }`";
     }
 
     // fix round 1 of #1945 (MED-2): a branch's literal text (`<A>"text"</>`, an Interp of a string
