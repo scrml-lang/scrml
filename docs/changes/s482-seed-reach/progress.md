@@ -30,3 +30,4 @@ Scratch: `~/.cache/scrml/review/s482-seed-reach/` (base tree `base/`, probes `p/
 - LOW-2: cellHop gives the seed note once per chain.
 - INFO-1: #2061 noted on g-boot-nested-decl-reach-runs-binding-early-s482 (open).
 - Tests: seed-reach-s482 36/0 head; 9 of the new tests red on 85efb48ed's analyzer.
+- merged origin/main again (#2061 landed): g-boot-nested-decl-reach-runs-binding-early-s482 measured `3 | 5` on the merged head → resolved-by=s482-client-roots; its test asserts the values.

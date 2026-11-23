@@ -337,15 +337,20 @@ let <c:int=(n + 0)/>
 <p id="s">\${k}</p>`), ["r", "s"])).toEqual(["5", "5"]);
   }, 120000);
 
-  test("a nested function declaration reaching it that is never called compiles (judged as body code is)", async () => {
-    const es = await errors(P(`\${ function h() -> int {
+  test("a nested function declaration reaching it that is never called compiles (judged as body code is), with the source-order values", async () => {
+    const src = P(`\${ function h() -> int {
     function inner() -> int { return k; }
     return 3;
 } }
 let <c:int=(h())/>
 <p id="r">\${@c}</p>
-\${ const k: int = n + 0; }`));
+\${ const k: int = n + 0; }
+<p id="k">\${k}</p>`);
+    const es = await errors(src);
     expect(es.map((d) => d.code)).toEqual([]);
+    // g-boot-nested-decl-reach-runs-binding-early-s482, resolved by #2061 (s482-client-roots):
+    // the printer no longer runs `k` before the body through the never-called `inner` (it had shown 1)
+    expect(await texts(src, ["r", "k"])).toEqual(["3", "5"]);
   }, 120000);
 
   test("INTERIM: a persisted cell is not judged (its default is computed at construction, g-boot-persist-seed-at-construction-s482)", async () => {
