@@ -252,7 +252,9 @@ export function e2e(mods, frontEnd, rt, tpl) {
   let r;
   try { r = frontEnd(mods, [{ path: "e.scrml", src }]); } catch (e) { return { status: "CRASH", why: String(e).slice(0, 200) }; }
   if (r.diags.some((d) => !d.code.startsWith("W-") && !d.code.startsWith("I-")) || !r.core) return { status: "skip" };
-  const js = mods.print.printProgram(r.core, "e.client.js", "scrml-runtime.js").js;
+  // s482 (s482-client-roots): `f` is called by nothing in the program — an unreached function is not
+  // printed (§12.2 Trigger 6), so it is named to the printer's test entry (print.scrml printProgramExposing)
+  const js = mods.print.printProgramExposing(r.core, "e.client.js", "scrml-runtime.js", r.core.fns.map((fn) => fn.sym.id)).js;
   const at = js.indexOf("function f(");
   const end = js.indexOf("\n}", at);
   if (at < 0 || end < 0) return { status: "NO-FN", got: js, want: "" };

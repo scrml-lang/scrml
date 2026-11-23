@@ -22,7 +22,10 @@ const run = (src) => frontEnd(mods(), [{ path: "app.scrml", src }], "app.scrml")
 const codes = (src) => run(src).diags.filter((d) => d.severity !== "Warning" && d.severity !== "Info").map((d) => d.code);
 const P = (host) => `<host>\n${host}\n</host>\n<program>\n<p>x</p>\n</program>\n`;
 // the target as EMITTED goes through runtime.js hostInert (guarded(inert-receiver))
-const guardedInert = (line) => { const r = run(P("  " + line)); return r.core != null && mods().print.printProgram(r.core, "t.client.js", "scrml-runtime.js").js.includes("hostInert("); };
+// s482 (s482-client-roots): these tests read how a function is LOWERED, and many name functions nothing
+// in their program calls — an unreached function is not printed (§12.2 Trigger 6), so every function is
+// named to the printer's test entry (print.scrml printProgramExposing).
+const guardedInert = (line) => { const r = run(P("  " + line)); return r.core != null && mods().print.printProgramExposing(r.core, "t.client.js", "scrml-runtime.js", r.core.fns.map((f) => f.sym.id)).js.includes("hostInert("); };
 
 export const DENYLIST_REFUSED = [
   "attrs(e: Fn) -> Fn = e.attributes",
