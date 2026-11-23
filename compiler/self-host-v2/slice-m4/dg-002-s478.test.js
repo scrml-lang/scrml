@@ -70,7 +70,7 @@ describe("E-DG-002 does not fire — a read in each main position", () => {
   test("a derived initializer", () => silent(P(`let <n:int=0/>\n<d=(@n * 2)/>`, `<p>${I}@d}</p>`)));
   test("a function body", () => silent(P(`let <n:int=0/>\nlet <m:int=0/>\nfunction go() { @m = @n + 1; }`, `<button onclick=go()>x</button><p>${I}@m}</p>`)));
   test("a function nobody calls (the read is still a reader edge)", () => silent(P(`let <n:int=0/>\nfunction f() -> int { return @n; }`)));
-  test("an effect's `deps=`", () => silent(P(`let <n:int=0/>\nfunction log(x: int) { }`, `<button onclick=(@n = @n + 1)>x</button>\n<effect deps=[@n]>${I} log(1); }</>`)));
+  test("an effect's `deps=`", () => silent(P(`let <n:int=0/>\nfunction note(x: int) { }`, `<button onclick=(@n = @n + 1)>x</button>\n<effect deps=[@n]>${I} note(1); }</>`)));
 });
 
 describe("E-DG-002 is not judged over a compile with an Error (no cascade)", () => {

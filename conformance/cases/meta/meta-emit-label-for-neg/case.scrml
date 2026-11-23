@@ -1,3 +1,3 @@
 <program>
-^{ emit("<label for=\"danger\">x</label>") }
+^{ emit("<label for=\"danger\">x</label>"); }
 </program>

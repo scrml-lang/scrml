@@ -1,3 +1,5 @@
+<program>
 ^{
-  emit("<p>ok</p>")
+  emit("<p>ok</p>");
 }
+</program>

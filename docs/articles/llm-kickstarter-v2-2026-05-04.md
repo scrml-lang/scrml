@@ -815,13 +815,12 @@ Three composable type-system surfaces that account for scrml's distinguishing ca
 
 A `^{}` block is **metaprogramming territory**. A compile-time `^{}` block can introspect the scrml type graph with `reflect(Type)` and splice markup in place with `emit(...)` (`emit.raw(...)` skips escape normalization). A `^{}` block that reads runtime values is a runtime meta block and uses the `meta.*` APIs instead (`meta.emit(html)`, `meta.interval`, `meta.timeout`, …). One block cannot mix the two (`E-META-005`). The meta surface is a **closed, enumerated set of primitives** — no JS-host escape, no DOM, no SQL, no I/O. Misuse fires `E-META-001` with a per-identifier hint.
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED] — the bootstrap has no ^{} meta context yet -->
 ```scrml
 <program>
 
 type User:struct = { name: string, email: string, age: int }
 
-<table>
+<table><tbody>
   ^{
     // Compile time: reflect(User) reads the type; emit() splices markup in place.
     const info = reflect(User);
@@ -829,7 +828,7 @@ type User:struct = { name: string, email: string, age: int }
       emit(`<tr><td>${field.name}</td><td>${field.type}</td></tr>`);
     }
   }
-</table>
+</tbody></table>
 
 </program>
 ```

@@ -1,4 +1,6 @@
+<program>
 ^{
-  let r = ?{ SELECT 1 }
-  meta.emit("" + r)
+  let r = ?{ `SELECT 1` };
+  meta.emit("" + r);
 }
+</program>

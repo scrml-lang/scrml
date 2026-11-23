@@ -3,7 +3,7 @@
 <form id="pf">
 <div id="host">
 ^{
-  meta.emit("<p>ok <button type=\"submit\">go</button></p>")
+  meta.emit("<p>ok <button type=\"submit\">go</button></p>");
 }
 </div>
 </form>

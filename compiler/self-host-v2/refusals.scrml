@@ -140,7 +140,6 @@ ${
             rowOn("httpStatus(…) on a variant", "§19.9.2", U, ["httpStatus", "("], ["E-PARSE-TYPE"], false, "the server maps a failure to a status by the variant's name (§19.9.2)"),
             row(".idempotent()", "§19.9.7", U, [".", "idempotent", "("], ""),
             row(".idempotent()", "§19.9.7", U, [".idempotent", "("], ""),
-            rowG("^{ } in logic", "§22.2", U, ["^", "{"], "tight", "meta-programming is not in the bootstrap"),
             rowG("extern", "§23.3", U, ["extern", "$w"], "lead", ""),
             rowG("r{ } call-char block", "§23.3", U, ["r", "{"], "tight", ""),
             rowG("use foreign:", "§23.4", U, ["use", "foreign"], "lead", ""),

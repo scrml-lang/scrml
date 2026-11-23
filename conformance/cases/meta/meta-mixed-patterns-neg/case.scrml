@@ -1,4 +1,6 @@
+<program>
 ^{
-  emit.raw("<p>hi</p>")
-  meta.set("x", 1)
+  emit.raw("<p>hi</p>");
+  meta.set("x", 1);
 }
+</program>

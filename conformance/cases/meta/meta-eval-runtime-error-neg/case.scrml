@@ -1,4 +1,6 @@
+<program>
 ^{
-  const n = 1
-  emit(n.toFixed(-1))
+  const n = 1;
+  emit(n.toFixed(-1));
 }
+</program>

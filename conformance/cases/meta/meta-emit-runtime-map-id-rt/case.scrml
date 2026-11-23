@@ -2,7 +2,7 @@
 <label> = "hi"
 <div id="host">
 ^{
-  meta.emit("<map id=\"pm\"><area shape=\"rect\" coords=\"0,0,1,1\" href=\"/x\" alt=\"a\"></map>")
+  meta.emit("<map id=\"pm\"><area shape=\"rect\" coords=\"0,0,1,1\" href=\"/x\" alt=\"a\"></map>");
 }
 </div>
 </program>

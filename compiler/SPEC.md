@@ -8379,7 +8379,7 @@ c = stepped(c);
 3. **Single-expression positions are unchanged.** A `:`-shorthand body (§4.14), a bare handler value `onclick=expr` (§5.2.3 — a top-level `;` there is still `E-MULTI-STATEMENT-HANDLER`), a markup `${ … }` interpolation in a render position (§17.6.10), and a single-expression arm body (`.A :> expr`, ended by its `,` or the list's `}`, §18.2) hold one expression and take no `;`. So does a **one-expression brace in a value position**: a `{ … }` holding exactly ONE expression and no `;` at its own top level, written as the body of a `match` or `!{}` arm whose value is used (§18.5) or as a branch of a value-form / if-as-expression `if` (§17.6.10), is that expression — `.Circle(r) :> { r * r * 3.14159 }`, `const v = if (c) { 2 } else { 3 };`. The expression MAY span lines and carry comments (rule 4: a newline is whitespace). `{ e; }` is the same arm (one expression statement, §18.5), and the same value-`if` branch (S475: `const v = if (c) { 2; } else { 3; };` yields `2` / `3` — RULED S475, bryan: "your recs on all of them", item 5; §17.6.2). A brace that holds a statement, a second item or a top-level `;` before its expression is a statement list, and rule 1 applies to each of its statements (`.B :> { log(); 2 }` is E-STMT-MISSING-SEMICOLON after `2`, and — in a value position — E-ARM-TAIL-VALUE, the ruling's code for a bare tail after a statement (§18.5); with the `;` it is E-ARM-TAIL-VALUE alone); a declaration, `return`, `fail` or `lift` is a statement, not an expression (`{ lift 2 }` owes its `;`, rule 2). In a STATEMENT position — a statement `match` / `!{}`, whose arms yield nothing — the arm's `{ … }` is a statement list, and `.A :> { f() }` there is E-STMT-MISSING-SEMICOLON. Two readings of an arm's brace body come first and are unchanged (§18.5): an object-literal body is that object ~~(not yet built in the bootstrap, which refuses it — `g-bootstrap-object-literal-arm-body-refused-s474`)~~ *(stale, struck S475: built in the bootstrap by s475-boot-value-if-object-arm, `compiler/self-host-v2/parse.scrml` `armObjectShape`)*, and a lone shorthand name `{ name }` is E-MATCH-ARM-SHORTHAND-AMBIGUOUS. An empty `{}` holds no expression.
 
    > **Amendment (S474, #1512 review) — the one-expression brace is a single-expression position.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — `{ e }` in a value-position match arm is that expression" — *"Allow { e } in arms too (Recommended)"* (*"Same as if-branches: a brace holding ONE expression is that expression. `lift` is required once the block holds a statement, and a bare tail after a statement is E-ARM-TAIL-VALUE."*) · ruling:user-voice-scrml.md S469 "⭐ RULED — three spec-follow-up opens" — if-branch: *"Keep { e }, lift once a statement (Rec)"* (*"A braced value-form `if` branch holding ONE expression is that expression. Once the branch holds a statement, it must `lift` (the same rule as block arms; a bare tail is E-ARM-TAIL-VALUE)."*) · **supersedes:** the S469 reading of "Terms" above that counted every arm block and value-form `if` branch as a statement list, so that rule 1 required `{ e; }` — which contradicted both rulings and §18.5's own example. **Direction of change:** **newly-accepting** — `.B :> { 2 }` and a `{ e }` value-`if` branch with no `;` (the bootstrap reported E-STMT-MISSING-SEMICOLON; impl#1, which does not enforce `;`, already accepted it). *(PA reading, not the rulings' words: the statement-position arm keeps rule 1, since both rulings speak of a value — "a value-position match arm", "a braced value-form `if` branch".)* **Status:** built in the bootstrap (s474-boot-one-expr-brace: `compiler/self-host-v2/parse.scrml` `parseArmBlock` (the `bare` arm), `armTails` / `bareArmSemi` (the statement-position report), `parseValueIf` / `parseValueBranch`). ~~The value-form `if` itself is still refused by the bootstrap (E-BOOTSTRAP-UNSUPPORTED); a `{ e }` branch no longer draws a second, wrong E-STMT-MISSING-SEMICOLON beside that refusal.~~ *(stale, struck S475: the bootstrap builds the value-form `if` whose every branch is one value — s475-boot-value-if-object-arm, `parse.scrml` `parseValueIfExpr`; a branch holding statements before its `lift` stays refused, `g-bootstrap-value-form-if-unbuilt-s474`.)*
-4. **A newline is whitespace.** In logic, a line break SHALL NOT end, continue or separate a statement or an arm: it is whitespace to the grammar of an accepted program. *(F1 (a): "newlines carry no grammar".)* Its only lexical job is ending a `//` comment. So a line that starts with an operator, `.`, `?.`, `?` or `:` continues the expression on the line above — the leading-dot chain needs no parentheses (`o.items⏎    .map(f)⏎    .reduce(g, 0);`) and a leading ternary is legal. **Line starts (RULED):** `!{ … }`, `is given` / `is not` and `?` cannot start a statement, so on a new line each continues the expression before it — `x⏎!{ … }` handles `x`, and `x⏎is given` tests `x`. A `?` is decided by adjacency only: glued (`x?`) it is the §19.5 propagation operator, spaced it is the conditional; whether a line ends after it plays no part. *(ruling:user-voice-scrml.md S469 "⭐ RULED — statement termination follow-ups, §7.2.2" item 2 — *"Attach to the line above"*; it confirms S447 reading 2's adjacency rule and drops the end-of-line test.)* **Hazard (accepted by the ruling):** a forgotten `;` before a line that starts with `-`, `+`, `/` or `.` joins the two lines into one expression (`console.log("m")⏎-3102;` is `console.log("m") - 3102`); dd §4.1 measured 0 such non-test sites, and F4 (iii), which would have made `-` / `+` / `/` errors, was not chosen. Rule 5 is the one exception.
+4. **A newline is whitespace.** In logic, a line break SHALL NOT end, continue or separate a statement or an arm: it is whitespace to the grammar of an accepted program. *(F1 (a): "newlines carry no grammar".)* Its only lexical job is ending a `//` comment. So a line that starts with an operator, `.`, `?.`, `?` or `:` continues the expression on the line above — the leading-dot chain needs no parentheses (`o.items⏎    .map(f)⏎    .reduce(g, 0);`) and a leading ternary is legal. **Line starts (RULED):** `!{ … }`, `is given` / `is not` and `?` cannot start a statement, so on a new line each continues the expression before it — `x⏎!{ … }` handles `x`, and `x⏎is given` tests `x`. A `?` is decided by adjacency only: glued (`x?`) it is the §19.5 propagation operator, spaced it is the conditional; whether a line ends after it plays no part. *(ruling:user-voice-scrml.md S469 "⭐ RULED — statement termination follow-ups, §7.2.2" item 2 — *"Attach to the line above"*; it confirms S447 reading 2's adjacency rule and drops the end-of-line test.)* **Hazard (accepted by the ruling):** a forgotten `;` before a line that starts with `-`, `+`, `/` or `.` joins the two lines into one expression (`console.log("m")⏎-3102;` is `console.log("m") - 3102`); dd §4.1 measured 0 such non-test sites, and F4 (iii), which would have made `-` / `+` / `/` errors, was not chosen. Rule 5 is the one exception. A `.` after the word `as` is likewise decided by adjacency: touching, it is member access on a binding named `as` (`as.value`); separated by whitespace, a line break or a comment, it begins the bare variant of an `as .V` cast (§14.12.6.2; ruling:user-voice-scrml.md-S482-as-adjacency).
 5. **A continuation into `(`, `[` or a template is an error.** An expression SHALL NOT continue across a line break into a line that starts with `(`, `[` or a template literal: `let b = a⏎(a + 1).toString();` is a compile error, not the call `a(a + 1)`. This keeps S440 JS-WAT #6's guarantee as a diagnostic, not as a grammar rule. The error SHALL be **`E-STMT-SPLIT-CONTINUATION`** (§34), message *"add `;` to the line above, or join the lines"*. *(F4 (ii), RULED; the code and message: ruling:user-voice-scrml.md S469 "⭐ RULED — statement termination follow-ups, §7.2.2" item 4.)* **Status:** built in the bootstrap (s469-boot-termination-rulings: `compiler/self-host-v2/parse.scrml` `splitContinuesAt` / `splitContinuation`), reported at the empty span ending the line above (where the `;` goes); a line that starts `( … ) :>` is an arm head, not a continuation. impl#1 does not emit it (it keeps its pre-S446 termination heuristic — the carried divergence above).
 6. **`;` is never text and never "source formatting".** It is legal between two statements on one line (`@a = 1; @b = 2;`). At a `<program>` / `<page>` / `<channel>` body top it is this terminator (§40.8). *(Restated from S446 rule 6, which F6 does not list as replaced; "a formatter MAY strip a line-final `;`" is struck — `;` is required.)*
 7. **Two statements on one line** need no rule of their own: by rule 1, `let a = 1 let b = 2;` is E-STMT-MISSING-SEMICOLON after `1`.
@@ -16289,6 +16289,8 @@ if (a is .Draft) {
     const publishedAt = a.publishedAt;  // OK — post-transition access of B-shape field
 }
 ```
+
+**`as .V` versus `as.member` — adjacency decides.** `as` is also a name a binding may take (§18.5: a scrml keyword that is not an ECMAScript strict-mode reserved word), so a `.` after the word `as` SHALL be read by adjacency: a `.` touching `as` — no whitespace, line break or comment between them — is member access on the name `as` (`as.value`, `as.f()`), and a `.` separated from `as` by any of those begins the bare variant of the cast (`return a as .Published;`, `a as⏎.Published`). This is the §7.2.2 rule 4 precedent (a `?` "is decided by adjacency only"). **Provenance:** ruling:user-voice-scrml.md-S482-as-adjacency — *"adjacency decides — a `.` touching `as` with no space is member access; a spaced `as .V` stays a bare variant. This follows §7.2.2 rule 4's 'adjacency decides' precedent."* ("your recomended permanent").
 
 **Missing-transition fires `E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED`:**
 
@@ -27807,7 +27809,15 @@ state that are in scope where `^{}` appears are accessible inside the meta block
   that are lexically in scope at the point where `^{}` appears.
 - A `^{}` meta context SHALL have access to the type registry, including all user-declared
   types and compiler-synthesized types (e.g., §14.8 generated table types).
-- A `^{}` meta context SHALL have access to the encoded variable name registry (see ADR-001).
+- ~~A `^{}` meta context SHALL have access to the encoded variable name registry (see ADR-001).~~
+  *(struck S481: the encoded-name registry is impl#1's — §47.1–§47.5, output name encoding, are an impl#1
+  annex, not a language obligation (S473 D4) — and nothing in the closed primitive set of §22.5.1 or §22.4
+  exposes it, so the sentence named no observable obligation.)*
+
+  > **Provenance:** ruling:user-voice-scrml.md S473 D4 "your recs on all" (*"§47.1–§47.5 (output name
+  > encoding) are NOT a language obligation. They are demoted to an impl#1 annex"*) — the S481 `^{}` design
+  > read (F1) found this §22.3 bullet still binding a registry D4 had demoted. **Direction of change:** inert —
+  > no program can observe the registry; no implementation builds a surface for it.
 - The mechanism by which access is provided SHALL differ between compile-time and runtime
   meta (see §22.4 and §22.5 respectively). Both modes SHALL satisfy the access guarantees
   stated above.
@@ -27857,6 +27867,113 @@ the form) rather than evaluating the block without it.
 > implementation, not the language.
 >
 > **Provenance:** ruling:user-voice-scrml.md S458 "1a" (the allow-list landing) — S459 PA review nit 1 of PR #1359; governing text §22.2 (meta-body), §22.4 (evaluate and inline), §22.9 ("`^{}` blocks MAY contain `match` expressions"). **Direction of change: newly-accepting** (`while`, `function`, `break` / `continue`, `match` now evaluate) **and newly-rejecting** (the refused forms above were silently dropped, now `E-META-EVAL-001`).
+
+**The evaluation bound (S481).** Compile-time evaluation is deterministic and bounded by a STEP COUNT,
+never a clock, so a body is accepted or refused the same way on every machine. A body that runs past
+the bound is refused with `E-META-EVAL-001`, naming the bound; it is never evaluated in part. The
+bound covers work and size as well as statements, so a short body cannot take the compiler's memory:
+
+- **Steps.** At most 1,000,000 evaluation steps per block, and calls nested at most 64 deep. A
+  built-in's work counts toward the same step count: one step per 1,024 characters a built-in
+  produces or reads, or list elements it copies (`+` and templates by the length of the text they
+  build, `repeat`, `padStart` / `padEnd`, `concat`, `slice`, `split`, `join`, `push`, `sort`,
+  `emit`), and one step per 16 elements of a list or record it walks (`==` on lists and records, a
+  list turned to text, `includes`, `map` / `filter`, and — S482 — a record literal, an object spread
+  `{ ...r }` and a field write `r.k = v`, each by the fields it copies; a spread into a record that
+  already has fields also by the pairs of keys it compares). S482 r4: every operation the evaluator
+  performs is charged at least its worst-case cost as a function of its inputs — a substring search
+  (`indexOf`, `includes`, `split`, `replace`, `replaceAll`) runs in time linear in the two strings and
+  is charged their length; reading, writing or declaring a binding, a record member read and a call's
+  arguments are charged by the bindings, keys and arguments the evaluator searches or copies (one step
+  per 1,024, each comparison weighed by the length of the name compared); a function value made at
+  run time is charged the walk of its body.
+- **The compile-wide step total (S482).** The step bound is per block, and a compile may hold any
+  number of blocks, so all the `^{}` blocks of ONE COMPILE together — every file's, imported files
+  included, refused blocks too — may take at most 4,000,000 steps (4 × the per-block bound), counted
+  as the step bound counts them. The block that reaches the total is refused with `E-META-EVAL-001`
+  naming it, and once it is spent every further block of the compile is refused the same way, before
+  it runs. (A namespace re-read parses a file again and runs its blocks once more, so a compile runs
+  at most twice the total — the same rule as the emit budget.) The largest total any corpus program,
+  conformance case or documentation snippet takes is 223 steps.
+- **Size.** No single value may exceed 16 Mi (16,777,216): the characters of a string, or a list or
+  record counted with everything it holds (a list holding the same list twice counts it twice). No
+  list may hold more than 1 Mi (1,048,576) elements, and values nest at most 256 levels deep. The
+  output of `emit()` / `emit.raw()` in one block is a string under the same bound. Each size is
+  checked before the value is built.
+- **Allocation (S482).** What a block's built-ins allocate is counted as it is made and never given
+  back, at most 256 Mi (268,435,456) units per block: a character of a string a built-in builds
+  counts 1, a list slot or record field it copies 8, an element value it creates 128 (`split`, a
+  string's characters in a spread or a `for … of`, `reflect`). A body past it is refused with
+  `E-META-EVAL-001` naming the bound; element values are counted before they are made.
+- **The emit budget (S482; one per compile since S482 r4).** All the `^{}` blocks of ONE COMPILE
+  together — every file's, imported files included — may emit at most 1 Mi (1,048,576) characters
+  and 64 Ki (65,536) `<` characters, and the markup they splice may hold at most 32 Ki (32,768) nodes
+  (elements and text) and 32 Ki attributes; one emitted element may carry at most 1 Ki (1,024)
+  attributes, emitted elements nest at most 256 levels deep, and reading the output may raise at most
+  1 Ki problems. The block that would pass one is refused with `E-META-EVAL-001` naming the bound.
+  The characters and `<` characters are counted as the body runs, and `emit()` text past the budget is
+  refused before its escapes are read (§22.4.1). The nodes, attributes, nesting and problems are
+  counted by the markup reader itself as it reads the emitted text, and it stops at the first excess,
+  before its cost grows past the text's — emitted output is never read past the budget.
+- **Plain markup only, as it is read (S482 r4).** The markup reader reads emitted output as plain
+  markup (§22.4.1): at the first construct that is not — a `${…}` logic block, a `#{…}` CSS block, a
+  `^{…}`, `!{…}`, `?{…}` or `_{…}` block, a declaration, an instance reference `<*…>`, a structural
+  element (`<match>`, `<db>`, `<schema>`, `<host>`, `<program>`, `<effect>`, `<request>`, `<theme>`), a
+  typed or namespaced attribute, a call in a tag, or an attribute value that is not quoted — it stops
+  and the block is refused with `E-META-EVAL-002` naming the construct. Such output was always
+  refused; it is now refused without reading the construct (a few kilobytes of brackets in a logic
+  block drove the logic reader past the compiler's stack).
+
+Building a long string by repeated `+` costs its length at each step; `.map(…).join("")` or one
+`emit()` per piece builds it at the cost of its length once. A list built by `push` in a loop costs its
+length once: a `push` to a binding whose list no other value holds appends in place (a list read in
+any other way since — kept in another binding, a container or a call, or read inside a callback such
+as `.map((x) => xs)` — is copied first, so the value taken earlier is unchanged and no list can come to
+hold itself, §66.10). A method that changes the list it is called on (`push`, `pop`, `sort`,
+`reverse`) changes the binding's list as it stands after the call's arguments are evaluated, so an
+argument that changes the same binding is seen (`t.push(t.push(2))` appends to the list the inner
+`push` made, and a name bound to `t` earlier keeps its own value); an argument that ASSIGNS the binding
+(`t.push((t = [9]).length)`) is refused with `E-META-EVAL-001`, since JavaScript would change the list
+`t` named before the assignment (S482 r5).
+
+> **Provenance:** ruling:user-voice-scrml.md S481 "⭐ RULED — `^{}` meta in the bootstrap: four design
+> questions" item 4 (*"a scrml interpreter over the bootstrap's own syntax tree, as the permanent design,
+> not impl#1's run-JS-in-a-sandbox. It stays deterministic and in scrml (S114, S452), bounded by a step
+> count rather than a clock."* — PERMANENT; ruling:user-voice-scrml.md-S481-meta-four). The numbers are
+> the S481 PA default (PR #2045 r1, review MED-1: a three-line body doubling a list reached 24 GB RSS,
+> and a doubled string ended in a host `RangeError`). Emitted by the bootstrap at
+> `compiler/self-host-v2/meta.scrml` (`tick`, `charge`, `made`, `maxSize` / `maxElems` / `maxNest`).
+> The allocation bound and the emit budget are the S482 PA default (PR #2045 r3, re-review HIGH-1..3:
+> forty 60-byte blocks of `emit("…".repeat(1000000))` passed 6 GB; `<i></i>` emitted 262,144 times ran
+> past 60 seconds in the markup reader; fourteen `s.split("")` of a 1 Mi string reached 2 GB inside the
+> step bound; a 1,000-field `{ ...r }` in a loop was charged no steps and ran 37 minutes of CPU per block).
+> The per-compile budget, the reader's own bounds, the plain-markup reading and the charged searches are
+> the S482 r4 PA default (PR #2045 r4, re-review HIGH-2..4 and MED-1: a worst-case `indexOf` ran one
+> block for minutes inside the step bound; forty imported files multiplied the per-file budget to
+> 2.2 GB; one emitted element of 150,000 attributes, or 256 elements of 1,024 repeated attributes, ran
+> past 60 seconds in the reader; 7,000 nested elements ended in a host `RangeError`); the cost model is
+> stated as an invariant and checked operation by operation (the bootstrap's
+> `compiler/self-host-v2/meta.scrml` THE BINDINGS / THE SEARCH, and `parse.scrml` FRAGMENT MODE).
+> The compile-wide step total is the S482 r5 PA default (PR #2045 r5, re-review HIGH-2: forty blocks
+> (7 KB of source in all), each running just inside the per-block bound, took 54 seconds; with the total they are
+> refused after the fourth in about 6 seconds).
+> **impl#1 status:** impl#1 bounds a compile-time body by a 5-second `node:vm` timeout (a clock) and
+> does not bound a single allocation or a file's emitted output; a host `RangeError` there is reported
+> as `E-META-EVAL-001`.
+> **Direction of change: newly-rejecting** only for bodies past the bound (none in the corpus or the
+> conformance cases); newly-accepting for `repeat` counts past 100,000 (an S481 bootstrap cap, removed).
+
+> **Bootstrap status (S481 r1, INTERIM — `g-boot-meta-closure-by-value-s481`).** The bootstrap's
+> evaluator keeps the bindings a function or lambda captures BY VALUE. It refuses, with
+> `E-META-EVAL-001` naming the binding, the two cases where that would differ from reading the binding
+> itself: a write from inside a function or lambda to a binding outside it, and a write to a binding
+> after a function or lambda that reads it was made (a lambda written directly as the argument of a
+> list method that calls it — `map`, `filter`, `forEach`, `some`, `every`, `find`, `findIndex`,
+> `reduce`, `sort` — is kept by nobody and is exempt; the exemption is the callback argument alone,
+> argument 0: a lambda in any other argument, such as `reduce`'s initial value, which `reduce` returns,
+> is pinned like any other — S482 r3). Aliasing is not one of them: a binding taken
+> from another is a snapshot (§66.10 item 1), so `const b = a; b.push(2)` leaves `a` unchanged. The
+> capable alternative is a binding store threaded through the evaluator, closures holding binding ids.
 
 Compile-time meta blocks have access to the type registry via `reflect()` (see §22.4.2).
 Phase-separation rules (§22.8) apply to compile-time meta.
@@ -28068,6 +28185,21 @@ Given a call `reflect(expr)` inside a `^{}` block:
   runtime values is a runtime block; its `reflect()` calls that happen to have literal
   arguments are still emitted as `meta.types.reflect(...)` calls in the runtime block output.
   The inlining optimization (strategy 1) applies only when the ENTIRE block is compile-time.
+  A literal argument does not change this: `^{ const i = reflect(User); meta.emit("<p>" + i.name + "</p>") }`
+  is a RUNTIME block whose `reflect(User)` resolves by the runtime path, and it compiles — it is not a
+  phase mix (§22.8), and `E-META-005` does not apply to it.
+
+  > **Provenance:** ruling:user-voice-scrml.md S481 "⭐ RULED — `^{}` meta in the bootstrap: four design
+  > questions" item 1 (*"compile it (§22.4.2), and drop the E-META-005 trigger from §22.8 for this case"*;
+  > ruling:user-voice-scrml.md-S481-meta-four). Resolves the §22.4.2 / §22.8 contradiction the S481 design read
+  > found (F2). **Direction of change:** newly-accepting — a runtime block holding a literal `reflect(T)` was
+  > `E-META-005` in impl#1.
+  >
+  > **impl#1 status (S481).** impl#1 still reports `E-META-005` for this block (meta-checker.ts
+  > `bodyMixesPhases` counts a PascalCase `reflect(User)` as a compile-time pattern); impl#1 is frozen (S471),
+  > so this is a carried impl#1 divergence. The bootstrap classifies by this paragraph (meta.scrml
+  > `isCompileTime`); it builds compile-time `^{}` only, so it refuses such a block today as a runtime block
+  > not yet built (`E-BOOTSTRAP-UNSUPPORTED`), never as `E-META-005`.
 - `reflect(unknownLiteral)` where the literal does not match any known type name SHALL be a
   compile error (E-META-003: reflect() called on unknown type).
 - `reflect(variable)` where `variable` could hold an unknown type name at runtime SHALL
@@ -28332,13 +28464,14 @@ all types that are in scope at any runtime `^{}` breakout point.
 ```javascript
 {
   TypeName: {
-    kind: "struct" | "enum" | "union",
+    kind: "struct" | "enum" | …,   // the declaration's kind (a primitive: "primitive")
+    name: "TypeName",
     fields: [          // present when kind === "struct"
-      { name: "fieldName", type: "TypeName" | primitive },
+      { name: "fieldName", type: "string" },   // `type`: the field's written type, as text
       ...
     ],
     variants: [        // present when kind === "enum"
-      { name: "VariantName" },
+      "VariantName",   // the variant NAMES, as strings
       ...
     ]
   },
@@ -28346,8 +28479,31 @@ all types that are in scope at any runtime `^{}` breakout point.
 }
 ```
 
+~~`kind: "struct" | "enum" | "union"` … `variants: [ { name: "VariantName" }, … ]`~~ *(struck S481 — the
+shape above is the rule; see the provenance below.)*
+
 The shape of each type entry SHALL be identical to what `reflect(TypeName)` produces in
-compile-time meta (§22.4).
+compile-time meta (§22.4): an object with `kind` and `name`; a struct's `fields`, each
+`{ name, type }` with `type` the field's written type as text; an enum's `variants`, the
+variant names as strings (as §14.4.2: "`.variants` is an array of variant-NAME strings").
+A declared type of any other kind carries `kind` and `name` only.
+
+The compiler-known type `TypeInfo` names an entry for a compiler that types `reflect()`
+results: `TypeInfo:struct = { kind: string, name: string, fields: FieldInfo[], variants: string[] }`
+with `FieldInfo:struct = { name: string, type: string }`.
+
+> **Provenance:** ruling:user-voice-scrml.md S481 "⭐ RULED — `^{}` meta in the bootstrap: four design
+> questions" item 3 (*"adopt impl#1's shape, as the permanent rule. `variants` is a list of name strings,
+> `fields` is `{name, type}`, plus `kind` and `name`. Amend §22.5.4 to match. Add a compiler-known `TypeInfo`
+> type so the bootstrap can type-check uses of it."* — PERMANENT; ruling:user-voice-scrml.md-S481-meta-four) ·
+> supersedes: *"kind: "struct" | "enum" | "union" … variants: [ { name: "VariantName" } ]"* (the struck shape,
+> which neither implementation produced — impl#1's compile-time `createReflect` and, since S211, its runtime
+> registry return name strings). **Direction of change:** inert for impl#1 (the rule now states what it
+> produces); meaning-changing only for a reader of the struck `{ name }` variant shape, which no
+> implementation returned. *(⚑ OPEN — owner question, S481: what a `TypeInfo`-typed read of the member a kind
+> does not carry (`fields` of an enum) yields — absent, as impl#1's entry has it, or the empty list. The
+> bootstrap's compile-time evaluator returns impl#1's entry as is (absent); the question binds the typed
+> runtime-`^{}` phase. Gap `g-boot-meta-typeinfo-absent-member-s481`.)*
 
 **The `meta.types` API:**
 
@@ -28469,10 +28625,22 @@ executes at program run time. These phases SHALL NOT be mixed in a single `^{}` 
 
 **Normative statements:**
 
-- A `^{}` block SHALL NOT reference both compile-time API patterns (e.g., `reflect()`,
-  `emit()`, `emit.raw()`) and runtime-only values in the same block.
-- The compiler SHALL reject any `^{}` block that mixes compile-time and runtime access
-  patterns (E-META-005).
+- ~~A `^{}` block SHALL NOT reference both compile-time API patterns (e.g., `reflect()`,
+  `emit()`, `emit.raw()`) and runtime-only values in the same block.~~
+- ~~The compiler SHALL reject any `^{}` block that mixes compile-time and runtime access
+  patterns (E-META-005).~~
+- A `^{}` block SHALL NOT use a compile-time-only output API — `emit()` or `emit.raw()` — and a
+  runtime-only value (an `@cell`, the `meta` object, a runtime binding) in the same block. The
+  compiler SHALL reject such a block (E-META-005).
+- A `reflect()` call is not a compile-time-only pattern for this rule: a block holding
+  `reflect(T)` (literal argument or not) beside a runtime-only value is a runtime block, and
+  its `reflect()` resolves by §22.4.2's runtime path — no `E-META-005`.
+
+  > **Provenance:** ruling:user-voice-scrml.md-S481-meta-four item 1 (*"compile it (§22.4.2), and drop the
+  > E-META-005 trigger from §22.8 for this case"*) · supersedes: the two struck bullets above (*"A `^{}` block
+  > SHALL NOT reference both compile-time API patterns (e.g., `reflect()`, `emit()`, `emit.raw()`) and
+  > runtime-only values in the same block."*). **Direction of change:** newly-accepting (a literal `reflect`
+  > beside a runtime value); unchanged for `emit` / `emit.raw` beside one.
 - `reflect(expr)` is the single programmer-facing API for type reflection. The compiler
   resolves `reflect(expr)` to either a compile-time inline (when `expr` is a literal) or a
   `meta.types.reflect(expr)` call (when `expr` is a runtime variable), per §22.4.2.
@@ -37956,6 +38124,11 @@ Value-native maps (§59) hash a **runtime key value** rather than a `ResolvedTyp
 - **Runtime `^{}` blocks** (non-deterministic per §22.6): `reflect()` decodes the encoded variable name using the runtime decode table bundled in `clientJs`.
 
 #### 47.2.2 Return Type
+
+*(S481: the LANGUAGE's `reflect()` result is §22.5.4's entry — `kind`, `name`, a struct's `fields` of
+`{ name, type }` with `type` the written type as text, an enum's `variants` as name strings
+(ruling:user-voice-scrml.md-S481-meta-four item 3, PERMANENT). The nested `TypeDescriptor` below described
+impl#1's planned decode table and binds nothing; where it differs from §22.5.4, §22.5.4 governs.)*
 
 `reflect()` returns a `TypeDescriptor` object:
 
