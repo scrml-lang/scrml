@@ -1,6 +1,6 @@
 {
   "id": "parse-syntax-as-touching-dot-member-neg",
-  "description": "§14.12.6.2 (S482) — `return a as.Published;`: the `.` touches `as`, so it is member access on the name `as`, not the bare variant of an `as .V` cast. The statement is `return a` followed by `as.Published` with no `;` between — E-STMT-MISSING-SEMICOLON.",
+  "description": "§14.12.6.2 (S482) — `return a as.Published;` with a parameter named `as` (a struct with a field `Published`): the `.` touches `as`, so it is member access on the name `as`, not the bare variant of an `as .V` cast. The statement is `return a` followed by `as.Published` with no `;` between — E-STMT-MISSING-SEMICOLON.",
   "language-version": "1.0",
   "spec": "§14.12.6.2, §7.2.2",
   "source-test": "compiler/self-host-v2/slice-m4/as-adjacency-s482.test.js",

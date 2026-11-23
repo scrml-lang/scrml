@@ -3,7 +3,8 @@
 <program>
 ${
     type S:enum = { Draft, Published }
-    fn f(a: S) -> S { return a as.Published; }
+    type P:struct = { Published: S }
+    fn f(a: S, as: P) -> S { return a as.Published; }
 }
-<p id="r">${f(.Draft)}</p>
+<p id="r">${f(.Draft, { Published: .Published })}</p>
 </program>

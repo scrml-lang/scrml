@@ -25,5 +25,17 @@ Rulings: user-voice-scrml.md "RULED — `/` after `as` by adjacency; `lin` as a 
   g-impl1-as-touching-dot-cast-s482 (carried), g-boot-of-name-member-read-s482 and
   g-boot-is-qualified-variant-s482 (owner questions).
 
-## Next
-- final gates, PR.
+- Carried gap g-impl1-as-touching-dot-cast-s482 pinned by conformance/cases/parse-syntax/as-touching-dot-member-neg
+  (bootstrap PASS; impl#1 xfail `missing:E-STMT-MISSING-SEMICOLON` — it compiles the cast, `return a;`).
+
+## Final gates (head 4d1e890a8 + the case fix)
+- pretest head/base exit 0. bootstrap-conformance --json: base PASS 778 / FAIL 3 / UNSUPPORTED 555 / CRASH 0;
+  head PASS 779 / FAIL 3 / UNSUPPORTED 555 / CRASH 0 (+1 case, PASS); no PASS->FAIL.
+- Corpus parse differential (5461 tracked .scrml, head sources, base vs head parser): 5449 identical, 12 changed,
+  0 throws, newly rejected 0 (self-host files lose `of`-binder E-PARSE-ARM / `lin` E-PARSE-LOCAL; three `is T.V`
+  files go from a cascade to one E-PARSE-EXPECTED; phase1-lin-as-variable-name-011 E-PARSE-LOCAL -> its real
+  missing `;`).
+- Emitted bootstrap output (3023 files: conformance, samples, examples, stdlib, benchmarks): js/html/server
+  byte-identical; ok 305 = 305; diagnostics differ only on phase1-lin-as-variable-name-011 and the new case.
+- s34-census --check-new PASS; types-gate OK (182, unchanged); gen-bootstrap-severity current; gen-md-shim current;
+  snippet-gate 0 fail; claim-gate 0 fail; corpus-compile-floor PASS; host-global-scan 1/2 + 2/2 exit 0.
