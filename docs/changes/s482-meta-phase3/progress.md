@@ -27,3 +27,24 @@ Scratch: ~/.cache/scrml/review/s482-meta-phase3/.
   as before.
 - [ ] records: SPEC §22.4.2 impl#1 note, §22.5 bootstrap status (phase 3 paragraph), §22.5.4 ⚑ OPEN note;
       known-gaps residue narrowed + absent-member S482 note; coverage §22.5 row.
+- [x] 695dd352e records (hook PASS; one earlier attempt per commit failed on the hook's shard-1 MEMORY
+      ceiling under machine load, not a test — retried unchanged).
+- Chromium server in meta-phase3-s482.test.js moved to node:http: Bun.serve needs the host Response, which
+  happy-dom replaces, so the two meta Chromium files failed when run in ONE process (each alone passed).
+
+## Final gates (head = this commit's tree; base = origin/main 9db729e7b)
+- pretest rc 0. bootstrap-conformance base 845/4/628/491/0 → head 845/4/628/491/0 (PASS/FAIL/NT/UNSUP/CRASH),
+  0 moves. Cases touching reflect/types/subscribe: meta-allow-list-clean-pos, meta-nested-block-neg,
+  meta-reflect-clean-pos, meta-reflect-outside-block-neg, meta-reflect-unknown-type-neg — PASS → PASS (all
+  compile-time / static; no conformance case holds a runtime reflect or subscribe).
+- impl#1 conformance-corpus -t meta 68/68. sync-bootstrap-meta-emit-gate --check in sync; gate drift test,
+  meta-runtime-s482, meta-s481, meta-phase3-s482 (SCRML_BROWSER_TESTS=1) all green; both Chromium files in one
+  process 68/0.
+- Emitted byte-compare (1968 conformance cases, html+js sha) base vs head: 0 diffs.
+- Corpus (76 `^{` files, fixS66, as written): base 3 OK → head 3 OK, 0 changes, newly-rejecting 0. The two
+  named samples are blocked before meta on both trees (E-STMT-MISSING-SEMICOLON / old syntax); hand-migrated
+  copies: meta-reflect-hybrid-002 base E-BOOTSTRAP-UNSUPPORTED → head compiles; meta-type-registry-001 base
+  E-BOOTSTRAP-UNSUPPORTED → head E-OPERATOR-OPERAND-TYPE (its own `info.name || @selectedType`, S440 Q1/Q2).
+- s34-census --check-new PASS; types-gate OK (182 unchanged); gen-bootstrap-severity current; gen-md-shim
+  current; snippet-gate 120/0 (9 spec-ahead, 0 stale); claim-gate 0 failed; corpus-compile-floor PASS;
+  e2e-render-map 259/0.

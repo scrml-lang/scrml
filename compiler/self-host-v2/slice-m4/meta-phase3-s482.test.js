@@ -18,13 +18,13 @@
 //   4. Chromium (SCRML_BROWSER_TESTS=1): a subscription re-renders on a click, once per change.
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { copyFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { loadM2, frontEnd } from "./harness.js";
 
-const HostResponse = globalThis.Response;
 const RUNTIME = join(import.meta.dir, "..", "slice-m1", "runtime", "runtime.js");
 
 let mods;
@@ -304,23 +304,30 @@ describe("s482 phase 3 — the shipping path", () => {
 const ON = process.env.SCRML_BROWSER_TESTS === "1";
 const BIN = process.env.SCRML_CHROMIUM || "/usr/bin/chromium";
 const suite = ON ? describe : describe.skip;
-let browser, server, cdir;
+let browser, server, cdir, port;
 beforeAll(async () => {
   if (!ON) return;
   if (!existsSync(BIN)) throw new Error(`SCRML_BROWSER_TESTS=1 but no Chromium at ${BIN} (set SCRML_CHROMIUM)`);
   cdir = mkdtempSync(join(tmpdir(), "s482-meta3-chromium-"));
   copyFileSync(RUNTIME, join(cdir, "scrml-runtime.js"));
-  server = Bun.serve({ port: 0, fetch: (req) => {
-    const p = new URL(req.url).pathname;
-    if (p === "/favicon.ico") return new HostResponse("", { status: 204 });
-    return new HostResponse(Bun.file(join(cdir, p.slice(1))), { headers: { "content-type": p.endsWith(".js") ? "text/javascript" : "text/html" } });
-  } });
+  // node:http, not Bun.serve: Bun.serve needs the host's Response, which happy-dom replaces on
+  // registration (and another file in the same process may have registered it before this one loads)
+  server = createServer((req, res) => {
+    const p = new URL(req.url, "http://localhost").pathname;
+    if (p === "/favicon.ico") { res.writeHead(204); res.end(); return; }
+    const f = join(cdir, p.slice(1));
+    if (!existsSync(f)) { res.writeHead(404); res.end(); return; }
+    res.writeHead(200, { "content-type": p.endsWith(".js") ? "text/javascript" : "text/html" });
+    res.end(readFileSync(f));
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  port = server.address().port;
   const { default: puppeteer } = await import("puppeteer");
   browser = await puppeteer.launch({ executablePath: BIN, headless: true, args: ["--no-sandbox"] });
 }, { timeout: 180000 });
 afterAll(async () => {
   if (browser) await browser.close();
-  if (server) server.stop(true);
+  if (server) await new Promise((r) => server.close(r));
   if (cdir) rmSync(cdir, { recursive: true, force: true });
 });
 
@@ -335,7 +342,7 @@ async function openChromium(src) {
   const page = await browser.newPage();
   const errors = [];
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
-  await page.goto(`http://localhost:${server.port}/${name}.html`);
+  await page.goto(`http://127.0.0.1:${port}/${name}.html`);
   await page.waitForFunction(() => document.body.innerHTML.includes("scrml"), { timeout: 10000 }).catch(() => {});
   return { page, errors };
 }
