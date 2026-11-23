@@ -215,3 +215,53 @@ describe("an acting initializer after a literal attribute (Chromium, #2082 LOW-1
     expect(await load(out, ["o", "o2"])).toEqual({ errors: [], texts: ["0", "5"] });
   }, 120000);
 });
+
+// #2082 r1 review HIGH-2 / MED-1 — a `<*phase/>` view of a `rule=` graph field renders its state-child
+// bodies at the mount; a body that reads a later cell (`${@s}`, `bind:value=@s`) runs that cell's seed
+// there, and one that calls a writer writes there. Head r1 compiled each in a construct and Chromium
+// showed k = 1; each is refused now. The controls (no construct) show the source-order value, 5.
+describe("a `<*x/>` view's state bodies before the initializer (Chromium, #2082 r1 HIGH-2, MED-1)", () => {
+  const PRE = `\${ let n: int = 1; }
+\${ function bump() -> int { n = 5; return 0; } }
+\${ function bumps() -> string { n = 5; return "s"; } }
+<program>
+    type Phase:enum = { Idle, Loading }
+`;
+  const PHASE = (body) => `    <phase:Phase=.Idle>
+        <Idle rule=.Loading>
+            ${body}
+        </>
+        <Loading rule=.Idle : "Loading">
+    </>
+`;
+  const S = `    let <s:string=(bumps())/>
+</program>
+`;
+  test("h03 construct, body reads `@s`: refused (head r1: Chromium k = 1)", () => {
+    const r = refused(PRE + `    <div if=(true)><span><*phase/></span>\${ const k: int = n + 0; }<p id="o">\${k}</p></div>
+` + PHASE("<b>${@s}</b>") + S);
+    expect(r.exit).not.toBe(0);
+    expect(r.codes).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+  }, 120000);
+
+  test("h07 construct, body binds `@s`: refused (head r1: Chromium k = 1)", () => {
+    const r = refused(PRE + `    <div if=(true)><span><*phase/></span>\${ const k: int = n + 0; }<p id="o">\${k}</p></div>
+` + PHASE("<input bind:value=@s/>") + S);
+    expect(r.exit).not.toBe(0);
+    expect(r.codes).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+  }, 120000);
+
+  test("h04 control (no construct), body reads `@s`: k = 5, source order", async () => {
+    if (skip()) return;
+    const out = build(PRE + `    <span><*phase/></span>\${ const k: int = n + 0; }<p id="o">\${k}</p>
+` + PHASE("<b>${@s}</b>") + S);
+    expect(await load(out, ["o"])).toEqual({ errors: [], texts: ["5"] });
+  }, 120000);
+
+  test("h08 control (no construct), body binds `@s`: k = 5, source order", async () => {
+    if (skip()) return;
+    const out = build(PRE + `    <span><*phase/></span>\${ const k: int = n + 0; }<p id="o">\${k}</p>
+` + PHASE("<input bind:value=@s/>") + S);
+    expect(await load(out, ["o"])).toEqual({ errors: [], texts: ["5"] });
+  }, 120000);
+});

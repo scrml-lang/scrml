@@ -39,3 +39,34 @@ Base: #2079 (s482-construct-init-fu) head f0281eca2, rebased onto origin/main on
       Gates: pretest exit 0; conformance 845/4/491/628, CRASH 0, 0 per-case diffs vs base; corpus
       (2972) 0 newly rejected / 0 newly accepted / 0 code / 0 output diffs vs d64e7e060; s34-census
       PASS; types-gate OK 182; corpus-compile-floor PASS; e2e-render-map 259 pass.
+- [x] fix round r2 (#2082 r1 re-review, head 9c6aee627):
+      HIGH-2 (regression from base since r0): the bounded `used` set did not descend into the state-child
+      bodies a `<*field/>` view (ElemFact.MStateView) renders at the mount, so h03 (`${@s}` in a body) and
+      h07 (`bind:value=@s` in a body) compiled and showed k = 1 in Chromium (base refused). MED-1
+      (pre-existing): h01, a body that writes (`"R${bump()}"`), was missed by blocksWrites too.
+      Fix — the bound is DEFAULT-DENY (analyze.scrml regionScan / scanElem / scanFact / scanArms /
+      opaqueAttr / viewsWrites): every `<*x/>` view in the region (and in a used component's render, and
+      in a view, transitively, each once) is walked whole — EVERY state's body, not only the initial one —
+      for its blocks (writes + cells used), its `bind:` cells and its component uses; anything the walk
+      does not positively understand sets `opaque`, and constructWrites then counts every seed placed at
+      or after `lo` (base's rule). regionHasCode (the textarea / title host path) counts a view or
+      anything opaque as code.
+      Handled node kinds (ANodeK, an exhaustive match — a new kind will not compile until classified):
+        Text, Interp, Run, Css — no hidden code (the generic walk reads the code they hold);
+        Effect, Request — do not run at the mount (unchanged ruling);
+        Gather — its rows; Elem — by its ElemFact (exhaustive match):
+          MHtml, MSlot, MDb, MSchema — attributes + kids (the generic walk);
+          MUse — use-site values + slot content (kids); its renders and seeds: the component loop;
+          MEach — `in=` / `key=` values + the row template (kids);
+          MMatch — `on=` value + every arm's body (the arm elements carry no fact: walked as arms);
+          MStateView — every state-child body, walked as a view (new);
+          MInline — the inlined child-field renders, walked as a view (new).
+      Fail closed (opaque → base's rule): DeclNode (a declaration where markup stands), MStar (a
+      declaration's shared instance), MErrors, an element with no ElemFact, and an attribute whose value is
+      code the walk does not read (a non-event `{ }` block, a quoted value or duration holding `${`).
+      LOW-doc: SPEC §7.6 rule (b) provenance + INTERIM marker and gap g-boot-rcdata-init-after-code-s482
+      headline/body now name c6-ta-bindz (non-acting initializer reading what a `bind:` seed writes:
+      base 5, now refused); SPEC also names the `<*field/>` state bodies in the construct-writes list.
+      Tests: slice-m4 cell-seed-bound (+6: h03, h07, h01 refused; non-initial state's body refused;
+      controls = 5; default-deny `<errors>` refused + its control 1/5); Chromium
+      rcdata-init-place-chromium (+4: h03/h07 CLI refusals, h04/h08 controls = 5), 13 pass, not skipped.

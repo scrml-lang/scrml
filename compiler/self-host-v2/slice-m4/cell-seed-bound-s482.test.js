@@ -130,4 +130,92 @@ let <s:string=(bumps())/>
 </program>
 `, ["o", "o2"])).toEqual(["1", "5"]);
   }, 120000);
+
+  // #2082 r1 review HIGH-2 / MED-1 — a `<*phase/>` view of a `rule=` graph field renders its state-child
+  // bodies at the mount (O5 (1i)); the bounded walk did not descend into them (head r1: compiled, k = 1)
+  const STAR = (where, body, after) => `<program>
+\${ let n: int = 1; }
+\${ function bump() -> int { n = 5; return 0; } }
+\${ function bumps() -> string { n = 5; return "s"; } }
+type Phase:enum = { Idle, Loading }
+${where}
+<phase:Phase=.Idle>
+<Idle rule=.Loading>
+${body}
+</>
+<Loading rule=.Idle : "Loading">
+</>
+${after}
+</program>
+`;
+  const IN = `<div if=(true)><span><*phase/></span>\${ const k: int = n + 0; }<p id="o">\${k}</p></div>`;
+  const OUT = `<span><*phase/></span>\${ const k: int = n + 0; }<p id="o">\${k}</p>`;
+  const S = `let <s:string=(bumps())/>`;
+
+  test("h03 refused: a state body before the initializer reads a later cell (`${@s}`)", async () => {
+    const d = await errors(STAR(IN, "<b>\${@s}</b>", S));
+    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(d[0].message).toContain("the initializer of `const k` reads `n`");
+  }, 120000);
+
+  test("h07 refused: a state body before the initializer binds a later cell (`bind:value=@s`)", async () => {
+    const d = await errors(STAR(IN, "<input bind:value=@s/>", S));
+    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+  }, 120000);
+
+  test("h01 refused: a state body before the initializer writes (`${bump()}`; base also missed it)", async () => {
+    const d = await errors(STAR(IN, "\"R\${bump()}\"", ""));
+    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+  }, 120000);
+
+  test("refused: every state body counts, not only the initial state's", async () => {
+    const src = `<program>
+\${ let n: int = 1; }
+\${ function bumps() -> string { n = 5; return "s"; } }
+type Phase:enum = { Idle, Loading }
+${IN}
+<phase:Phase=.Idle>
+<Idle rule=.Loading>
+<b>idle</b>
+</>
+<Loading rule=.Idle>
+<b>\${@s}</b>
+</>
+</>
+${S}
+</program>
+`;
+    const d = await errors(src);
+    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+  }, 120000);
+
+  test("controls (no construct): source order, k = 5", async () => {
+    expect(await texts(STAR(OUT, "<b>\${@s}</b>", S), ["o"])).toEqual(["5"]);
+    expect(await texts(STAR(OUT, "<input bind:value=@s/>", S), ["o"])).toEqual(["5"]);
+    expect(await texts(STAR(OUT, "\"R\${bump()}\"", ""), ["o"])).toEqual(["5"]);
+  }, 120000);
+
+  // default-deny: an element the bounded walk does not positively understand (here `<errors>`, MErrors)
+  // falls back to base's rule — every seed placed at or after the construct's start counts — so the
+  // later `z`, which nothing there names, is counted; without it, `z` runs after the initializer
+  test("default-deny: an `<errors>` before the initializer counts every later seed (fail closed)", async () => {
+    const d = await errors(`<program>
+\${ let n: int = 1; }
+\${ function bump() -> int { n = 5; return 0; } }
+let <e:string="" length(>2)/>
+<div if=(true)><errors of=@e/>\${ const k: int = n + 0; }<p id="o">\${k}</p></div>
+let <z:int=(bump())/>
+</program>
+`);
+    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(await texts(`<program>
+\${ let n: int = 1; }
+\${ function bump() -> int { n = 5; return 0; } }
+let <e:string="" length(>2)/>
+<div if=(true)><span/>\${ const k: int = n + 0; }<p id="o">\${k}</p></div>
+let <z:int=(bump())/>
+<p id="o2">\${n}</p>
+</program>
+`, ["o", "o2"])).toEqual(["1", "5"]);
+  }, 120000);
 });

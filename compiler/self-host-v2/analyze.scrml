@@ -11766,6 +11766,11 @@ ${
         for (const it of items) {
             const n: ANode | not = markupOfItem(it);
             if (n is given && (codeBlocksOf(regionBlocks(n, lo, hi)).length > 0 || regionUses(t, n, lo, hi).length > 0)) return true;
+            // s482 r2 — a `<*x/>` view there runs its markup's code; anything opaque fails closed
+            if (n is given) {
+                const sc: RegionScan = regionScan(t, n, lo, hi);
+                if (sc.opaque || sc.views.length > 0) return true;
+            }
         }
         return false;
     }
@@ -11849,12 +11854,17 @@ ${
     // that nothing there uses (`let <z:int=(bump())/>` after it) runs its seed after the
     // initializer: it is not counted (it was, with no upper bound, and refused with a message
     // that put the write inside the construct).
+    // s482 r2 (#2082 r1 review HIGH-2, MED-1): the walk is default-deny (regionScan) — the state-child
+    // bodies a `<*field/>` there renders are walked like a component's renders, and anything there the
+    // walk does not positively understand falls back to base's rule: every seed placed at or after `lo`.
     // `lo` < 0: all of the program body's code (bodyWritesOf, #2076).
     fn constructWrites(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[], usesR: FxAtom[][], file: string, items: AItem[], pfields: FieldInfo[], lo: int, hi: int) -> BodyW {
         if (lo < 0) return bodyWritesOf(g, t, sum, writes, sites, lets, file, items, pfields);
         let blocks: ABlock[] = [];
         let uses: int[] = [];
         let binds: int[] = [];
+        let views: ViewW[] = [];
+        let opaque: boolean = false;
         for (const it of items) {
             const k: AItemK = it.k;
             const c: AConst | not = match k {
@@ -11872,15 +11882,23 @@ ${
                 blocks = blocks.concat(regionBlocks(n, lo, hi));
                 uses = unionIds(uses, regionUses(t, n, lo, hi));
                 binds = unionIds(binds, regionBindCells(t, g.program, pfields, n, lo, hi));
+                const sc: RegionScan = regionScan(t, n, lo, hi);
+                views = views.concat(placeViews(g, sc.views, file));
+                if (sc.opaque) opaque = true;
             }
         }
         // the cells the code there uses (with the components' code, below) — a `bind:` there
         // included: mounting the element reads its cell (#2082 review HIGH-1) — then the seeds they run
         let used: int[] = unionIds(blocksCells(t, sum, usesR, file, blocks, g.program.id, pfields), binds);
         let bw: BodyW = blocksWrites(g, t, sum, writes, sites, lets, file, blocks, pfields);
+        // s482 r2 (#2082 r1 review HIGH-2, MED-1) — the markup a `<*x/>` there renders (regionScan)
+        const va: ViewAcc = viewsWrites(g, t, sum, writes, sites, lets, usesR, pfields, views);
+        bw = mergeBodyW(bw, va.bw);
+        used = unionIds(used, va.used);
+        if (va.opaque) opaque = true;
         // the components used there, and those they use, each once
         let seen: int[] = [];
-        let todo: int[] = uses;
+        let todo: int[] = unionIds(uses, va.uses);
         for (; todo.length > 0; ) {
             let next: int[] = [];
             for (const d of todo) {
@@ -11897,6 +11915,13 @@ ${
                                 cb = cb.concat(bodyCodeBlocks(rn));
                                 next = unionIds(next, regionUses(t, rn, -1, 2147483647));
                                 used = unionIds(used, regionBindCells(t, g.program, pfields, rn, -1, 2147483647));
+                                const rs: RegionScan = regionScan(t, rn, -1, 2147483647);
+                                if (rs.opaque) opaque = true;
+                                const rv: ViewAcc = viewsWrites(g, t, sum, writes, sites, lets, usesR, pfields, placeViews(g, rs.views, ds.file));
+                                bw = mergeBodyW(bw, rv.bw);
+                                used = unionIds(used, rv.used);
+                                next = unionIds(next, rv.uses);
+                                if (rv.opaque) opaque = true;
                             }
                             bw = mergeBodyW(bw, blocksWrites(g, t, sum, writes, sites, lets, ds.file, cb, pfields));
                             used = unionIds(used, blocksCells(t, sum, usesR, ds.file, cb, g.program.id, pfields));
@@ -11914,7 +11939,8 @@ ${
             grew = false;
             for (const fi of pfields) {
                 const at: int = fi.span.start;
-                if (ran.indexOf(fi.sym.id) < 0 && at >= lo && (at < hi || used.indexOf(fi.sym.id) >= 0)) {
+                // default-deny: with something opaque there, every seed placed at or after `lo` (base)
+                if (ran.indexOf(fi.sym.id) < 0 && at >= lo && (at < hi || opaque || used.indexOf(fi.sym.id) >= 0)) {
                     ran = ran.concat([fi.sym.id]);
                     grew = true;
                     const sb: ABlock[] = seedBlocks(fi.init);
@@ -12056,6 +12082,175 @@ ${
             for (const r of gatherRows(gf)) { out = unionIds(out, regionUses(t, r, lo, hi)); }
         }
         return out;
+    }
+
+    // s482 r2 (#2082 r1 review HIGH-2, MED-1) — the bounded walk is DEFAULT-DENY. regionBlocks /
+    // regionUses / regionBindCells read the code an element runs at mount from its attributes and
+    // its kids; that is the whole story only for the node kinds listed here. regionScan names, for
+    // the part of `n` between `lo` and `hi`, (a) the markup a `<*x/>` there renders that is NOT its
+    // kids — every state-child body of a `rule=` graph field (MStateView, all states: any may be the
+    // one held at mount), the inlined renders of a child field (MInline) — which the caller walks as
+    // it walks a component's renders; and (b) `opaque`: something there the walk does not
+    // positively understand, on which the caller falls back to base's rule (every seed placed at or
+    // after `lo` runs there). Understood, by ANodeK: Text, Interp, Run, Css (no hidden code);
+    // Effect, Request (they do not run at mount); Gather (its rows); Elem — by its ElemFact: MHtml,
+    // MUse (its renders: constructWrites' component loop; its slot content: its kids), MEach (its
+    // `in=` / `key=` values, its row template: its kids), MSlot, MDb, MSchema (kids), MMatch (its
+    // `on=` value; every arm's body), MStateView / MInline (the views above). Opaque: DeclNode (a
+    // declaration where markup stands), MStar (a declaration's shared instance — when its seeds
+    // run is not judged here), MErrors, an element with no fact, and an attribute whose value is
+    // code the walk does not read (a `{ }` block that is not an event handler, a quoted value or a
+    // duration holding an interpolation).
+    type ViewW:struct = { nodes: ANode[], decl: int, key: int, file: string }
+    type RegionScan:struct = { views: ViewW[], opaque: boolean }
+
+    fn noScan() -> RegionScan {
+        return { views: [], opaque: false };
+    }
+
+    fn opaqueScan() -> RegionScan {
+        return { views: [], opaque: true };
+    }
+
+    fn joinScan(a: RegionScan, b: RegionScan) -> RegionScan {
+        return { views: a.views.concat(b.views), opaque: a.opaque || b.opaque };
+    }
+
+    fn regionScan(t: Tables, n: ANode, lo: int, hi: int) -> RegionScan {
+        if (n.span.end <= lo || n.span.start >= hi) return noScan();
+        const k: ANodeK = n.k;
+        return match k {
+            .Elem(e: e) :> scanElem(t, e, lo, hi),
+            .Gather(f: gf) :> scanNodes(t, gatherRows(gf), lo, hi),
+            .Text(text: x) :> noScan(),
+            .Interp(e: x) :> noScan(),
+            .Run(b: rb) :> noScan(),
+            .Css(c: x) :> noScan(),
+            .Effect(w: x) :> noScan(),
+            .Request(r: x) :> noScan(),
+            .DeclNode(d: x) :> (n.span.start >= lo ? opaqueScan() : noScan())
+        };
+    }
+
+    fn scanNodes(t: Tables, ns: ANode[], lo: int, hi: int) -> RegionScan {
+        let out: RegionScan = noScan();
+        for (const n of ns) { out = joinScan(out, regionScan(t, n, lo, hi)); }
+        return out;
+    }
+
+    fn scanElem(t: Tables, e: AElem, lo: int, hi: int) -> RegionScan {
+        // an element that holds `lo` (an HTML element or a `<db>` the place descends through,
+        // constructStart): only what is inside it is there
+        if (e.span.start < lo) return scanNodes(t, e.kids, lo, hi);
+        for (const a of e.attrs) { if (opaqueAttr(a)) return opaqueScan(); }
+        const fct: ElemFact | not = elemFact(t.elems, e.nid);
+        if (fct is not) return opaqueScan();
+        return scanFact(t, e, fct, lo, hi);
+    }
+
+    fn scanFact(t: Tables, e: AElem, fct: ElemFact, lo: int, hi: int) -> RegionScan {
+        const kids: RegionScan = scanNodes(t, e.kids, lo, hi);
+        return match fct {
+            .MHtml :> kids,
+            .MUse(decl: d) :> kids,
+            .MEach(bind: b) :> kids,
+            .MSlot :> kids,
+            .MDb :> kids,
+            .MSchema :> kids,
+            .MMatch(m: m) :> scanArms(t, e, m, lo, hi),
+            .MStateView(v: v) :> joinScan(kids, stateViewScan(e, v)),
+            .MInline(v: v) :> joinScan(kids, { views: [{ nodes: v.nodes, decl: -1, key: e.nid, file: "" }], opaque: false }),
+            .MStar(decl: d) :> opaqueScan(),
+            .MErrors(of: o) :> opaqueScan()
+        };
+    }
+
+    // A `<match>`: its arms are its kids (the arm element carries no ElemFact); each arm's body.
+    fn scanArms(t: Tables, e: AElem, m: MatchBlock, lo: int, hi: int) -> RegionScan {
+        let out: RegionScan = noScan();
+        for (const kid of e.kids) {
+            const ae: AElem | not = elemOfNodeK(kid.k);
+            let arm: boolean = false;
+            if (ae is given) {
+                for (const ma of m.arms) { if (ma.elem.nid == ae.nid) arm = true; }
+            }
+            if (ae is given && arm) {
+                for (const a of ae.attrs) { if (opaqueAttr(a)) out = joinScan(out, opaqueScan()); }
+                out = joinScan(out, scanNodes(t, ae.kids, lo, hi));
+            } else out = joinScan(out, regionScan(t, kid, lo, hi));
+        }
+        return out;
+    }
+
+    fn stateViewScan(e: AElem, v: StateView) -> RegionScan {
+        let vs: ViewW[] = [];
+        let i: int = 0;
+        for (const arm of v.arms) {
+            // key: the `<*x/>` element and the arm — each state body walked once
+            vs = vs.concat([{ nodes: arm.body, decl: v.decl.id, key: e.nid * 64 + i, file: "" }]);
+            i = i + 1;
+        }
+        return { views: vs, opaque: false };
+    }
+
+    // An attribute value that is code the walk (bodyElemBlocks) does not read.
+    fn opaqueAttr(a: AAttr) -> boolean {
+        const av: AAttrValue = a.value;
+        return match av {
+            .NoValue :> false,
+            .Quoted(v: s, sq: q) :> s.indexOf("$" + "{") >= 0,
+            .Bare(e: x) :> false,
+            .Paren(e: x) :> false,
+            .Braced(b: b, ev: ev) :> eventName(a.name) == "",
+            .Dur(text: x) :> x.indexOf("$" + "{") >= 0
+        };
+    }
+
+    // The file a view's markup is code of: the declaring declaration's (a state body), else `file`.
+    fn placeViews(g: Globals, vs: ViewW[], file: string) -> ViewW[] {
+        let out: ViewW[] = [];
+        for (const v of vs) {
+            let f: string = file;
+            if (v.decl >= 0) {
+                for (const ds of g.decls) { if (ds.info.sym.id == v.decl) f = ds.file; }
+            }
+            out = out.concat([{ nodes: v.nodes, decl: v.decl, key: v.key, file: f }]);
+        }
+        return out;
+    }
+
+    // What the views (and the views they hold) run: their writes, the cells they use (a `bind:`
+    // included), the components they use, and whether any holds something opaque.
+    type ViewAcc:struct = { bw: BodyW, used: int[], uses: int[], opaque: boolean }
+
+    fn viewsWrites(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[], usesR: FxAtom[][], pfields: FieldInfo[], vs0: ViewW[]) -> ViewAcc {
+        let bw: BodyW = { lets: [], cells: [], cellNames: [] };
+        let used: int[] = [];
+        let uses: int[] = [];
+        let opaque: boolean = false;
+        let seen: int[] = [];
+        let todo: ViewW[] = vs0;
+        for (; todo.length > 0; ) {
+            let next: ViewW[] = [];
+            for (const v of todo) {
+                if (seen.indexOf(v.key) < 0) {
+                    seen = seen.concat([v.key]);
+                    let cb: ABlock[] = [];
+                    for (const vn of v.nodes) {
+                        cb = cb.concat(bodyCodeBlocks(vn));
+                        uses = unionIds(uses, regionUses(t, vn, -1, 2147483647));
+                        used = unionIds(used, regionBindCells(t, g.program, pfields, vn, -1, 2147483647));
+                        const s: RegionScan = regionScan(t, vn, -1, 2147483647);
+                        if (s.opaque) opaque = true;
+                        next = next.concat(placeViews(g, s.views, v.file));
+                    }
+                    bw = mergeBodyW(bw, blocksWrites(g, t, sum, writes, sites, lets, v.file, cb, pfields));
+                    used = unionIds(used, blocksCells(t, sum, usesR, v.file, cb, g.program.id, pfields));
+                }
+            }
+            todo = next;
+        }
+        return { bw: bw, used: used, uses: uses, opaque: opaque };
     }
 
     fn bodyWritesOf(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[], file: string, items: AItem[], pfields: FieldInfo[]) -> BodyW {
