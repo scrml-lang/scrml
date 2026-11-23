@@ -502,7 +502,15 @@ ${
         // is a statement list, evaluated, not rendered"). §40.8: "it runs once
         // at mount in source order, like any other body-top statement". Owned,
         // like an effect, by the scope it stands in; renders nothing.
-        Run(b: ABlock),
+        // s482 (s482-meta-runtime) — `meta`: "" for such a run; else a RUNTIME `^{}`
+        // block (SPEC §22.5) where markup stands, and `meta` is its scope id (§22.10:
+        // deterministic, unique in the document). meta.scrml makes it: its body is the
+        // block's, rewritten (the `meta.*` surface → cell reads / writes and calls on
+        // the reserved receiver `^`) and wrapped in ONE bare `{ … }` so its locals are
+        // the run's own, never file-scope. It is analyzed as a run is; lower makes it a
+        // View.Run with the same `meta`, which the printer renders as a placeholder
+        // element and an `rt.metaEffect` (re-run on a change of what it `meta.get`s).
+        Run(b: ABlock, meta: string),
     }
 
     // -------------------------------------------------------------------------

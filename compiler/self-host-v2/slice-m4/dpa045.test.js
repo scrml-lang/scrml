@@ -111,14 +111,16 @@ describe("dpa-045 B(3) — SUPERSEDED S444: `\\\"` / `\\\\` / `\\${` are escapes
 // display-text escape catalog deleted; whitespace-only text kept.
 // ---------------------------------------------------------------------------
 describe("follow-up 1 — the closed exit set of free text", () => {
-  // s481 (s481-boot-meta): `^{` is now READ — a meta block (§22.2), its body logic. The `^` rows use a
-  // RUNTIME body (`meta.emit`), refused by name (runtime `^{}` is not built), so the extent pins stand
+  // s481 (s481-boot-meta): `^{` is now READ — a meta block (§22.2), its body logic. s482 (s482-meta-runtime):
+  // a runtime body is built too, so the `^` rows use a compile-time body whose evaluation fails
+  // (`"…".repeat(-1)`, E-META-EVAL-001 reported over the whole block), and the extent pins stand
   const body = (sig, other, meta) => (sig === "^" ? meta : other);
+  const code = (sig) => (sig === "!" ? "E-ERROR-014" : sig === "^" ? "E-META-EVAL-001" : "E-BOOTSTRAP-UNSUPPORTED");
   test("`^{` / `!{` / `~{` are exits (context sigils; `~{` per SPEC §4.18.1b): skipped whole and reported", () => {
     for (const sig of ["^", "!", "~"]) {
-      const d = run(P(`<p>a ${sig}${body(sig, `{ x = "</p> }" }`, `{ meta.emit("</p> }"); }`)} b</p>`)).diags;
+      const d = run(P(`<p>a ${sig}${body(sig, `{ x = "</p> }" }`, `{ emit("</p> }".repeat(-1)); }`)} b</p>`)).diags;
       // s452: a `!{` in markup is a handler attached to nothing — E-ERROR-014 (§19.4.3, S451)
-      expect(d.map((x) => x.code)).toEqual([sig === "!" ? "E-ERROR-014" : "E-BOOTSTRAP-UNSUPPORTED"]);
+      expect(d.map((x) => x.code)).toEqual([code(sig)]);
       expect(d[0].message).toContain(sig + "{");
     }
   });
@@ -127,7 +129,7 @@ describe("follow-up 1 — the closed exit set of free text", () => {
   // walker), not at the `}` inside the string: never text.
   test("`^{` / `!{` / `~{` extent: a `}` (and a `</p>`) inside a string does not end the block — the text around it is exactly `a ` and ` b`", () => {
     for (const sig of ["^", "!", "~"]) {
-      const src = P(`<p>a ${sig}${body(sig, `{ x = "</p> }" }`, `{ meta.emit("</p> }"); }`)} b</p>`);
+      const src = P(`<p>a ${sig}${body(sig, `{ x = "</p> }" }`, `{ emit("</p> }".repeat(-1)); }`)} b</p>`);
       const r = run(src);
       const open = src.indexOf(sig + "{");
       const close = src.indexOf("} b</p>") + 1;
@@ -139,8 +141,8 @@ describe("follow-up 1 — the closed exit set of free text", () => {
   });
   test("`^{` / `!{` / `~{` extent: a nested `{ … }` balances too", () => {
     for (const sig of ["^", "!", "~"]) {
-      const r = run(P(`<p>a ${sig}${body(sig, `{ f({ k: "}" }) }`, `{ meta.emit({ k: "}" }.k); }`)} b</p>`));
-      expect(r.diags.map((x) => x.code)).toEqual([sig === "!" ? "E-ERROR-014" : "E-BOOTSTRAP-UNSUPPORTED"]);
+      const r = run(P(`<p>a ${sig}${body(sig, `{ f({ k: "}" }) }`, `{ emit({ k: "}" }.k.repeat(-1)); }`)} b</p>`));
+      expect(r.diags.map((x) => x.code)).toEqual([code(sig)]);
       expect(texts(r).filter((t) => t.trim() !== "")).toEqual(["a ", " b", "end"]);
     }
   });

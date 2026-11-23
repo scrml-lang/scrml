@@ -80,7 +80,7 @@ ${
         let used: MUsed = { chars: 0, tags: 0, nodes: 0, attrs: 0, steps: 0 };
         for (const f of files) {
             const env: MEnv = envOf(f, files);
-            const c0: MC = { file: f.path, env: env, next: next, diags: [], errs: f.errs, hits: 0, used: used };
+            const c0: MC = { file: f.path, env: env, next: next, diags: [], errs: f.errs, hits: 0, used: used, rt: "", wh: "" };
             const r: RItems = mItems(c0, f.items, "program", true);
             used = r.c.used;
             next = r.c.next;
@@ -268,29 +268,41 @@ ${
     // walk's state: the diagnostics so far, the next node id, `hits` (blocks
     // replaced — a file with none is returned as it was).
     // =========================================================================
-    type MC:struct = { file: string, env: MEnv, next: int, diags: Diag[], errs: ASpan[], hits: int, used: MUsed }
+    // s482 (s482-meta-runtime): `rt` — the scope id of the RUNTIME `^{}` block whose body
+    // is being rewritten ("" — none); `wh` — where the walk stands, for a runtime block's
+    // placement: "" the program's markup, "each" an `<each>` / `for … lift` row, "foreign"
+    // inside `<svg>` / `<math>`, "decl" a declaration's markup (a component's renders).
+    type MC:struct = { file: string, env: MEnv, next: int, diags: Diag[], errs: ASpan[], hits: int, used: MUsed, rt: string, wh: string }
+
+    fn withRt(c: MC, rt: string) -> MC {
+        return { file: c.file, env: c.env, next: c.next, diags: c.diags, errs: c.errs, hits: c.hits, used: c.used, rt: rt, wh: c.wh };
+    }
+
+    fn withWh(c: MC, wh: string) -> MC {
+        return { file: c.file, env: c.env, next: c.next, diags: c.diags, errs: c.errs, hits: c.hits, used: c.used, rt: c.rt, wh: wh };
+    }
     // THE EMIT BUDGET spent by the file's blocks so far (characters, `<` characters, nodes).
     // What the compile's `^{}` blocks have emitted so far (THE EMIT BUDGET).
     type MUsed:struct = { chars: int, tags: int, nodes: int, attrs: int, steps: int }
 
     fn withDiag(c: MC, code: string, msg: string, span: ASpan) -> MC {
-        return { file: c.file, env: c.env, next: c.next, diags: c.diags.concat([newDiag(code, msg, c.file, span)]), errs: c.errs, hits: c.hits, used: c.used };
+        return { file: c.file, env: c.env, next: c.next, diags: c.diags.concat([newDiag(code, msg, c.file, span)]), errs: c.errs, hits: c.hits, used: c.used, rt: c.rt, wh: c.wh };
     }
 
     fn withDiags(c: MC, ds: Diag[]) -> MC {
-        return { file: c.file, env: c.env, next: c.next, diags: c.diags.concat(ds), errs: c.errs, hits: c.hits, used: c.used };
+        return { file: c.file, env: c.env, next: c.next, diags: c.diags.concat(ds), errs: c.errs, hits: c.hits, used: c.used, rt: c.rt, wh: c.wh };
     }
 
     fn withNext(c: MC, next: int) -> MC {
-        return { file: c.file, env: c.env, next: next, diags: c.diags, errs: c.errs, hits: c.hits, used: c.used };
+        return { file: c.file, env: c.env, next: next, diags: c.diags, errs: c.errs, hits: c.hits, used: c.used, rt: c.rt, wh: c.wh };
     }
 
     fn withErr(c: MC, span: ASpan) -> MC {
-        return { file: c.file, env: c.env, next: c.next, diags: c.diags, errs: c.errs.concat([span]), hits: c.hits, used: c.used };
+        return { file: c.file, env: c.env, next: c.next, diags: c.diags, errs: c.errs.concat([span]), hits: c.hits, used: c.used, rt: c.rt, wh: c.wh };
     }
 
     fn hit(c: MC) -> MC {
-        return { file: c.file, env: c.env, next: c.next, diags: c.diags, errs: c.errs, hits: c.hits + 1, used: c.used };
+        return { file: c.file, env: c.env, next: c.next, diags: c.diags, errs: c.errs, hits: c.hits + 1, used: c.used, rt: c.rt, wh: c.wh };
     }
 
     type RItems:struct = { items: AItem[], c: MC }
@@ -373,7 +385,7 @@ ${
             .Effect(w: w) :> mEffectNode(c, n, w),
             .Request(r: r) :> mRequestNode(c, n, r),
             .Gather(f: f) :> mGatherNode(c, n, f),
-            .Run(b: b) :> mRunNode(c, n, b)
+            .Run(b: b, meta: mt) :> mRunNode(c, n, b, mt)
         };
     }
 
@@ -393,8 +405,12 @@ ${
 
     fn mElem(c: MC, el: AElem) -> RElem {
         const ra: RAttrs = mAttrs(c, el.attrs);
-        const rk: RNodes = mNodes(ra.c, el.kids, el.tag, false);
-        return { el: { nid: el.nid, span: el.span, star: el.star, tag: el.tag, attrs: ra.attrs, kids: rk.nodes, binds: el.binds, parens: el.parens }, c: rk.c };
+        // s482: where a runtime block among the children would stand (runtimeBlock)
+        let wh: string = c.wh;
+        if (wh == "" && el.tag == "each") wh = "each";
+        if (wh == "" && (el.tag == "svg" || el.tag == "math")) wh = "foreign";
+        const rk: RNodes = mNodes(withWh(ra.c, wh), el.kids, el.tag, false);
+        return { el: { nid: el.nid, span: el.span, star: el.star, tag: el.tag, attrs: ra.attrs, kids: rk.nodes, binds: el.binds, parens: el.parens }, c: withWh(rk.c, c.wh) };
     }
 
     fn mDeclNode(c: MC, n: ANode, d: ADecl) -> RNodes {
@@ -422,13 +438,15 @@ ${
     }
 
     fn mGatherNode(c: MC, n: ANode, f: AFor) -> RNodes {
-        const r: RFor = mFor(c, f);
-        return one({ nid: n.nid, span: n.span, k: ANodeK.Gather(r.f) }, r.c);
+        let wh: string = c.wh;
+        if (wh == "") wh = "each";                      // s482: its lifted markup is a row
+        const r: RFor = mFor(withWh(c, wh), f);
+        return one({ nid: n.nid, span: n.span, k: ANodeK.Gather(r.f) }, withWh(r.c, c.wh));
     }
 
-    fn mRunNode(c: MC, n: ANode, b: ABlock) -> RNodes {
+    fn mRunNode(c: MC, n: ANode, b: ABlock, mt: string) -> RNodes {
         const r: RBlock = mBlock(c, b);
-        return one({ nid: n.nid, span: n.span, k: ANodeK.Run(r.b) }, r.c);
+        return one({ nid: n.nid, span: n.span, k: ANodeK.Run(r.b, mt) }, r.c);
     }
 
     fn mAttrs(c0: MC, attrs: AAttr[]) -> RAttrs {
@@ -471,6 +489,11 @@ ${
     }
 
     fn mDecl(c0: MC, d: ADecl) -> RDecl {
+        const r: RDecl = mDeclIn(withWh(c0, "decl"), d);
+        return { d: r.d, c: withWh(r.c, c0.wh) };
+    }
+
+    fn mDeclIn(c0: MC, d: ADecl) -> RDecl {
         const ro: RVal = mVal(c0, d.own);
         let c: MC = ro.c;
         let attrs: ADeclAttr[] = [];
@@ -594,6 +617,12 @@ ${
 
     fn mEvalStmt(c: MC, s: AStmt, e: AExpr) -> RStmts {
         const m: AMeta | not = metaOf(e);
+        if (m is given && c.rt != "") return { ss: [], c: withDiag(hit(c), "E-BOOTSTRAP-UNSUPPORTED", nestedInRuntimeWhy(), m.span) };
+        // s482: `meta.set("x", v);` — a write of the cell (§22.5.1), as `@x = v;`
+        if (c.rt != "") {
+            const sw: RStmts | not = rtSetStmt(c, s, e);
+            if (sw is given) return sw;
+        }
         if (m is given) {
             const r: RNodes = metaBlock(hit(c), m, "", false, "");
             return { ss: [], c: r.c };
@@ -765,6 +794,12 @@ ${
     // `attr`: the attribute whose value the expression is ("" — none).
     fn mExprAt(c: MC, e: AExpr, attr: string) -> RExpr {
         const m: AMeta | not = metaOf(e);
+        if (m is given && c.rt != "") return { e: ex(e, AExprK.Recovered), c: withErr(withDiag(hit(c), "E-BOOTSTRAP-UNSUPPORTED", nestedInRuntimeWhy(), m.span), m.span) };
+        // s482: the `meta` surface of a runtime block's body (rtForm)
+        if (c.rt != "") {
+            const rf: RExpr | not = rtForm(c, e);
+            if (rf is given) return rf;
+        }
         if (m is given) {
             const r: RNodes = metaBlock(hit(c), m, "", false, attr);
             let c2: MC = r.c;
@@ -991,10 +1026,8 @@ ${
         const fx: FX = factsOf(c0.env, m.body, []);
         const ds: Diag[] = staticDiags(c0, m, fx.f);
         if (ds.length > 0) return { nodes: [], c: withDiags(c0, ds) };
-        // 3. a runtime block (§22.5): phase 2, not built
-        if (!isCompileTime(fx.f)) {
-            return { nodes: [], c: withDiag(c0, "E-BOOTSTRAP-UNSUPPORTED", "a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap builds compile-time `^{}` (§22.4) only (INTERIM, g-boot-meta-runtime-unbuilt-s481)", m.span) };
-        }
+        // 3. a RUNTIME block (§22.5): rewritten and kept for analysis (s482, runtimeBlock)
+        if (!isCompileTime(fx.f)) return runtimeBlock(c0, m, attr);
         // 4. evaluate — on the compile's step total (THE STEP TOTAL, S482 r5, review HIGH-2):
         // what every block before this one spent, refused or not, is gone
         const u0: MUsed = c0.used;
@@ -1032,8 +1065,268 @@ ${
         return "compile-time `^{}` evaluation failed: " + msg + " (§22.4: a block the compile-time evaluator cannot finish is refused, never evaluated without the failing statement)";
     }
 
+    // =========================================================================
+    // s482 (s482-meta-runtime) — a RUNTIME block (§22.5), phase 2 of the build.
+    // Rulings: ruling:user-voice-scrml.md-S481-meta-four item 2 — `meta.get` /
+    // `meta.set` / `meta.subscribe` take LITERAL cell names, resolved here at
+    // compile time; a computed name is refused as not supported yet (INTERIM —
+    // the capable alternative is a by-name lookup at run time); a literal naming
+    // no cell is E-SCOPE-001.
+    //
+    // A block where markup stands is kept, as ANodeK.Run(body, id) — analyzed as
+    // a run is, printed as an effect with a placeholder (core.scrml View.Run
+    // `meta`). Its body is rewritten first, so analysis sees only ordinary scrml
+    // and calls on the reserved receiver `^` (no identifier spells it):
+    //   meta.get("x")            → ^.get(@x)     a read that is the block's dependency
+    //   meta.set("x", v);        → @x = v;       a cell write (a statement)
+    //   meta.bindings.x          → ^.get(@x) for a cell (§22.5.2: "equivalent to
+    //                              meta.get"), the binding `x` itself otherwise
+    //   meta.scopeId             → "<id>"        the block's scope id (a constant)
+    //   meta.emit / cleanup / interval / timeout / clearInterval / clearTimeout(…)
+    //                            → ^.<same>(…)   the per-run `meta` object's calls
+    // Refused by name (INTERIM, g-boot-meta-runtime-residue-s482): `meta.subscribe`,
+    // `meta.types` and `reflect` in a runtime block (the runtime type registry —
+    // design read phase 3), a runtime block in a logic body or an attribute value,
+    // inside `<svg>` / `<math>`, in a declaration's markup, and a `^{}` nested in a
+    // runtime block. In an `<each>` row: E-META-001, as impl#1 (PA default S481
+    // Q7, INTERIM — the capable alternative is a per-row effect).
+    // =========================================================================
+    fn runtimeBlock(c0: MC, m: AMeta, attr: string) -> RNodes {
+        if (attr != "") return { nodes: [], c: withDiag(c0, "E-BOOTSTRAP-UNSUPPORTED", "a runtime `^{}` block (§22.5) as the value of the attribute `" + attr + "=` is not in the bootstrap — its `meta.emit` output goes where markup stands (§22.5.1); move the block among the element's children (INTERIM, g-boot-meta-runtime-residue-s482)", m.span) };
+        if (!m.markup) return { nodes: [], c: withDiag(c0, "E-BOOTSTRAP-UNSUPPORTED", "a runtime `^{}` block (§22.5) inside a logic body (a `" + "$" + "{…}` statement list, a function body, a branch or a loop) is not in the bootstrap yet — it builds a runtime block where markup stands (an element's children, a `<program>` body), whose effect the scope it stands in owns (INTERIM, g-boot-meta-runtime-residue-s482). Move the block into the markup", m.span) };
+        if (c0.wh == "each") return { nodes: [], c: withDiag(c0, "E-META-001", "a runtime `^{}` block inside an `<each>` row (or a `for … lift` row) is refused: each row would need its own effect and its own `meta.emit` place, which this compiler does not build (§22.11, as the main compiler; INTERIM — the capable alternative is a per-row effect, g-boot-meta-runtime-residue-s482). Move the block out of the row", m.span) };
+        if (c0.wh == "foreign") return { nodes: [], c: withDiag(c0, "E-BOOTSTRAP-UNSUPPORTED", "a runtime `^{}` block inside `<svg>` / `<math>` is not in the bootstrap — its `meta.emit` place is an HTML `<span>` (§22.12), which foreign content does not hold (INTERIM, g-boot-meta-runtime-residue-s482). Move the block outside the `<svg>` / `<math>`", m.span) };
+        if (c0.wh == "decl") return { nodes: [], c: withDiag(c0, "E-BOOTSTRAP-UNSUPPORTED", "a runtime `^{}` block in a declaration's markup (a component's renders) is not in the bootstrap — every instance would share one `meta.emit` place (§22.10 makes the scope id unique in the document) (INTERIM, g-boot-meta-runtime-residue-s482). Move the block into the `<program>` markup", m.span) };
+        if (c0.next < 0) return { nodes: [], c: withDiag(c0, "E-BOOTSTRAP-UNSUPPORTED", "this runtime `^{}` block is kept for analysis, and the caller gave the analysis no node ids to give it (a linked program does) — compile the program through the front end", m.span) };
+        const id: string = metaScopeId(c0.file, c0.hits);
+        const r: RBlock = mBlock(withRt(c0, id), m.body);
+        const c1: MC = withRt(r.c, "");
+        if (c1.diags.length > c0.diags.length) return { nodes: [], c: c1 };
+        // ONE bare `{ … }` around the body: its locals are each run's own, never file-scope
+        const nb: int = c1.next;
+        const yes: AExpr = { nid: nb, span: m.span, k: AExprK.Bool(true) };
+        const bare: AStmt = { nid: nb + 1, span: m.span, k: AStmtK.If(yes, r.b, not, IfForm.Bare) };
+        const body: ABlock = { nid: nb + 2, span: m.body.span, stmts: [bare] };
+        return { nodes: [{ nid: m.nid, span: m.span, k: ANodeK.Run(body, id) }], c: withNext(c1, nb + 3) };
+    }
+
+    // §22.10: "deterministic per project-relative path" and unique in the document — the
+    // file's path spelled in [A-Za-z0-9_] (every other character, `_` included, as `_` + its
+    // UTF-16 code unit in FOUR hex digits) and `_` + the block's ordinal in the file.
+    // s482 r1 (review of #2067, LOW-2): the escape is fixed-width so the spelling is injective —
+    // read from the left, a `_` always starts a 4-digit escape until the LAST `_` (the ordinal,
+    // which holds no `_`); a variable-width escape let `a_5f.scrml` and `a` + U+5F5F + `.scrml` meet.
+    fn metaScopeId(file: string, n: int) -> string {
+        let out: string = "scrml_meta_";
+        let i: int = 0;
+        for (; i < file.length; ) {
+            const ch: string = file.substring(i, i + 1);
+            const u: int = file.charCodeAt(i);
+            const alnum: boolean = (u >= 48 && u <= 57) || (u >= 65 && u <= 90) || (u >= 97 && u <= 122);
+            if (alnum) out = out + ch;
+            if (!alnum) out = out + "_" + hex4(u);
+            i = i + 1;
+        }
+        return out + "_" + n;
+    }
+
+    // `u` (a UTF-16 code unit, 0..0xFFFF) in exactly four lower-case hex digits.
+    fn hex4(u: int) -> string {
+        let out: string = hexOf(u);
+        for (; out.length < 4; ) { out = "0" + out; }
+        return out;
+    }
+
+    fn hexOf(u: int) -> string {
+        const digits: string = "0123456789abcdef";
+        let v: int = u;
+        let out: string = "";
+        for (; v > 0; ) {
+            const d: int = v % 16;
+            out = digits.substring(d, d + 1) + out;
+            v = (v - d) / 16;
+        }
+        if (out == "") out = "0";
+        return out;
+    }
+
+    fn nestedInRuntimeWhy() -> string {
+        return "a `^{}` block nested in a runtime `^{}` block is not in the bootstrap (INTERIM, g-boot-meta-runtime-residue-s482) — write the two blocks one after the other";
+    }
+
+    fn rtRefuse(c: MC, e: AExpr, msg: string) -> RExpr {
+        return { e: ex(e, AExprK.Recovered), c: withErr(withDiag(c, "E-BOOTSTRAP-UNSUPPORTED", msg, e.span), e.span) };
+    }
+
+    fn isMetaName(o: AExpr) -> boolean {
+        const k: AExprK = o.k;
+        return match k {
+            .Name(name: n) :> n == "meta",
+            // no-default-arm: one question of an expression — is it the bare name `meta`
+            _ :> false
+        };
+    }
+
+    // `meta.<what>` — the member `what` of the bare `meta`.
+    fn isMetaMember(o: AExpr, what: string) -> boolean {
+        const k: AExprK = o.k;
+        return match k {
+            .Member(obj: x, name: n) :> n == what && isMetaName(x),
+            // no-default-arm: one question of an expression — is it `meta.<what>`
+            _ :> false
+        };
+    }
+
+    // The callee `meta.<m>` → "m"; `meta.types.<m>` → "types.m"; `meta.bindings.<m>` → "bindings.m"; else "".
+    fn metaMethodOf(f: AExpr) -> string {
+        const k: AExprK = f.k;
+        return match k {
+            .Member(obj: o, name: n) :> metaMethodAt(o, n),
+            // no-default-arm: one question of a callee — is it a member of `meta`
+            _ :> ""
+        };
+    }
+
+    fn metaMethodAt(o: AExpr, n: string) -> string {
+        if (isMetaName(o)) return n;
+        if (isMetaMember(o, "types")) return "types." + n;
+        if (isMetaMember(o, "bindings")) return "bindings." + n;
+        return "";
+    }
+
+    // `meta.<m>` with the receiver respelled `^` — the same node ids (no source spells `^`).
+    fn caretMember(f: AExpr, m: string) -> AExpr {
+        const k: AExprK = f.k;
+        const caret: AExpr = match k {
+            .Member(obj: o) :> { nid: o.nid, span: o.span, k: AExprK.Name("^") },
+            // no-default-arm: only ever given a `meta.<m>` callee (metaMethodOf)
+            _ :> { nid: f.nid, span: f.span, k: AExprK.Name("^") }
+        };
+        return { nid: f.nid, span: f.span, k: AExprK.Member(caret, m) };
+    }
+
+    fn calleeIsName(f: AExpr, name: string) -> boolean {
+        const k: AExprK = f.k;
+        return match k {
+            .Name(name: n) :> n == name,
+            // no-default-arm: one question of a callee — is it the bare name `name`
+            _ :> false
+        };
+    }
+
+    fn strLit(e: AExpr) -> string | not {
+        const k: AExprK = e.k;
+        return match k {
+            .Str(v: s) :> s,
+            // no-default-arm: one question of an expression — is it a string literal
+            _ :> not
+        };
+    }
+
+    // One form of the `meta` surface (or `reflect`) in a runtime body → its rewrite; `not` —
+    // not such a form (the walk goes on as usual).
+    fn rtForm(c: MC, e: AExpr) -> RExpr | not {
+        const k: AExprK = e.k;
+        return match k {
+            .Call(callee: f, args: xs) :> rtCall(c, e, f, xs),
+            .Member(obj: o, name: n) :> rtMember(c, e, o, n),
+            // no-default-arm: only a call or a member is a form of the `meta` surface
+            _ :> not
+        };
+    }
+
+    fn rtCall(c: MC, e: AExpr, f: AExpr, xs: AExpr[]) -> RExpr | not {
+        if (calleeIsName(f, "reflect")) return rtRefuse(c, e, "`reflect(…)` in a runtime `^{}` block is not in the bootstrap yet — the runtime type registry (`meta.types`, §22.4.2 / §22.5.4) is phase 3 of the build (INTERIM, g-boot-meta-runtime-residue-s482). Reflect the type in a compile-time block, or pass what the runtime block needs as a cell");
+        const op: string = metaMethodOf(f);
+        if (op == "") return not;
+        if (op == "get") return rtGet(c, e, f, xs);
+        if (op == "set") return rtRefuse(c, e, "`meta.set(…)` used as a value is not in the bootstrap — it writes a cell (§22.5.1) and is built as a statement of its own (INTERIM, g-boot-meta-runtime-residue-s482). Call it on its own line");
+        if (op == "emit" || op == "cleanup" || op == "interval" || op == "timeout" || op == "clearInterval" || op == "clearTimeout") {
+            const ra: RExprs = mExprs(c, xs);
+            return { e: ex(e, AExprK.Call(caretMember(f, op), ra.es)), c: ra.c };
+        }
+        if (op == "subscribe") return rtRefuse(c, e, "`meta.subscribe(…)` in a runtime `^{}` block is not in the bootstrap yet (§22.5.1; INTERIM, g-boot-meta-runtime-residue-s482) — read the cell with `meta.get(\"name\")`: the block re-runs when it changes");
+        if (op == "types.reflect") return rtRefuse(c, e, "`meta.types.reflect(…)` is not in the bootstrap yet — the runtime type registry (§22.5.4) is phase 3 of the build (INTERIM, g-boot-meta-runtime-residue-s482). Reflect the type in a compile-time block");
+        return rtRefuse(c, e, "`meta." + op + "(…)` is not a call of the runtime `meta` object the bootstrap builds (§22.5.1: get, set, emit, cleanup, interval, timeout, clearInterval, clearTimeout; subscribe and types are not built yet — INTERIM, g-boot-meta-runtime-residue-s482)");
+    }
+
+    // ruling:user-voice-scrml.md-S481-meta-four item 2: a LITERAL cell name, resolved here.
+    fn rtCellName(c: MC, e: AExpr, what: string, xs: AExpr[], arity: int) -> RCell {
+        if (xs.length != arity) return { name: "", r: rtRefuse(c, e, "`meta." + what + "(…)` takes " + arity + " argument" + (arity == 1 ? "" : "s") + " (§22.5.1), the first a cell's name as a string literal") };
+        const lit: string | not = strLit(xs[0]);
+        if (lit is not) return { name: "", r: rtRefuse(c, e, "`meta." + what + "(…)` with a computed cell name is not supported yet — the bootstrap resolves the name at compile time, so it must be a string literal naming a cell (`meta." + what + "(\"count\"…)`) (ruling:user-voice-scrml.md-S481-meta-four item 2; INTERIM — the capable alternative is a by-name lookup at run time)") };
+        if (c.env.cells.indexOf(lit) < 0) {
+            return { name: "", r: { e: ex(e, AExprK.Recovered), c: withErr(withDiag(c, "E-SCOPE-001", "`meta." + what + "(\"" + lit + "\")` names no cell of the program — the name is resolved at compile time and must name a declared cell (`<" + lit + ">`) (ruling:user-voice-scrml.md-S481-meta-four item 2)", xs[0].span), e.span) } };
+        }
+        return { name: lit, r: { e: e, c: c } };
+    }
+
+    fn rtGet(c: MC, e: AExpr, f: AExpr, xs: AExpr[]) -> RExpr {
+        const rc: RCell = rtCellName(c, e, "get", xs, 1);
+        if (rc.name == "") return rc.r;
+        return { e: ex(e, AExprK.Call(caretMember(f, "get"), [ex(xs[0], AExprK.At(rc.name))])), c: c };
+    }
+
+    fn rtMember(c: MC, e: AExpr, o: AExpr, n: string) -> RExpr | not {
+        if (isMetaName(o)) {
+            if (n == "scopeId") return { e: ex(e, AExprK.Str(c.rt)), c: c };
+            return rtRefuse(c, e, "`meta." + n + "` used as a value is not in the bootstrap — the runtime `meta` object is reached through its calls (`meta.get(\"x\")`, `meta.emit(html)`, …), `meta.scopeId` and `meta.bindings.<name>` (§22.5.1; INTERIM, g-boot-meta-runtime-residue-s482)");
+        }
+        if (isMetaMember(o, "bindings")) return rtBinding(c, e, o, n);
+        if (isMetaMember(o, "types")) return rtRefuse(c, e, "`meta.types` is not in the bootstrap yet — the runtime type registry (§22.5.4) is phase 3 of the build (INTERIM, g-boot-meta-runtime-residue-s482)");
+        return not;
+    }
+
+    // §22.5.2: a cell's entry "SHALL return the same value as meta.get" — a dependency read. A
+    // constant binding (a file-scope `const`, a function, an import) is the binding itself: its
+    // value at run start is its value. A `let` — or a binding meta.scrml cannot see is constant
+    // (a body-top `${ … }` local, a server function) — would need §22.5.2's per-run snapshot
+    // ("the value that was current when the effect function was invoked for this run"), which is
+    // not built: refused by name (INTERIM).
+    fn rtBinding(c: MC, e: AExpr, o: AExpr, n: string) -> RExpr {
+        if (c.env.cells.indexOf(n) < 0) {
+            const d: MDecl | not = findDecl(c.env, n);
+            let constant: boolean = false;
+            if (d is given) constant = d.kind != 2;
+            if (!constant) return rtRefuse(c, e, "`meta.bindings." + n + "` — the entry of a `let` binding (or of one this compiler cannot see is constant: a body-top `" + "$" + "{ … }` local, a server function, a name not declared at file scope) is not built: §22.5.2 gives such an entry the value current when the run started, a snapshot the bootstrap does not take (INTERIM, g-boot-meta-runtime-residue-s482). Read the binding directly, or declare it `const` at file scope");
+            return { e: ex(e, AExprK.Name(n)), c: c };
+        }
+        if (c.next < 0) return rtRefuse(c, e, "`meta.bindings." + n + "` — the caller gave the analysis no node ids (compile the program through the front end)");
+        const at: AExpr = { nid: c.next, span: e.span, k: AExprK.At(n) };
+        return { e: ex(e, AExprK.Call(caretMember(o, "get"), [at])), c: withNext(c, c.next + 1) };
+    }
+
+    // `meta.set("x", v);` as a statement → `@x = v;` (§22.5.1: "Write a reactive @variable by name").
+    fn rtSetStmt(c: MC, s: AStmt, e: AExpr) -> RStmts | not {
+        const k: AExprK = e.k;
+        const f: AExpr | not = match k {
+            .Call(callee: g) :> g,
+            // no-default-arm: one question of a statement's expression — is it a call
+            _ :> not
+        };
+        if (f is not) return not;
+        if (metaMethodOf(f) != "set") return not;
+        const xs: AExpr[] = callArgs(e);
+        const rc: RCell = rtCellName(c, e, "set", xs, 2);
+        if (rc.name == "") return { ss: [], c: rc.r.c };
+        const rv: RExpr = mExpr(c, xs[1]);
+        const w: AExpr = ex(e, AExprK.Assign(ex(xs[0], AExprK.At(rc.name)), rv.e, false, false));
+        return { ss: [st(s, AStmtK.Eval(w))], c: rv.c };
+    }
+
+    fn callArgs(e: AExpr) -> AExpr[] {
+        const k: AExprK = e.k;
+        return match k {
+            .Call(args: xs) :> xs,
+            // no-default-arm: only ever given a call (rtSetStmt)
+            _ :> []
+        };
+    }
+
+    type RCell:struct = { name: string, r: RExpr }
+
     fn withUsed(c: MC, u: MUsed) -> MC {
-        return { file: c.file, env: c.env, next: c.next, diags: c.diags, errs: c.errs, hits: c.hits, used: u };
+        return { file: c.file, env: c.env, next: c.next, diags: c.diags, errs: c.errs, hits: c.hits, used: u, rt: c.rt, wh: c.wh };
     }
 
     // The nodes of a spliced run, every descendant counted.
