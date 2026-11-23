@@ -24,3 +24,18 @@ Base: #2079 (s482-construct-init-fu) head f0281eca2, rebased onto origin/main on
       types-gate OK (182 unchanged); snippet-gate / claim-gate 0 failed; corpus-compile-floor PASS;
       gen-md-shim current; gen-bootstrap-severity current; e2e-render-map 259 pass.
       New tests red on base: 19 fail / 9 pass (the 9 are refusal and guard tests base already met).
+- [x] fix round r1 (#2082 review, head b7502bd4d → a3ce57fe8):
+      HIGH-1: constructWrites missed the cell named by a `bind:` (AttrKind.ABind sits on the attribute,
+      not on the `@s` node), so a later cell's seed run at the mount went uncounted — c3-bind (construct)
+      and c6-ta-bindz (textarea) compiled and showed k = 1 in Chromium. regionBindCells adds every `bind:`
+      cell of an element starting in the region (and in a used component's render), read through
+      bindCellOf, shared with the seed-reach judgment's bodyBindReach. Both shapes refused again (base
+      refused c3; c6 now refused, base 5). Other attribute forms (class:, style:, show=, if=, nested
+      attrs, component props) were already counted (their `@x` node carries a read fact).
+      LOW-1: regionHasCode skips literal attribute values (codeBlocksOf / literalBlock: Num, Str, Bool,
+      not) — `<textarea rows=3>${ const k = bump(); }${n}` compiles, Chromium "5" (source order).
+      Tests: slice-m4 cell-seed-bound (+3), rcdata-init-place (+2); Chromium rcdata-init-place-chromium
+      (+5: 2 CLI refusals, 2 controls = 5, rows=3 = 0/5), 9 pass / 11 expects, not skipped.
+      Gates: pretest exit 0; conformance 845/4/491/628, CRASH 0, 0 per-case diffs vs base; corpus
+      (2972) 0 newly rejected / 0 newly accepted / 0 code / 0 output diffs vs d64e7e060; s34-census
+      PASS; types-gate OK 182; corpus-compile-floor PASS; e2e-render-map 259 pass.
