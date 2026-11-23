@@ -98,3 +98,12 @@ Base: #2079 (s482-construct-init-fu) head f0281eca2, rebased onto origin/main on
       rows; refused on main too) and g10-ta-bind-checked-sib (RCDATA path; main 5 — the place was
       after the element there) change, all to E-FILE-SCOPE-INIT-IN-CONSTRUCT.
 
+      Tests: slice-m4 cell-seed-bound / rcdata-init-place / e-type-044 46 pass / 0 fail; Chromium
+      rcdata-init-place-chromium 17 pass / 0 fail, not skipped (+4: s01a, r02 refusals; s01a, r02
+      controls = 5).
+      Gates (head 28182efa8; base main d64e7e060): pre-commit hook PASS (58100 pass / 0 fail);
+      pretest exit 0; bootstrap-conformance --json PASS 845 / FAIL 4 / UNSUPPORTED 491 / NOT-TWINNED 628,
+      CRASH 0, 0 per-case bucket/emitted diffs vs base; corpus differential + byte-compare (2972 files,
+      html/js/server) vs main: 0 newly rejected / 0 newly accepted / 0 code changes / 0 output diffs /
+      0 throws; s34-census --check-new PASS (1 row); types-gate OK (182 unchanged);
+      corpus-compile-floor PASS; e2e-render-map 259 pass / 0 fail.
