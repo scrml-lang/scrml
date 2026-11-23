@@ -3966,18 +3966,29 @@ ${
                 out = out.concat([{ pat: Pattern.PWild, body: armBody(c, h, a), value: armValue(c, h, a), whole: wholeSym(c, a) }]);
             } else if (idx >= 0 && !deadTransportArm(c, h, idx)) {
                 out = out.concat([{ pat: Pattern.PVariant(effErr(c, h), idx, armBindSyms(c, a)), body: armBody(c, h, a), value: armValue(c, h, a), whole: not }]);
-            } else if (idx == -7) {
+            } else if (idx == -7 || (idx == -1 && isMatch)) {
                 // s482 — an alternation (§18.2): one failure arm testing each alternate's variant
                 // (a `.Transport` alternate the call cannot raise is left out, as its own arm would be)
-                let ps: Pattern[] = [];
-                for (const ix of armAltsOf(c.t, a)) {
-                    if (ix >= 0 && !deadTransportArm(c, h, ix)) ps = ps.concat([Pattern.PVariant(effErr(c, h), ix, [])]);
-                }
+                // s482-alt-followups (LOW-1) — and, in a `match`, a WILDCARD alternation
+                // (`.Denied | else :> …`): its `_` / `else` is the success value's arm (matchOk),
+                // and the error variants its other alternates name run the same body here (analyze
+                // counts them covered, resolveArms). A plain `_` / `else` has no alternates: no arm.
+                const ps: Pattern[] = altErrPats(c, h, armAltsOf(c.t, a));
                 if (ps.length == 1) out = out.concat([{ pat: ps[0], body: armBody(c, h, a), value: armValue(c, h, a), whole: not }]);
                 if (ps.length > 1) out = out.concat([{ pat: Pattern.PAlt(ps), body: armBody(c, h, a), value: armValue(c, h, a), whole: not }]);
             }
         }
         return out;
+    }
+
+    // s482 — the failure patterns of an alternation's named error alternates, in source order
+    // (its wildcard / unresolved alternates, and a `.Transport` the call cannot raise, left out).
+    fn altErrPats(c: LC, h: HandledFact, alts: int[]) -> Pattern[] {
+        let ps: Pattern[] = [];
+        for (const ix of alts) {
+            if (ix >= 0 && !deadTransportArm(c, h, ix)) ps = ps.concat([Pattern.PVariant(effErr(c, h), ix, [])]);
+        }
+        return ps;
     }
 
     // The whole-error binder's Sym (the binder minted it; `_ _` binds nothing visible but still has one).

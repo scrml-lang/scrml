@@ -272,10 +272,14 @@ describe("unreachable / misplaced alternates", () => {
     expect(codes(src)).toEqual(["E-SYNTAX-010"]);
   });
 
-  test("… and after full coverage it is W-MATCH-001", () => {
-    const src = prog(TYPES + `    fn f(k: K) -> int {\n        return match k {\n            .A | .B :> 1,\n            .C | .D :> 2,\n            .A | else :> 3,\n        };\n    }`);
+  test("… and after full coverage a plain `else` is W-MATCH-001; a redundant alternate there is E-TYPE-023", () => {
+    const src = prog(TYPES + `    fn f(k: K) -> int {\n        return match k {\n            .A | .B :> 1,\n            .C | .D :> 2,\n            else :> 3,\n        };\n    }`);
     expect(codes(src)).toEqual([]);
     expect(allCodes(src)).toContain("W-MATCH-001");
+    // s482-alt-followups (INFO-1): the `.A` alternate of a wildcard alternation names a case an
+    // earlier arm takes — §18.14.2 E-TYPE-023, as for `.A | .C` (was: W-MATCH-001 only)
+    const red = prog(TYPES + `    fn f(k: K) -> int {\n        return match k {\n            .A | .B :> 1,\n            .C | .D :> 2,\n            .A | else :> 3,\n        };\n    }`);
+    expect(codes(red)).toEqual(["E-TYPE-023"]);
   });
 
   test("on a failable result the wildcard alternation is the `else` (`.Ok` only): an error it would take is E-MATCH-ELSE-ABSORBS-ERROR", () => {
