@@ -21,4 +21,9 @@ Branch `s482-match-alternation` from origin/main ce6d500b0.
 
 ## Status
 - [x] build + slice test green (31/31), red on base (30/31 before strictening)
-- [ ] full hook / conformance / gates / gap record / PR
+- [x] commit af4eaa5ef (full hook PASS 57916/0)
+- [x] conformance cases match-codes/{match-alternation-rt, e-match-alt-binding-pos, e-match-alt-binding-neg}:
+      impl#1 corpus-bridge 3/3; bootstrap PASS (non-twin, runtime executed); base FAIL x3
+- [x] host-global-scan --check 1/2, 2/2 exit 0
+- [x] gap record resolved; new gap g-boot-match-alt-ok-alternate-s482; SPEC §18.2 / §34 status notes
+- [ ] final gates, byte-compare, corpus differential, self-host counts, PR

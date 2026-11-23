@@ -1,0 +1,31 @@
+// §18.2 — an arm pattern lists several alternates separated by `|`: enum variants, string literals and numbers, value-form `match` arms in functions.
+<program>
+    type Size:enum = { Small, Medium, Large, Huge }
+
+    function kind(s: Size) -> string {
+        return match s {
+            .Small | .Medium :> "compact",
+            .Large | .Huge :> "big",
+        };
+    }
+    function code(w: string) -> string {
+        return match w {
+            "yes" | "y" | "ok" :> "Y",
+            "no" | "n" :> "N",
+            else :> "?",
+        };
+    }
+    function tier(n: int) -> string {
+        return match n {
+            1 | 2 | 3 :> "low",
+            4 | 5 :> "mid",
+            else :> "high",
+        };
+    }
+
+    <main>
+        <p id="k">${kind(Size.Small)} ${kind(Size.Medium)} ${kind(Size.Large)} ${kind(Size.Huge)}</p>
+        <p id="c">${code("yes")} ${code("y")} ${code("ok")} ${code("n")} ${code("maybe")}</p>
+        <p id="t">${tier(1)} ${tier(3)} ${tier(4)} ${tier(5)} ${tier(9)}</p>
+    </main>
+</program>

@@ -1,0 +1,17 @@
+{
+  "id": "match-codes-match-alternation-rt",
+  "description": "§18.2 — `|` arm-pattern alternation in value-form `match` arms: enum variants (`.Small | .Medium :>`), string literals (`\"yes\" | \"y\" | \"ok\" :>`) and numbers (`1 | 2 | 3 :>`). Each alternate takes its own value: #k \"compact compact big big\", #c \"Y Y Y N ?\", #t \"low low mid mid high\".",
+  "language-version": "1.0",
+  "spec": "§18.2",
+  "rationale": "§18.2: \"An arm pattern MAY list several alternates separated by `|` (`.B | .C :> r`, `\"a\" | \"b\" :> r`, `1 | 2 :> r` — the §51.0.J `derived=match` form), at ANY arm position.\" The alternates of one arm cover the union of their cases (§18.8.1: the enum match is exhaustive with no `else`).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-020", "E-MATCH-ALT-BINDING", "E-SYNTAX-011"],
+    "notCodePrefixes": ["E-"],
+    "domAnchored": [
+      { "selector": "#k", "text": "compact compact big big" },
+      { "selector": "#c", "text": "Y Y Y N ?" },
+      { "selector": "#t", "text": "low low mid mid high" }
+    ]
+  }
+}

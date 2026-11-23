@@ -1,0 +1,16 @@
+// §18.2 — POSITIONAL `_` discards in the alternates of one arm are permitted: no E-MATCH-ALT-BINDING.
+<program>
+    type Shape:enum = { Circle(r: int), Square(r: int), Dot }
+
+    function round(s: Shape) -> string {
+        return match s {
+            .Circle(_) | .Square(_) :> "sized",
+            .Dot :> "point",
+        };
+    }
+
+    <main>
+        <p id="out">${round(Shape.Square(3))}</p>
+        <p id="dot">${round(Shape.Dot)}</p>
+    </main>
+</program>
