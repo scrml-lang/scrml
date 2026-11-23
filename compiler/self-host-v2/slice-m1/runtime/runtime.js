@@ -5528,6 +5528,58 @@ export function run(scope, body) {
 // The blocks whose runs are making the current change (null: no block is running).
 let metaChain = null;
 
+// s482 (s482-meta-phase3) — `meta.subscribe("x", f)` (§22.5.1: "Subscribe to changes of a reactive
+// variable. Returns an unsubscribe function"): `read` the cell read (tracked HERE only — it is never a
+// dependency of the block), `f` called with the cell's new value, in a batch, each time the cell
+// changes after the subscription. It belongs to the run that made it: the block's next run and its
+// teardown unsubscribe it (impl#1 keeps a subscription past the run that made it, so each re-run adds
+// one; §22.5.1 says nothing of its lifetime — the run owning it is the §22.5.1 cleanup's rule).
+// The callback body is the bootstrap's closure body (analyze lamBodyCheck: no cell write), so a
+// callback never sets off a change of its own.
+class MetaSubscription {
+  constructor(read, fn) {
+    this.read = read;
+    this.fn = fn;
+    this.disposed = false;
+    this.sources = new Set();
+    this.track();
+  }
+  track() {
+    unsubscribe(this);
+    const saved = tracking;
+    tracking = this;
+    try { return this.read(); } finally { tracking = saved; }
+  }
+  markStale() {
+    if (this.disposed) return;
+    queue.add(this);
+    if (batchDepth === 0) flush();
+  }
+  run() {
+    if (this.disposed) return;
+    const v = this.track();
+    try { batch(() => this.fn(v)); } catch (err) { reportLater(err); }
+  }
+  dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
+    queue.delete(this);
+    unsubscribe(this);
+  }
+}
+
+// s482 (s482-meta-phase3) — `reflect(T)` / `meta.types.reflect(name)` (§22.4.2 / §22.5.4): `entries`
+// are the registry entries the call can name (print.scrml: the compiler's `TypeInfo` records); the
+// entry whose name is `name`, else `not` ("Unknown names SHALL return `not`, not throw"). The
+// registry is read, never written.
+function metaReflect(name, entries) {
+  if (typeof name !== "string") return null;
+  for (const e of entries) {
+    if (e.name === name) return e;
+  }
+  return null;
+}
+
 function metaMaxRuns() {
   const n = globalThis.__scrml_max_meta_runs;
   return typeof n === "number" && n > 0 ? n : 100;
@@ -5544,6 +5596,7 @@ class MetaEffect {
     this.tasks = new Set();
     this.cleanups = [];
     this.timers = new Map();
+    this.subs = [];                                  // s482 (s482-meta-phase3): the run's `meta.subscribe`s
     this.nextTimer = 0;
     this.discharging = false;
     this.pending = [];
@@ -5567,8 +5620,11 @@ class MetaEffect {
     if (batchDepth === 0) flush();
   }
   settled(task) { if (task.pending === 0) this.tasks.delete(task); }
-  /** Clear the timers (LIFO), then run the cleanups (LIFO) — §22.5.1. */
+  /** Clear the timers (LIFO), then run the cleanups (LIFO) — §22.5.1. The run's subscriptions end first. */
   discharge() {
+    const subs = this.subs;
+    this.subs = [];
+    for (let i = subs.length - 1; i >= 0; i--) subs[i].dispose();
     const live = [...this.timers.values()];
     this.timers.clear();
     for (let i = live.length - 1; i >= 0; i--) {
@@ -5698,7 +5754,17 @@ class MetaEffect {
       timeout: (ms, fn) => this.startTimer("timeout", ms, fn),
       clearInterval: (id) => this.stopTimer("interval", id),
       clearTimeout: (id) => this.stopTimer("timeout", id),
+      subscribe: (read, fn) => this.subscribe(read, fn),
+      types: Object.freeze({ reflect: (name, entries) => metaReflect(name, entries) }),
     });
+  }
+  subscribe(read, fn) {
+    if (typeof fn !== "function") throw new TypeError("meta.subscribe(name, callback): callback must be a function");
+    // made by a cleanup (the run is being discharged) or after disposal: it would outlive the run
+    if (this.disposed || this.discharging) return () => {};
+    const sub = new MetaSubscription(read, fn);
+    this.subs.push(sub);
+    return () => sub.dispose();
   }
   dispose() {
     if (this.disposed) return;

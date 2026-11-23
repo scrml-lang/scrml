@@ -79,9 +79,8 @@ describe("s481 — the static checks (§22.11, §22.12)", () => {
   test("ruling S481-meta-four item 1: a literal reflect(T) beside a runtime value is a RUNTIME block, not E-META-005", () => {
     const r = run(P(`    type User:struct = { name: string }\n^{ const i = reflect(User); meta.emit("<p>" + i.name + "</p>"); }`));
     expect(errs(r)).not.toContain("E-META-005");
-    // s482: runtime blocks are built; `reflect` in one is refused by name (the runtime type registry, phase 3)
-    expect(errs(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(r.diags[0].message).toContain("runtime `^{}`");
+    // s482-meta-phase3: the runtime type registry is built — the block compiles (§22.4.2)
+    expect(errs(r)).toEqual([]);
   });
 });
 

@@ -1189,7 +1189,57 @@ ${
                                 isEnum: false, members: [], src: td }]);
             k = k + 1;
         }
+        // s482 (s482-meta-phase3) — SPEC §22.5.4: "The compiler-known type `TypeInfo` names an
+        // entry for a compiler that types `reflect()` results: `TypeInfo:struct = { kind: string,
+        // name: string, fields: FieldInfo[], variants: string[] }` with `FieldInfo:struct = { name:
+        // string, type: string }`" (ruling:user-voice-scrml.md-S481-meta-four item 3). Built-in
+        // structs, in scope everywhere and shadowed by a user type of the same name, as the
+        // built-in enums are. Their Syms (and their members') are FIXED (metaInfoSym, negative
+        // ids), not minted, so they shift no other Sym of any program; lower ships them only when
+        // the Core names them (a runtime `reflect`).
+        for (const md of metaInfoDecls()) {
+            let ms: Sym[] = [];
+            for (const n of typeMemberNames(md.body)) { ms = ms.concat([metaInfoSym(md.name, n)]); }
+            out = out.concat([{ nid: -1, name: md.name, file: builtinFile(), exported: false, sym: metaInfoSym(md.name, ""),
+                                isEnum: false, members: ms, src: md }]);
+        }
         return { stubs: out, st: st };
+    }
+
+    export fn typeInfoName() -> string { return "TypeInfo"; }
+    export fn fieldInfoName() -> string { return "FieldInfo"; }
+
+    fn metaInfoDecls() -> ATypeDecl[] {
+        return [
+            builtinStruct(fieldInfoName(), [builtinField("name", "string", false), builtinField("type", "string", false)]),
+            builtinStruct(typeInfoName(), [builtinField("kind", "string", false), builtinField("name", "string", false),
+                                           builtinField("fields", fieldInfoName(), true), builtinField("variants", "string", true)]),
+        ];
+    }
+
+    // The fixed Sym of a `TypeInfo` / `FieldInfo` part ("" — the type itself): -3000.. (the
+    // Appendix H interfaces hold -2000..-2299).
+    export fn metaInfoSym(ty: string, member: string) -> Sym {
+        const names: string[] = ["", "kind", "name", "fields", "variants"];
+        if (ty == fieldInfoName()) {
+            if (member == "") return mkSym(-3010, ty);
+            if (member == "name") return mkSym(-3011, member);
+            return mkSym(-3012, member);
+        }
+        const i: int = names.indexOf(member);
+        if (member == "") return mkSym(-3000, ty);
+        return mkSym(-3000 - i, member);
+    }
+
+    fn builtinStruct(name: string, fs: ATypeField[]) -> ATypeDecl {
+        return { nid: -1, span: mkSpan(0, 0), exported: false, name: name, body: ATypeBody.StructBody(fs) };
+    }
+
+    // A built-in struct field of the named type (`tape` — a tape of it).
+    fn builtinField(name: string, ty: string, tape: boolean) -> ATypeField {
+        let at: AType = { nid: -1, span: mkSpan(0, 0), k: ATypeK.TName(ty) };
+        if (tape) at = { nid: -1, span: mkSpan(0, 0), k: ATypeK.TSeq(at, []) };
+        return { nid: -1, span: mkSpan(0, 0), isLet: false, name: name, ty: at, vals: [] };
     }
 
     // s451 (Ue) — the built-in error enums, written as the SPEC writes them:
@@ -9934,6 +9984,13 @@ ${
     //                           §22.5.1 "opaque intervalId", a `string` here: INTERIM, the
     //                           bootstrap has no opaque type; the runtime keys it per block)
     //   clearInterval / clearTimeout(id: string)  no value
+    // s482 (s482-meta-phase3):
+    //   reflect(name: string, entries: TypeInfo[]) -> TypeInfo (a string-literal name: the
+    //                           type's literal, which names a type) / TypeInfo | not (any
+    //                           other name, §22.5.4 "Unknown names SHALL return `not`") —
+    //                           meta.scrml builds `entries` (the runtime type registry)
+    //   subscribe(@x, f: (v: T) => void) -> () => void   (§22.5.1 "Returns an unsubscribe
+    //                           function"; T the cell's type)
     fn metaOpCallee(callee: AExpr) -> string {
         const m: MethodCall | not = memberCall(callee);
         if (m is not) return "";
@@ -9949,15 +10006,61 @@ ${
         if (op == "timeout") return PrimOp.MetaTimeout;
         if (op == "clearInterval") return PrimOp.MetaClearInterval;
         if (op == "clearTimeout") return PrimOp.MetaClearTimeout;
+        if (op == "reflect") return PrimOp.MetaReflect;
+        if (op == "subscribe") return PrimOp.MetaSubscribe;
         return not;
     }
 
     fn metaArity(op: string) -> int {
-        if (op == "interval" || op == "timeout") return 2;
+        if (op == "interval" || op == "timeout" || op == "reflect" || op == "subscribe") return 2;
         return 1;
     }
 
     fn voidFnType() -> Type { return Type.Fn([], not, false, not); }
+
+    // s482 (s482-meta-phase3) — the compiler-known `TypeInfo` (§22.5.4), and a tape of it
+    export fn typeInfoType() -> Type { return Type.Named(metaInfoSym(typeInfoName(), "")); }
+    fn typeInfoTape() -> Type { return Type.Seq(typeInfoType(), fixedSeq()); }
+
+    // `^.reflect(name, entries)`: `TypeInfo` when the name is a string literal that one of the
+    // entries carries as its `name` (the lookup cannot miss); `TypeInfo | not` otherwise — a
+    // computed name, or a literal naming no type (`meta.types.reflect("Nope")`, §22.5.4 "Unknown
+    // names SHALL return `not`")
+    fn metaReflectType(name: AExpr, entries: AExpr) -> Type {
+        const lit: string | not = strLitOf(name);
+        if (lit is given) {
+            for (const en of arrayElems(entries)) {
+                if (entryName(en) == lit) return typeInfoType();
+            }
+        }
+        return Type.Maybe(typeInfoType());
+    }
+
+    fn strLitOf(e: AExpr) -> string | not {
+        const k: AExprK = e.k;
+        return match k {
+            .Str(v: x) :> x,
+            // no-default-arm: one question of an expression — is it a string literal
+            _ :> not
+        };
+    }
+
+    // a registry entry's `name` (meta.scrml entryExpr: an object literal), "" when it has none
+    fn entryName(e: AExpr) -> string {
+        const k: AExprK = e.k;
+        const ps: AProp[] = match k {
+            .ObjectLit(props: xs) :> xs,
+            // no-default-arm: one question of an entry — its props
+            _ :> []
+        };
+        for (const p of ps) {
+            if (p.name == "name") {
+                const v: string | not = strLitOf(p.value);
+                if (v is given) return v;
+            }
+        }
+        return "";
+    }
 
     fn resolveMetaCall(env: Env, e: AExpr, op: string, args: AExpr[], st0: AS) -> RX {
         const po: PrimOp | not = metaPrimOp(op);
@@ -9972,13 +10075,25 @@ ${
             return plain(not, addValue(re.st, e.nid, ValueFact.VMethod(po)));
         }
         if (op == "cleanup") {
-            const sc: AS = resolveMetaCallback(env, args[0], op, st0);
+            const sc: AS = resolveMetaCallback(env, args[0], op, not, st0);
             return plain(not, addValue(sc, e.nid, ValueFact.VMethod(po)));
         }
         if (op == "interval" || op == "timeout") {
             const rm: RX = resolveExpr(env, args[0], Type.Num, st0);
-            const sf: AS = resolveMetaCallback(env, args[1], op, rm.st);
+            const sf: AS = resolveMetaCallback(env, args[1], op, not, rm.st);
             return plain(Type.Str, addValue(sf, e.nid, ValueFact.VMethod(po)));
+        }
+        if (op == "reflect") {
+            const rn: RX = resolveExpr(env, args[0], Type.Str, st0);
+            const rl: RX = resolveExpr(env, args[1], typeInfoTape(), rn.st);
+            return plain(metaReflectType(args[0], args[1]), addValue(rl.st, e.nid, ValueFact.VMethod(po)));
+        }
+        if (op == "subscribe") {
+            const rs: RX = resolveExpr(env, args[0], not, st0);
+            let cty: Type | not = rs.x.ty;
+            if (cty is not) cty = Type.Str;      // (unreached: meta.scrml names a cell, whose type is known)
+            const sb: AS = resolveMetaCallback(env, args[1], op, cty, rs.st);
+            return plain(voidFnType(), addValue(sb, e.nid, ValueFact.VMethod(po)));
         }
         const ri: RX = resolveExpr(env, args[0], Type.Str, st0);
         return plain(not, addValue(ri.st, e.nid, ValueFact.VMethod(po)));
@@ -9992,11 +10107,40 @@ ${
     // `let` locals, `if` / `else`, and calls of the block's `meta` — isMetaCallExpr); anything
     // else in it, and a named function as the callback, are refused by name (INTERIM,
     // g-boot-meta-runtime-residue-s482).
-    fn resolveMetaCallback(env: Env, lam: AExpr, op: string, st0: AS) -> AS {
+    // s482 (s482-meta-phase3): `meta.subscribe`'s callback takes the cell's new value — `pty` the
+    // cell's type, its one parameter (written bare, or `: T` naming that type); the others take none.
+    fn resolveMetaCallback(env: Env, lam: AExpr, op: string, pty: Type | not, st0: AS) -> AS {
         if (!isLambda(lam)) return addDiag(st0, env.file, lam.span, "E-BOOTSTRAP-UNSUPPORTED", "the callback of `meta." + op + "(…)` is built only as an arrow written in place (`() => { … }`) — a named function or another function value is not in the bootstrap yet (INTERIM, g-boot-meta-runtime-residue-s482)");
-        if (lambdaParams(lam).length != 0) return addDiag(st0, env.file, lam.span, "E-BOOTSTRAP-UNSUPPORTED", "the callback of `meta." + op + "(…)` takes no parameters (§22.5.1: the runtime calls it with none) — write `() => { … }`");
+        if (pty is not && lambdaParams(lam).length != 0) return addDiag(st0, env.file, lam.span, "E-BOOTSTRAP-UNSUPPORTED", "the callback of `meta." + op + "(…)` takes no parameters (§22.5.1: the runtime calls it with none) — write `() => { … }`");
+        if (pty is given && lambdaParams(lam).length > 1) return addDiag(st0, env.file, lam.span, "E-BOOTSTRAP-UNSUPPORTED", "the callback of `meta." + op + "(…)` takes at most one parameter, the cell's new value (§22.5.1) — write `(v) => { … }`");
         let st: AS = st0;
-        const env2: Env = noNarrows(sealEvent(env));
+        let env2: Env = noNarrows(sealEvent(env));
+        let psyms: Sym[] = [];
+        let pts: Type[] = [];
+        if (pty is given) {
+            pts = [pty];
+            const aps: AParam[] = lambdaAParams(lam).concat(lambdaTypedParams(lam));
+            for (const pn of lambdaParams(lam)) {
+                const rs: RSym = mint(reservedName(st, env.file, lam.span, pn), pn);
+                st = rs.st;
+                psyms = psyms.concat([rs.s]);
+                for (const p of aps) {
+                    if (p.name == pn) {
+                        if (p.lin) st = addDiag(st, env.file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "a `lin` parameter on a `meta." + op + "` callback is not in the bootstrap (INTERIM) — drop `lin`");
+                        const at: AType | not = p.ty;
+                        if (at is given && !hasErrIn(fileErrs(env.g.files, env.file), at.span)) {
+                            const rt: RType = resolveTypeFn(teAt(env.g.te, env.file), at, st);
+                            st = rt.st;
+                            if (!rt.unresolved && !sameType(rt.t, pty)) {
+                                st = addDiag(st, env.file, at.span, "E-TYPE-031", "the parameter `" + pn + "` is declared `" + typeName(rt.t) + "`, and `meta." + op + "` passes it the cell's new value, which is `" + typeName(pty) + "` (§22.5.1)");
+                            }
+                        }
+                    }
+                }
+                st = addAnnot(st, rs.s, pty);
+                env2 = withLocal(env2, { name: pn, s: rs.s, ty: pty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "" });
+            }
+        }
         const blk: ABlock | not = lambdaBlock(lam);
         if (blk is given) {
             st = lamBodyCheck(env, blk, [], st);
@@ -10009,8 +10153,8 @@ ${
                 st = resolveExpr(withFx(env2, noFailCtx()), b, not, st).st;
             }
         }
-        const ft: Type = voidFnType();
-        st = addValue(st, lam.nid, ValueFact.VLambda([], ft));
+        const ft: Type = Type.Fn(pts, not, false, not);
+        st = addValue(st, lam.nid, ValueFact.VLambda(psyms, ft));
         return addPending(st, PendRule.FnValue(-1, env.fx.fnSym, env.file, lam.span, ""));
     }
 
@@ -37191,7 +37335,9 @@ ${
             .MetaInterval :> ts,
             .MetaTimeout :> ts,
             .MetaClearInterval :> ts,
-            .MetaClearTimeout :> ts
+            .MetaClearTimeout :> ts,
+            .MetaReflect :> ts,
+            .MetaSubscribe :> ts
         };
     }
 
@@ -37984,7 +38130,9 @@ ${
             .MetaInterval :> VType.Unknown,
             .MetaTimeout :> VType.Unknown,
             .MetaClearInterval :> VType.Unknown,
-            .MetaClearTimeout :> VType.Unknown
+            .MetaClearTimeout :> VType.Unknown,
+            .MetaReflect :> VType.Unknown,
+            .MetaSubscribe :> VType.Unknown
         };
     }
 
@@ -38366,6 +38514,12 @@ ${
             return rvt(known(Type.Str), ts);
         }
         if (op == "clearInterval" || op == "clearTimeout") return rvt(VType.Unknown, checkValue(env, exprType0(ts, args[0].nid), Type.Str, args[0].span, "the timer id of `meta." + op + "` (§22.5.1)", ts));
+        // s482 (s482-meta-phase3) — the registry lookup and the subscription (resolveMetaCall)
+        if (op == "reflect") {
+            ts = checkValue(env, exprType0(ts, args[0].nid), Type.Str, args[0].span, "the type name of `reflect` (§22.4.2)", ts);
+            return rvt(known(metaReflectType(args[0], args[1])), ts);
+        }
+        if (op == "subscribe") return rvt(known(voidFnType()), ts);
         return rvt(VType.Unknown, ts);
     }
 

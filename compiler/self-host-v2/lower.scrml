@@ -45,7 +45,7 @@ ${
              NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, MatchBlock, MatchBlockArm, SeqSnap, Tables, TypedProgram, ResetOnInfo, PersistInfo, ReqFact, ReqSig, reqSigIndex,
              SqlInfo, HandledFact, FailFact, Retag, RemoteFact, SuspendPlan, SuspendAt, SuspendK, PlainMatch, PlainArm, plainFactOf,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest, sqlInfo, isServerPlaced,
-             failFact, builtinFile, blockReference, suspendAtOf, tempOf, joinOf, retOf, remoteCaller, serverCallErrorName, ServerFacts, SrvCopy, sideCallee,
+             failFact, builtinFile, blockReference, suspendAtOf, tempOf, joinOf, retOf, remoteCaller, serverCallErrorName, typeInfoName, fieldInfoName, ServerFacts, SrvCopy, sideCallee,
              sqlParamRep, distinctSqlParams, CssFacts, CssInline, CssBridge, LStep, LocalEdit, BoundCheck, boundCheckAt, editBoundNid, RefineCheck, refineCheckAt, txAtOf, txPlainAt, rowOfSite } from "./analyze.scrml";
     import { RefineTop, refineTopOf, refineSpec, refineLitVerdict } from "./parse.scrml";
 
@@ -622,7 +622,8 @@ ${
 
     fn isMetaOp(o: PrimOp) -> boolean {
         return o == PrimOp.MetaGet || o == PrimOp.MetaEmit || o == PrimOp.MetaCleanup || o == PrimOp.MetaInterval
-            || o == PrimOp.MetaTimeout || o == PrimOp.MetaClearInterval || o == PrimOp.MetaClearTimeout;
+            || o == PrimOp.MetaTimeout || o == PrimOp.MetaClearInterval || o == PrimOp.MetaClearTimeout
+            || o == PrimOp.MetaReflect || o == PrimOp.MetaSubscribe;
     }
 
     fn calleeObj(cal: AExpr) -> AExpr | not {
@@ -5037,11 +5038,27 @@ ${
             const h: HostFn | not = f.host;
             if (h is given) anyHost = true;
         }
+        let reflects: boolean = false;
+        for (const vf0 of t.values.facts) {
+            const vf: ValueFact = vf0;
+            match vf {
+                .VMethod(op: o) :> { if (o == PrimOp.MetaReflect) reflects = true; },
+                // no-default-arm: one question of a value fact — is it a runtime `reflect`
+                _ :> {}
+            }
+        }
         for (const ti of t.types) {
             const ts: Sym = typeDefSym(ti.def);
             // s478-boot-sql-row-types: a `?{}` row struct (analyze rowTypes — the one StructDef of the
             // built-in file) ships always: field reads name its columns (print memberAt)
-            if (ti.file != builtinFile() || used2.indexOf(ts.id) >= 0 || (anyHost && isHostTypeDef(ti.def)) || isStructTypeDef(ti.def)) types = types.concat([ti.def]);
+            // s482 (s482-meta-phase3): the compiler-known `TypeInfo` / `FieldInfo` (§22.5.4) ship only when
+            // a runtime `reflect` builds their values (field reads name their members, print memberAt)
+            const metaInfo: boolean = ti.file == builtinFile() && (ti.name == typeInfoName() || ti.name == fieldInfoName());
+            if (metaInfo) {
+                if (reflects) types = types.concat([ti.def]);
+            } else if (ti.file != builtinFile() || used2.indexOf(ts.id) >= 0 || (anyHost && isHostTypeDef(ti.def)) || isStructTypeDef(ti.def)) {
+                types = types.concat([ti.def]);
+            }
             if (ti.file == builtinFile() && ti.name == "SqlError" && used2.indexOf(ts.id) >= 0) sqlError = ts;
             if (ti.file == builtinFile() && ti.name == serverCallErrorName() && used2.indexOf(ts.id) >= 0) serverCallError = ts;
         }

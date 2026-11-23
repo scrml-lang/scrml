@@ -134,8 +134,9 @@ describe("s482 — refused by name, never misread (INTERIM, g-boot-meta-runtime-
   test("in a logic body", () => one(`\${ function f() { ^{ meta.emit("x"); } } }`, "E-BOOTSTRAP-UNSUPPORTED", "inside a logic body"));
   test("as an attribute value", () => one(`<p title=^{ meta.emit("x"); }>t</p>`, "E-BOOTSTRAP-UNSUPPORTED", "value of the attribute"));
   test("inside <svg>", () => one(`<svg>^{ meta.emit("x"); }</svg>`, "E-BOOTSTRAP-UNSUPPORTED", "`<svg>` / `<math>`"));
-  test("meta.subscribe", () => one(`<div>^{ meta.subscribe("label", () => { meta.emit("x"); }); }</div>`, "E-BOOTSTRAP-UNSUPPORTED", "`meta.subscribe(…)` in a runtime `^{}` block is not in the bootstrap yet"));
-  test("reflect in a runtime block (the runtime type registry, phase 3)", () => one(`type U:struct = { n: string }\n<div>^{ const i = reflect(U); meta.emit(meta.get("label")); }</div>`, "E-BOOTSTRAP-UNSUPPORTED", "`reflect(…)` in a runtime `^{}` block"));
+  // s482-meta-phase3 built meta.subscribe and the runtime type registry (meta-phase3-s482.test.js); what stays refused:
+  test("meta.subscribe with a computed name (ruling S481-meta-four item 2)", () => one(`<div>^{ const k = "label"; meta.subscribe(k, (v) => { meta.emit(v); }); }</div>`, "E-BOOTSTRAP-UNSUPPORTED", "computed cell name"));
+  test("meta.types used as a value (only its reflect call is built)", () => one(`<div>^{ const t = meta.types.all; meta.emit(meta.get("label")); }</div>`, "E-BOOTSTRAP-UNSUPPORTED", "`meta.types.all` used as a value"));
   test("meta.set as a value", () => one(`<div>^{ const v = meta.set("label", "y"); }</div>`, "E-BOOTSTRAP-UNSUPPORTED", "`meta.set(…)` used as a value"));
   test("a ^{} nested in a runtime block", () => one(`<div>^{ ^{ meta.emit("x"); } }</div>`, "E-BOOTSTRAP-UNSUPPORTED", "nested in a runtime"));
   test("a meta.bindings entry of a `let` / a body-top local (no per-run snapshot, §22.5.2)", () => one(`\${ let v = 1; }\n<div>^{ meta.emit("<i>" + meta.bindings.v + "</i>"); }</div>`, "E-BOOTSTRAP-UNSUPPORTED", "`meta.bindings.v` — the entry of a `let` binding"));

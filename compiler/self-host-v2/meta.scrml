@@ -80,7 +80,7 @@ ${
         let used: MUsed = { chars: 0, tags: 0, nodes: 0, attrs: 0, steps: 0 };
         for (const f of files) {
             const env: MEnv = envOf(f, files);
-            const c0: MC = { file: f.path, env: env, next: next, diags: [], errs: f.errs, hits: 0, used: used, rt: "", wh: "" };
+            const c0: MC = { file: f.path, env: env, next: next, diags: [], errs: f.errs, hits: 0, used: used, rt: "", wh: "", lits: [] };
             const r: RItems = mItems(c0, f.items, "program", true);
             used = r.c.used;
             next = r.c.next;
@@ -272,37 +272,41 @@ ${
     // is being rewritten ("" — none); `wh` — where the walk stands, for a runtime block's
     // placement: "" the program's markup, "each" an `<each>` / `for … lift` row, "foreign"
     // inside `<svg>` / `<math>`, "decl" a declaration's markup (a component's renders).
-    type MC:struct = { file: string, env: MEnv, next: int, diags: Diag[], errs: ASpan[], hits: int, used: MUsed, rt: string, wh: string }
+    type MC:struct = { file: string, env: MEnv, next: int, diags: Diag[], errs: ASpan[], hits: int, used: MUsed, rt: string, wh: string, lits: int[] }
 
     fn withRt(c: MC, rt: string) -> MC {
-        return { file: c.file, env: c.env, next: c.next, diags: c.diags, errs: c.errs, hits: c.hits, used: c.used, rt: rt, wh: c.wh };
+        return { file: c.file, env: c.env, next: c.next, diags: c.diags, errs: c.errs, hits: c.hits, used: c.used, rt: rt, wh: c.wh, lits: c.lits };
+    }
+
+    fn withLits(c: MC, lits: int[]) -> MC {
+        return { file: c.file, env: c.env, next: c.next, diags: c.diags, errs: c.errs, hits: c.hits, used: c.used, rt: c.rt, wh: c.wh, lits: lits };
     }
 
     fn withWh(c: MC, wh: string) -> MC {
-        return { file: c.file, env: c.env, next: c.next, diags: c.diags, errs: c.errs, hits: c.hits, used: c.used, rt: c.rt, wh: wh };
+        return { file: c.file, env: c.env, next: c.next, diags: c.diags, errs: c.errs, hits: c.hits, used: c.used, rt: c.rt, wh: wh, lits: c.lits };
     }
     // THE EMIT BUDGET spent by the file's blocks so far (characters, `<` characters, nodes).
     // What the compile's `^{}` blocks have emitted so far (THE EMIT BUDGET).
     type MUsed:struct = { chars: int, tags: int, nodes: int, attrs: int, steps: int }
 
     fn withDiag(c: MC, code: string, msg: string, span: ASpan) -> MC {
-        return { file: c.file, env: c.env, next: c.next, diags: c.diags.concat([newDiag(code, msg, c.file, span)]), errs: c.errs, hits: c.hits, used: c.used, rt: c.rt, wh: c.wh };
+        return { file: c.file, env: c.env, next: c.next, diags: c.diags.concat([newDiag(code, msg, c.file, span)]), errs: c.errs, hits: c.hits, used: c.used, rt: c.rt, wh: c.wh, lits: c.lits };
     }
 
     fn withDiags(c: MC, ds: Diag[]) -> MC {
-        return { file: c.file, env: c.env, next: c.next, diags: c.diags.concat(ds), errs: c.errs, hits: c.hits, used: c.used, rt: c.rt, wh: c.wh };
+        return { file: c.file, env: c.env, next: c.next, diags: c.diags.concat(ds), errs: c.errs, hits: c.hits, used: c.used, rt: c.rt, wh: c.wh, lits: c.lits };
     }
 
     fn withNext(c: MC, next: int) -> MC {
-        return { file: c.file, env: c.env, next: next, diags: c.diags, errs: c.errs, hits: c.hits, used: c.used, rt: c.rt, wh: c.wh };
+        return { file: c.file, env: c.env, next: next, diags: c.diags, errs: c.errs, hits: c.hits, used: c.used, rt: c.rt, wh: c.wh, lits: c.lits };
     }
 
     fn withErr(c: MC, span: ASpan) -> MC {
-        return { file: c.file, env: c.env, next: c.next, diags: c.diags, errs: c.errs.concat([span]), hits: c.hits, used: c.used, rt: c.rt, wh: c.wh };
+        return { file: c.file, env: c.env, next: c.next, diags: c.diags, errs: c.errs.concat([span]), hits: c.hits, used: c.used, rt: c.rt, wh: c.wh, lits: c.lits };
     }
 
     fn hit(c: MC) -> MC {
-        return { file: c.file, env: c.env, next: c.next, diags: c.diags, errs: c.errs, hits: c.hits + 1, used: c.used, rt: c.rt, wh: c.wh };
+        return { file: c.file, env: c.env, next: c.next, diags: c.diags, errs: c.errs, hits: c.hits + 1, used: c.used, rt: c.rt, wh: c.wh, lits: c.lits };
     }
 
     type RItems:struct = { items: AItem[], c: MC }
@@ -1027,7 +1031,7 @@ ${
         const ds: Diag[] = staticDiags(c0, m, fx.f);
         if (ds.length > 0) return { nodes: [], c: withDiags(c0, ds) };
         // 3. a RUNTIME block (§22.5): rewritten and kept for analysis (s482, runtimeBlock)
-        if (!isCompileTime(fx.f)) return runtimeBlock(c0, m, attr);
+        if (!isCompileTime(fx.f)) return runtimeBlock(c0, m, attr, fx.f.reflects);
         // 4. evaluate — on the compile's step total (THE STEP TOTAL, S482 r5, review HIGH-2):
         // what every block before this one spent, refused or not, is gone
         const u0: MUsed = c0.used;
@@ -1091,7 +1095,7 @@ ${
     // runtime block. In an `<each>` row: E-META-001, as impl#1 (PA default S481
     // Q7, INTERIM — the capable alternative is a per-row effect).
     // =========================================================================
-    fn runtimeBlock(c0: MC, m: AMeta, attr: string) -> RNodes {
+    fn runtimeBlock(c0: MC, m: AMeta, attr: string, refs: MRef[]) -> RNodes {
         if (attr != "") return { nodes: [], c: withDiag(c0, "E-BOOTSTRAP-UNSUPPORTED", "a runtime `^{}` block (§22.5) as the value of the attribute `" + attr + "=` is not in the bootstrap — its `meta.emit` output goes where markup stands (§22.5.1); move the block among the element's children (INTERIM, g-boot-meta-runtime-residue-s482)", m.span) };
         if (!m.markup) return { nodes: [], c: withDiag(c0, "E-BOOTSTRAP-UNSUPPORTED", "a runtime `^{}` block (§22.5) inside a logic body (a `" + "$" + "{…}` statement list, a function body, a branch or a loop) is not in the bootstrap yet — it builds a runtime block where markup stands (an element's children, a `<program>` body), whose effect the scope it stands in owns (INTERIM, g-boot-meta-runtime-residue-s482). Move the block into the markup", m.span) };
         if (c0.wh == "each") return { nodes: [], c: withDiag(c0, "E-META-001", "a runtime `^{}` block inside an `<each>` row (or a `for … lift` row) is refused: each row would need its own effect and its own `meta.emit` place, which this compiler does not build (§22.11, as the main compiler; INTERIM — the capable alternative is a per-row effect, g-boot-meta-runtime-residue-s482). Move the block out of the row", m.span) };
@@ -1099,8 +1103,12 @@ ${
         if (c0.wh == "decl") return { nodes: [], c: withDiag(c0, "E-BOOTSTRAP-UNSUPPORTED", "a runtime `^{}` block in a declaration's markup (a component's renders) is not in the bootstrap — every instance would share one `meta.emit` place (§22.10 makes the scope id unique in the document) (INTERIM, g-boot-meta-runtime-residue-s482). Move the block into the `<program>` markup", m.span) };
         if (c0.next < 0) return { nodes: [], c: withDiag(c0, "E-BOOTSTRAP-UNSUPPORTED", "this runtime `^{}` block is kept for analysis, and the caller gave the analysis no node ids to give it (a linked program does) — compile the program through the front end", m.span) };
         const id: string = metaScopeId(c0.file, c0.hits);
-        const r: RBlock = mBlock(withRt(c0, id), m.body);
-        const c1: MC = withRt(r.c, "");
+        // s482 (s482-meta-phase3): the `reflect` calls whose argument is a type literal (factsOf —
+        // a type name or a string, impl#1's REFLECT_COMPILE_TIME_RE), by the argument's offset
+        let lits: int[] = [];
+        for (const rf of refs) { lits = lits.concat([rf.span.start]); }
+        const r: RBlock = mBlock(withLits(withRt(c0, id), lits), m.body);
+        const c1: MC = withLits(withRt(r.c, ""), []);
         if (c1.diags.length > c0.diags.length) return { nodes: [], c: c1 };
         // ONE bare `{ … }` around the body: its locals are each run's own, never file-scope
         const nb: int = c1.next;
@@ -1236,7 +1244,7 @@ ${
     }
 
     fn rtCall(c: MC, e: AExpr, f: AExpr, xs: AExpr[]) -> RExpr | not {
-        if (calleeIsName(f, "reflect")) return rtRefuse(c, e, "`reflect(…)` in a runtime `^{}` block is not in the bootstrap yet — the runtime type registry (`meta.types`, §22.4.2 / §22.5.4) is phase 3 of the build (INTERIM, g-boot-meta-runtime-residue-s482). Reflect the type in a compile-time block, or pass what the runtime block needs as a cell");
+        if (calleeIsName(f, "reflect")) return rtReflect(c, e, f, xs, false);
         const op: string = metaMethodOf(f);
         if (op == "") return not;
         if (op == "get") return rtGet(c, e, f, xs);
@@ -1245,9 +1253,130 @@ ${
             const ra: RExprs = mExprs(c, xs);
             return { e: ex(e, AExprK.Call(caretMember(f, op), ra.es)), c: ra.c };
         }
-        if (op == "subscribe") return rtRefuse(c, e, "`meta.subscribe(…)` in a runtime `^{}` block is not in the bootstrap yet (§22.5.1; INTERIM, g-boot-meta-runtime-residue-s482) — read the cell with `meta.get(\"name\")`: the block re-runs when it changes");
-        if (op == "types.reflect") return rtRefuse(c, e, "`meta.types.reflect(…)` is not in the bootstrap yet — the runtime type registry (§22.5.4) is phase 3 of the build (INTERIM, g-boot-meta-runtime-residue-s482). Reflect the type in a compile-time block");
-        return rtRefuse(c, e, "`meta." + op + "(…)` is not a call of the runtime `meta` object the bootstrap builds (§22.5.1: get, set, emit, cleanup, interval, timeout, clearInterval, clearTimeout; subscribe and types are not built yet — INTERIM, g-boot-meta-runtime-residue-s482)");
+        if (op == "subscribe") return rtSubscribe(c, e, f, xs);
+        if (op == "types.reflect") return rtReflect(c, e, f, xs, true);
+        return rtRefuse(c, e, "`meta." + op + "(…)` is not a call of the runtime `meta` object (§22.5.1: get, set, subscribe, emit, cleanup, interval, timeout, clearInterval, clearTimeout, and `meta.types.reflect`)");
+    }
+
+    // s482 (s482-meta-phase3) — `reflect(x)` / `meta.types.reflect(x)` in a runtime block: the
+    // §22.5.4 runtime type registry. ruling:user-voice-scrml.md-S481-meta-four item 1 — a literal
+    // `reflect(T)` there compiles (§22.4.2: "its `reflect()` calls that happen to have literal
+    // arguments are still emitted as `meta.types.reflect(...)` calls"); item 3 — the entry is
+    // impl#1's shape, typed by the compiler-known `TypeInfo`. Rewritten to
+    //   ^.reflect(<name>, [<entry>, …])
+    // whose entries are the types the call can name, each a `TypeInfo` record (analyze types the
+    // list against `TypeInfo[]`): a type LITERAL (factsOf's — a type name or a string literal; the
+    // static checks already refused one naming no type, E-META-003) names its type alone; any other
+    // argument (§22.4.2 strategy 2 / 3, "a runtime path expression") may name any type in scope
+    // at the block ("include all types that are in scope at the breakout point"). The runtime
+    // returns the entry of that name, else `not` (§22.5.4 "Unknown names SHALL return `not`").
+    // `meta.types.reflect("T")` with a literal naming a type is that type's lookup; any other
+    // argument of it is the strategy-2 lookup.
+    fn rtReflect(c0: MC, e: AExpr, f: AExpr, xs: AExpr[], typesForm: boolean) -> RExpr {
+        let what: string = "reflect";
+        if (typesForm) what = "meta.types.reflect";
+        if (xs.length != 1) return rtRefuse(c0, e, "`" + what + "(…)` takes one argument, a type's name (§22.4.2 / §22.5.4)");
+        if (c0.next < 0) return rtRefuse(c0, e, "`" + what + "(…)` — the caller gave the analysis no node ids (compile the program through the front end)");
+        const a: AExpr = xs[0];
+        let lit: string = "";
+        if (typesForm) {
+            const sl: string | not = strLit(a);
+            if (sl is given) {
+                if (findType(c0.env, sl) is given) lit = sl;
+            }
+        } else if (c0.lits.indexOf(a.span.start) >= 0) {
+            lit = typeLitName(a);
+        }
+        let c: MC = c0;
+        let arg: AExpr = ex(a, AExprK.Str(lit));
+        let types: MType[] = [];
+        if (lit != "") {
+            const t: MType | not = findType(c.env, lit);
+            if (t is given) types = [t];
+        } else {
+            const ra: RExpr = mExpr(c, a);
+            c = ra.c;
+            arg = ra.e;
+            types = c.env.types;
+        }
+        let next: int = c.next;
+        let entries: AExpr[] = [];
+        for (const t of types) {
+            const re: RAst = entryExpr(t, e.span, next);
+            next = re.next;
+            entries = entries.concat([re.e]);
+        }
+        const list: AExpr = { nid: next, span: e.span, k: AExprK.ArrayLit(entries) };
+        const caret: AExpr = { nid: next + 1, span: f.span, k: AExprK.Name("^") };
+        const callee: AExpr = { nid: f.nid, span: f.span, k: AExprK.Member(caret, "reflect") };
+        return { e: ex(e, AExprK.Call(callee, [arg, list])), c: withNext(c, next + 2) };
+    }
+
+    // a type literal's name (factsOf reflectLiteral: a string literal or a type name)
+    fn typeLitName(a: AExpr) -> string {
+        const k: AExprK = a.k;
+        return match k {
+            .Str(v: s) :> s,
+            .Name(name: n) :> n,
+            // no-default-arm: factsOf records only a string or a name as a type literal
+            _ :> ""
+        };
+    }
+
+    type RAst:struct = { e: AExpr, next: int }
+
+    // One registry entry: a record of `TypeInfo`'s members, every member present (a kind's missing
+    // list is the EMPTY list — g-boot-meta-typeinfo-absent-member-s481), the same members, in the
+    // same order, as the compile-time `reflect` gives (typeInfo; §22.5.4 "SHALL be identical").
+    fn entryExpr(t: MType, sp: ASpan, n0: int) -> RAst {
+        let n: int = n0;
+        let fs: AExpr[] = [];
+        for (const fl of t.fields) {
+            const rn: RAst = strNode(fl.name, sp, n);
+            const rt: RAst = strNode(fl.ty, sp, rn.next);
+            const rec: RAst = recNode(["name", "type"], [rn.e, rt.e], sp, rt.next);
+            n = rec.next;
+            fs = fs.concat([rec.e]);
+        }
+        let vs: AExpr[] = [];
+        for (const v of t.variants) {
+            const rv: RAst = strNode(v, sp, n);
+            n = rv.next;
+            vs = vs.concat([rv.e]);
+        }
+        const rk: RAst = strNode(t.kind, sp, n);
+        const rm: RAst = strNode(t.name, sp, rk.next);
+        const fl2: AExpr = { nid: rm.next, span: sp, k: AExprK.ArrayLit(fs) };
+        const vl: AExpr = { nid: rm.next + 1, span: sp, k: AExprK.ArrayLit(vs) };
+        return recNode(["kind", "name", "fields", "variants"], [rk.e, rm.e, fl2, vl], sp, rm.next + 2);
+    }
+
+    fn strNode(v: string, sp: ASpan, n: int) -> RAst {
+        return { e: { nid: n, span: sp, k: AExprK.Str(v) }, next: n + 1 };
+    }
+
+    fn recNode(keys: string[], vals: AExpr[], sp: ASpan, n0: int) -> RAst {
+        let n: int = n0;
+        let ps: AProp[] = [];
+        let i: int = 0;
+        for (; i < keys.length; ) {
+            ps = ps.concat([{ nid: n, span: sp, spread: false, name: keys[i], value: vals[i] }]);
+            n = n + 1;
+            i = i + 1;
+        }
+        return { e: { nid: n, span: sp, k: AExprK.ObjectLit(ps) }, next: n + 1 };
+    }
+
+    // s482 (s482-meta-phase3) — `meta.subscribe("x", (v) => { … })` (§22.5.1: "Subscribe to changes
+    // of a reactive variable. Returns an unsubscribe function"): a LITERAL cell name (ruling item 2),
+    // rewritten to `^.subscribe(@x, callback)`. The callback is called with the cell's new value on
+    // each change while the run stands; the run's end (a re-run, the block's teardown) unsubscribes
+    // it (runtime MetaEffect). analyze judges the callback (resolveMetaCallback).
+    fn rtSubscribe(c: MC, e: AExpr, f: AExpr, xs: AExpr[]) -> RExpr {
+        const rc: RCell = rtCellName(c, e, "subscribe", xs, 2);
+        if (rc.name == "") return rc.r;
+        const rf: RExpr = mExpr(c, xs[1]);
+        return { e: ex(e, AExprK.Call(caretMember(f, "subscribe"), [ex(xs[0], AExprK.At(rc.name)), rf.e])), c: rf.c };
     }
 
     // ruling:user-voice-scrml.md-S481-meta-four item 2: a LITERAL cell name, resolved here.
@@ -1273,7 +1402,7 @@ ${
             return rtRefuse(c, e, "`meta." + n + "` used as a value is not in the bootstrap — the runtime `meta` object is reached through its calls (`meta.get(\"x\")`, `meta.emit(html)`, …), `meta.scopeId` and `meta.bindings.<name>` (§22.5.1; INTERIM, g-boot-meta-runtime-residue-s482)");
         }
         if (isMetaMember(o, "bindings")) return rtBinding(c, e, o, n);
-        if (isMetaMember(o, "types")) return rtRefuse(c, e, "`meta.types` is not in the bootstrap yet — the runtime type registry (§22.5.4) is phase 3 of the build (INTERIM, g-boot-meta-runtime-residue-s482)");
+        if (isMetaMember(o, "types")) return rtRefuse(c, e, "`meta.types." + n + "` used as a value is not in the bootstrap — the runtime type registry is reached through its call, `meta.types.reflect(name)` (§22.5.4), or `reflect(T)` (§22.4.2) (INTERIM, g-boot-meta-runtime-residue-s482)");
         return not;
     }
 
@@ -1326,7 +1455,7 @@ ${
     type RCell:struct = { name: string, r: RExpr }
 
     fn withUsed(c: MC, u: MUsed) -> MC {
-        return { file: c.file, env: c.env, next: c.next, diags: c.diags, errs: c.errs, hits: c.hits, used: u, rt: c.rt, wh: c.wh };
+        return { file: c.file, env: c.env, next: c.next, diags: c.diags, errs: c.errs, hits: c.hits, used: u, rt: c.rt, wh: c.wh, lits: c.lits };
     }
 
     // The nodes of a spliced run, every descendant counted.
@@ -4331,27 +4460,25 @@ ${
     }
 
     // (built element by element in place — no copy per variant / field, S482 r4)
+    // s482 (s482-meta-phase3): every entry carries all four `TypeInfo` members (§22.5.4: "TypeInfo:struct
+    // = { kind: string, name: string, fields: FieldInfo[], variants: string[] }") — a kind's missing list
+    // is the EMPTY list, so a typed read never fails (g-boot-meta-typeinfo-absent-member-s481) — and is
+    // identical to the runtime registry's entry (meta.scrml entryExpr; "SHALL be identical").
     fn typeInfo(t: MType) -> MV {
-        if (t.kind == "enum") {
-            let vs: MV[] = [];
-            let i: int = 0;
-            for (; i < t.variants.length; ) {
-                vs[i] = MV.VStr(t.variants[i]);
-                i = i + 1;
-            }
-            return mkRec(["kind", "name", "variants"], [MV.VStr("enum"), MV.VStr(t.name), mkTape(vs)]);
+        let vs: MV[] = [];
+        let i: int = 0;
+        for (; i < t.variants.length; ) {
+            vs[i] = MV.VStr(t.variants[i]);
+            i = i + 1;
         }
-        if (t.kind == "struct") {
-            let fs: MV[] = [];
-            let i: int = 0;
-            for (; i < t.fields.length; ) {
-                const f: MField = t.fields[i];
-                fs[i] = mkRec(["name", "type"], [MV.VStr(f.name), MV.VStr(f.ty)]);
-                i = i + 1;
-            }
-            return mkRec(["kind", "name", "fields"], [MV.VStr("struct"), MV.VStr(t.name), mkTape(fs)]);
+        let fs: MV[] = [];
+        let j: int = 0;
+        for (; j < t.fields.length; ) {
+            const f: MField = t.fields[j];
+            fs[j] = mkRec(["name", "type"], [MV.VStr(f.name), MV.VStr(f.ty)]);
+            j = j + 1;
         }
-        return mkRec(["kind", "name"], [MV.VStr(t.kind), MV.VStr(t.name)]);
+        return mkRec(["kind", "name", "fields", "variants"], [MV.VStr(t.kind), MV.VStr(t.name), mkTape(fs), mkTape(vs)]);
     }
 
     // ---- methods -------------------------------------------------------------
