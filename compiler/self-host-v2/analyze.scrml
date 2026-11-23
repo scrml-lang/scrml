@@ -11850,9 +11850,13 @@ ${
         return c.derived || c.pos > pos;
     }
 
+    // s482 r1 (#2063 review LOW-2) — the why of a seed hop is given once, at the first hop of a
+    // chain that names a seed: a later seed hop's copy (the inner path, built first) is dropped.
     fn cellHop(c: BodyCell, inner: SeedReach) -> string {
+        const note: string = " (a read or a write of a cell runs its seed first if it has not run, §7.6 rule (b) S482)";
         if (c.derived) return " reads `@" + c.name + "`, a derived value computed when it is read, and its formula" + inner.how;
-        return " uses `@" + c.name + "` before its place, so its seed is computed here (a read or a write of a cell runs its seed first if it has not run, §7.6 rule (b) S482), and that seed" + inner.how;
+        const rest: string = inner.how.replace(note, "");
+        return " uses `@" + c.name + "` before its place, so its seed is computed here" + note + ", and that seed" + rest;
     }
 
     // The first later-place reach of code running at `pos`: a name of a binding whose place is
@@ -11942,17 +11946,38 @@ ${
             .Run(b: rb) :> bodyBlockReach(cx, rb, n.span.start),
             .Text(text: x) :> [],
             .DeclNode(d: x) :> [],
+            // §7.6 rule (b) S482: "Code that does not run in the body is not judged: an event
+            // handler …, an `<effect>` / `<request>` (they run after the mount)". A `#{}` bridge
+            // read (§25.7) is the rule's INTERIM ("a §25.7 CSS bridge" runs the binding at module
+            // initialization), not a display — s482-seed-reach r1 owner question.
             .Effect(w: x) :> [],
             .Request(r: x) :> [],
             .Css(c: x) :> [],
-            .Gather(f: x) :> []
+            // s482 (lane s482-seed-reach r1, #2063 review MED-1) — a Tier-0 gather
+            // `${ for (…) { … lift <li/>; … } }` is a display (an interpolation, §17.4): its
+            // loop runs where it stands, and every lifted row is markup rendered there
+            .Gather(f: gf) :> bodyGatherReach(cx, gf, n.span.start)
         };
+    }
+
+    // s482 (lane s482-seed-reach r1, #2063 review MED-1) — a gather's code (its head, its
+    // statements, its `lift` values — the loop as a statement) and its lifted rows (markup,
+    // judged as any body markup at its own position — every row is rendered before what the
+    // source writes after the gather).
+    fn bodyGatherReach(cx: BodyCx, f: AFor, pos: int) -> Diag[] {
+        const st: AStmt = { nid: -1, span: f.span, k: AStmtK.For(f) };
+        const b: ABlock = { nid: -1, span: f.span, stmts: [st] };
+        let out: Diag[] = bodyCodeReach(cx, b, pos, "this display");
+        for (const r of gatherRows(f)) { out = out.concat(bodyNodeReach(cx, r)); }
+        return out;
     }
 
     fn bodyElemReach(cx: BodyCx, e: AElem) -> Diag[] {
         let out: Diag[] = [];
         for (const a of e.attrs) {
-            if (a.name.indexOf("on") != 0) {
+            // s482 r1 — an event handler is what §5.2 rule 1 reads as one (eventName): `one=`,
+            // `online=`, `onboarding=` are ordinary attributes, and are displays
+            if (eventName(a.name) == "") {
                 const v: AAttrValue = a.value;
                 const x: AExpr | not = match v {
                     .Bare(e: x) :> x,
@@ -11961,10 +11986,30 @@ ${
                     _ :> not
                 };
                 if (x is given) out = out.concat(bodyExprReach(cx, x, a.span.start, "this attribute value"));
+                if (a.name.substring(0, 5) == "bind:") out = out.concat(bodyBindReach(cx, a));
             }
         }
         for (const kid of e.kids) { out = out.concat(bodyNodeReach(cx, kid)); }
         return out;
+    }
+
+    // s482 (lane s482-seed-reach r1, #2063 review HIGH-1) — a `bind:` attribute shows its cell
+    // and writes it back (§5.4): a read and a write of the cell where the element stands. The
+    // resolver records the target on the attribute (AttrKind.ABind), not on the `@c` node (it
+    // carries no read fact, no write effect), so the cell is taken from that fact; a use before
+    // the cell's place computes its seed there (§7.6 rule (b) S482).
+    fn bodyBindReach(cx: BodyCx, a: AAttr) -> Diag[] {
+        const k: AttrKind | not = attrFact(cx.t.attrs, a.nid);
+        if (k is not) return [];
+        const ix: int = programFieldBound(cx.g.program, k);
+        if (ix < 0 || ix >= cx.pfields.length) return [];
+        const c: BodyCell | not = cellOfSym(cx.cells, cx.pfields[ix].sym.id);
+        if (c is not) return [];
+        const pos: int = a.span.start;
+        if (!cellRunsAt(c, pos)) return [];
+        const inner: SeedReach | not = cellReach(cx, c, pos, [c.sym]);
+        if (inner is given) return [laterPlaceDiagHow(inner.bp, "this `" + a.name + "=`", cellHop(c, inner), cx.file, a.span)];
+        return [];
     }
 
     // One display: a bare name of a later binding (direct), a read of a cell that runs its seed
@@ -11976,8 +12021,12 @@ ${
     }
 
     fn bodyBlockReach(cx: BodyCx, b: ABlock, pos: int) -> Diag[] {
+        return bodyCodeReach(cx, b, pos, "this statement");
+    }
+
+    fn bodyCodeReach(cx: BodyCx, b: ABlock, pos: int, what: string) -> Diag[] {
         const r: SeedReach | not = codeReach(cx, nameExprsIn(b), letWritesIn(cx.t, b, cx.binds, cx.file), atUsesIn(cx.t, b), scanBlock({ t: cx.t, file: cx.file }, b, emptyScan()).refs, heldSpansIn(b), pos, []);
-        if (r is given) return [laterPlaceDiagHow(r.bp, "this statement", r.how, r.file, r.span)];
+        if (r is given) return [laterPlaceDiagHow(r.bp, what, r.how, r.file, r.span)];
         return [];
     }
 
