@@ -50736,6 +50736,9 @@ ${
     // s482 r2 (#2080 r1 review HIGH-1r) — the chain of display labels (`ck()` … `clickB()`) from
     // callable `from` down to the first `<host src>`-backed function it reaches through the
     // references its body makes (calls and function values), transitively; [] — none.
+    // A query on the summary alone, for any rule that must treat host code as unproven: the
+    // `<effect>` no-write rule takes it next (ruling:user-voice-scrml.md-S482-effect-host-call,
+    // g-boot-effect-host-call-hang-s482).
     fn hostChain(s: Summary, t: Tables, from: int) -> string[] {
         let seen: int[] = [];
         let todo: int[] = [from];

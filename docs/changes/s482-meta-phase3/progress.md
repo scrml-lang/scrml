@@ -82,7 +82,14 @@ Scratch: ~/.cache/scrml/review/s482-meta-phase3/.
 - [x] MED: a `^{}` body naming a namespace-import member is refused by name (meta.scrml `fName`), and
       `analyzeExpanded` reports the re-read meta pass's new diagnostics (`nsMetaNotes`) — they were dropped with
       the block. Corpus 0 newly rejected, so refused (not only filed); gap g-boot-meta-namespace-import-dropped-s482.
-- [x] gap g-boot-effect-host-call-hang-s482 (HIGH, pre-existing, owner fork pending; not built).
+- [x] gap g-boot-effect-host-call-hang-s482 (HIGH, pre-existing) — RULED S482 (ruling:user-voice-scrml.md-S482-effect-host-call), open, follow-up lane; `hostChain` is the reusable query.
 - Corpus (bootstrap compileSource, 959 examples/samples/benchmarks files, 29d2494d1 vs r2): 160 OK → 160 OK,
   0 diffs (byte hashes included). `^{` files (76, fixS66 and raw): 0 diffs. Corpus meta callbacks calling a
   host function: 0; corpus `^{` files with a namespace import: 0.
+
+### r2 final gates (head vs r1 head 29d2494d1; every run under a systemd-run MemoryMax=6G scope)
+- New r2 tests: 5 of 6 red on 29d2494d1 (the named-import positive passes on both), 6/6 green on head.
+- pretest rc 0. bootstrap-conformance 845/4/0 (628/491/0) — report identical to r1 head apart from timings, CRASH 0.
+- byte-compare 1968 conformance cases: 0 diffs. Corpus 959 files: 0 diffs; `^{` files (76, fixS66 / raw): 0 diffs.
+- s34-census --check-new PASS; types-gate OK 182 unchanged; corpus-compile-floor PASS; e2e-render-map 259/0;
+  meta-phase3 + meta-runtime + meta-s481 with SCRML_BROWSER_TESTS=1: 214/0.
