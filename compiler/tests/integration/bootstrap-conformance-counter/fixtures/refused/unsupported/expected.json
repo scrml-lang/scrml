@@ -1,6 +1,6 @@
 {
   "id": "fixture-unsupported",
-  "description": "KNOWN UNSUPPORTED: a RUNTIME `^{…}` meta block (§22.5) — the bootstrap front end refuses it by name with E-BOOTSTRAP-UNSUPPORTED (s481-boot-meta: compile-time `^{}` is built; runtime meta is phase 2). (s469-boot-css: was a `#{…}` CSS block, which the bootstrap now compiles.)",
+  "description": "KNOWN UNSUPPORTED: `meta.subscribe(…)` in a runtime `^{…}` meta block (§22.5.1) — the bootstrap front end refuses it by name with E-BOOTSTRAP-UNSUPPORTED (s482-meta-runtime: runtime `^{}` is built, `meta.subscribe` is not yet). (s481-boot-meta: was any runtime `^{}`.) (s469-boot-css: was a `#{…}` CSS block, which the bootstrap now compiles.)",
   "language-version": "1.0",
   "spec": "§22",
   "rationale": "fixture for scripts/bootstrap-conformance.ts",

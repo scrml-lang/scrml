@@ -1428,7 +1428,14 @@ ${
             .LengthCheck :> "LengthCheck",
             .RefineCheck :> "RefineCheck",
             .TapeInsert :> "TapeInsert",
-            .Print :> "Print"
+            .Print :> "Print",
+            .MetaGet :> "MetaGet",
+            .MetaEmit :> "MetaEmit",
+            .MetaCleanup :> "MetaCleanup",
+            .MetaInterval :> "MetaInterval",
+            .MetaTimeout :> "MetaTimeout",
+            .MetaClearInterval :> "MetaClearInterval",
+            .MetaClearTimeout :> "MetaClearTimeout"
         };
     }
 }

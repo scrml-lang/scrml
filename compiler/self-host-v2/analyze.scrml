@@ -9922,6 +9922,98 @@ ${
         return diagX(env, e, "E-SCOPE-001", "`" + name + "` is not declared" + valueElsewhere(env.g.te.link, env.file, name), st);
     }
 
+    // s482 (s482-meta-runtime) — a RUNTIME `^{}` block's calls on its `meta` object (SPEC
+    // §22.5.1). meta.scrml rewrote `meta.<op>(…)` in the block's body to `^.<op>(…)` — `^` is
+    // spelled by no identifier, so only that rewrite makes one, and only inside such a block
+    // (ANodeK.Run with its `meta` id), or a function value made there. Each records its Meta
+    // op (VMethod; lower: a Prim with no receiver) and has its §22.5.1 signature:
+    //   get(@x)                 the cell's type — `meta.get("x")`, a dependency read
+    //   emit(html: string)      no value
+    //   cleanup(f: () => void)  no value
+    //   interval / timeout(ms: number, f: () => void) -> string  (the timer's id — the
+    //                           §22.5.1 "opaque intervalId", a `string` here: INTERIM, the
+    //                           bootstrap has no opaque type; the runtime keys it per block)
+    //   clearInterval / clearTimeout(id: string)  no value
+    fn metaOpCallee(callee: AExpr) -> string {
+        const m: MethodCall | not = memberCall(callee);
+        if (m is not) return "";
+        if (exprName(m.obj) != "^") return "";
+        return m.method;
+    }
+
+    fn metaPrimOp(op: string) -> PrimOp | not {
+        if (op == "get") return PrimOp.MetaGet;
+        if (op == "emit") return PrimOp.MetaEmit;
+        if (op == "cleanup") return PrimOp.MetaCleanup;
+        if (op == "interval") return PrimOp.MetaInterval;
+        if (op == "timeout") return PrimOp.MetaTimeout;
+        if (op == "clearInterval") return PrimOp.MetaClearInterval;
+        if (op == "clearTimeout") return PrimOp.MetaClearTimeout;
+        return not;
+    }
+
+    fn metaArity(op: string) -> int {
+        if (op == "interval" || op == "timeout") return 2;
+        return 1;
+    }
+
+    fn voidFnType() -> Type { return Type.Fn([], not, false, not); }
+
+    fn resolveMetaCall(env: Env, e: AExpr, op: string, args: AExpr[], st0: AS) -> RX {
+        const po: PrimOp | not = metaPrimOp(op);
+        if (po is not) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`meta." + op + "(…)` is not a call of the runtime `meta` object the bootstrap builds (§22.5.1)", resolveExprs(env, args, not, st0));
+        if (args.length != metaArity(op)) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`meta." + op + "(…)` takes " + metaArity(op) + " argument(s) (§22.5.1)", resolveExprs(env, args, not, st0));
+        if (op == "get") {
+            const rg: RX = resolveExpr(env, args[0], not, st0);
+            return plain(rg.x.ty, addValue(rg.st, e.nid, ValueFact.VMethod(po)));
+        }
+        if (op == "emit") {
+            const re: RX = resolveExpr(env, args[0], Type.Str, st0);
+            return plain(not, addValue(re.st, e.nid, ValueFact.VMethod(po)));
+        }
+        if (op == "cleanup") {
+            const sc: AS = resolveMetaCallback(env, args[0], op, st0);
+            return plain(not, addValue(sc, e.nid, ValueFact.VMethod(po)));
+        }
+        if (op == "interval" || op == "timeout") {
+            const rm: RX = resolveExpr(env, args[0], Type.Num, st0);
+            const sf: AS = resolveMetaCallback(env, args[1], op, rm.st);
+            return plain(Type.Str, addValue(sf, e.nid, ValueFact.VMethod(po)));
+        }
+        const ri: RX = resolveExpr(env, args[0], Type.Str, st0);
+        return plain(not, addValue(ri.st, e.nid, ValueFact.VMethod(po)));
+    }
+
+    // s482 — a runtime `^{}` block's CALLBACK (`meta.cleanup(f)`, `meta.interval(ms, f)`,
+    // `meta.timeout(ms, f)`): an arrow of no parameters, a function value of type `() => void`
+    // the runtime calls later (a timer firing, the run's teardown). It gives no value, so —
+    // unlike a function value the bootstrap otherwise builds — its body may end without a
+    // `return`. Its body is the bootstrap's closure body (lamBodyCheck: locals, writes of its own
+    // `let` locals, `if` / `else`, and calls of the block's `meta` — isMetaCallExpr); anything
+    // else in it, and a named function as the callback, are refused by name (INTERIM,
+    // g-boot-meta-runtime-residue-s482).
+    fn resolveMetaCallback(env: Env, lam: AExpr, op: string, st0: AS) -> AS {
+        if (!isLambda(lam)) return addDiag(st0, env.file, lam.span, "E-BOOTSTRAP-UNSUPPORTED", "the callback of `meta." + op + "(…)` is built only as an arrow written in place (`() => { … }`) — a named function or another function value is not in the bootstrap yet (INTERIM, g-boot-meta-runtime-residue-s482)");
+        if (lambdaParams(lam).length != 0) return addDiag(st0, env.file, lam.span, "E-BOOTSTRAP-UNSUPPORTED", "the callback of `meta." + op + "(…)` takes no parameters (§22.5.1: the runtime calls it with none) — write `() => { … }`");
+        let st: AS = st0;
+        const env2: Env = noNarrows(sealEvent(env));
+        const blk: ABlock | not = lambdaBlock(lam);
+        if (blk is given) {
+            st = lamBodyCheck(env, blk, [], st);
+            const lenv: Env = withFx(withNest(env2, { fns: env2.nest.fns, top: [], caps: env2.nest.caps, pureCaps: env2.nest.pureCaps, pureFn: env2.nest.pureFn, lam: lam.nid, lamWant: not }), noFailCtx());
+            st = resolveBlock(lenv, blk, st);
+        } else {
+            const b: AExpr | not = lambdaBody(lam);
+            if (b is given) {
+                st = lamExprCheck(env, b, [], st);
+                st = resolveExpr(withFx(env2, noFailCtx()), b, not, st).st;
+            }
+        }
+        const ft: Type = voidFnType();
+        st = addValue(st, lam.nid, ValueFact.VLambda([], ft));
+        return addPending(st, PendRule.FnValue(-1, env.fx.fnSym, env.file, lam.span, ""));
+    }
+
     // s478 (g-boot-s20-builtins-unbuilt-s473, g-bootstrap-twin-log-unknown-s451) — the built-in
     // names of the language the bootstrap does not build yet. Each is refused BY NAME (S473 D30:
     // "UNSUPPORTED is only for E-BOOTSTRAP-UNSUPPORTED"), never reported as an undeclared name: the
@@ -10848,6 +10940,9 @@ ${
     }
 
     fn resolveCall(env: Env, e: AExpr, callee: AExpr, args: AExpr[], st0: AS) -> RX {
+        // s482 (s482-meta-runtime): a runtime `^{}` block's `meta` call (the receiver `^`)
+        const mop: string = metaOpCallee(callee);
+        if (mop != "") return resolveMetaCall(env, e, mop, args, st0);
         const n: string = exprName(callee);
         if (n == "reset") return diagX(env, e, "E-RESET-POSITION", "`reset(@x)` is a statement (a write), not a value", st0);
         if (n == "cleanup" && builtinFree(env, n)) return resolveCleanup(env, e, args, st0);   // s478 (§6.7.3)
@@ -14310,6 +14405,9 @@ ${
     // An expression statement: only `x = v` whose `x` is one of the body's own `let` locals
     // (a condition head's kept assignment is lamExprCheck's, by the same rule).
     fn lamEvalWhy(e: AExpr, own: string[]) -> string {
+        // s482 (s482-meta-runtime): a call of a runtime `^{}` block's `meta` (`meta.emit(…)`,
+        // `meta.clearInterval(id)`, …) — the closure runs in that block (its timer, its cleanup)
+        if (isMetaCallExpr(e)) return "";
         const t: AExpr | not = assignedTarget(e);
         if (t is not) return "an expression statement (a call run for its effect)";
         if (lamOwnTarget(t, own)) return "";
@@ -14334,6 +14432,15 @@ ${
     }
 
     // An assignment's target is one of the body's own `let` locals (a plain name).
+    fn isMetaCallExpr(e: AExpr) -> boolean {
+        const k: AExprK = e.k;
+        return match k {
+            .Call(callee: c) :> metaOpCallee(c) != "",
+            // no-default-arm: one question of an expression — is it a `^.<op>(…)` call
+            _ :> false
+        };
+    }
+
     fn lamOwnTarget(t: AExpr, own: string[]) -> boolean {
         const n: string = exprName(t);
         return n != "" && atName(t) == "" && own.indexOf(n) >= 0;
@@ -23055,6 +23162,19 @@ ${
     // (§17.3), so they are resolved as a handler block is (a write, a host call and
     // a server call are allowed; a `lift` has no loop to append to; a `break` /
     // `continue` has no loop around it — loopChecks).
+    // s482 (s482-meta-runtime) — a runtime `^{}` block (ANodeK.Run with its `meta` id) is
+    // resolved as a run is, where the program's markup stands; anywhere else it is refused by
+    // name (a component's renders, a child field's own renders — every instance would share one
+    // `meta.emit` place; meta.scrml already refuses the row, the foreign-content and the logic
+    // positions).
+    fn resolveRunNode(env: Env, b: ABlock, meta: string, st0: AS) -> AS {
+        if (meta == "") return resolveRun(env, b, st0);
+        if (!inProgramCtx(env) || env.own != "") {
+            return addDiag(st0, env.file, b.span, "E-BOOTSTRAP-UNSUPPORTED", "a runtime `^{}` block (§22.5) outside the `<program>` markup (a declaration's renders) is not in the bootstrap — every instance would share one `meta.emit` place, and §22.10 makes the block's scope id unique in the document (INTERIM, g-boot-meta-runtime-residue-s482). Move the block into the `<program>` markup");
+        }
+        return resolveRunEnv(env, b, st0).st;
+    }
+
     fn resolveRun(env: Env, b: ABlock, st0: AS) -> AS {
         if (!inProgramCtx(env) || env.own != "") {
             return addDiag(st0, env.file, b.span, "E-BOOTSTRAP-UNSUPPORTED", "statements here are not in the bootstrap — only a `<program>` / `<page>` body top runs statements (§40.8)");
@@ -27033,7 +27153,7 @@ ${
             .DeclNode(d: d) :> addDiag(st, env.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "a declaration inside markup is not in bootstrap slice M2"),
             .Css(c: c) :> st,
             .Effect(w: w) :> resolveEffect(env, w, st),
-            .Run(b: b) :> resolveRun(env, b, st),                          // s478 (§40.8)
+            .Run(b: b, meta: mt) :> resolveRunNode(env, b, mt, st),           // s478 (§40.8); s482 a runtime `^{}`
             .Request(r: r) :> resolveRequest(env, r, st),
             .Gather(f: lf) :> resolveTier0(env, n, lf, st)                 // s469 (§17.4)
         };
@@ -27433,7 +27553,7 @@ ${
         for (const n of nodes) {
             let cn: MkCx = c;
             const k: ANodeK = n.k;
-            const e: AElem | not = mkElemOf(k);
+            const e: AElem | not = mkElemOf(n);
             if (e is given) {
                 if (mkPrintsElem(g, file, e)) {
                     const t: string = e.tag.toLowerCase();
@@ -27459,14 +27579,17 @@ ${
         return out;
     }
 
-    fn mkElemOf(k: ANodeK) -> AElem | not {
+    // The element a node puts in its template: an element, or a runtime `^{}` block's placeholder
+    // `<span>` (mkMetaPlace) — the first element of a template root decides its mode either way.
+    fn mkElemOf(n: ANode) -> AElem | not {
+        const k: ANodeK = n.k;
         return match k {
             .Elem(e: e) :> e,
             .Text(text: t) :> not,
             .Interp(e: x) :> not,
             .DeclNode(d: x) :> not,
             .Effect(w: x) :> not,
-            .Run(b: rb0) :> not,
+            .Run(b: rb0, meta: mt) :> mkMetaPlace(n, mt),
             .Request(r: x) :> not,
             .Css(c: x) :> not,
             .Gather(f: lf) :> not
@@ -27528,11 +27651,60 @@ ${
             .Interp(e: x) :> mkLitText(file, n, x, c),
             .DeclNode(d: x) :> [],
             .Effect(w: x) :> [],
-            .Run(b: rb0) :> [],
+            .Run(b: rb0, meta: mt) :> mkMetaRun(g, sa, file, n, mt, c),
             .Request(r: x) :> [],
             .Css(c: x) :> [],
             .Gather(f: lf) :> mkBranch(g, sa, file, rowsOfBlock(lf.body), c)
         };
+    }
+
+    // s482 r1 (review of #2067, MED-1) — a RUNTIME `^{}` block (meta "" — a body-top run, which
+    // renders a comment) renders a placeholder `<span data-scrml-meta>` where it stands (print.scrml
+    // runHole): the place its `meta.emit` output goes (§22.12). That span is markup the parser reads
+    // like any other, so it is judged as the span it is — by this check's own rules, with nothing
+    // added: inside a table part it is foster-parented out, inside a raw-text / RCDATA element it is
+    // text (§24.5). A fault is reported at the block, naming the placeholder.
+    fn mkMetaPlace(n: ANode, mt: string) -> AElem | not {
+        if (mt == "") return not;
+        return { nid: n.nid, span: n.span, star: false, tag: "span", attrs: [], kids: [], binds: [], parens: false };
+    }
+
+    fn mkMetaRun(g: Globals, sa: AS, file: string, n: ANode, mt: string, c: MkCx) -> MkFault[] {
+        const e: AElem | not = mkMetaPlace(n, mt);
+        if (e is not) return [];
+        let out: MkFault[] = [];
+        for (const f of mkElem(g, sa, file, e, c)) {
+            out = out.concat([{ nid: f.nid, file: f.file, span: f.span, code: f.code, msg: mkMetaMsg(f.msg) }]);
+        }
+        return out;
+    }
+
+    // Every runtime `^{}` block in an HTML `<template>`'s content `nodes` (at any depth) a fault of
+    // `done` does not already name — refused: its placeholder is in the inert template content,
+    // where the gate never finds it (§22.12 then writes into a fresh span at the end of `<body>`).
+    fn mkInertMeta(file: string, nodes: ANode[], done: MkFault[]) -> MkFault[] {
+        let out: MkFault[] = done;
+        for (const n of nodes) {
+            const k: ANodeK = n.k;
+            const mt: string = match k {
+                .Run(b: rb0, meta: m) :> m,
+                // no-default-arm: one question of a node — is it a runtime `^{}` block
+                _ :> ""
+            };
+            if (mt != "") {
+                let seen: boolean = false;
+                for (const x of out) { if (x.nid == n.nid) seen = true; }
+                if (!seen) out = out.concat([{ nid: n.nid, file: file, span: n.span, code: "E-HTML-PARSER-REPAIR",
+                                               msg: mkMetaMsg("inside an HTML `<template>` it is inert content, never in the page (HTML §4.12.3), so the gate would not find it (§22.12)") }]);
+            }
+            const e: AElem | not = elemOfANode(n);
+            if (e is given) out = mkInertMeta(file, e.kids, out);
+        }
+        return out;
+    }
+
+    fn mkMetaMsg(why: string) -> string {
+        return "a runtime `^{}` block renders a placeholder `<span data-scrml-meta>` where it stands — the place its `meta.emit` output goes (§22.12) — and that span is judged as one written here: " + why + ". Move the block where a `<span>` may stand (inside a `<td>`, a `<div>`, a `<p>`)";
     }
 
     // s482 (g-boot-rcdata-hole-anchor-s482) — a child of an HTML raw-text / RCDATA element (`c.raw`:
@@ -27554,7 +27726,7 @@ ${
             .Interp(e: x) :> mkLitText(file, n, x, c),
             .DeclNode(d: x) :> [],
             .Css(c: x) :> [],
-            .Run(b: rb0) :> [],
+            .Run(b: rb0, meta: mt) :> mkMetaRun(g, sa, file, n, mt, c),   // s482 r1 (MED-1): a runtime block's placeholder span is text here — refused
             .Effect(w: x) :> [{ nid: n.nid, file: file, span: n.span, code: "E-HTML-PARSER-REPAIR", msg: rawTextMsg("effect", c.raw) }],
             .Request(r: x) :> [{ nid: n.nid, file: file, span: n.span, code: "E-HTML-PARSER-REPAIR", msg: rawTextMsg("request", c.raw) }],
             .Gather(f: lf) :> [{ nid: n.nid, file: file, span: n.span, code: "E-BOOTSTRAP-UNSUPPORTED", msg: rawGatherMsg(c.raw) }]
@@ -27721,7 +27893,9 @@ ${
         // s475: `<plaintext>` is one fault — what it holds is its text either way (one report, no cascade)
         if (t == "plaintext" && out.length > 0) return out;
         // s475: an HTML `<template>`'s content is parsed apart, "in template" — a root of its own
-        if (t == "template" && isHtmlInNs(c.ns, t)) return out.concat(mkNodes(g, sa, file, e.kids, mkRoot(htmlNs(), c.depth)));
+        // s482 r1 (MED-1): it is also INERT — the page never runs or shows it (its content is a
+        // DocumentFragment, HTML §4.12.3), so a runtime `^{}` block there has no place in the page
+        if (t == "template" && isHtmlInNs(c.ns, t)) return mkInertMeta(file, e.kids, out.concat(mkNodes(g, sa, file, e.kids, mkRoot(htmlNs(), c.depth))));
         return out.concat(mkNodes(g, sa, file, e.kids, mkKid(ns, t, mkQuoted(e.attrs, "encoding"), kc)));
     }
 
@@ -37010,7 +37184,14 @@ ${
             .LengthCheck :> ts,
             .RefineCheck :> ts,
             .TapeInsert :> ts,
-            .Print :> ts
+            .Print :> ts,
+            .MetaGet :> ts,
+            .MetaEmit :> ts,
+            .MetaCleanup :> ts,
+            .MetaInterval :> ts,
+            .MetaTimeout :> ts,
+            .MetaClearInterval :> ts,
+            .MetaClearTimeout :> ts
         };
     }
 
@@ -37796,7 +37977,14 @@ ${
             .LengthCheck :> VType.Unknown,
             .RefineCheck :> VType.Unknown,
             .TapeInsert :> VType.Unknown,
-            .Print :> VType.Unknown
+            .Print :> VType.Unknown,
+            .MetaGet :> VType.Unknown,
+            .MetaEmit :> VType.Unknown,
+            .MetaCleanup :> VType.Unknown,
+            .MetaInterval :> VType.Unknown,
+            .MetaTimeout :> VType.Unknown,
+            .MetaClearInterval :> VType.Unknown,
+            .MetaClearTimeout :> VType.Unknown
         };
     }
 
@@ -38080,6 +38268,9 @@ ${
     // defaulted — is honoured by never guessing). Checked only when the
     // callee resolves statically to a function (provable-or-silent).
     fn typeCall(env: TEnv, e: AExpr, callee: AExpr, args: AExpr[], ts0: TypeState) -> RVT {
+        // s482 (s482-meta-runtime): a runtime `^{}` block's `meta` call (resolveMetaCall)
+        const mop: string = metaOpCallee(callee);
+        if (mop != "") return typeMetaCall(env, e, mop, args, ts0);
         // s477 (s477-boot-tape-forms): a removal used as a VALUE (resolveRemovalValue) —
         // the edit judged as in statement position, the value `T | not` (§66.12.6 rule 3)
         const rf: EffectFact | not = effectFact(env.t.effects, e.nid);
@@ -38160,6 +38351,21 @@ ${
         // s473 (§48.8): an unannotated function's INFERRED return (inferReturn)
         const inf: VType | not = findLocalT(env.settled, retKey(s).id);
         if (inf is given) return rvt(inf, ts);
+        return rvt(VType.Unknown, ts);
+    }
+
+    // s482 (s482-meta-runtime) — the §22.5.1 signature of a runtime `^{}` block's `meta` call
+    // (resolveMetaCall): the arguments typed, each checked against its parameter type.
+    fn typeMetaCall(env: TEnv, e: AExpr, op: string, args: AExpr[], ts0: TypeState) -> RVT {
+        let ts: TypeState = typeExprs(env, args, ts0);
+        if (args.length != metaArity(op)) return rvt(VType.Unknown, ts);
+        if (op == "get") return rvt(exprType0(ts, args[0].nid), ts);
+        if (op == "emit") return rvt(VType.Unknown, checkValue(env, exprType0(ts, args[0].nid), Type.Str, args[0].span, "the argument of `meta.emit` (the markup, §22.5.1)", ts));
+        if (op == "interval" || op == "timeout") {
+            ts = checkValue(env, exprType0(ts, args[0].nid), Type.Num, args[0].span, "the delay of `meta." + op + "` (milliseconds, §22.5.1)", ts);
+            return rvt(known(Type.Str), ts);
+        }
+        if (op == "clearInterval" || op == "clearTimeout") return rvt(VType.Unknown, checkValue(env, exprType0(ts, args[0].nid), Type.Str, args[0].span, "the timer id of `meta." + op + "` (§22.5.1)", ts));
         return rvt(VType.Unknown, ts);
     }
 
