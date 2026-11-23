@@ -174,3 +174,38 @@ describe("INFO-1 — a redundant alternate in a wildcard alternation is E-TYPE-0
     expect(await run(src)).toBe("w b w w");
   }, 120000);
 });
+
+// s482-wmatch-alt-fix (#2075 review LOW-1) — §18.2: "An alternation containing a wildcard alternate
+// (`_` / `else`) is the wildcard arm." Its named alternates are a duplicate check (E-TYPE-023) only;
+// they are not cases covered BEFORE the wildcard, so they never make it "unreachable" (§18.6
+// W-MATCH-001). #2075 added them to the plain match's coverage set, and W-MATCH-001 then fired on a
+// reachable arm (the failable path kept them out of `coveredBefore` and stayed silent).
+describe("LOW-1 (wmatch-alt-fix) — a wildcard alternation is not judged unreachable by its own alternates", () => {
+  test("`.A | .B | .C | .D | _` as the only arm: clean, and runs", async () => {
+    const src = prog(pm([`.A | .B | .C | .D | _ :> "w"`]), `<p id="a">\${f(K.A)} \${f(K.D)}</p>\n`);
+    expect(allCodes(src)).toEqual([]);
+    expect(await run(src)).toBe("w w");
+  }, 120000);
+
+  test("`.A :> …, .B | .C | .D | else`, `.A | .B :> …, .C | .D | else`, `true | false | else`: no W-MATCH-001", () => {
+    expect(allCodes(prog(pm([`.A :> "a"`, `.B | .C | .D | else :> "w"`])))).toEqual([]);
+    expect(allCodes(prog(pm([`.A | .B :> "ab"`, `.C | .D | else :> "w"`])))).toEqual([]);
+    expect(allCodes(prog(lm("boolean", [`true | false | else :> "w"`])))).toEqual([]);
+    expect(allCodes(prog(lm("boolean", [`true :> "t"`, `false | else :> "w"`])))).toEqual([]);
+  });
+
+  test("a wildcard after every case already has an arm is still W-MATCH-001", () => {
+    expect(allCodes(prog(pm([`.A :> "a"`, `.B | .C :> "bc"`, `.D :> "d"`, `_ :> "w"`])))).toEqual(["W-MATCH-001"]);
+    expect(allCodes(prog(pm([`.A | .B | .C | .D :> "abcd"`, `else :> "w"`])))).toEqual(["W-MATCH-001"]);
+    expect(allCodes(prog(lm("boolean", [`true | false :> "tf"`, `else :> "w"`])))).toEqual(["W-MATCH-001"]);
+    // its named alternate repeats an earlier arm too: both reports
+    const c = allCodes(prog(pm([`.A :> "a"`, `.B :> "b"`, `.C :> "c"`, `.D :> "d"`, `.A | _ :> "w"`])));
+    expect(c.slice().sort()).toEqual(["E-TYPE-023", "W-MATCH-001"]);
+  });
+
+  test("the duplicate check inside a wildcard alternation still fires", () => {
+    expect(codes(prog(pm([`.A | .A | _ :> "w"`])))).toEqual(["E-TYPE-023"]);
+    expect(codes(prog(lm("boolean", [`true | true | else :> "w"`])))).toEqual(["E-TYPE-023"]);
+    expect(codes(prog(pm([`.B :> "b"`, `.C | .B | else :> "w"`])))).toEqual(["E-TYPE-023"]);
+  });
+});
