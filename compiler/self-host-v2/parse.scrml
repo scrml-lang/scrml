@@ -8637,7 +8637,7 @@ ${
         const sp: ASpan = mkSpan(start, last.span.end);
         const b: ABlock = { nid: tp.nid, span: sp, stmts: stmts };
         const t1: TP = bumpId(tp);
-        const n: ANode = { nid: t1.nid, span: sp, k: ANodeK.Run(b) };
+        const n: ANode = { nid: t1.nid, span: sp, k: ANodeK.Run(b, "") };
         const t2: TP = bumpId(t1);
         const it: AItem = { nid: t2.nid, span: sp, k: AItemK.MarkupItem(n) };
         return { items: [it], tp: bumpId(t2) };

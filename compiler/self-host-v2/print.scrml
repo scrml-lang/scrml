@@ -832,7 +832,16 @@ ${
             .RefineCheck :> rtCall(ctx, "refineCheck", a),
             .TapeInsert :> rtCall(ctx, "tapeInsert", a),
             // s478 (§20.7) — raw stdout (server-runtime.js printOut; server code only, check.scrml C-P1)
-            .Print :> rtCall(ctx, "printOut", a)
+            .Print :> rtCall(ctx, "printOut", a),
+            // s482 (§22.5.1) — a runtime `^{}` block's calls, on its per-run `meta` object (metaJs);
+            // a dependency read is a thunk the runtime runs with tracking on
+            .MetaGet :> jmcall(jid(metaVar()), "get", [jthunk(a[0])]),
+            .MetaEmit :> jmcall(jid(metaVar()), "emit", a),
+            .MetaCleanup :> jmcall(jid(metaVar()), "cleanup", a),
+            .MetaInterval :> jmcall(jid(metaVar()), "interval", a),
+            .MetaTimeout :> jmcall(jid(metaVar()), "timeout", a),
+            .MetaClearInterval :> jmcall(jid(metaVar()), "clearInterval", a),
+            .MetaClearTimeout :> jmcall(jid(metaVar()), "clearTimeout", a)
         };
     }
 
@@ -2918,6 +2927,16 @@ ${
 
     fn textBuilt(t: string) -> Built { return { nodes: [HNode.HText(t)], holes: [] }; }
 
+    // s482 (s482-meta-runtime) — a runtime `^{}` block's PLACE: the element its `meta.emit`
+    // output goes into (impl#1's placeholder, the one the verbatim gate looks up by its
+    // `data-scrml-meta` id and whose `<form>` ancestry it judges, §22.12). A `span`, as
+    // impl#1's (the gate parses emitted markup as that element's content). Body-top
+    // statements render no DOM (a comment keeps the child-index paths positional).
+    fn runHole(meta: string, path: int[], v: View, ns: string) -> Built {
+        if (meta == "") return hole(HNode.HComment("run"), path, v, ns);
+        return hole(HNode.HElem("span", [{ name: "data-scrml-meta", value: meta }], []), path, v, ns);
+    }
+
     // s468 — a raw-content body's text (SPEC §4.17): `<` / `>` encoded, `&` kept.
     fn rawTextBuilt(t: string) -> Built { return { nodes: [HNode.HRawText(t)], holes: [] }; }
 
@@ -2934,7 +2953,7 @@ ${
             .Star(decl: d) :> hole(HNode.HComment("*" + d.hint), path, v, ns),
             // s449: an `<effect>` renders no DOM; its comment keeps child-index paths positional
             .Effect :> hole(HNode.HComment("effect"), path, v, ns),
-            .Run :> hole(HNode.HComment("run"), path, v, ns),          // s478: body-top statements render no DOM
+            .Run(meta: mt) :> runHole(mt, path, v, ns),          // s478: body-top statements render no DOM; s482: a runtime `^{}` its placeholder
             .Init :> hole(HNode.HComment("init"), path, v, ns),        // s481: never reached — bodyInits rewrites every Init first
             // s475: a request renders no DOM either (its signals are read where the author reads them)
             .Request :> hole(HNode.HComment("request"), path, v, ns),
@@ -3042,6 +3061,8 @@ ${
     // Views → client code.
     // -------------------------------------------------------------------------
     fn scopeVar() -> JsExpr { return jid("scope$"); }
+    // s482 — a runtime `^{}` block's per-run `meta` object (metaJs; the Meta* PrimOps)
+    fn metaVar() -> string { return "meta$"; }
 
     // s474: the template is the content of `ctx.ns` — the context it is inserted in.
     fn renderViews(ctx: Ctx, views: View[], tid: string) -> Rendered {
@@ -3105,7 +3126,7 @@ ${
     fn holeNeedsNode(v: View) -> boolean {
         return match v {
             .Effect(deps: ds) :> false,
-            .Run(body: x) :> false,
+            .Run(meta: mt) :> mt != "",                 // s482: a runtime `^{}` block is wired to its placeholder
             .Init(k: x) :> false,
             .Request(deps: ds) :> false,
             .ResetOn(triggers: ds) :> false,
@@ -3141,7 +3162,7 @@ ${
             .Slot :> only([sexpr(rtCall(ctx, "slot", [scopeVar(), node, ctx.slot]))]),
             .Star(decl: d, inst: i) :> starJs(ctx, d, i, node),
             .Effect(deps: ds, body: b) :> effectJs(ctx, ds, b),
-            .Run(body: b, hoist: hs) :> runJs(ctx, b, hs),
+            .Run(body: b, hoist: hs, meta: mt) :> runOrMetaJs(ctx, b, hs, mt, node),
             .Init(k: x) :> only(seedPlaceJs(ctx, x)),                     // s482: a held cell's place (bodyInits keeps only those)
             .Request(target: t, deps: ds, body: b, mount: m, state: st, handle: h, cls: k) :> requestJs(ctx, t, ds, b, m, st, h, k),
             .ResetOn(triggers: ds, reset: b, rank: r) :> resetOnJs(ctx, ds, b, r),
@@ -3333,6 +3354,16 @@ ${
         let out: JsStmt[] = [];
         for (const h of hoist) { out = out.concat([JsStmt.SDecl(symName(ctx, h))]); }
         return only(out.concat([sexpr(rtCall(ctx, "run", [scopeVar(), JsExpr.JArrow(handlerParams(body), blockJs(ctx, body))]))]));
+    }
+
+    // s482 (s482-meta-runtime) — a runtime `^{}` block (View.Run with its `meta` id; SPEC §22.5):
+    // `rt.metaEffect(scope$, <placeholder>, "<id>", (task$, meta$) => { … })`. The body runs as
+    // a run does (a task the scope owns; it may write cells), first where it stands and again
+    // when a cell it reads through `meta.get` changes (runtime.js MetaEffect); `meta$` is the
+    // run's fresh `meta` object the Meta* PrimOps call (§22.5.1).
+    fn runOrMetaJs(ctx: Ctx, body: Block, hoist: Sym[], meta: string, node: JsExpr) -> Rendered {
+        if (meta == "") return runJs(ctx, body, hoist);
+        return only([sexpr(rtCall(ctx, "metaEffect", [scopeVar(), node, jstr(meta), JsExpr.JArrow(["task$", metaVar()], blockJs(ctx, body))]))]);
     }
 
     fn effectJs(ctx: Ctx, deps: EffectDep[], body: Block) -> Rendered {
@@ -5581,7 +5612,7 @@ ${
                 out = out.concat([v]);
             } else if (hasInt(seq, h[0])) {
                 const k: CoreConst | not = findConst(p0, h[0]);
-                if (k is given) out = out.concat([View.Run(block([Stmt.Assign(k.sym, k.init, [])]), [])]);
+                if (k is given) out = out.concat([View.Run(block([Stmt.Assign(k.sym, k.init, [])]), [], "")]);
             }
         }
         return out;

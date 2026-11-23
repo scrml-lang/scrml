@@ -252,6 +252,15 @@ ${
         // "\n" appended for println. SERVER code only (§20.7.3: "Host `process.stdout` is a server-only
         // resource") — check.scrml C-P1 refuses it in client code.
         Print,
+        // s482 (s482-meta-runtime, §22.5.1) — the runtime `meta` object's calls, standing
+        // ONLY in the body of a View.Run whose `meta` is set (or a function value made
+        // there): the printer calls them on that block's per-run `meta` object.
+        // MetaGet(v): `v` (a cell read) read as a DEPENDENCY of the block (`meta.get("x")`,
+        // a `meta.bindings.x` of a cell) — the one read that re-runs it. MetaEmit(html):
+        // the gated `meta.emit` (§22.12). MetaCleanup(f): a cleanup for this run.
+        // MetaInterval / MetaTimeout(ms, f): a timer bound to the block, its id a
+        // `string`. MetaClearInterval / MetaClearTimeout(id).
+        MetaGet, MetaEmit, MetaCleanup, MetaInterval, MetaTimeout, MetaClearInterval, MetaClearTimeout,
     }
 
     export type Pattern:enum = {
@@ -971,7 +980,14 @@ ${
         // binding at the common ancestor scope"). Each is declared in the scope's
         // render, before the body runs, and the body ASSIGNS it (an Assign with an
         // empty path where its Let stood), so the later views read the one binding.
-        Run(body: Block, hoist: Sym[]),
+        // s482 (s482-meta-runtime) — `meta`: "" for body-top statements; else the
+        // view is a RUNTIME `^{}` block (SPEC §22.5) and `meta` its scope id (§22.10):
+        // it renders a placeholder element (`<span data-scrml-meta="id">`, the place
+        // its `meta.emit` output goes, §22.12) and its body runs as an effect —
+        // first where it stands (as a run does), then again whenever a cell it
+        // `meta.get`s changes (Prim MetaGet). `hoist` is empty (the body's locals are
+        // the run's own). The meta surface in the body is the Meta* PrimOps.
+        Run(body: Block, hoist: Sym[], meta: string),
         // s481 — the PLACE of a file-scope binding's initializer in the program body (§7.6
         // S481, ruling:user-voice-scrml.md-S481-body-run-order: "The program body runs once,
         // top to bottom, in source order, and that sequence is the module initialization.

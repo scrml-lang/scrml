@@ -608,6 +608,9 @@ ${
     // [receiver, …arguments]). s469: a parse (`int.parse(s)`, §14.13.4) has no
     // receiver VALUE — its "receiver" names a type — so it is Prim(op, [s]).
     fn methodExpr(c: LC, o: PrimOp, cal: AExpr, args: AExpr[]) -> Expr {
+        // s482 (§22.5.1): a runtime `^{}` block's `meta` call — its receiver is the reserved `^`
+        // (meta.scrml), no value: the printer names the block's per-run `meta` object
+        if (isMetaOp(o)) return Expr.Prim(o, lowerExprs(c, args));
         if (o == PrimOp.ParseInt || o == PrimOp.ParseNum || o == PrimOp.ParseBool) {
             if (args.length != 1) return missing();
             return Expr.Prim(o, lowerExprs(c, args));
@@ -615,6 +618,11 @@ ${
         const obj: AExpr | not = calleeObj(cal);
         if (obj is not) return missing();
         return Expr.Prim(o, [lowerExpr(c, obj)].concat(lowerExprs(c, args)));
+    }
+
+    fn isMetaOp(o: PrimOp) -> boolean {
+        return o == PrimOp.MetaGet || o == PrimOp.MetaEmit || o == PrimOp.MetaCleanup || o == PrimOp.MetaInterval
+            || o == PrimOp.MetaTimeout || o == PrimOp.MetaClearInterval || o == PrimOp.MetaClearTimeout;
     }
 
     fn calleeObj(cal: AExpr) -> AExpr | not {
@@ -1986,7 +1994,7 @@ ${
             .DeclNode(d: d) :> [],
             .Css(c: c) :> [],
             .Effect(w: w) :> [effectView(c, w)],
-            .Run(b: b) :> [runView(c, b)],   // s478 (§40.8): explicit continuations, as a handler's
+            .Run(b: b, meta: mt) :> [runView(c, b, mt)],   // s478 (§40.8): explicit continuations, as a handler's; s482: `mt` a runtime `^{}`
             .Request(r: r) :> [requestView(c, r)],
             .Gather(f: lf) :> gatherView(c, n, lf)        // s469 (§17.4)
         };
@@ -2000,7 +2008,11 @@ ${
     // its Let — at the body's top level or, after the continuation pass, in a continuation
     // (a Suspend's `then`, a Join's body) — becomes an Assign of that binding. A Local of a
     // nested block keeps its Let (block-scoped, §7.6 "Only top-level declarations").
-    fn runView(c: LC, b: ABlock) -> View {
+    fn runView(c: LC, b: ABlock, meta: string) -> View {
+        // s482 (s482-meta-runtime) — a runtime `^{}` block (SPEC §22.5): its body is one bare
+        // block (meta.scrml), so it binds nothing at its top level — nothing is hoisted, and its
+        // locals are each run's own
+        if (meta != "") return View.Run(cpsBody(lowerBlock(c, b), []), [], meta);
         let hoist: Sym[] = [];
         for (const s of b.stmts) {
             if (isLocalStmt(s)) {
@@ -2009,8 +2021,8 @@ ${
             }
         }
         const body: Block = cpsBody(lowerBlock(c, b), []);
-        if (hoist.length == 0) return View.Run(body, []);
-        return View.Run(block(hoistedLets(body.stmts, hoist)), hoist);
+        if (hoist.length == 0) return View.Run(body, [], "");
+        return View.Run(block(hoistedLets(body.stmts, hoist)), hoist, "");
     }
 
     fn isLocalStmt(s: AStmt) -> boolean {

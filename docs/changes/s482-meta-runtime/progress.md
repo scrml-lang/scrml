@@ -19,5 +19,23 @@ Base: origin/main ba34ad0ba (contains #2045). Scratch: ~/.cache/scrml/review/s48
   VERBATIM between markers (sync script + drift test); `metaEffect` on the runtime's tracking.
 
 ## Done (committed)
+- [x] afe42a411 runtime: impl#1 gate verbatim between markers (scripts/sync-bootstrap-meta-emit-gate.ts, drift test
+      compiler/tests/unit/bootstrap-meta-emit-gate-verbatim.test.js; url-guard test excludes the block) + MetaEffect.
+- [x] compiler: ast ANodeK.Run(b, meta); core View.Run(…, meta) + Meta* PrimOps; meta.scrml runtimeBlock / rtForm /
+      rtSetStmt (MC.rt / MC.wh); analyze resolveMetaCall / typeMetaCall / resolveMetaCallback / resolveRunNode /
+      lamEvalWhy; lower runView / methodExpr; print runHole / runOrMetaJs / primJs.
+- [x] tests: slice-m4/meta-runtime-s482.test.js (30 + 2 Chromium) — red on base (28 fail); meta-s481 updated (2 tests).
+
+## Findings
+- impl#1 tracks ONLY meta.get (+ bindings getters): a direct `@x` read or one in a called function is no dependency
+  (probe p/track.scrml: "direct 1 / get 5 / fn 1"). Bootstrap matches (body untracked; meta$.get thunks tracked).
+- Q11 probe: impl#1 "run1;meta1;run2;meta2;" — bootstrap the same (first run inline). Not a STOP.
+- Emits during a mount's render are held until the placeholder is in the page (the gate's page-form judgement needs it).
+- conformance meta: 64 PASS / 1 FAIL (meta-proto-cell-name-pos: `"<p>" + meta.get("constructor")` with an int cell —
+  E-OPERATOR-OPERAND-TYPE, S440 Gotcha Q1; the bootstrap types meta.get as the cell) / 1 UNSUPPORTED (log) / 2 NOT-TWINNED.
+- corpus (71 `^{` programs, migrated as s481): base 19 OK → head 27 OK.
 
 ## Remaining
+- SPEC §22 status notes; known-gaps (resolve g-boot-meta-runtime-unbuilt-s481, file g-boot-meta-runtime-residue-s482,
+  bindings snapshot, timer id type); bootstrap-spec-coverage rows.
+- final gates (pretest, full conformance base vs head, impl#1 -t meta, byte-compare non-meta, corpus, CI checks).
