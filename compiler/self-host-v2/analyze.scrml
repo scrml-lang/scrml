@@ -50686,7 +50686,9 @@ ${
     // `<effect>` body is (scanExpr — calls of scrml functions, `function` and `fn` alike, and
     // functions handed on as values, closed transitively by the summary), and a call the analysis
     // cannot resolve (through a local, a parameter, a field — a function value) fails closed
-    // (§6.7.4 rule 4). A direct write is the binder's (lamBodyCheck), reported once there.
+    // (§6.7.4 rule 4). s482 r2: so does a call reaching a `<host src>`-backed function (§21.3.1)
+    // — directly, through a wrapper at any depth, or as a value (hostChain): host code has no
+    // write summary. A direct write is the binder's (lamBodyCheck), reported once there.
     // INTERIM (g-boot-meta-runtime-residue-s482): §22.5.1 does not rule whether a callback may
     // write state; the capable form is a callback whose writes are batched after the flush.
     fn metaCbDiags(s: Summary, t: Tables, lam: AExpr, file: string, op: string) -> Diag[] {
@@ -50707,6 +50709,21 @@ ${
                     out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", who + how + " — " + why, r.file, r.span)]);
                 } else if (su is given) {
                     out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", who + " reaches a call the compiler cannot resolve, through `" + chainText(su.chain) + "`: " + su.site.what + " — it cannot prove the callback writes no reactive cell, and the rule fails closed (§6.7.4 rule 4): " + why, r.file, r.span)]);
+                } else {
+                    // s482 r2 (#2080 r1 review HIGH-1r) — a `<host src>`-backed function (§21.3.1) has
+                    // no scrml body: the summary holds it with no write, yet its JS can write a cell
+                    // (it can fire a DOM event whose handler writes one — probe p-5wwuPb looped 100
+                    // times a click). Unproven, so refused: directly, through a scrml wrapper at any
+                    // depth, or handed on as a value (INTERIM, g-boot-meta-runtime-residue-s482).
+                    const hc: string[] = hostChain(s, t, r.sym);
+                    // a `<host>`-backed function itself named as a value is the binder's refusal
+                    // (fnNameRef: "a host-backed function … used as a value is not in the bootstrap")
+                    if (hc.length > 0 && !(r.asValue && hc.length == 1)) {
+                        let how: string = " calls `" + hc[hc.length - 1] + "`, a `<host>`-backed function (§21.3.1), through `" + chainText(hc) + "`";
+                        if (hc.length == 1) how = " calls `" + hc[0] + "`, a `<host>`-backed function (§21.3.1)";
+                        if (r.asValue) how = " hands `" + r.name.replace("()", "") + "` on as a function value, and it reaches `" + hc[hc.length - 1] + "`, a `<host>`-backed function (§21.3.1), through `" + chainText(hc) + "`";
+                        out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", who + how + " — host code is outside the analysis (it can write a cell, e.g. by firing a DOM event whose handler writes one), so the compiler cannot prove the callback writes no reactive cell, and the rule fails closed (§6.7.4 rule 4): " + why, r.file, r.span)]);
+                    }
                 }
             }
         }
@@ -50714,6 +50731,40 @@ ${
             out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", u.what + " — the compiler cannot prove " + who + " writes no reactive cell, and the rule fails closed (§6.7.4 rule 4): " + why + ". Call a declared scrml function by its name", u.file, u.span)]);
         }
         return out;
+    }
+
+    // s482 r2 (#2080 r1 review HIGH-1r) — the chain of display labels (`ck()` … `clickB()`) from
+    // callable `from` down to the first `<host src>`-backed function it reaches through the
+    // references its body makes (calls and function values), transitively; [] — none.
+    fn hostChain(s: Summary, t: Tables, from: int) -> string[] {
+        let seen: int[] = [];
+        let todo: int[] = [from];
+        let via: int[] = [-1];
+        let at: int = 0;
+        for (; at < todo.length; ) {
+            const id: int = todo[at];
+            if (seen.indexOf(id) < 0) {
+                seen = seen.concat([id]);
+                const i: int = nodeIdx(s.nodes, id);
+                if (i >= 0) {
+                    if (hostBackedSym(t, id)) {
+                        let out: string[] = [];
+                        let k: int = at;
+                        for (; k >= 0; ) {
+                            out = [s.nodes[nodeIdx(s.nodes, todo[k])].label].concat(out);
+                            k = via[k];
+                        }
+                        return out;
+                    }
+                    for (const r of s.nodes[i].f.scan.refs) {
+                        todo = todo.concat([r.sym]);
+                        via = via.concat([at]);
+                    }
+                }
+            }
+            at = at + 1;
+        }
+        return [];
     }
 
     // s478 (s478-boot-fn-type) — what a function value's type cannot carry in the bootstrap,
@@ -55292,22 +55343,29 @@ ${
     // diagnostics lead the program's.
     export fn analyzeSources(files00: FileAst[], srcs: Source[], entry: string, keyBase: string, routeBase: string, nextId0: int) -> TypedProgram {
         const mr: MetaRun = metaFiles(files00, nextId0);
-        const tp: TypedProgram = analyzeExpanded(mr.files, srcs, entry, keyBase, routeBase, mr.next);
+        const tp: TypedProgram = analyzeExpanded(mr.files, srcs, entry, keyBase, routeBase, mr.next, mr.diags);
         if (mr.diags.length == 0) return tp;
         return { files: tp.files, tables: tp.tables, diags: mr.diags.concat(tp.diags), infos: tp.infos };
     }
 
-    fn analyzeExpanded(files0: FileAst[], srcs: Source[], entry: string, keyBase: string, routeBase: string, nextId0: int) -> TypedProgram {
+    // `metaDs0`: the first meta pass's diagnostics (analyzeSources reports them) — a re-read
+    // file's meta pass reports only what that pass did not (s482 r2, nsMetaNotes).
+    fn analyzeExpanded(files0: FileAst[], srcs: Source[], entry: string, keyBase: string, routeBase: string, nextId0: int, metaDs0: Diag[]) -> TypedProgram {
         let nextId: int = nextId0;
         const r0: ARun = analyzeRun(files0, entry, keyBase, routeBase, nextId >= 0, []);
         let files: FileAst[] = files0;
         let r1: ARun = r0;
+        let nsNotes: Diag[] = [];
         if (r0.nsAt.length > 0) {
             const rr: NsReread = nsReread(files0, srcs, r0.nsAt);
             if (rr.changed) {
                 // s481: a re-read file is parsed from its source again, its `^{}` blocks
                 // with it — replaced again (their diagnostics were reported by the first pass)
                 const mr2: MetaRun = metaFiles(rr.files, nextId);
+                // s482 r2 (#2080 r1 review MED): a refusal ONLY the re-read finds — a `^{}` body
+                // naming a namespace member, `m.x` one name now — is reported; it was dropped with
+                // its block, silently (no effect, an empty element)
+                nsNotes = nsMetaNotes(metaDs0, mr2.diags);
                 files = mr2.files;
                 nextId = mr2.next;
                 r1 = analyzeRun(files, entry, keyBase, routeBase, nextId >= 0, []);
@@ -55347,6 +55405,7 @@ ${
         // the composed program will run
         // s475-boot-literal-carriers: only when some carrier's failure set is not its declared enum (ARun.retype)
         if (r1.retype) r1 = analyzeRun(files, entry, keyBase, routeBase, nextId >= 0, r1.carriers);
+        if (nsNotes.length > 0) return withNotes(r1.tp, nsNotes);
         if (r1.plans.length == 0 || hasErrorDiag(r1.tp.diags)) return withNotes(withNotes(r1.tp, epNotes), r1.unused);
         const r2: ARun = analyzeRun(composeFiles(files, r1.plans, next), entry, keyBase, routeBase, false, r1.carriers);
         // the plans' warnings join the composed program's diagnostics, and no diagnostic names the
@@ -55359,6 +55418,19 @@ ${
         let un: Diag[] = [];
         if (!hasErrorDiag(ds)) un = r1.unused;
         return withNotes(withNotes({ files: r2.tp.files, tables: r2.tp.tables, diags: ds, infos: r2.tp.infos }, epNotes), un);
+    }
+
+    // The re-read meta pass's diagnostics the first pass did not report (by code, file and span).
+    fn nsMetaNotes(first: Diag[], again: Diag[]) -> Diag[] {
+        let out: Diag[] = [];
+        for (const d of again) {
+            let seen = false;
+            for (const f of first) {
+                if (f.code == d.code && f.file == d.file && f.span.start == d.span.start && f.span.end == d.span.end) seen = true;
+            }
+            if (!seen) out = out.concat([d]);
+        }
+        return out;
     }
 
     fn withNotes(tp: TypedProgram, notes: Diag[]) -> TypedProgram {

@@ -210,6 +210,67 @@ describe("s482 r1 — a runtime ^{} callback reaches no cell write, not through 
   });
 });
 
+// s482 r2 (re-review of #2080 r1) — HIGH-1r: a `<host src>`-backed function in a callback compiled
+// (no write summary, so no witness) and one click ran the subscription 100 times (probe p-5wwuPb);
+// MED: a `^{}` body naming a namespace-import member (`m.one()`) was DROPPED with no diagnostic.
+const HOSTP = (pre, body) => `<host src="./glue.js">\n  clickB() -> int\n</host>\n<program>\n${pre}\nlet <n:int=0/>\n${body}\n<button id="b" onclick=\${() => { @n = @n + 1; }}>b</button>\n</program>\n`;
+const hostRefused = (pre, body, ...needles) => {
+  const r = run(HOSTP(pre, body));
+  expect(errs(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  for (const n of needles) expect(errMsgs(r)[0]).toContain(n);
+};
+const SUB = (stmt) => `<div id="o">^{ meta.subscribe("n", (v) => { ${stmt} meta.emit(\`<p>\${v}</p>\`); }); }</div>`;
+
+describe("s482 r2 — a callback reaching a `<host>`-backed function is unproven, so refused (HIGH-1r)", () => {
+  test("a direct call (the review's p-FhgC0u) is refused, naming the host function", () => {
+    hostRefused("", SUB("const z = clickB();"), "calls `clickB()`, a `<host>`-backed function (§21.3.1)", "fails closed (§6.7.4 rule 4)");
+  });
+
+  test("through a scrml wrapper, at any depth (the review's p-5wwuPb), naming the chain", () => {
+    hostRefused("function ck() -> int { return clickB(); }", SUB("const z = ck();"), "through `ck() → clickB()`");
+    hostRefused("function ck() -> int { return clickB(); }\nfunction ck2() -> int { return ck(); }", SUB("const z = ck2();"), "through `ck2() → ck() → clickB()`");
+    hostRefused("function ck() -> int { return clickB(); }", SUB("if (ck() == 0) { }"), "ck() → clickB()");
+  });
+
+  test("as a value: a wrapper handed on is refused here; the host function itself, by the binder (one report)", () => {
+    hostRefused("function ck() -> int { return clickB(); }", SUB("const g = ck;"), "hands `ck` on as a function value, and it reaches `clickB()`");
+    hostRefused("", SUB("const g = clickB;"), "a host-backed function (§21.3.1) used as a value is not in the bootstrap");
+  });
+
+  test("timer and cleanup callbacks too; a callback calling no host function still compiles", () => {
+    hostRefused("", `<div>^{ meta.interval(100, () => { const z = clickB(); }); }</div>`, "the callback of `meta.interval(…)` calls `clickB()`");
+    hostRefused("", `<div>^{ meta.cleanup(() => { const z = clickB(); }); }</div>`, "the callback of `meta.cleanup(…)` calls `clickB()`");
+    const r = run(HOSTP("function inc(x: int) -> int { return x + 1; }", SUB("const z = inc(v);")));
+    expect(errMsgs(r)).toEqual([]);
+  });
+});
+
+const LIB = "export let <count:int=0/>\nexport function bump() -> int { @count = @count + 1; return 0; }\nexport function one() -> int { return 1; }\n";
+const nsRun = (blk, imp = `import * as m from "./lib.scrml";\n`) => frontEnd(mods, [
+  { path: "lib.scrml", src: LIB },
+  { path: "app.scrml", src: `${imp}<program>\nlet <n:int=0/>\n<div id="o">^{ ${blk} }</div>\n<button id="b" onclick=\${() => { @n = @n + 1; }}>b</button>\n</program>\n` },
+]);
+
+describe("s482 r2 — a namespace-import member in a `^{}` body is refused by name, never dropped (MED)", () => {
+  test("a call in the block body, in a callback, and a writing member in a callback are each refused", () => {
+    for (const [blk, name] of [
+      ["const z = m.one(); meta.emit(`<p>${z}</p>`);", "m.one"],
+      ["meta.subscribe(\"n\", (v) => { const z = m.one(); meta.emit(`<p>${v}</p>`); });", "m.one"],
+      ["meta.subscribe(\"n\", (v) => { const z = m.bump(); meta.emit(`<p>${v}</p>`); });", "m.bump"],
+    ]) {
+      const r = nsRun(blk);
+      expect(errs(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+      expect(errMsgs(r)[0]).toContain("`" + name + "` — a namespace-import member (`import * as m`)");
+    }
+  });
+
+  test("the named import of the same function still builds", () => {
+    const r = nsRun("meta.subscribe(\"n\", (v) => { const z = one(); meta.emit(`<p>${v}</p>`); });", `import { one } from "./lib.scrml";\n`);
+    expect(errMsgs(r)).toEqual([]);
+    expect(print(r).js).toContain("metaEffect");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 2. the runtime (happy-dom; the bootstrap runtime module)
 // ---------------------------------------------------------------------------

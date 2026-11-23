@@ -2104,6 +2104,15 @@ ${
             if (d.kind == 2) return fxSet(x, "runtime", span, "");
             return x;
         }
+        // s482 r2 (#2080 r1 review MED) — a namespace-import member (`m.one`): the re-read
+        // (analyzeExpanded / nsReread) makes `m.x` one name after `m` resolved to `import * as m`;
+        // a `^{}` body that names one is refused by name (INTERIM, g-boot-meta-namespace-import-
+        // dropped-s482) — before, the re-read's refusal was dropped with the block, silently
+        const dot: int = n.indexOf(".");
+        if (dot > 0) {
+            const nd: MDecl | not = findDecl(env, n.substring(0, dot));
+            if (nd is given && nd.kind == 3) return fxCoded(x, "E-BOOTSTRAP-UNSUPPORTED", "`" + n + "` — a namespace-import member (`import * as " + n.substring(0, dot) + "`) read or called in a `^{}` body is not built: the bootstrap does not carry a namespace member into a meta block (INTERIM, g-boot-meta-namespace-import-dropped-s482). Import the name itself (`import { " + n.substring(dot + 1) + " } from …`) and use it by that name", span);
+        }
         if (env.cells.indexOf(n) >= 0) return fxBad(x, "`" + n + "` is a cell of the program, read here as a bare name — a `^{}` body reaches a cell as `@" + n + "` (or, in a runtime block, `meta.get(\"" + n + "\")`), never as a captured binding (§22.12). " + allowedSet(), span);
         return fxBad(x, "`" + n + "` is not available inside `^{}` meta blocks — it is not a scrml construct, a local or captured binding, or a meta primitive. " + allowedSet() + hostHint(n), span);
     }

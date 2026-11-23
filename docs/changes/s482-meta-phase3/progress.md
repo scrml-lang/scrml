@@ -74,3 +74,15 @@ Scratch: ~/.cache/scrml/review/s482-meta-phase3/.
 - byte-compare 1968 conformance cases main vs head: 0 diffs. Corpus (76 `^{` files, fixS66 and raw): 3 OK → 3 OK, 0 diffs.
 - s34-census --check-new PASS; types-gate OK 182 unchanged; gen-bootstrap-severity current; corpus-compile-floor PASS;
   snippet-gate 120/0 (9 spec-ahead); claim-gate 0 failed; gen-md-shim current; e2e-render-map 259/0.
+
+## r2 (fix round, re-review of #2080 @ 29d2494d1)
+- [x] HIGH-1r: `metaCbDiags` refuses a callback reaching a `<host src>`-backed function — direct, through a scrml
+      wrapper at any depth, or a wrapper as a value (`hostChain`, analyze.scrml) — E-BOOTSTRAP-UNSUPPORTED naming
+      the chain, fail closed (§6.7.4 rule 4). The host function itself as a value stays the binder's refusal.
+- [x] MED: a `^{}` body naming a namespace-import member is refused by name (meta.scrml `fName`), and
+      `analyzeExpanded` reports the re-read meta pass's new diagnostics (`nsMetaNotes`) — they were dropped with
+      the block. Corpus 0 newly rejected, so refused (not only filed); gap g-boot-meta-namespace-import-dropped-s482.
+- [x] gap g-boot-effect-host-call-hang-s482 (HIGH, pre-existing, owner fork pending; not built).
+- Corpus (bootstrap compileSource, 959 examples/samples/benchmarks files, 29d2494d1 vs r2): 160 OK → 160 OK,
+  0 diffs (byte hashes included). `^{` files (76, fixS66 and raw): 0 diffs. Corpus meta callbacks calling a
+  host function: 0; corpus `^{` files with a namespace import: 0.
