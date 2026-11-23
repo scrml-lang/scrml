@@ -144,6 +144,62 @@ describe("s482 phase 3 — meta.subscribe (§22.5.1; ruling item 2: literal name
   });
 });
 
+// s482 r1 (review of #2080) — HIGH-1: a callback reaching a cell write through a CALL compiled, and a
+// subscription writing its own cell hung the page; LOW-3: nested registrations accumulated per call.
+const FNS = `    function bump() -> int { @n = @n + 1; return 0; }
+    function setSel() -> int { @sel = "Color"; return 0; }
+    function viaBump() -> int { return bump(); }
+    function one() -> int { return 1; }
+    fn two() -> int { return 2; }`;
+const PF = (body) => `<program>\n${TYPES}\n${FNS}\nlet <sel:string="User"/>\nlet <n:int=0/>\n${body}\n</program>\n`;
+const refused = (body, ...needles) => {
+  const r = run(PF(body));
+  expect(errs(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  for (const n of needles) expect(errMsgs(r)[0]).toContain(n);
+};
+
+describe("s482 r1 — a runtime ^{} callback reaches no cell write, not through a call either (HIGH-1)", () => {
+  test("the review's repro: a subscribe callback writing its OWN cell through a `function` is refused, naming the chain", () => {
+    refused(`<div id="o">^{ meta.subscribe("n", (v) => { const z = bump(); meta.emit(\`<p>\${v}</p>\`); }); }</div>`, "writes `@n` through a call: `bump() → @n`");
+  });
+
+  test("every position: an expression-bodied callback, an `if` condition, a nested lambda's body", () => {
+    refused(`<div>^{ meta.subscribe("n", (v) => bump()); }</div>`, "bump() → @n");
+    refused(`<div>^{ meta.subscribe("n", (v) => { if (bump() > 0) { meta.emit("x"); } }); }</div>`, "bump() → @n");
+    refused(`<div>^{ meta.subscribe("n", (v) => { const xs = [1, 2].map((x) => bump()); }); }</div>`, "bump() → @n");
+  });
+
+  test("a DIFFERENT cell through a function, and a write two calls down, are refused", () => {
+    refused(`<div>^{ meta.subscribe("n", (v) => { const z = setSel(); }); }</div>`, "writes `@sel` through a call: `setSel() → @sel`");
+    refused(`<div>^{ meta.subscribe("n", (v) => { const z = viaBump(); }); }</div>`, "viaBump() → bump() → @n");
+  });
+
+  test("a writing function handed on as a value is refused (the summary counts it called); a call through a local fails closed", () => {
+    refused(`<div>^{ meta.subscribe("n", (v) => { const f = bump; }); }</div>`, "hands `bump` on as a function value");
+    const r = run(PF(`<div>^{ meta.subscribe("n", (v) => { const f = bump; const z = f(); }); }</div>`));
+    expect(errs(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(errMsgs(r).join("\n")).toContain("calls through `f`");
+  });
+
+  test("timer and cleanup callbacks are held to the same rule", () => {
+    refused(`<div>^{ meta.interval(100, () => { const z = bump(); }); }</div>`, "meta.interval");
+    refused(`<div>^{ meta.timeout(100, () => { const z = bump(); }); }</div>`, "meta.timeout");
+    refused(`<div>^{ meta.cleanup(() => { const z = bump(); }); }</div>`, "meta.cleanup");
+  });
+
+  test("a call that writes nothing compiles — `function` and `fn` alike", () => {
+    const r = run(PF(`<div>^{ meta.subscribe("n", (v) => { const a = one(); const b = two(); meta.emit(\`<p>\${a + b + v}</p>\`); }); }</div>`));
+    expect(errMsgs(r)).toEqual([]);
+  });
+
+  test("LOW-3: a meta registration inside a callback is refused by name", () => {
+    refused(`<div>^{ meta.subscribe("n", (v) => { meta.subscribe("sel", (s) => { meta.emit(s); }); }); }</div>`, "`meta.subscribe(…)` inside the callback of `meta.subscribe(…)`");
+    refused(`<div>^{ meta.subscribe("n", (v) => { meta.interval(10, () => { meta.emit("x"); }); }); }</div>`, "`meta.interval(…)` inside the callback");
+    refused(`<div>^{ meta.interval(10, () => { meta.timeout(10, () => { meta.emit("x"); }); }); }</div>`, "`meta.timeout(…)` inside the callback of `meta.interval(…)`");
+    refused(`<div>^{ meta.subscribe("n", (v) => { if (v > 1) { meta.cleanup(() => { meta.emit("x"); }); } }); }</div>`, "`meta.cleanup(…)` inside the callback");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 2. the runtime (happy-dom; the bootstrap runtime module)
 // ---------------------------------------------------------------------------
@@ -247,6 +303,102 @@ describe("s482 phase 3 — the runtime", () => {
   });
 });
 
+describe("s482 r1 — the runtime backstop and delivery order", () => {
+  test("HIGH-1 backstop: a subscription that re-marks its own cell stops at MAX_RUNS in one flush and reports the cycle (no hang)", () => {
+    const ph = page("c1");
+    const scope = rt.root.child();
+    const c = rt.cell(0);
+    const logged = [];
+    const savedErr = console.error;
+    console.error = (...a) => logged.push(a.join(" "));
+    let calls = 0;
+    try {
+      // the review's repro, below the compiler's refusal: the callback writes the cell it watches
+      rt.metaEffect(scope, ph, "c1", (task, meta) => {
+        meta.subscribe(() => c.get(), (v) => { calls++; c.set(v + 1); });
+      });
+      const t0 = Date.now();
+      c.set(1);                                    // the click
+      expect(Date.now() - t0).toBeLessThan(5000);
+      expect(calls).toBe(100);
+      expect(logged).toEqual(["[scrml] meta subscription in c1 exceeded 100 re-runs — possible infinite loop"]);
+      calls = 0;
+      c.set(1000);                                 // the next flush counts afresh
+      expect(calls).toBe(100);
+    } finally {
+      console.error = savedErr;
+      scope.dispose();
+    }
+  });
+
+  test("the cap is `globalThis.__scrml_max_meta_runs`, and two subscriptions writing each other's cells settle too", () => {
+    const ph = page("c2");
+    const scope = rt.root.child();
+    const a = rt.cell(0);
+    const b = rt.cell(0);
+    const logged = [];
+    const savedErr = console.error;
+    console.error = (...x) => logged.push(x.join(" "));
+    globalThis.__scrml_max_meta_runs = 5;
+    try {
+      rt.metaEffect(scope, ph, "c2", (task, meta) => {
+        meta.subscribe(() => a.get(), (v) => { b.set(v + 1); });
+        meta.subscribe(() => b.get(), (v) => { a.set(v + 1); });
+      });
+      a.set(1);
+      expect(logged.length).toBeGreaterThan(0);
+      expect(logged[0]).toContain("exceeded 5 re-runs");
+      expect(a.get()).toBeLessThan(20);
+    } finally {
+      delete globalThis.__scrml_max_meta_runs;
+      console.error = savedErr;
+      scope.dispose();
+    }
+  });
+
+  test("MED-2: a subscription sees every change whatever its order against a meta.get of the same cell", () => {
+    for (const order of ["get-then-subscribe", "subscribe-then-get"]) {
+      const ph = page("o-" + order);
+      const scope = rt.root.child();
+      const c = rt.cell(0);
+      const seen = [];
+      let runs = 0;
+      rt.metaEffect(scope, ph, "o-" + order, (task, meta) => {
+        runs++;
+        if (order === "get-then-subscribe") {
+          meta.get(() => c.get());
+          meta.subscribe(() => c.get(), (v) => { seen.push(v); });
+        } else {
+          meta.subscribe(() => c.get(), (v) => { seen.push(v); });
+          meta.get(() => c.get());
+        }
+      });
+      c.set(1);
+      c.set(2);
+      expect([order, seen]).toEqual([order, [1, 2]]);
+      expect([order, runs]).toEqual([order, 3]);
+      scope.dispose();
+    }
+  });
+
+  test("MED-2: a re-run for ANOTHER cell delivers nothing (only a queued change is delivered)", () => {
+    const ph = page("o3");
+    const scope = rt.root.child();
+    const c = rt.cell(0);
+    const d = rt.cell(0);
+    const seen = [];
+    rt.metaEffect(scope, ph, "o3", (task, meta) => {
+      meta.get(() => d.get());
+      meta.subscribe(() => c.get(), (v) => { seen.push(v); });
+    });
+    d.set(1);
+    expect(seen).toEqual([]);
+    c.set(5);
+    expect(seen).toEqual([5]);
+    scope.dispose();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 3. the shipping path: scrml-boot compileSource → the conformance runner (happy-dom)
 // ---------------------------------------------------------------------------
@@ -295,6 +447,18 @@ describe("s482 phase 3 — the shipping path", () => {
 }</div>
 <button id="b" onclick=\${() => { @n = @n + 1; }}>b</button>`), [{ click: "#b" }, { click: "#b" }]);
     expect(text(r, "#h p")).toBe("n=2");
+  }, 120000);
+
+  test("s482 r1 MED-2: compiled, the statement order of meta.get and meta.subscribe of one cell does not decide delivery", async () => {
+    for (const [name, body] of [
+      ["get-then-subscribe", `const k = meta.get("n"); meta.subscribe("n", (v) => { meta.emit(\`<p>n=\${v}</p>\`); });`],
+      ["subscribe-then-get", `meta.subscribe("n", (v) => { meta.emit(\`<p>n=\${v}</p>\`); }); const k = meta.get("n");`],
+    ]) {
+      // `k` read for its dependency only; the block's own emit would replace the callback's, so it emits none
+      const r = await ship(P(`<div id="h">^{ ${body} }</div>
+<button id="b" onclick=\${() => { @n = @n + 1; }}>b</button>`), [{ click: "#b" }, { click: "#b" }]);
+      expect([name, text(r, "#h p")]).toEqual([name, "n=2"]);
+    }
   }, 120000);
 });
 
@@ -364,6 +528,38 @@ suite("s482 phase 3 — Chromium", () => {
     }
     expect(seen).toEqual(["n=1", "n=2", "n=3"]);
     expect(errors).toEqual([]);
+    await page.close();
+  }, 60000);
+
+  test("s482 r1 HIGH-1 backstop: a subscription writing its own cell (below the compiler's refusal) leaves the page responsive after the click", async () => {
+    // the review's repro cannot compile any more; its runtime shape is written against the runtime directly
+    const name = `cyc${cseq++}`;
+    writeFileSync(join(cdir, `${name}.html`), `<!doctype html><html><body><div id="o"><span data-scrml-meta="m1"></span></div><button id="b">b</button>
+<script type="module">
+import * as rt from "./scrml-runtime.js";
+const n = rt.cell(0);
+const scope = rt.root.child();
+rt.metaEffect(scope, document.querySelector("[data-scrml-meta=m1]"), "m1", (task, meta) => {
+  meta.subscribe(() => n.get(), (v) => { n.set(v + 1); meta.emit("<p>" + v + "</p>"); });
+});
+document.querySelector("#b").addEventListener("click", () => n.set(n.get() + 1));
+document.body.dataset.ready = "1";
+</script></body></html>`);
+    const page = await browser.newPage();
+    const errors = [];
+    page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+    await page.goto(`http://127.0.0.1:${port}/${name}.html`);
+    await page.waitForFunction(() => document.body.dataset.ready === "1", { timeout: 10000 });
+    page.click("#b").catch(() => {});
+    const t = await Promise.race([
+      (async () => {
+        await new Promise((r) => setTimeout(r, 300));
+        return await page.evaluate(() => "responsive " + document.querySelector("#o p")?.textContent);
+      })(),
+      new Promise((r) => setTimeout(() => r("PAGE UNRESPONSIVE after 8s"), 8000)),
+    ]);
+    expect(t).toBe("responsive 100");
+    expect(errors).toEqual(["[scrml] meta subscription in m1 exceeded 100 re-runs — possible infinite loop"]);
     await page.close();
   }, 60000);
 

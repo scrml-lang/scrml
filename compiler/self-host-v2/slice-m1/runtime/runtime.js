@@ -5553,14 +5553,27 @@ let metaChain = null;
 // changes after the subscription. It belongs to the run that made it: the block's next run and its
 // teardown unsubscribe it (impl#1 keeps a subscription past the run that made it, so each re-run adds
 // one; §22.5.1 says nothing of its lifetime — the run owning it is the §22.5.1 cleanup's rule).
-// The callback body is the bootstrap's closure body (analyze lamBodyCheck: no cell write), so a
-// callback never sets off a change of its own.
+// The callback body is the bootstrap's closure body (analyze lamBodyCheck: no cell write; s482 r1
+// metaCbDiags: no call that may write one either), so a callback never sets off a change of its own.
+// s482 r1 (review of #2080, HIGH-1) — the BACKSTOP all the same: a subscription runs at most
+// MAX_RUNS (metaMaxRuns: 100, `globalThis.__scrml_max_meta_runs` overrides) times in one flush, as a
+// MetaEffect does; past that it logs the cycle once and skips the run (the next flush counts afresh).
+// A callback that re-marked its own cell (or two that marked each other's) re-ran forever, in the
+// flush, and hung the page.
+// MED-2 — a re-run of the owning block DELIVERS a change still queued for its subscriptions before it
+// ends them (MetaEffect.deliver): with `meta.get("n")` before `meta.subscribe("n", f)` the block was
+// queued first, its re-run disposed the subscription, and `f` never ran; now `f` sees every change
+// whatever the statement order.
 class MetaSubscription {
-  constructor(read, fn) {
+  constructor(read, fn, scopeId) {
     this.read = read;
     this.fn = fn;
+    this.scopeId = scopeId;
     this.disposed = false;
     this.sources = new Set();
+    this.maxRuns = metaMaxRuns();
+    this.flushSeq = -1;
+    this.flushRuns = 0;
     this.track();
   }
   track() {
@@ -5576,6 +5589,16 @@ class MetaSubscription {
   }
   run() {
     if (this.disposed) return;
+    if (flushing) {
+      if (this.flushSeq !== flushSeq) { this.flushSeq = flushSeq; this.flushRuns = 0; }
+      this.flushRuns++;
+      if (this.flushRuns > this.maxRuns) {
+        if (this.flushRuns === this.maxRuns + 1) {
+          console.error("[scrml] meta subscription in " + this.scopeId + " exceeded " + this.maxRuns + " re-runs — possible infinite loop");
+        }
+        return;
+      }
+    }
     const v = this.track();
     try { batch(() => this.fn(v)); } catch (err) { reportLater(err); }
   }
@@ -5685,7 +5708,17 @@ class MetaEffect {
     }
     if (batchDepth === 0) flush();
   }
+  /** s482 r1 (MED-2): run the subscriptions a change has queued, before the re-run ends them. */
+  deliver() {
+    for (const sub of this.subs) {
+      if (queue.has(sub)) {
+        queue.delete(sub);
+        sub.run();
+      }
+    }
+  }
   runNow() {
+    this.deliver();
     this.discharge();
     unsubscribe(this);
     for (const t of this.tasks) t.cancel();
@@ -5781,7 +5814,7 @@ class MetaEffect {
     if (typeof fn !== "function") throw new TypeError("meta.subscribe(name, callback): callback must be a function");
     // made by a cleanup (the run is being discharged) or after disposal: it would outlive the run
     if (this.disposed || this.discharging) return () => {};
-    const sub = new MetaSubscription(read, fn);
+    const sub = new MetaSubscription(read, fn, this.scopeId);
     this.subs.push(sub);
     return () => sub.dispose();
   }

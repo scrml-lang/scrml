@@ -10153,9 +10153,63 @@ ${
                 st = resolveExpr(withFx(env2, noFailCtx()), b, not, st).st;
             }
         }
+        // s482 r1 (s482-meta-phase3, HIGH-1 / LOW-3): no nested registration of the block's
+        // `meta` in a callback, and no call that may write a cell (decided on the summary)
+        st = metaNestedRegs(env, lam, op, st);
         const ft: Type = Type.Fn(pts, not, false, not);
         st = addValue(st, lam.nid, ValueFact.VLambda(psyms, ft));
+        st = addPending(st, PendRule.MetaCb(lam, env.file, op));
         return addPending(st, PendRule.FnValue(-1, env.fx.fnSym, env.file, lam.span, ""));
+    }
+
+    // s482 r1 (LOW-3) — a `meta.subscribe` / `meta.interval` / `meta.timeout` / `meta.cleanup`
+    // INSIDE a callback registers again on every call of the callback: a subscription callback
+    // run on each change, or an interval's tick, would add one more subscription / timer /
+    // cleanup per call, each living until the block's run ends (§22.5.1 gives a registration
+    // the run's lifetime; it says nothing of one made by a callback). Refused by name — a
+    // registration stands in the block's own body, where it is made once per run. INTERIM
+    // (g-boot-meta-runtime-residue-s482): the capable form owns a callback's registrations by
+    // that callback's invocation.
+    fn metaNestedRegs(env: Env, lam: AExpr, op: string, st0: AS) -> AS {
+        let st: AS = st0;
+        let es: AExpr[] = [];
+        const b: AExpr | not = lambdaBody(lam);
+        if (b is given) es = [b];
+        const blk: ABlock | not = lambdaBlock(lam);
+        if (blk is given) es = blockExprsDeep(blk);
+        for (const x of es) {
+            for (const r of metaRegsIn(x)) {
+                st = addDiag(st, env.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", "`meta." + metaOpCallee(calleeOrSelf(r)) + "(…)` inside the callback of `meta." + op + "(…)` would register again on every call of the callback, each registration living until the block's run ends — a registration stands in the block's own body, where it is made once per run (§22.5.1; INTERIM, g-boot-meta-runtime-residue-s482: a registration owned by the callback's call is not built). Move it out of the callback");
+            }
+        }
+        return st;
+    }
+
+    fn isMetaRegOp(op: string) -> boolean {
+        return op == "subscribe" || op == "interval" || op == "timeout" || op == "cleanup";
+    }
+
+    // the outermost `meta` registration calls in `e` (a nested one's own callback is judged
+    // when it is resolved)
+    fn metaRegsIn(e: AExpr) -> AExpr[] {
+        const c: AExpr | not = calleeOf(e.k);
+        if (c is given && isMetaRegOp(metaOpCallee(c))) return [e];
+        let out: AExpr[] = [];
+        for (const x of exprKids(e)) { out = out.concat(metaRegsIn(x)); }
+        for (const bb of exprBlocksIn(e)) {
+            for (const y of blockExprsDeep(bb)) { out = out.concat(metaRegsIn(y)); }
+        }
+        return out;
+    }
+
+    // every statement expression of a block, its nested statement blocks included
+    fn blockExprsDeep(b: ABlock) -> AExpr[] {
+        let out: AExpr[] = [];
+        for (const s of b.stmts) {
+            out = out.concat(stmtExprs(s));
+            for (const kb of stmtKidBlocks(s)) { out = out.concat(blockExprsDeep(kb)); }
+        }
+        return out;
     }
 
     // s478 (g-boot-s20-builtins-unbuilt-s473, g-bootstrap-twin-log-unknown-s451) — the built-in
@@ -50571,17 +50625,21 @@ ${
         // (-1: no function — a handler, markup, an initializer): refused where the summary
         // shows what the bootstrap's function types cannot carry (fnValueDiags).
         FnValue(target: int, caller: int, file: string, span: ASpan, name: string),
+        // s482 r1 (s482-meta-phase3, HIGH-1) — a runtime `^{}` block's callback (`op`: subscribe /
+        // interval / timeout / cleanup): refused where its body reaches a cell write through a
+        // call, or a call the analysis cannot resolve (metaCbDiags)
+        MetaCb(lam: AExpr, file: string, op: string),
     }
     type Pending:struct = { at: int, rule: PendRule }
 
-    fn rulesPass(s: Summary, st: AS) -> AS {
+    fn rulesPass(s: Summary, t: Tables, st: AS) -> AS {
         if (st.pend.length == 0) return st;
         let out: Diag[] = [];
         let k: int = 0;
         let i: int = 0;
         for (; i <= st.diags.length; ) {
             for (; k < st.pend.length && st.pend[k].at == i; ) {
-                out = out.concat(decide(s, st.pend[k].rule));
+                out = out.concat(decide(s, t, st.pend[k].rule));
                 k = k + 1;
             }
             if (i < st.diags.length) out = out.concat([st.diags[i]]);
@@ -50590,14 +50648,55 @@ ${
         return { facts: st.facts, diags: out, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: [], lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets, locs: st.locs };
     }
 
-    fn decide(s: Summary, r: PendRule) -> Diag[] {
+    fn decide(s: Summary, t: Tables, r: PendRule) -> Diag[] {
         return match r {
             .IfNoValue(fnSym: f, diag: d) :> onlyIf(yieldsNoValue(s, f), d),
             .RemoteOr(caller: c, remote: r, local: l) :> remoteOr(s, c, r, l),
             .IfClock(fnSym: f, diag: d) :> onlyIf(readsClock(s, f), d),
             .PureCall(fnSym: f, bare: a, clocked: b) :> either(readsClock(s, f), b, a),
-            .FnValue(target: t, caller: c, file: f, span: sp, name: n) :> fnValueDiags(s, t, c, f, sp, n)
+            .FnValue(target: tg, caller: c, file: f, span: sp, name: n) :> fnValueDiags(s, tg, c, f, sp, n),
+            .MetaCb(lam: l, file: f, op: o) :> metaCbDiags(s, t, l, f, o)
         };
+    }
+
+    // s482 r1 (s482-meta-phase3, HIGH-1) — a runtime `^{}` callback writes no reactive cell,
+    // directly or THROUGH A CALL. A subscription callback runs inside the runtime's flush of the
+    // change that fired it: a cell write there marks the subscription (or another) stale again in
+    // the same flush — `meta.subscribe("n", v => { const z = bump(); })` with `bump` writing `@n`
+    // re-ran forever and hung the page. A timer / cleanup callback is held to the same body rule
+    // (s482-meta-runtime: its direct writes were already refused). The judgement is the no-write
+    // rule's (§6.7.4), read from the same effect summary: the callback's body is scanned as an
+    // `<effect>` body is (scanExpr — calls of scrml functions, `function` and `fn` alike, and
+    // functions handed on as values, closed transitively by the summary), and a call the analysis
+    // cannot resolve (through a local, a parameter, a field — a function value) fails closed
+    // (§6.7.4 rule 4). A direct write is the binder's (lamBodyCheck), reported once there.
+    // INTERIM (g-boot-meta-runtime-residue-s482): §22.5.1 does not rule whether a callback may
+    // write state; the capable form is a callback whose writes are batched after the flush.
+    fn metaCbDiags(s: Summary, t: Tables, lam: AExpr, file: string, op: string) -> Diag[] {
+        const scan: BodyScan = scanExpr({ t: t, file: file }, lam, emptyScan());
+        const who: string = "the callback of `meta." + op + "(…)`";
+        const why: string = "a runtime `^{}` callback writes no reactive cell, directly or through a called function — a write made while the runtime delivers a change re-runs the subscriptions it reaches in that same pass (INTERIM, g-boot-meta-runtime-residue-s482). Make the write in an event handler, or derive the value";
+        let out: Diag[] = [];
+        for (const r of scan.refs) {
+            const i: int = nodeIdx(s.nodes, r.sym);
+            if (i < 0) {
+                out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", who + " reaches `" + r.name + "`, which has no write summary — the compiler cannot prove it writes no reactive cell, and the rule fails closed (§6.7.4 rule 4): " + why, r.file, r.span)]);
+            } else {
+                const sw: Witness | not = writeWitness(s, i);
+                const su: UWitness | not = openWitness(s, i);
+                if (sw is given) {
+                    let how: string = " writes `" + sw.site.cell + "` through a call: `" + chainText(sw.chain) + " → " + sw.site.cell + "`";
+                    if (r.asValue) how = " hands `" + r.name.replace("()", "") + "` on as a function value, and it writes `" + sw.site.cell + "`: `" + chainText(sw.chain) + " → " + sw.site.cell + "`";
+                    out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", who + how + " — " + why, r.file, r.span)]);
+                } else if (su is given) {
+                    out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", who + " reaches a call the compiler cannot resolve, through `" + chainText(su.chain) + "`: " + su.site.what + " — it cannot prove the callback writes no reactive cell, and the rule fails closed (§6.7.4 rule 4): " + why, r.file, r.span)]);
+                }
+            }
+        }
+        for (const u of scan.unproven) {
+            out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", u.what + " — the compiler cannot prove " + who + " writes no reactive cell, and the rule fails closed (§6.7.4 rule 4): " + why + ". Call a declared scrml function by its name", u.file, u.span)]);
+        }
+        return out;
     }
 
     // s478 (s478-boot-fn-type) — what a function value's type cannot carry in the bootstrap,
@@ -55558,7 +55657,7 @@ ${
         // s452 (dpa-066): THE EFFECT SUMMARY — once, over the bound tables —
         // and the binder's decisions that read it (rulesPass, M3)
         const sum: Summary = summarize(ra.g, bound);
-        st = rulesPass(sum, st);
+        st = rulesPass(sum, bound, st);
         // s449: the no-write rule over every accepted effect (§6.7.4)
         const effectDiags: Diag[] = effectPass(ra.g, bound, st.effects, sum).concat(requestPass(bound, sum)).concat(requestWarnPass(ra.g, bound));
         // s444 Phase B: dead validators (RULED S442 (5)) and the forms that take `novalidate` (RULED S442 (3))
