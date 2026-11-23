@@ -44,7 +44,7 @@
 // again, S440.)
 // =============================================================================
 ${
-    import { Token, TokenKind, LexStop, LexRun, LexPause, lexFrom, lexFromMode, lexTier0, lexTier0X, ForeignExtent, foreignOpenAt, foreignExtentAt, isVoidName, markupValueExtentAt, isKeyword, markupOpensAt } from "./lex.scrml";
+    import { Token, TokenKind, LexStop, LexRun, LexPause, lexFrom, lexFromMode, lexTier0, lexTier0X, ForeignExtent, foreignOpenAt, foreignExtentAt, isVoidName, markupValueExtentAt, markupAttrValueExtentAt, isKeyword, markupOpensAt } from "./lex.scrml";
     import { Severity } from "./severity.scrml";
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, IfForm, AEffect, ARequest, AType, ATypeK, AFnFx,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport, ALink,
@@ -9386,7 +9386,7 @@ ${
     // name right after a keyword: a destructuring (`const { a, b }`, `const [c]`), a
     // `let <x…/>` / `const <x…/>` cell (§66), and a keywordless binding `y = 1` at a
     // statement start (§7.2 — a name and a lone `=` where a statement begins: the first
-    // skipped token, the first on its line, or after a `;` / `{`).
+    // skipped token, the first on its line, or after a `;` — stmtStartIn).
     fn skippedDecls(tp: TP, from: int, to: int) -> string {
         let out: string = "";
         let i: int = from;
@@ -9402,7 +9402,7 @@ ${
                 } else if ((k.text == "const" || k.text == "let") && tk(n, "<") && i + 2 < to && tp.toks[i + 2].cls == TC.Ident) {
                     named = k.text + " <" + tp.toks[i + 2].text + "/>";
                 }
-            } else if (k.cls == TC.Ident && tk(n, "=") && stmtStartIn(tp, from, i)) {
+            } else if (k.cls == TC.Ident && tk(n, "=") && stmtStartIn(tp, from, i, to)) {
                 named = k.text + " = …";
             }
             if (named != "") {
@@ -9415,37 +9415,62 @@ ${
     }
 
     // A destructuring pattern as written, from its opener at toks[at] to its closer (in
-    // [at, to)): "{ a, b }", "[c]" (a nested group is cut to "…").
+    // [at, to)): "{ a, b }", "[c]" (a nested group is cut to "…"). s482-fu (LOW-3) — the
+    // tokens are joined as the source spaces them (`...e`, `b: …`, not `. . .e`, `b :…`).
     fn destructClose(tp: TP, at: int, to: int) -> string {
         const brace: boolean = tk(tp.toks[at], "{");
         const close: string = brace ? "}" : "]";
         let out: string = "";
+        let prevEnd: int = tp.toks[at].end;
         let j: int = at + 1;
         let going = true;
         for (; going && j < to && !tk(tp.toks[j], close); ) {
             const t: PTok = tp.toks[j];
+            if (out != "" && t.start > prevEnd) out = out + " ";
             if (tk(t, "{") || tk(t, "[")) {
                 out = out + "…";
                 going = false;
-            } else if (tk(t, ",")) {
-                out = out + ", ";
             } else {
-                if (out != "" && !out.endsWith(" ")) out = out + " ";
                 out = out + t.text;
             }
+            prevEnd = t.end;
             j = j + 1;
         }
         if (brace) return "{ " + out + " }";
         return "[" + out + "]";
     }
 
-    // Does toks[i] begin a statement inside the skipped text toks[from, …)? It is the first
-    // skipped token, the first on its line, or follows a `;` / `{`.
-    fn stmtStartIn(tp: TP, from: int, i: int) -> boolean {
-        if (i == from) return true;
-        const p: PTok = tp.toks[i - 1];
-        if (p.line != tp.toks[i].line) return true;
-        return tk(p, ";") || tk(p, "{");
+    // Does toks[i] begin a statement inside the skipped text toks[from, to)? It is the first
+    // skipped token, the first on its line, or follows a `;`. s482-fu (LOW-3) — and it is a
+    // statement, not a call argument, an object-literal line or a destructuring default
+    // (`extra(⏎ a = 1,⏎ b = 2⏎)`, `extra({⏎ k = 1⏎})`, `const { a = 1, b }`): at depth 0
+    // of the skipped text, or inside a group only when it runs to a `;` at its own depth
+    // (`extra(⏎ y = 1;⏎)` — a group holding statements), not to a `,` or the group's closer.
+    fn stmtStartIn(tp: TP, from: int, i: int, to: int) -> boolean {
+        if (i != from) {
+            const p: PTok = tp.toks[i - 1];
+            if (p.line == tp.toks[i].line && !tk(p, ";")) return false;
+        }
+        let depth: int = 0;
+        let j: int = from;
+        for (; j < i; ) {
+            const t: PTok = tp.toks[j];
+            if (tk(t, "(") || tk(t, "[") || tk(t, "{")) depth = depth + 1;
+            if ((tk(t, ")") || tk(t, "]") || tk(t, "}")) && depth > 0) depth = depth - 1;
+            j = j + 1;
+        }
+        if (depth == 0) return true;
+        let d: int = 0;
+        let k: int = i;
+        for (; k < to; ) {
+            const t: PTok = tp.toks[k];
+            if (d == 0 && tk(t, ";")) return true;
+            if (d == 0 && (tk(t, ",") || tk(t, ")") || tk(t, "]") || tk(t, "}"))) return false;
+            if (tk(t, "(") || tk(t, "[") || tk(t, "{")) d = d + 1;
+            if (tk(t, ")") || tk(t, "]") || tk(t, "}")) d = d - 1;
+            k = k + 1;
+        }
+        return false;
     }
 
     // Past the tokens on `line` from `tp` that cannot start a statement or item: it stops
@@ -10098,7 +10123,7 @@ ${
             const t2: TP = expectRegionEnd(r.tp);
             return { v: AAttrValue.Paren(r.e), mp: backToMarkup(mp, t2) };
         }
-        if (c == "{" && !handler && markupValueOpens(mp)) {
+        if (c == "{" && !handler) {
             const rm: RValue | not = markupAttrValue(mp, name);
             if (rm is given) return rm;
         }
@@ -10133,43 +10158,66 @@ ${
         return { v: AAttrValue.Bare(r3.e), mp: backToMarkup(mp, t4) };
     }
 
-    // s482 (g-boot-e-type-045-in-misread-markup-s479) — a `{ … }` value that opens with a
-    // tag (`fallback={<div class="x">Could not load</>}`, §19.6.2's markup value, its terse
-    // `/}` closer included): MARKUP, which the bootstrap does not build as an attribute value
-    // (its one consumer, `<errorBoundary>`, is not in the bootstrap — analyze refuses it by
-    // name). INTERIM: it is refused by name, once, over the whole value, and its text is
-    // never read as code — before this the value was read as statements (E-PARSE-EXPR at the
-    // `<`, then the element's text as expressions: `not load` an E-TYPE-045, and a cascade
-    // past the element). The value ends at the `}` that balances its `{` (braces counted by
-    // character: the element's text and `${ … }` slots hold balanced braces); with none
-    // before the file's end the reading is the block one, as before. Not on an event
+    // s482 (g-boot-e-type-045-in-misread-markup-s479) — a `{ … }` value that IS an element
+    // (`fallback={<div class="x">Could not load</>}`, §19.6.2's markup value, its terse
+    // `/}` closer included; a component prop `header={<h1>Hi</h1>}`, §7.4.1): MARKUP, which
+    // the bootstrap does not build as an attribute value (`<errorBoundary>`, its main
+    // consumer, is not in the bootstrap — analyze refuses it by name). INTERIM: it is refused
+    // by name, once, over the whole value, and its text is never read as code — before this
+    // the value was read as statements (E-PARSE-EXPR at the `<`, then the element's text as
+    // expressions: `not load` an E-TYPE-045, and a cascade past the element). Not on an event
     // handler, whose `{ … }` is a statement list (§5.2.3).
+    // s482-fu (review LOW-1, LOW-2) — the value is an element only when its `{` is followed by
+    // a tag start (`<` and a letter), that element CLOSES (`</…>`,
+    // `</>`, `/>`, a void element's `>`, or the terse `/}`), and only space separates its end
+    // from the value's `}` (or, with text after it, the `}` balancing the value's `{` by
+    // character count lies past the element's end). The extent is the lexer's element extent (lex.scrml
+    // markupAttrValueExtentAt — the markup-value token's own walker), so a `}` in a quoted
+    // attribute value, a `${ "}" }` slot, an `<!-- … -->` comment or the body text does not end
+    // the value. A legacy cell read `{<count>}`, `{<count> == 1}` or `{ <n> < 2 }` is not an
+    // element and keeps its block reading (as before s482); so does an element never closed.
     // PERMANENT capable form: read the element with the markup reader as the value
     // (an AAttrValue markup variant) when `<errorBoundary>` is built.
-    fn markupValueOpens(mp: MP) -> boolean {
+    fn markupAttrValueEnd(mp: MP) -> int {
         let k: int = 1;
         for (; isSpaceCh(chAt(mp, k)); ) { k = k + 1; }
-        if (chAt(mp, k) != "<") return false;
+        if (chAt(mp, k) != "<") return -1;
         const c1: string = chAt(mp, k + 1);
-        return (c1 >= "a" && c1 <= "z") || (c1 >= "A" && c1 <= "Z");
-    }
-
-    fn markupAttrValue(mp: MP, name: string) -> RValue | not {
+        if (!((c1 >= "a" && c1 <= "z") || (c1 >= "A" && c1 <= "Z"))) return -1;
+        const lt: int = mp.pos + k;
+        const e: int = markupAttrValueExtentAt(mp.src, lt);
+        if (e >= mp.src.length) return -1;
+        let j: int = e - mp.pos;
+        for (; isSpaceCh(chAt(mp, j)); ) { j = j + 1; }
+        if (chAt(mp, j) == "}") return j + 1;
+        // text after the closed element (`{<div>a</> extra}`): the value still opens with an
+        // element, and ends at the `}` that balances its `{` by character count — when that
+        // `}` lies past the element (a legacy `{<count>}` is balanced before its "element"
+        // would close at a later `</p>`, so it is not markup)
         let depth: int = 0;
-        let k: int = 0;
-        let end: int = -1;
-        for (; end < 0 && mp.pos + k < mp.src.length; ) {
-            const ch: string = chAt(mp, k);
+        let q: int = 0;
+        for (; mp.pos + q < mp.src.length; ) {
+            const ch: string = chAt(mp, q);
             if (ch == "{") depth = depth + 1;
             if (ch == "}") {
                 depth = depth - 1;
-                if (depth == 0) end = k + 1;
+                if (depth == 0) {
+                    if (mp.pos + q < e) return -1;
+                    return q + 1;
+                }
             }
-            k = k + 1;
+            q = q + 1;
         }
+        return -1;
+    }
+
+    fn markupAttrValue(mp: MP, name: string) -> RValue | not {
+        const end: int = markupAttrValueEnd(mp);
         if (end < 0) return not;
         const m: MP = mAdv(mp, end);
-        const md: MP = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "markup as an attribute value (`" + name + "={<tag …>…</>}`, §19.6.2) is not in the bootstrap yet (the markup value of `<errorBoundary fallback=>`, §19.6, which the bootstrap does not build); it is refused here by name rather than read as code", mp.pos, m.pos);
+        let whose: string = "";
+        if (name == "fallback") whose = " (`fallback=` is `<errorBoundary>`'s markup value, §19.6, which the bootstrap does not build)";
+        const md: MP = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "markup as an attribute value (`" + name + "={<tag …>…</>}`, a markup value §7.4.1) is not in the bootstrap yet" + whose + "; it is refused here by name rather than read as code", mp.pos, m.pos);
         return { v: AAttrValue.Bare(recoveredAt(md, mp.pos)), mp: md };
     }
 
