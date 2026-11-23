@@ -3680,6 +3680,981 @@ function _scrml_url_shape_ok(value) {
 // <<< END verbatim compiler/src/runtime-url-guard.js
 
 // ---------------------------------------------------------------------------
+// s482 (s482-meta-runtime) — SPEC §22.12 "Runtime `meta.emit` output is gated" (ruling
+// user-voice-scrml.md S458 "a"; S459 rounds 3-4; S460). The gate is SECURITY CODE and the bootstrap
+// does not re-implement it: the block between the markers below is impl#1's runtime gate COPIED
+// VERBATIM — exactly the text impl#1's own client runtime inlines (compiler/src/runtime-template.js
+// CSS_ATTR_GUARD_RUNTIME_SOURCE, then META_EMIT_GATE_RUNTIME_SOURCE: runtime-css-attr-guard.js, the
+// element tables from html-elements.js, the `_SCRML_EMIT_FORM_MEMBERS` table of
+// dom-named-property-members.js, markup-attr-allow-list.js and runtime-meta-emit-gate.js, each with
+// `export ` stripped). Copied at impl#1 784b7f1d0 (the last commit touching any of those sources).
+// Its URL reader is the verbatim URL-guard block above (`_scrml_is_url_attr`,
+// `_scrml_url_value_admitted`) — never a second one. Do not edit between the markers — change the
+// impl#1 sources and run `bun scripts/sync-bootstrap-meta-emit-gate.ts --write`; the unit test
+// compiler/tests/unit/bootstrap-meta-emit-gate-verbatim.test.js fails on drift. The bootstrap's
+// `metaEffect` (below) calls only `_scrml_meta_emit_insert`. With no `_scrml_error_boundary_log`
+// in this runtime, a refusal reports to `console.error` (the gate's own fallback) — never the value.
+// ---------------------------------------------------------------------------
+// >>> BEGIN verbatim impl#1 runtime meta.emit gate (runtime-template.js CSS_ATTR_GUARD_RUNTIME_SOURCE + META_EMIT_GATE_RUNTIME_SOURCE)
+// SPEC §5.2 — the runtime write guards for the CSS-url attributes and a stylesheet `<link>`'s `href`
+// (impl#1; S479 carve-out 2 — ruling:user-voice-scrml.md-S479-3B-rest-item-21, gap
+// g-impl1-svg-css-url-attr-and-link-stylesheet-href-unguarded-s473).
+//
+// The compiler routes every data write of a CSS-url attribute, an SVG animation value whose target
+// may be one, and a `<link>`'s `href`, through the two setters at the end of this file
+// (`codegen/url-attr-guard.ts` `dataAttrWriteGuard` / `guardedAttrWrite`). The runtime inlines this
+// file verbatim (`export ` stripped; runtime-template.js chunk 'cssattrguard', which depends on
+// 'urlguard' for `_scrml_safe_url`), so a page with no such write ships none of it.
+//
+// The CSS value reader is the bootstrap's, ported verbatim — `cssValueOf` + `cssAttrValue` +
+// `CSS_URL_ATTRS` / `CSS_ATTR_FUNCTIONS` / `LOCAL_FRAGMENT_URL` in
+// compiler/self-host-v2/slice-m1/runtime/runtime.js (the §25.7 bridge's value check, s473 / s479).
+// Same alphabet, same function sets, same accept/refuse: do not widen one without the other.
+//
+// Plain function and `const` declarations only — no imports — and every top-level name carries the
+// `_scrml_` / `_SCRML_` prefix the runtime reserves.
+
+// The CSS-url attributes (SPEC §5.2 "Data-supplied CSS-url attributes — runtime guard (S473)"): the
+// SVG presentation attributes whose CSS value grammar admits `<url>` / `<image>`. Matched by
+// lowercased name on EVERY element (SVG, HTML or custom — fail closed).
+const _SCRML_CSS_URL_ATTRS = new Set([
+  "fill", "stroke", "marker", "marker-start", "marker-mid", "marker-end",
+  "clip-path", "mask", "filter", "cursor", "color-profile",
+]);
+
+// The §25.7 bridge's CSS-value alphabet and colour / math functions (bootstrap `cssValueOf`).
+const _SCRML_CSS_VALUE_ALPHABET = /^[A-Za-z0-9 #%.,+\-*/_()]*$/;
+const _SCRML_CSS_VALUE_FUNCTIONS = new Set([
+  "rgb", "rgba", "hsl", "hsla", "hwb", "lab", "lch", "oklab", "oklch", "color",
+  "calc", "min", "max", "clamp",
+]);
+const _SCRML_CSS_VALUE_MAX = 256;
+
+// For the CSS-url attributes only: the Filter Effects 1 filter functions and the CSS Shapes 1 basic
+// shapes, none of which takes a URL (bootstrap `CSS_ATTR_FUNCTIONS`).
+const _SCRML_CSS_ATTR_FUNCTIONS = new Set([
+  "blur", "brightness", "contrast", "drop-shadow", "grayscale", "hue-rotate",
+  "invert", "opacity", "saturate", "sepia",
+  "inset", "circle", "ellipse", "polygon",
+]);
+
+// S479 (ruled §3.B item 22, INTERIM) — exactly `url(#ident)`, a same-document fragment reference.
+const _SCRML_LOCAL_FRAGMENT_URL = /^url\(#[A-Za-z_][A-Za-z0-9_-]*\)$/;
+
+// The bootstrap's `cssValueOf(v, extraFunctions)` for a string: the text when admitted, else null.
+function _scrml_css_attr_value_of(v) {
+  if (v.length > _SCRML_CSS_VALUE_MAX || !_SCRML_CSS_VALUE_ALPHABET.test(v)) return null;
+  if (v.includes("/*") || v.includes("*/")) return null;
+  let depth = 0;
+  for (let i = 0; i < v.length; i++) {
+    const c = v[i];
+    if (c === "(") {
+      let j = i;
+      while (j > 0 && /[A-Za-z0-9_-]/.test(v[j - 1])) j--;
+      const name = v.slice(j, i).toLowerCase();
+      // a bare `(` is a grouping only inside a function (`calc((1px + 2px) * 2)`)
+      if (name === "" ? depth === 0 : !(_SCRML_CSS_VALUE_FUNCTIONS.has(name) || _SCRML_CSS_ATTR_FUNCTIONS.has(name))) return null;
+      depth++;
+    } else if (c === ")") {
+      depth--;
+      if (depth < 0) return null;
+    }
+  }
+  return depth === 0 ? v : null;
+}
+
+// Is `text` (the string the write would set) admitted on a CSS-url attribute? `perEntry` (an animation
+// `values` list) judges every `;`-separated entry (bootstrap `cssAttrValue`).
+function _scrml_css_attr_value_admitted(text, perEntry) {
+  const entries = perEntry ? text.split(";") : [text];
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    if (_SCRML_LOCAL_FRAGMENT_URL.test(e.replace(/^[\t\n\f\r ]+|[\t\n\f\r ]+$/g, ""))) continue;
+    if (_scrml_css_attr_value_of(e) === null) return false;
+  }
+  return true;
+}
+
+function _scrml_css_guard_report(message) {
+  const err = new Error(message);
+  if (typeof _scrml_error_boundary_log === "function") {
+    _scrml_error_boundary_log("css-guard", err);
+  } else if (typeof console !== "undefined" && typeof console.error === "function") {
+    console.error("[scrml css-guard] " + err.message);
+  }
+}
+
+// THE write of a CSS-url attribute (or of an SVG animation value that may animate one) from data
+// (SPEC §5.2 "Data-supplied CSS-url attributes"). `value` is converted to a string exactly as
+// `setAttribute` converts it. `target` is passed only for an animation value whose animated attribute
+// may ALSO be a URL attribute — `""` when `attributeName` is computed: then §5.2 rule 3's URL guard
+// judges first (a refused scheme is written as `about:blank`, as `_scrml_safe_url` does), then this
+// one. A refused value is NOT written: the attribute is removed, and the refusal is reported once,
+// naming the attribute and the element — never the value.
+function _scrml_css_attr_set(el, name, value, target) {
+  const text = String(value);
+  if (typeof target === "string") {
+    const u = _scrml_safe_url(el, name, text, target);
+    if (u !== text) { el.setAttribute(name, u); return; }
+  }
+  const lower = String(name).toLowerCase();
+  if (_scrml_css_attr_value_admitted(text, lower === "values")) { el.setAttribute(name, text); return; }
+  el.removeAttribute(name);
+  _scrml_css_attr_refused(el, name, "removed");
+}
+
+// Report one refused CSS-url attribute value (never the value). `fate`: what happened to the attribute.
+function _scrml_css_attr_refused(el, name, fate) {
+  const tag = el && typeof el.tagName === "string" ? "<" + el.tagName.toLowerCase() + "> " : "";
+  _scrml_css_guard_report(
+    "refused a data-supplied value for " + tag + String(name) + "=: the browser reads this attribute as " +
+    "CSS, and only a finite number, a plain CSS value (no url(), image-set(), var(), quotes, escapes, ; { } " +
+    "< or !) or exactly a same-document url(#id) is written there from data (SPEC §5.2). The attribute was " + fate + ".",
+  );
+}
+
+function _scrml_css_attr_escape(text) {
+  return text.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// THE write of a CSS-url attribute into an HTML STRING (S480 r1 F2): an enum variant's `renders`
+// template / an `<errorBoundary>` `fallback=` is assembled as text and written with innerHTML
+// (codegen/emit-error-boundary.ts `emitBoundaryMarkupExpr`). `parts` are the value's pieces (static
+// text and payload fields, `null` / `undefined` read as ""). Returns ` name="…"` (attribute-escaped)
+// when `_scrml_css_attr_set` would write the value, `""` (reported) when it would remove it; `target`
+// as for `_scrml_css_attr_set`.
+function _scrml_css_attr_html(tag, name, parts, target) {
+  let text = "";
+  for (let i = 0; i < parts.length; i++) text += parts[i] == null ? "" : String(parts[i]);
+  const el = { tagName: String(tag) };
+  if (typeof target === "string") {
+    const u = _scrml_safe_url(el, name, text, target);
+    if (u !== text) return " " + name + '="' + _scrml_css_attr_escape(u) + '"';
+  }
+  if (_scrml_css_attr_value_admitted(text, String(name).toLowerCase() === "values")) {
+    return " " + name + '="' + _scrml_css_attr_escape(text) + '"';
+  }
+  _scrml_css_attr_refused(el, name, "not written");
+  return "";
+}
+
+// Does this `rel` text load (or may it load) a stylesheet? It holds `stylesheet` anywhere (ASCII
+// case-insensitive — a superset of the token test, fail closed). null: no `rel`.
+function _scrml_rel_loads_sheet(rel) {
+  return rel !== null && rel !== undefined && String(rel).toLowerCase().indexOf("stylesheet") !== -1;
+}
+
+// Does this `<link>` load (or may it load) a stylesheet? A `rel` written from data is refused at
+// compile time with any data `href` (E-ATTR-STYLESHEET-HREF), so the static text decides.
+function _scrml_link_loads_sheet(el) {
+  return _scrml_rel_loads_sheet(el && typeof el.getAttribute === "function" ? el.getAttribute("rel") : null);
+}
+
+function _scrml_link_href_refused(name, fate) {
+  _scrml_css_guard_report(
+    "refused a data-supplied `" + String(name) + "` on a <link> whose `rel` loads a stylesheet: a " +
+    "stylesheet is never chosen by data (SPEC §5.2). The attribute was " + fate + ".",
+  );
+}
+
+// Is `el` a `<base>` (tag compared case-insensitively)? (bootstrap runtime.js `isBaseElement`.)
+function _scrml_is_base_el(el) {
+  return !!el && typeof el.tagName === "string" && el.tagName.toLowerCase() === "base";
+}
+
+function _scrml_base_href_refused(name, fate) {
+  _scrml_css_guard_report(
+    "refused a data-supplied `" + String(name) + "` on a <base>: data never chooses the document's base " +
+    "URL (SPEC §5.2). The attribute was " + fate + ".",
+  );
+}
+
+// THE write of a URL attribute into an HTML STRING (S480, carve-out 2 widened —
+// ruling:user-voice-scrml.md-S480-census-recs item 5; gap g-impl1-renders-href-unguarded-s480): a
+// `renders` / `fallback=` template (codegen/emit-error-boundary.ts `emitBoundaryMarkupExpr`) writes a
+// URL attribute (`href`, `src`, `action`, … on its element — `_scrml_is_url_attr`), or an SVG animation
+// value that animates one (`target` as for `_scrml_safe_url`), from a payload field. The assembled
+// value (`parts`: static text and payload fields, `null` / `undefined` read as "") is judged by §5.2
+// rule 3's guard, `_scrml_safe_url` — the one reader: a refused scheme is written as `about:blank`
+// (reported, never the value). Returns ` name="…"`, attribute-escaped.
+function _scrml_url_attr_html(tag, name, parts, target) {
+  let text = "";
+  for (let i = 0; i < parts.length; i++) text += parts[i] == null ? "" : String(parts[i]);
+  const u = _scrml_safe_url({ tagName: String(tag) }, name, text, target);
+  return " " + name + '="' + _scrml_css_attr_escape(u) + '"';
+}
+
+// THE write of a `<link>`'s `href` into an HTML STRING (S480 r2 N1) — the string-template twin of
+// `_scrml_link_href_set`, for a `renders` / `fallback=` template (codegen/emit-error-boundary.ts
+// `emitBoundaryMarkupExpr`). `relParts` are the pieces of the element's `rel` value (null: no `rel`),
+// `hrefParts` those of the `href` value (static text and payload fields, `null` / `undefined` read as
+// ""). When `rel` loads a stylesheet: `""` (the attribute is not written; reported, never the value).
+// Otherwise ` name="…"` judged by §5.2 rule 3's URL guard, as `_scrml_link_href_set` judges it (S480,
+// carve-out 2 widened; gap g-impl1-renders-href-unguarded-s480). `tag` (S480) is passed only for a
+// `<base>`: its `href` is never written from data (§5.2 "Data never moves the document base") — `""`,
+// reported.
+function _scrml_link_href_html(name, relParts, hrefParts, tag) {
+  if (typeof tag === "string" && tag.toLowerCase() === "base") {
+    _scrml_base_href_refused(name, "not written");
+    return "";
+  }
+  let rel = null;
+  if (relParts != null) {
+    rel = "";
+    for (let i = 0; i < relParts.length; i++) rel += relParts[i] == null ? "" : String(relParts[i]);
+  }
+  if (_scrml_rel_loads_sheet(rel)) {
+    _scrml_link_href_refused(name, "not written");
+    return "";
+  }
+  return _scrml_url_attr_html("link", name, hrefParts);
+}
+
+// THE write of a `<link>`'s `href` (any case, any `prefix:href`) from data (SPEC §5.2 "Data-supplied
+// stylesheets (S472)": "Every runtime path that writes a `<link>`'s `href` from data SHALL refuse the
+// write when the element's `rel` contains `stylesheet` …"). Refused: the attribute is removed and the
+// refusal reported (never the value). Otherwise the value is judged by §5.2 rule 3's URL guard.
+//
+// S480 (carve-out 2 widened) — the same setter is the runtime wall for a `<base>`'s `href` (§5.2 "Data
+// never moves the document base (S473)": "Every runtime path that writes a `<base>`'s `href` from data
+// SHALL refuse the write (fail closed)"): removed, reported. The compiler refuses every such write
+// first (E-ATTR-BASE-HREF), so no compiled program asks for it.
+function _scrml_link_href_set(el, name, value) {
+  if (_scrml_is_base_el(el)) {
+    el.removeAttribute(name);
+    _scrml_base_href_refused(name, "removed");
+    return;
+  }
+  if (_scrml_link_loads_sheet(el)) {
+    el.removeAttribute(name);
+    _scrml_link_href_refused(name, "removed");
+    return;
+  }
+  el.setAttribute(name, _scrml_safe_url(el, name, value));
+}
+const _SCRML_META_EMIT_KNOWN_ELEMENTS = new Set(["a","abbr","acronym","address","altglyph","altglyphdef","altglyphitem","animate","animatecolor","animatemotion","animatetransform","annotation","annotation-xml","applet","area","article","aside","audio","b","base","basefont","bdi","bdo","bgsound","big","blink","blockquote","body","br","button","canvas","caption","center","circle","cite","clippath","code","col","colgroup","color-profile","content","cursor","data","datalist","dd","defs","del","desc","details","dfn","dialog","dir","discard","div","dl","dt","ellipse","em","embed","feblend","fecolormatrix","fecomponenttransfer","fecomposite","feconvolvematrix","fediffuselighting","fedisplacementmap","fedistantlight","fedropshadow","feflood","fefunca","fefuncb","fefuncg","fefuncr","fegaussianblur","feimage","femerge","femergenode","femorphology","fencedframe","feoffset","fepointlight","fespecularlighting","fespotlight","fetile","feturbulence","fieldset","figcaption","figure","filter","font","font-face","font-face-format","font-face-name","font-face-src","font-face-uri","footer","foreignobject","form","frame","frameset","g","glyph","glyphref","h1","h2","h3","h4","h5","h6","hatch","hatchpath","head","header","hgroup","hkern","hr","html","i","iframe","image","img","input","ins","isindex","kbd","keygen","label","legend","li","line","lineargradient","link","listing","maction","main","maligngroup","malignmark","map","mark","marker","marquee","mask","math","menclose","menu","menuitem","merror","mesh","meshgradient","meshpatch","meshrow","meta","metadata","meter","mfenced","mfrac","mglyph","mi","missing-glyph","mlabeledtr","mlongdiv","mmultiscripts","mn","mo","mover","mpadded","mpath","mphantom","mprescripts","mroot","mrow","ms","mscarries","mscarry","msgroup","msline","mspace","msqrt","msrow","mstack","mstyle","msub","msubsup","msup","mtable","mtd","mtext","mtr","multicol","munder","munderover","nav","nextid","nobr","noembed","noframes","none","noscript","object","ol","optgroup","option","output","p","param","path","pattern","picture","plaintext","polygon","polyline","portal","pre","progress","q","radialgradient","rb","rect","rp","rt","rtc","ruby","s","samp","script","search","section","select","semantics","set","shadow","slot","small","solidcolor","source","spacer","span","stop","strike","strong","style","sub","summary","sup","svg","switch","symbol","table","tbody","td","template","text","textarea","textpath","tfoot","th","thead","time","title","tr","track","tref","tspan","tt","u","ul","unknown","use","var","video","view","vkern","wbr","xmp"]);
+const _SCRML_CUSTOM_ELEMENT_NAME = /^[a-z][a-z0-9._]*-[a-z0-9._-]*$/;
+const _SCRML_EMIT_FORM_MEMBERS = new Set([
+  "ATTRIBUTE_NODE", "CDATA_SECTION_NODE", "COMMENT_NODE", "DOCUMENT_FRAGMENT_NODE", "DOCUMENT_NODE",
+  "DOCUMENT_POSITION_CONTAINED_BY", "DOCUMENT_POSITION_CONTAINS", "DOCUMENT_POSITION_DISCONNECTED",
+  "DOCUMENT_POSITION_FOLLOWING", "DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC",
+  "DOCUMENT_POSITION_PRECEDING", "DOCUMENT_TYPE_NODE", "ELEMENT_NODE", "ENTITY_NODE",
+  "ENTITY_REFERENCE_NODE", "NOTATION_NODE", "PROCESSING_INSTRUCTION_NODE", "TEXT_NODE",
+  "__defineGetter__", "__defineSetter__", "__lookupGetter__", "__lookupSetter__", "__proto__",
+  "acceptCharset", "accessKey", "action", "activeViewTransition", "addEventListener", "after",
+  "animate", "append", "appendChild", "ariaActiveDescendantElement", "ariaAtomic",
+  "ariaAutoComplete", "ariaBrailleLabel", "ariaBrailleRoleDescription", "ariaBusy", "ariaChecked",
+  "ariaColCount", "ariaColIndex", "ariaColIndexText", "ariaColSpan", "ariaControlsElements",
+  "ariaCurrent", "ariaDescribedByElements", "ariaDescription", "ariaDetailsElements",
+  "ariaDisabled", "ariaErrorMessageElements", "ariaExpanded", "ariaFlowToElements", "ariaHasPopup",
+  "ariaHidden", "ariaInvalid", "ariaKeyShortcuts", "ariaLabel", "ariaLabelledByElements",
+  "ariaLevel", "ariaLive", "ariaModal", "ariaMultiLine", "ariaMultiSelectable", "ariaNotify",
+  "ariaOrientation", "ariaPlaceholder", "ariaPosInSet", "ariaPressed", "ariaReadOnly",
+  "ariaRelevant", "ariaRequired", "ariaRoleDescription", "ariaRowCount", "ariaRowIndex",
+  "ariaRowIndexText", "ariaRowSpan", "ariaSelected", "ariaSetSize", "ariaSort", "ariaValueMax",
+  "ariaValueMin", "ariaValueNow", "ariaValueText", "assignedSlot", "attachInternals",
+  "attachShadow", "attributeStyleMap", "attributes", "autocapitalize", "autocomplete", "autofocus",
+  "baseURI", "before", "blur", "checkValidity", "checkVisibility", "childElementCount",
+  "childNodes", "children", "classList", "className", "click", "clientHeight", "clientLeft",
+  "clientTop", "clientWidth", "cloneNode", "closest", "compareDocumentPosition", "computedStyleMap",
+  "constructor", "contains", "contentEditable", "currentCSSZoom", "customElementRegistry",
+  "dataset", "dir", "dispatchEvent", "draggable", "editContext", "elementTiming", "elements",
+  "encoding", "enctype", "enterKeyHint", "firstChild", "firstElementChild", "focus",
+  "getAnimations", "getAttribute", "getAttributeNS", "getAttributeNames", "getAttributeNode",
+  "getAttributeNodeNS", "getBoundingClientRect", "getClientRects", "getElementsByClassName",
+  "getElementsByTagName", "getElementsByTagNameNS", "getHTML", "getRootNode", "hasAttribute",
+  "hasAttributeNS", "hasAttributes", "hasChildNodes", "hasOwnProperty", "hasPointerCapture",
+  "hidden", "hidePopover", "id", "inert", "innerHTML", "innerText", "inputMode",
+  "insertAdjacentElement", "insertAdjacentHTML", "insertAdjacentText", "insertBefore",
+  "isConnected", "isContentEditable", "isDefaultNamespace", "isEqualNode", "isPrototypeOf",
+  "isSameNode", "lang", "lastChild", "lastElementChild", "length", "localName",
+  "lookupNamespaceURI", "lookupPrefix", "matches", "method", "moveBefore", "name", "namespaceURI",
+  "nextElementSibling", "nextSibling", "noValidate", "nodeName", "nodeType", "nodeValue", "nonce",
+  "normalize", "offsetHeight", "offsetLeft", "offsetParent", "offsetTop", "offsetWidth", "onabort",
+  "onanimationcancel", "onanimationend", "onanimationiteration", "onanimationstart", "onauxclick",
+  "onbeforecopy", "onbeforecut", "onbeforeinput", "onbeforematch", "onbeforepaste",
+  "onbeforetoggle", "onbeforexrselect", "onblur", "oncancel", "oncanplay", "oncanplaythrough",
+  "onchange", "onclick", "onclose", "oncommand", "oncontentvisibilityautostatechange",
+  "oncontextlost", "oncontextmenu", "oncontextrestored", "oncopy", "oncuechange", "oncut",
+  "ondblclick", "ondrag", "ondragend", "ondragenter", "ondragleave", "ondragover", "ondragstart",
+  "ondrop", "ondurationchange", "onemptied", "onended", "onerror", "onfocus", "onformdata",
+  "onfullscreenchange", "onfullscreenerror", "ongotpointercapture", "oninput", "oninvalid",
+  "onkeydown", "onkeypress", "onkeyup", "onload", "onloadeddata", "onloadedmetadata", "onloadstart",
+  "onlostpointercapture", "onmousedown", "onmouseenter", "onmouseleave", "onmousemove",
+  "onmouseout", "onmouseover", "onmouseup", "onmousewheel", "onpaste", "onpause", "onplay",
+  "onplaying", "onpointercancel", "onpointerdown", "onpointerenter", "onpointerleave",
+  "onpointermove", "onpointerout", "onpointerover", "onpointerup", "onprogress", "onratechange",
+  "onreset", "onresize", "onscroll", "onscrollend", "onscrollsnapchange", "onscrollsnapchanging",
+  "onsearch", "onsecuritypolicyviolation", "onseeked", "onseeking", "onselect", "onselectionchange",
+  "onselectstart", "onslotchange", "onstalled", "onsubmit", "onsuspend", "ontimeupdate", "ontoggle",
+  "ontransitioncancel", "ontransitionend", "ontransitionrun", "ontransitionstart", "onvolumechange",
+  "onwaiting", "onwebkitanimationend", "onwebkitanimationiteration", "onwebkitanimationstart",
+  "onwebkitfullscreenchange", "onwebkitfullscreenerror", "onwebkittransitionend", "onwheel",
+  "outerHTML", "outerText", "ownerDocument", "parentElement", "parentNode", "part", "popover",
+  "prefix", "prepend", "previousElementSibling", "previousSibling", "propertyIsEnumerable",
+  "querySelector", "querySelectorAll", "rel", "relList", "releasePointerCapture", "remove",
+  "removeAttribute", "removeAttributeNS", "removeAttributeNode", "removeChild",
+  "removeEventListener", "replaceChild", "replaceChildren", "replaceWith", "reportValidity",
+  "requestFullscreen", "requestPointerLock", "requestSubmit", "reset", "role", "scroll", "scrollBy",
+  "scrollHeight", "scrollIntoView", "scrollIntoViewIfNeeded", "scrollLeft", "scrollTo", "scrollTop",
+  "scrollWidth", "setAttribute", "setAttributeNS", "setAttributeNode", "setAttributeNodeNS",
+  "setHTML", "setHTMLUnsafe", "setPointerCapture", "shadowRoot", "showPopover", "slot",
+  "spellcheck", "startViewTransition", "style", "submit", "tabIndex", "tagName", "target",
+  "textContent", "title", "toLocaleString", "toString", "toggleAttribute", "togglePopover",
+  "translate", "valueOf", "virtualKeyboardPolicy", "webkitMatchesSelector",
+  "webkitRequestFullScreen", "webkitRequestFullscreen", "when", "writingSuggestions",
+]);
+// SPEC §22.4.1 / §22.12 — the ONE attribute judge for markup a `^{}` block emits: compile-time
+// `emit()` / `emit.raw()` output (meta-eval.ts `checkEmittedNodes`) and runtime `meta.emit(html)`
+// output (runtime-meta-emit-gate.js). S459 round 3 (PA addendum 3, items 2 + 3).
+//
+// THE TEST IS CLOSED. An attribute is admitted only when its name is on the list below for the
+// element's namespace (and, for the HTML per-element names, for that element); every other name is
+// refused — an attribute no list knows yet (a new event handler, a new navigation or resource
+// attribute) is refused, never let through. This replaces the earlier deny-list (`on*`, `srcdoc`,
+// `data-scrml*`), which admitted everything it did not name. The lists name presentation, structure,
+// accessibility and form-value attributes that never run text as script and never load or navigate
+// on their own; the URL-valued names they admit (`href`, `src`, `srcset`, `cite`, `poster`,
+// `xlink:href`, `itemid`, `itemtype`) are ADDITIONALLY judged by scheme per §5.2 by the
+// caller, in BOTH phases with the ONE §5.2 reader (S459 round 4 F4): `_scrml_is_url_attr("", name)` +
+// `_scrml_url_value_admitted(name, value)` from runtime-url-guard.js — the runtime on the parsed value,
+// compile time (meta-eval.ts `checkEmittedNodes`) on the literal value the emitted markup carries,
+// which is the string the browser parses (the compiler HTML-escapes it on output). (Before round 4
+// this header claimed compile time was covered by the §5.2 sink check over the spliced nodes; that
+// check judges only the literal text before a `${`, so a fully literal `href="javascript:…"` in
+// `emit()` output passed — the review's F4.)
+//
+// Deliberately NOT on the lists (refused): every `on*` event handler; `srcdoc`; `is` (instantiates a
+// page-registered customized built-in); `nonce` / `integrity`; `ping`; `xml:base` (re-bases relative
+// URLs); `action`, `method`, `enctype`, `target` on `<form>`, and `form`, `formaction`, `formmethod`,
+// `formenctype`, `formtarget`, `formnovalidate` (data must not redirect or retarget a submission — of
+// the emitted form or, through `form=`, of a form already on the page); `popovertarget`,
+// `popovertargetaction`, `commandfor`, `command`, `anchor`, and `for` on `<label>` (act on an element
+// elsewhere in the page by id — a `<label for="x">` click IS a click on the page's `#x`, S459 round 4
+// F1; `<output for>` only names its inputs and is admitted); `usemap` on `<img>` and `name` on `<map>`
+// (S460 N1 — the same reference-by-name class: `<img usemap="#m">` resolves `#m` against every
+// `<map>` in the page by name OR id, so an emitted image would run a page `<area>`'s activation on
+// click, and an emitted `<map name>` / `<map id>` would capture the areas of a page image — `id` on
+// `<map>` is the one global refused on one element, in `_scrml_emit_attr_name_verdict`); the SVG animation attributes `attributename`, `to`, `from`, `by`, `begin` (their elements are
+// refused anyway); and the compiler-owned `data-scrml` / `data-scrml-*` namespace (ruling S458 "your
+// recs on all four" item 3 + PA-ruled S459 consequence: the component CSS scope root and the runtime
+// markers).
+//
+// Names are compared as the HTML tokenizer leaves them: ASCII upper case folded to lower case (the
+// tokenizer does not decode character references in a name). SVG's camelCase attributes (`viewBox`)
+// are listed lowercased; callers fold before asking.
+//
+// This file is BOTH a compiler module (imported by meta-eval.ts) and runtime source (inlined verbatim,
+// `export ` stripped, into the 'metaemit' chunk by runtime-template.js), so it holds only `const`
+// tables and plain functions, every top-level name `_scrml_` / `_SCRML_` prefixed, no imports.
+
+// Admitted on every element of every namespace.
+const _SCRML_EMIT_GLOBAL_ATTRS = new Set([
+  "accesskey", "autocapitalize", "autocorrect", "autofocus", "class", "contenteditable", "dir",
+  "draggable", "enterkeyhint", "exportparts", "hidden", "id", "inert", "inputmode", "itemid",
+  "itemprop", "itemref", "itemscope", "itemtype", "lang", "part", "popover", "role", "slot",
+  "spellcheck", "style", "tabindex", "title", "translate", "writingsuggestions",
+  "xml:lang", "xml:space", "xmlns", "xmlns:xlink",
+]);
+
+// HTML per-element names: attribute → the (lowercased) HTML elements it is admitted on.
+const _SCRML_EMIT_HTML_ELEMENT_ATTRS = {
+  abbr: ["td", "th"],
+  accept: ["input"],
+  "accept-charset": ["form"],
+  // `<meta>`'s DESCRIPTIVE attributes (PA-ruled S459: meta descriptive attrs; http-equiv refused).
+  // `content` is inert only while the element has no `http-equiv` — `http-equiv="refresh"` with
+  // `content="0;url=javascript:…"` is an executable navigation (S456 filed meta refresh as a URL
+  // sink). `http-equiv` is on no list, so it is refused outright, and THAT is what makes admitting
+  // `content` safe — which is why `content` is scoped to `<meta>` here, never admitted globally.
+  // (The runtime gate refuses the `<meta>` element itself; these names matter for compile-time
+  // `emit()` output, e.g. `<meta name="robots" content="index, follow">`, `<meta name="Description">`.)
+  charset: ["meta"],
+  content: ["meta"],
+  property: ["meta"],
+  alt: ["img", "area", "input"],
+  autocomplete: ["form", "input", "select", "textarea"],
+  autoplay: ["audio", "video"],
+  checked: ["input"],
+  cite: ["blockquote", "q", "del", "ins"],
+  cols: ["textarea"],
+  colspan: ["td", "th"],
+  controls: ["audio", "video"],
+  coords: ["area"],
+  crossorigin: ["img", "audio", "video"],
+  datetime: ["time", "del", "ins"],
+  decoding: ["img"],
+  default: ["track"],
+  dirname: ["input", "textarea"],
+  disabled: ["button", "fieldset", "input", "optgroup", "option", "select", "textarea"],
+  download: ["a", "area"],
+  fetchpriority: ["img"],
+  // `for` on `<label>` is NOT admitted (S459 round 4 F1): activating a label activates its control,
+  // and `for="id"` picks that control anywhere in the page — `<label for="danger">` made a click on
+  // emitted text a click on the page's `#danger`. `<output for>` only lists its inputs.
+  for: ["output"],
+  headers: ["td", "th"],
+  height: ["img", "video", "canvas", "input", "source"],
+  high: ["meter"],
+  href: ["a", "area"],
+  hreflang: ["a", "area"],
+  ismap: ["img"],
+  kind: ["track"],
+  label: ["option", "optgroup", "track"],
+  list: ["input"],
+  loading: ["img"],
+  loop: ["audio", "video"],
+  low: ["meter"],
+  max: ["input", "meter", "progress"],
+  maxlength: ["input", "textarea"],
+  media: ["source", "meta"],
+  min: ["input", "meter"],
+  minlength: ["input", "textarea"],
+  multiple: ["input", "select"],
+  muted: ["audio", "video"],
+  // Not on `<map>` (S460 N1 — see the header).
+  name: ["button", "fieldset", "input", "output", "select", "textarea", "details", "meta"],
+  novalidate: ["form"],
+  open: ["details", "dialog"],
+  optimum: ["meter"],
+  pattern: ["input"],
+  placeholder: ["input", "textarea"],
+  playsinline: ["video"],
+  poster: ["video"],
+  preload: ["audio", "video"],
+  readonly: ["input", "textarea"],
+  referrerpolicy: ["a", "area", "img"],
+  rel: ["a", "area"],
+  required: ["input", "select", "textarea"],
+  reversed: ["ol"],
+  rows: ["textarea"],
+  rowspan: ["td", "th"],
+  scope: ["th"],
+  selected: ["option"],
+  shape: ["area"],
+  size: ["input", "select"],
+  sizes: ["img", "source"],
+  span: ["col", "colgroup"],
+  src: ["img", "audio", "video", "source", "track", "input"],
+  srclang: ["track"],
+  srcset: ["img", "source"],
+  start: ["ol"],
+  step: ["input"],
+  type: ["a", "button", "input", "ol", "source", "menu"],
+  value: ["button", "data", "input", "li", "meter", "option", "progress"],
+  width: ["img", "video", "canvas", "input", "source", "col", "colgroup"],
+  wrap: ["textarea"],
+};
+
+// SVG names (any SVG element; their elements are judged separately). Lowercased.
+const _SCRML_EMIT_SVG_ATTRS = new Set([
+  "alignment-baseline", "baseline-shift", "baseprofile", "clip", "clip-path", "clip-rule",
+  "clippathunits", "color", "color-interpolation", "color-interpolation-filters", "cursor", "cx", "cy",
+  "d", "diffuseconstant", "direction", "display", "divisor", "dominant-baseline", "dx", "dy",
+  "edgemode", "elevation", "fill", "fill-opacity", "fill-rule", "filter", "filterunits",
+  "flood-color", "flood-opacity", "focusable", "font-family", "font-size", "font-size-adjust",
+  "font-stretch", "font-style", "font-variant", "font-weight", "fr", "fx", "fy", "gradienttransform",
+  "gradientunits", "height", "href", "image-rendering", "in", "in2", "k", "k1", "k2", "k3", "k4",
+  "kernelmatrix", "kernelunitlength", "lengthadjust", "letter-spacing", "lighting-color",
+  "limitingconeangle", "marker-end", "marker-mid", "marker-start", "markerheight", "markerunits",
+  "markerwidth", "mask", "maskcontentunits", "maskunits", "mode", "numoctaves", "offset", "opacity",
+  "operator", "order", "orient", "overflow", "paint-order", "pathlength", "patterncontentunits",
+  "patterntransform", "patternunits", "pointer-events", "points", "pointsatx", "pointsaty",
+  "pointsatz", "preservealpha", "preserveaspectratio", "primitiveunits", "r", "radius", "refx",
+  "refy", "result", "rotate", "rx", "ry", "scale", "seed", "shape-rendering", "spacing",
+  "specularconstant", "specularexponent", "spreadmethod", "startoffset", "stddeviation",
+  "stitchtiles", "stop-color", "stop-opacity", "stroke", "stroke-dasharray", "stroke-dashoffset",
+  "stroke-linecap", "stroke-linejoin", "stroke-miterlimit", "stroke-opacity", "stroke-width",
+  "surfacescale", "systemlanguage", "tablevalues", "targetx", "targety", "text-anchor",
+  "text-decoration", "text-rendering", "textlength", "transform", "transform-origin", "type",
+  "unicode-bidi", "values", "vector-effect", "version", "viewbox", "visibility", "width",
+  "word-spacing", "writing-mode", "x", "x1", "x2", "xchannelselector", "xlink:href", "xlink:title",
+  "y", "y1", "y2", "ychannelselector", "z",
+]);
+
+// MathML names (any MathML element). Lowercased.
+const _SCRML_EMIT_MATHML_ATTRS = new Set([
+  "accent", "accentunder", "align", "arg", "close", "columnalign", "columnlines", "columnspacing",
+  "columnspan", "depth", "display", "displaystyle", "encoding", "equalcolumns", "equalrows", "fence",
+  "form", "frame", "framespacing", "height", "href", "intent", "largeop", "linethickness", "lspace",
+  "mathbackground", "mathcolor", "mathsize", "mathvariant", "maxsize", "minsize", "movablelimits",
+  "notation", "open", "rowalign", "rowlines", "rowspacing", "rowspan", "rspace", "scriptlevel",
+  "separator", "separators", "side", "stretchy", "symmetric", "voffset", "width",
+]);
+
+const _SCRML_EMIT_NS_HTML = "http://www.w3.org/1999/xhtml";
+const _SCRML_EMIT_NS_SVG = "http://www.w3.org/2000/svg";
+const _SCRML_EMIT_NS_MATHML = "http://www.w3.org/1998/Math/MathML";
+
+// Fold ASCII upper case to lower case — the HTML tokenizer's only change to an attribute name.
+function _scrml_emit_fold_name(name) {
+  return String(name).replace(/[A-Z]/g, (c) => c.toLowerCase());
+}
+
+// The compiler-owned namespace: `data-scrml` itself (the component CSS scope root) and every
+// `data-scrml-*` name (the runtime markers). `lowerName` is already folded.
+function _scrml_emit_reserved_attr_name(lowerName) {
+  return lowerName === "data-scrml" || lowerName.slice(0, 11) === "data-scrml-";
+}
+
+// The ONE attribute judge. `ns` is the element's namespace URI (one of the three above; anything else
+// is judged as HTML), `tag` its lowercased local name, `name` the attribute name as written / parsed.
+// Returns "" when the name is admitted, else a short reason naming the attribute (never its value).
+function _scrml_emit_attr_name_verdict(ns, tag, name) {
+  const lowerName = _scrml_emit_fold_name(name);
+  if (_scrml_emit_reserved_attr_name(lowerName)) {
+    return "a " + lowerName + "= attribute on <" + tag + "> (the data-scrml attribute namespace is " +
+      "reserved for the compiler's own markers)";
+  }
+  // A `<map>` is found by `id` as well as `name` (hash-name reference; Chromium-verified S460 N1).
+  if (lowerName === "id" && String(tag).toLowerCase() === "map" && ns !== _SCRML_EMIT_NS_SVG && ns !== _SCRML_EMIT_NS_MATHML) {
+    return "an id= attribute on <map> (an <img usemap> anywhere in the page resolves to a map by its id " +
+      "or name)";
+  }
+  if (lowerName.slice(0, 5) === "data-" && lowerName.length > 5) return "";
+  if (lowerName.slice(0, 5) === "aria-" && lowerName.length > 5) return "";
+  if (_SCRML_EMIT_GLOBAL_ATTRS.has(lowerName)) return "";
+  if (ns === _SCRML_EMIT_NS_SVG) {
+    if (_SCRML_EMIT_SVG_ATTRS.has(lowerName)) return "";
+  } else if (ns === _SCRML_EMIT_NS_MATHML) {
+    if (_SCRML_EMIT_MATHML_ATTRS.has(lowerName)) return "";
+  } else if (Object.prototype.hasOwnProperty.call(_SCRML_EMIT_HTML_ELEMENT_ATTRS, lowerName)
+    && _SCRML_EMIT_HTML_ELEMENT_ATTRS[lowerName].indexOf(String(tag).toLowerCase()) !== -1) {
+    return "";
+  }
+  if (lowerName.slice(0, 2) === "on") return "an event-handler attribute " + lowerName + "= on <" + tag + ">";
+  return (/^[aeiou]/.test(lowerName) ? "an " : "a ") + lowerName + "= attribute on <" + tag + "> (not on the admitted attribute list for " +
+    "emitted markup)";
+}
+
+// The value half of the judge (names already admitted). `tag` is the element's lowercased local name.
+//   - An `id` / `name` whose value begins with the compiler-reserved prefix `_scrml` / `__scrml`
+//     (§47.1.1) is refused on EVERY element — any element's `id` becomes a `window._scrml…` named
+//     property, which the runtime's own `typeof _scrml_x === "function"` probes would then find.
+//   - Other `id` / `name` values are judged by `_scrml_emit_named_value_verdict` below, and only on
+//     the elements that make them a named property of `document` or of a form.
+//   - `<meta name>` values are not judged (S459 round 4 F5). `<meta>` creates no named property of
+//     `document`, `window` or a form, so no value of it can shadow anything; meta names are ASCII
+//     case-insensitive tokens of any spelling (`Description`, `DC.title`, `msapplication-TileColor`).
+//     The earlier lowercase-token rule refused those and guarded nothing, so it is dropped rather than
+//     case-folded.
+// `tag` is kept in the signature for callers; the value rules here are element-independent.
+// Returns "" or a reason naming the attribute (never its value).
+function _scrml_emit_attr_value_verdict(name, value, tag) {
+  const lowerName = _scrml_emit_fold_name(name);
+  if ((lowerName === "id" || lowerName === "name") && /^_{1,2}scrml/i.test(String(value).trim())) {
+    return (lowerName === "id" ? "an " : "a ") + lowerName + "= value in the compiler-reserved _scrml / __scrml namespace";
+  }
+  return "";
+}
+
+// NAMED PROPERTIES (S459 round 4 F2). `Document` and `HTMLFormElement` are [LegacyOverrideBuiltIns]:
+// an element they expose BY NAME shadows their member of the same name (`<img name="querySelector">`
+// makes `document.querySelector` that image; `<input name="action">` inside a form makes `form.action`
+// that input). So an `id` / `name` value is refused when — and only when — the element makes it such a
+// named property AND it names a member of that object. Which elements, per the HTML standard:
+//   - `document` (Document's supported property names): the `name` of `embed`, `form`, `iframe`,
+//     `img`, `object`; the `id` of `object`; the `id` of an `img` that also has a `name`;
+//   - a form (HTMLFormElement's supported property names): the `id` and the `name` of every LISTED
+//     element whose form owner is that form — `button`, `fieldset`, `input`, `object`, `output`,
+//     `select`, `textarea`, and a form-associated custom element (whether a custom element is
+//     form-associated is known only once the page upgrades it, so every custom element counts) — and
+//     of every `img` inside the form.
+// `window`'s named properties are not consulted: Window is NOT [LegacyOverrideBuiltIns], so an element
+// named like a window member never shadows it (the reserved `_scrml` prefix above covers the names the
+// runtime probes for). Every other element — `div`, `h2`, `section`, `p`, … — is admitted with any
+// `id` / `name` value (the round-3 belt refused the 370 HTMLFormElement member names on EVERY element).
+const _SCRML_EMIT_DOCUMENT_NAMED_BY_NAME = new Set(["embed", "form", "iframe", "img", "object"]);
+const _SCRML_EMIT_FORM_LISTED_ELEMENTS = new Set([
+  "button", "fieldset", "input", "object", "output", "select", "textarea",
+]);
+
+// Is the element `tag` (lowercased) in namespace `ns` a form-associated control — one that joins the
+// submission and the named properties of the form it sits in? `isCustom`: `tag` is a custom-element
+// name.
+function _scrml_emit_is_form_control(ns, tag, isCustom) {
+  if (ns && ns !== _SCRML_EMIT_NS_HTML) return false;
+  return _SCRML_EMIT_FORM_LISTED_ELEMENTS.has(tag) || isCustom === true;
+}
+
+// The named-property judge for attribute `lowerName` (folded) with `value` on the element `tag`
+// (lowercased) in namespace `ns`. `hasNameAttr`: the element also carries `name`. `inForm`: the element
+// sits inside a `<form>` — of the emitted tree, or (at run time) the page form around the insertion
+// point. `members` = { document, form }: the generated member tables (dom-named-property-members.js),
+// plus at run time `formProto`: the live HTMLFormElement prototype captured at load (`in` on it
+// reaches the platform's own members, data cannot). Each phase passes only the table it needs (S460):
+// compile time `form: null` with `inForm` false (no form half there — ruling S460 "n4 b"); the runtime
+// `document: null` (the document half never decides a runtime verdict: `name` is admitted on none of
+// embed / form / iframe / img / object, and object / embed / iframe are refused elements). A `null`
+// table judges fail-closed. Returns "" or a reason naming the attribute and the object it would
+// shadow a member of (never the value).
+function _scrml_emit_named_value_verdict(ns, tag, lowerName, value, hasNameAttr, inForm, isCustom, members) {
+  if (lowerName !== "id" && lowerName !== "name") return "";
+  if (ns && ns !== _SCRML_EMIT_NS_HTML) return "";
+  const v = String(value);
+  if (v === "") return "";
+  // A `null` table (a phase that does not carry it) is FAIL-CLOSED: every value counts as a member.
+  const isMember = (table, proto) => table === null || table === undefined || table.has(v)
+    || (proto !== null && proto !== undefined && v in proto);
+  const ofDocument = (lowerName === "name" && _SCRML_EMIT_DOCUMENT_NAMED_BY_NAME.has(tag))
+    || (lowerName === "id" && (tag === "object" || (tag === "img" && hasNameAttr === true)));
+  if (ofDocument && isMember(members.document, null)) {
+    return (lowerName === "id" ? "an " : "a ") + lowerName + "= value on <" + tag + "> that names a member of document (the element " +
+      "would shadow that member)";
+  }
+  const ofForm = inForm === true && (_scrml_emit_is_form_control(ns, tag, isCustom) || tag === "img");
+  if (ofForm && isMember(members.form, members.formProto)) {
+    return (lowerName === "id" ? "an " : "a ") + lowerName + "= value on <" + tag + "> inside a form that names a member of the form " +
+      "(the element would shadow that member)";
+  }
+  return "";
+}
+
+// The namespace of a child element named `childTag` (lowercased) whose parent is in namespace
+// `parentNs` with local name `parentTag` — the HTML tree builder's rule, for callers (compile time)
+// that judge a tree no parser built: `<svg>` opens SVG, `<math>` opens MathML, and an SVG
+// `foreignObject` / `desc` / `title` or a MathML `annotation-xml` (text/html) / token element returns
+// to HTML.
+function _scrml_emit_child_ns(parentNs, parentTag, childTag) {
+  if (parentNs === _SCRML_EMIT_NS_SVG) {
+    if (parentTag === "foreignobject" || parentTag === "desc" || parentTag === "title") {
+      return childTag === "svg" ? _SCRML_EMIT_NS_SVG : childTag === "math" ? _SCRML_EMIT_NS_MATHML : _SCRML_EMIT_NS_HTML;
+    }
+    return _SCRML_EMIT_NS_SVG;
+  }
+  if (parentNs === _SCRML_EMIT_NS_MATHML) {
+    if (parentTag === "annotation-xml" || parentTag === "mi" || parentTag === "mo" || parentTag === "mn"
+      || parentTag === "ms" || parentTag === "mtext") {
+      return childTag === "svg" ? _SCRML_EMIT_NS_SVG : childTag === "math" ? _SCRML_EMIT_NS_MATHML : _SCRML_EMIT_NS_HTML;
+    }
+    return _SCRML_EMIT_NS_MATHML;
+  }
+  return childTag === "svg" ? _SCRML_EMIT_NS_SVG : childTag === "math" ? _SCRML_EMIT_NS_MATHML : _SCRML_EMIT_NS_HTML;
+}
+// SPEC §22.4.1 / §22.5.1 / §22.12 — the runtime `meta.emit(html)` gate (ruling S458 "a"; S459 round 3).
+//
+// Runtime `meta.emit(html)` output is held to the SAME closed rule as compile-time `emit()` output:
+// admitted elements, admitted attribute NAMES (markup-attr-allow-list.js — the one attribute judge
+// both phases use), URL schemes judged per §5.2. A violation is refused, reported once to scrml's
+// logging surface (§19.6.8 B5), and NOTHING is written. At run time every byte of the string is DATA
+// (`meta.emit("<p>" + row.name + "</p>")`), so every attribute value is judged the way §5.2 rule 3
+// judges a data-supplied value.
+//
+// ONE READER. The string is parsed ONCE, inertly — as the content of an element of the insertion
+// point's tag, created in a separate document with no browsing context (`createHTMLDocument`: nothing
+// in it runs, no resource loads, no event fires). The gate walks THAT tree, and on success the SAME
+// nodes are moved into the page — the string is never parsed a second time, so the checked tree is
+// the inserted tree.
+//
+// UNFORGEABLE READS (S459 round 3, review HIGH). The tree the gate walks was SHAPED BY THE DATA, and the
+// DOM lets markup shadow properties: on an `HTMLFormElement` ([LegacyOverrideBuiltIns]) a control named
+// `lastChild`, `previousSibling` or `attributes` replaces those properties, and a `name=` / `id=` can
+// shadow `document.*` members. A gate that reads `node.lastChild` / `node.attributes` therefore judged a
+// tree the data chose for it (four payloads were inserted unread and ran). So NOTHING here reads a
+// property of a node, of `document`, or of an attribute map: every read goes through an accessor or
+// method taken from the PROTOTYPE at chunk load (`Object.getOwnPropertyDescriptor(Node.prototype,
+// "firstChild").get`, …) and applied with `.call` — those cannot be shadowed by anything in the data.
+// Chunk load runs before any `meta.emit`, so the captured functions are the platform's own.
+//
+// This file is inlined into the client runtime verbatim (runtime-template.js, chunk 'metaemit',
+// `export ` stripped) after the 'urlguard' chunk, whose scheme reader it calls (`_scrml_is_url_attr`,
+// `_scrml_url_value_admitted` — runtime-url-guard.js; do NOT write a second URL reader here), the
+// 'cssattrguard' chunk (`_SCRML_CSS_URL_ATTRS`, `_scrml_css_attr_value_admitted` —
+// runtime-css-attr-guard.js, the CSS-url attribute reader; S480 r1 F3), and
+// after the `_SCRML_EMIT_FORM_MEMBERS` declaration of dom-named-property-members.js (the only one the
+// runtime carries — S460 N6) and
+// markup-attr-allow-list.js (`_scrml_emit_attr_name_verdict`, `_scrml_emit_attr_value_verdict`,
+// `_scrml_emit_named_value_verdict`, `_scrml_emit_is_form_control`, `_scrml_emit_fold_name`).
+// `_SCRML_META_EMIT_KNOWN_ELEMENTS` is defined immediately before this file's source by
+// runtime-template.js from the compiler's ONE element list (html-elements.js
+// `standardMarkupElementNamesLowercase()`), the list compile-time `emit()` output is judged against;
+// `_SCRML_CUSTOM_ELEMENT_NAME` likewise from html-elements.js `CUSTOM_ELEMENT_NAME_PATTERN`.
+// Plain function and `const` declarations only; every top-level name carries the `_scrml_` /
+// `_SCRML_` prefix the runtime reserves.
+
+// Elements refused in runtime `meta.emit` output, by lowercased local name in ANY namespace (an
+// `<svg><script>` is a script). Derived as:
+//   - what compile-time `emit()` refuses: `script` (E-SCRIPT-001), `style` (E-STYLE-001);
+//   - elements whose effect reaches beyond the emitted fragment, where a per-attribute §5.2 check of
+//     the fragment cannot see what they do: `base` (re-bases every relative URL in the document),
+//     `meta` (`http-equiv` refresh / cookies / policy), `link` (loads a stylesheet or resource into
+//     the document); `iframe`, `frame`, `frameset`, `object`, `embed`, `applet`, `portal`,
+//     `fencedframe` (a nested document or plugin whose content the gate never sees); and the SVG
+//     animation elements `set`, `animate`, `animatecolor`, `animatemotion`, `animatetransform`, which
+//     write ANOTHER element's attribute — a target an `href="#id"` may pick anywhere in the page.
+// Every other element must ALSO be a standard HTML / SVG / MathML element or a custom element (below):
+// the element test is an allow-list, this set only removes names from it.
+const _SCRML_META_EMIT_REFUSED_ELEMENTS = new Set([
+  "script", "style", "base", "meta", "link",
+  "iframe", "frame", "frameset", "object", "embed", "applet", "portal", "fencedframe",
+  "set", "animate", "animatecolor", "animatemotion", "animatetransform",
+]);
+
+// The platform's own accessors, taken from the prototypes once, at chunk load (see UNFORGEABLE READS).
+// `null` where there is no DOM (the chunk is then inert: `_scrml_meta_emit_insert` returns at once).
+function _scrml_meta_emit_dom() {
+  const w = typeof window !== "undefined" ? window : (typeof globalThis !== "undefined" ? globalThis : null);
+  if (!w || typeof w.Node !== "function" || typeof w.Element !== "function" || typeof w.Document !== "function") {
+    return null;
+  }
+  const getter = (proto, name) => {
+    for (let p = proto; p; p = Object.getPrototypeOf(p)) {
+      const d = Object.getOwnPropertyDescriptor(p, name);
+      if (d && typeof d.get === "function") return d.get;
+    }
+    return null;
+  };
+  const setter = (proto, name) => {
+    for (let p = proto; p; p = Object.getPrototypeOf(p)) {
+      const d = Object.getOwnPropertyDescriptor(p, name);
+      if (d && typeof d.set === "function") return d.set;
+    }
+    return null;
+  };
+  const method = (proto, name) => {
+    for (let p = proto; p; p = Object.getPrototypeOf(p)) {
+      const d = Object.getOwnPropertyDescriptor(p, name);
+      if (d && typeof d.value === "function") return d.value;
+    }
+    return null;
+  };
+  const N = w.Node.prototype;
+  const E = w.Element.prototype;
+  const D = w.Document.prototype;
+  // DOMImplementation's prototype: the global constructor's, or (where the environment does not expose
+  // the constructor) the prototype of the real `document.implementation`, read once at load through the
+  // captured Document getter — `document` itself is unforgeable.
+  const implGetter = getter(D, "implementation");
+  let implProto = w.DOMImplementation ? w.DOMImplementation.prototype : null;
+  if (!implProto && implGetter && typeof document !== "undefined") {
+    const impl = implGetter.call(document);
+    implProto = impl ? Object.getPrototypeOf(impl) : null;
+  }
+  const dom = {
+    firstChild: getter(N, "firstChild"),
+    nextSibling: getter(N, "nextSibling"),
+    parentNode: getter(N, "parentNode"),
+    nodeType: getter(N, "nodeType"),
+    appendChild: method(N, "appendChild"),
+    removeChild: method(N, "removeChild"),
+    localName: getter(E, "localName"),
+    namespaceURI: getter(E, "namespaceURI"),
+    attributes: getter(E, "attributes"),
+    setAttribute: method(E, "setAttribute"),
+    innerHTML: setter(E, "innerHTML") || (w.HTMLElement ? setter(w.HTMLElement.prototype, "innerHTML") : null),
+    attrsLength: w.NamedNodeMap ? getter(w.NamedNodeMap.prototype, "length") : null,
+    attrsItem: w.NamedNodeMap ? method(w.NamedNodeMap.prototype, "item") : null,
+    attrName: w.Attr ? getter(w.Attr.prototype, "name") : null,
+    attrValue: w.Attr ? getter(w.Attr.prototype, "value") : null,
+    templateContent: w.HTMLTemplateElement ? getter(w.HTMLTemplateElement.prototype, "content") : null,
+    implementation: implGetter,
+    querySelector: method(D, "querySelector"),
+    createElement: method(D, "createElement"),
+    body: getter(D, "body") || (w.HTMLDocument ? getter(w.HTMLDocument.prototype, "body") : null),
+    createHTMLDocument: implProto ? method(implProto, "createHTMLDocument") : null,
+    // The live prototype the named-property rule (S459 round 4 F2) asks `in` of, on top of the
+    // generated HTMLFormElement member table. Captured here, at load; data cannot reach it.
+    formProto: w.HTMLFormElement ? w.HTMLFormElement.prototype : null,
+  };
+  for (const k in dom) {
+    if (dom[k] === null && k !== "templateContent" && k !== "formProto") return null;
+  }
+  return dom;
+}
+const _SCRML_META_EMIT_DOM = _scrml_meta_emit_dom();
+
+// Is `el` (an element of the page) inside an HTML `<form>`? Walked up through the captured `parentNode`
+// / `localName` / `namespaceURI` accessors — the page's own markup may name its elements anything.
+function _scrml_meta_emit_inside_form(el) {
+  const dom = _SCRML_META_EMIT_DOM;
+  for (let p = dom.parentNode.call(el); p; p = dom.parentNode.call(p)) {
+    if (dom.nodeType.call(p) !== 1) continue;
+    if (dom.localName.call(p) === "form" && dom.namespaceURI.call(p) === _SCRML_EMIT_NS_HTML) return true;
+  }
+  return false;
+}
+
+// The violation the tree rooted at `root` carries, as a short description naming the element and the
+// attribute but NEVER the value (it is data, and may be sensitive) — or "" when it carries none.
+// Walks every descendant, including an HTML `<template>`'s content, reading ONLY through the captured
+// accessors. `inPageForm`: the insertion point sits inside a page `<form>` (S459 round 4 F1) — then a
+// form-associated control anywhere in the tree is refused (it would join that form's submission and
+// named properties: an injected `<input type=hidden name=amount>` fed the page form's FormData, an
+// injected `<button type=submit>` submitted it) — except inside an HTML `<template>`'s inert content
+// (S460 N5). A named-property `id` / `name` (F2) is reported only
+// when the walk finds nothing else, so a refusal names what such a shadowing would have hidden.
+function _scrml_meta_emit_violation(root, inPageForm) {
+  const dom = _SCRML_META_EMIT_DOM;
+  const call = (fn, self, a, b) => fn.call(self, a, b);
+  // `document: null`: no document table ships (S460 N6; why: `_scrml_emit_named_value_verdict`).
+  const members = { document: null, form: _SCRML_EMIT_FORM_MEMBERS, formProto: dom.formProto };
+  // [node, insideAForm, insideTemplateContent]. Template content is inert — it joins no form and no
+  // radio group — so the page-form rule, the form half of the named-property rule and the radio-group
+  // rule do not apply inside it (S460 N5); every other rule does.
+  const stack = [];
+  let shadowing = "";
+  const pushChildren = (parent, inForm, inTemplate) => {
+    const kids = [];
+    for (let c = call(dom.firstChild, parent); c; c = call(dom.nextSibling, c)) kids.push(c);
+    for (let k = kids.length - 1; k >= 0; k--) stack.push([kids[k], inForm, inTemplate]);
+  };
+  pushChildren(root, inPageForm === true, false);
+  while (stack.length > 0) {
+    const entry = stack.pop();
+    const node = entry[0];
+    let inForm = entry[1];
+    const inTemplate = entry[2];
+    const type = call(dom.nodeType, node);
+    if (type === 1) {
+      // Names are folded the way the HTML tokenizer folds them — ASCII only (a KELVIN SIGN stays
+      // itself, as it does in the compile-time judge).
+      const tag = _scrml_emit_fold_name(String(call(dom.localName, node)));
+      const ns = call(dom.namespaceURI, node);
+      if (_SCRML_META_EMIT_REFUSED_ELEMENTS.has(tag)) return "a <" + tag + "> element";
+      const isCustom = _SCRML_CUSTOM_ELEMENT_NAME.test(tag);
+      if (!_SCRML_META_EMIT_KNOWN_ELEMENTS.has(tag) && !isCustom) {
+        return "a <" + tag + "> element (not a standard HTML / SVG / MathML element or a custom element)";
+      }
+      if (inPageForm === true && inTemplate !== true && _scrml_emit_is_form_control(ns, tag, isCustom)) {
+        return "a <" + tag + "> element inserted inside a page <form> (a form control there would join " +
+          "that form's submission)";
+      }
+      const attrs = call(dom.attributes, node);
+      const n = call(dom.attrsLength, attrs);
+      const read = [];
+      let hasNameAttr = false;
+      for (let i = 0; i < n; i++) {
+        const a = call(dom.attrsItem, attrs, i);
+        const name = _scrml_emit_fold_name(String(call(dom.attrName, a)));
+        if (name === "name") hasNameAttr = true;
+        read.push([name, String(call(dom.attrValue, a))]);
+      }
+      for (let i = 0; i < read.length; i++) {
+        const name = read[i][0];
+        const value = read[i][1];
+        const nameVerdict = _scrml_emit_attr_name_verdict(ns, tag, name);
+        if (nameVerdict !== "") return nameVerdict;
+        const valueVerdict = _scrml_emit_attr_value_verdict(name, value, tag);
+        if (valueVerdict !== "") return valueVerdict + " on <" + tag + ">";
+        if (shadowing === "") {
+          // Recorded, not returned: the walk goes on (see above).
+          shadowing = _scrml_emit_named_value_verdict(ns, tag, name, value, hasNameAttr, inForm, isCustom, members);
+        }
+        if (_scrml_is_url_attr("", name) && !_scrml_url_value_admitted(name, value)) {
+          return "a " + name + "= URL on <" + tag + "> whose scheme is not admitted";
+        }
+        // §5.2 "Data-supplied CSS-url attributes" (S479 carve-out 2; S480 r1 F3) — `fill=`, `filter=`,
+        // … are read as CSS: judged by the same reader as every other data write of one
+        // (runtime-css-attr-guard.js, chunk 'cssattrguard'). `name` is already folded.
+        if (_SCRML_CSS_URL_ATTRS.has(name) && !_scrml_css_attr_value_admitted(value, false)) {
+          return "a " + name + "= value on <" + tag + "> that is not a plain CSS value (the browser reads it as CSS; " +
+            "no url() other than a same-document url(#id))";
+        }
+      }
+      // A radio button outside any form joins the radio group of every form-less radio of the same
+      // name in the page — checking it unchecks the page's (S460 N2a). Inside an emitted `<form>` its
+      // group is that form's (a page form around the insertion point already refused it above).
+      if (tag === "input" && ns === _SCRML_EMIT_NS_HTML && inForm !== true && inTemplate !== true) {
+        let inputType = "";
+        let groupName = "";
+        for (let i = 0; i < read.length; i++) {
+          if (read[i][0] === "type") inputType = _scrml_emit_fold_name(read[i][1]);
+          if (read[i][0] === "name") groupName = read[i][1];
+        }
+        if (inputType === "radio" && groupName !== "") {
+          return "a name= on an <input type=radio> outside any form (it would join a radio group of the page)";
+        }
+      }
+      if (tag === "form" && ns === _SCRML_EMIT_NS_HTML) inForm = true;
+      // Only an HTML `<template>` has a content fragment (the getter throws on an SVG / MathML element
+      // named `template`, which is an ordinary element whose children are walked below).
+      if (tag === "template" && ns === _SCRML_EMIT_NS_HTML && dom.templateContent !== null) {
+        const content = call(dom.templateContent, node);
+        if (content) stack.push([content, false, true]);
+      }
+    } else if (type === 11) {
+      // a template's content fragment — its children are judged like any others
+    } else if (type !== 3 && type !== 8) {
+      return "a node of type " + type;
+    }
+    pushChildren(node, inForm, inTemplate);
+  }
+  return shadowing;
+}
+
+// Report one refusal to the §19.6.8 logging surface.
+function _scrml_meta_emit_report(scopeId, violation) {
+  const err = new Error(
+    "refused meta.emit() output for ^{} block " + scopeId + ": it contains " + violation + " (SPEC " +
+    "§22.4.1, §22.12). Runtime meta.emit() admits the same closed markup as compile-time emit(): " +
+    "standard elements, attributes on the admitted list (no event handlers, no data-scrml or " +
+    "data-scrml-* name), and URL attributes with http:, https:, ftp:, mailto:, tel:, sms:, a relative " +
+    "URL, or a raster data:image on an image source, and CSS-url attributes (fill=, filter=, …) holding " +
+    "a plain CSS value. Nothing was written.",
+  );
+  if (typeof _scrml_error_boundary_log === "function") {
+    _scrml_error_boundary_log("meta-emit", err);
+  } else if (typeof console !== "undefined" && typeof console.error === "function") {
+    console.error("[scrml meta-emit] " + err.message);
+  }
+}
+
+// Parse `htmlString` inertly as the content of a `contextTag` element in a document with no browsing
+// context and judge it. Returns that inert container when admitted; `null` (after one report) when not.
+// `inPageForm`: the insertion point is inside a page `<form>` (see `_scrml_meta_emit_violation`).
+// Anything the reading throws (an accessor the environment applies differently) is a refusal too —
+// reported, nothing written, never an exception out of `meta.emit`.
+function _scrml_meta_emit_checked(scopeId, htmlString, contextTag, inPageForm) {
+  const dom = _SCRML_META_EMIT_DOM;
+  let violation = "";
+  let container = null;
+  try {
+    const impl = dom.implementation.call(document);
+    const inert = dom.createHTMLDocument.call(impl, "");
+    container = dom.createElement.call(inert, contextTag || "span");
+    dom.innerHTML.call(container, String(htmlString)); // the string conversion the ungated path used
+    violation = _scrml_meta_emit_violation(container, inPageForm);
+  } catch (e) {
+    violation = "markup the gate could not read to the end (reading it threw)";
+  }
+  if (violation === "") return container;
+  _scrml_meta_emit_report(scopeId, violation);
+  return null;
+}
+
+// `meta.emit(html)`: judge, then move the judged nodes to the block's placeholder (created at the end
+// of `<body>` when the block has none), replacing what it held. Every DOM read and write here goes
+// through the captured accessors too: `document.querySelector` itself can be shadowed by a `name=`.
+function _scrml_meta_emit_insert(scopeId, htmlString) {
+  const dom = _SCRML_META_EMIT_DOM;
+  if (typeof document === "undefined") return;
+  if (dom === null) {
+    // A document but none of the platform accessors the gate reads through: it cannot judge, so it
+    // writes nothing — and says so (fail closed, never silent).
+    _scrml_meta_emit_report(scopeId, "markup this environment gives the gate no unforgeable DOM accessors to read");
+    return;
+  }
+  let placeholder = dom.querySelector.call(document, '[data-scrml-meta="' + scopeId + '"]');
+  const contextTag = placeholder ? String(dom.localName.call(placeholder)) : "span";
+  // The fallback span is appended to <body>, outside any form.
+  const inPageForm = placeholder ? _scrml_meta_emit_inside_form(placeholder) : false;
+  const judged = _scrml_meta_emit_checked(scopeId, htmlString, contextTag, inPageForm);
+  if (judged === null) return;
+  if (!placeholder) {
+    placeholder = dom.createElement.call(document, "span");
+    dom.setAttribute.call(placeholder, "data-scrml-meta", scopeId);
+    dom.appendChild.call(dom.body.call(document), placeholder);
+  }
+  for (let c = dom.firstChild.call(placeholder); c; c = dom.firstChild.call(placeholder)) {
+    dom.removeChild.call(placeholder, c);
+  }
+  for (let c = dom.firstChild.call(judged); c; c = dom.firstChild.call(judged)) {
+    dom.appendChild.call(placeholder, c);
+  }
+}
+// <<< END verbatim impl#1 runtime meta.emit gate
+
+// ---------------------------------------------------------------------------
 // DOM. Views are cloned from <template> elements the printer writes into the
 // page; holes are addressed by child-index path, looked up before any wiring.
 // ---------------------------------------------------------------------------
@@ -4466,6 +5441,201 @@ export function run(scope, body) {
   } finally {
     owner.settled(task);
   }
+}
+
+// ---------------------------------------------------------------------------
+// s482 (s482-meta-runtime) — a RUNTIME `^{}` block (SPEC §22.5; Core View.Meta;
+// print.scrml metaJs): `rt.metaEffect(scope$, placeholder, scopeId, (task$, meta$) => { … })`.
+//
+// WHEN IT RUNS. Its first run is NOW, where the printer registers it — the hole
+// order of the scope's render, so a block at a `<program>` body top runs in source
+// order with the body-top statements around it (`rt.run`), as impl#1's inline
+// `_scrml_meta_effect` call does (S481 design read Q11, probed: impl#1 logs
+// "run1;meta1;run2;meta2;"). A re-run is a flush's, after a dependency changes.
+//
+// DEPENDENCIES. The body runs UNTRACKED; a read is a dependency only where §22.5.1 /
+// §22.9 make it one: `meta.get("x")` and a `meta.bindings.x` of a cell — each printed
+// as `meta$.get(() => <the cell read>)`, the one place tracking is on. A direct `@x`
+// read in the body, or one inside a function the body calls, is not a dependency
+// (impl#1 tracks exactly these two forms too — probed). A write the run itself
+// makes never re-runs it (impl#1's re-entrancy guard: its own invalidation while
+// running is dropped); every other change of a dependency re-runs it once per flush.
+//
+// A RUN: the previous run's timers are cleared (LIFO), then its `meta.cleanup`
+// callbacks run (LIFO) — §22.5.1 "Timer primitives lifetime" — then the body runs
+// with a FRESH `meta` object in a fresh task (an earlier run still suspended never
+// resumes — the newest run wins, as a `<request>`'s). A throw in the body (a trap
+// or anything else) is reported and ends that run only: the mount proceeds
+// (impl#1 logs it and goes on). Disposing the scope clears the timers, then runs
+// the cleanups, then unsubscribes.
+//
+// `meta.emit(html)` is impl#1's gate, verbatim (`_scrml_meta_emit_insert`, above).
+// The gate finds the block's placeholder in the PAGE (`[data-scrml-meta="id"]`) and
+// judges the page `<form>` around it — so it must not run while the placeholder is
+// still in a detached render (a mount builds its tree first, then inserts it). An
+// emit made then is held, in order, and handed to the gate in a microtask, after
+// the insert (each later one replacing the earlier, as §22.5.1 says; a refused one
+// is reported and writes nothing). Fail closed: if the placeholder is still not in
+// the page then, the gate's own rule applies (it writes into a fresh span appended
+// to `<body>`, outside any form).
+//
+// Timer ids (`meta.interval` / `meta.timeout`) are strings the run's own registry
+// keys — a clear with an id this block did not register (another block's, or a
+// forged one) finds nothing and is a no-op (§22.5.1); never a host handle.
+// ---------------------------------------------------------------------------
+class MetaEffect {
+  constructor(scope, ph, scopeId, body) {
+    this.ph = ph;
+    this.scopeId = scopeId;
+    this.body = body;
+    this.disposed = false;
+    this.running = false;
+    this.sources = new Set();
+    this.tasks = new Set();
+    this.cleanups = [];
+    this.timers = new Map();
+    this.nextTimer = 0;
+    this.discharging = false;
+    this.pending = [];
+    stats.effects++;
+    scope.own(() => this.dispose());
+    this.run();
+  }
+  markStale() {
+    // a change the run itself made (a `meta.set` of a cell it `meta.get`s) never re-runs it
+    if (this.disposed || this.running) return;
+    queue.add(this);
+    if (batchDepth === 0) flush();
+  }
+  settled(task) { if (task.pending === 0) this.tasks.delete(task); }
+  /** Clear the timers (LIFO), then run the cleanups (LIFO) — §22.5.1. */
+  discharge() {
+    const live = [...this.timers.values()];
+    this.timers.clear();
+    for (let i = live.length - 1; i >= 0; i--) {
+      if (live[i].kind === "interval") clearInterval(live[i].handle);
+      else clearTimeout(live[i].handle);
+    }
+    const cs = this.cleanups;
+    this.cleanups = [];
+    this.discharging = true;
+    try {
+      for (let i = cs.length - 1; i >= 0; i--) {
+        try { batch(() => cs[i]()); } catch (err) { reportLater(err); }
+      }
+    } finally {
+      this.discharging = false;
+    }
+  }
+  run() {
+    if (this.disposed || this.running) return;
+    this.discharge();
+    unsubscribe(this);
+    for (const t of this.tasks) t.cancel();
+    this.tasks.clear();
+    const task = new Task(this);
+    this.tasks.add(task);
+    const saved = tracking;
+    tracking = null;                                 // untracked, except inside meta$.get
+    this.running = true;
+    batchDepth++;
+    try {
+      this.body(task, this.metaObject());
+    } catch (err) {
+      reportLater(err);
+    } finally {
+      tracking = saved;
+      this.running = false;
+      batchDepth--;
+      this.settled(task);
+    }
+    if (batchDepth === 0) flush();
+  }
+  /** A tracked read: `meta.get("x")` / a `meta.bindings.x` of a cell. */
+  tracked(read) {
+    if (this.disposed) return read();
+    const saved = tracking;
+    tracking = this;
+    try { return read(); } finally { tracking = saved; }
+  }
+  emit(html) {
+    if (this.disposed) return;
+    if (this.ph && this.ph.isConnected) {
+      _scrml_meta_emit_insert(this.scopeId, html);
+      return;
+    }
+    // the placeholder is still in a detached render: hand the emits to the gate after the insert
+    this.pending.push(html);
+    if (this.pending.length === 1) {
+      queueMicrotask(() => {
+        const hs = this.pending;
+        this.pending = [];
+        if (this.disposed) return;
+        for (const h of hs) _scrml_meta_emit_insert(this.scopeId, h);
+      });
+    }
+  }
+  startTimer(kind, ms, callback) {
+    if (typeof callback !== "function") {
+      throw new TypeError("meta." + kind + "(ms, callback): callback must be a function");
+    }
+    if (typeof ms !== "number" || !(ms >= 0) || ms === Infinity) {
+      throw new TypeError("meta." + kind + "(ms, callback): ms must be a finite number >= 0, got " + ms);
+    }
+    const id = this.scopeId + "#" + kind + "#" + (++this.nextTimer);
+    // registered by a cleanup (the run is being discharged) or after disposal: it would outlive
+    // every clear, so it is never started (impl#1 S458 review F5)
+    if (this.disposed || this.discharging) return id;
+    const fire = () => {
+      if (kind === "timeout") this.timers.delete(id);
+      try { batch(() => callback()); } catch (err) { reportLater(err); }
+    };
+    const handle = kind === "interval" ? setInterval(fire, ms) : setTimeout(fire, ms);
+    this.timers.set(id, { kind, handle });
+    return id;
+  }
+  stopTimer(kind, id) {
+    const entry = this.timers.get(id);
+    // already cleared / already fired / another kind's id / another block's: a no-op (§22.5.1)
+    if (entry === undefined || entry.kind !== kind) return;
+    this.timers.delete(id);
+    if (kind === "interval") clearInterval(entry.handle);
+    else clearTimeout(entry.handle);
+  }
+  /** The `meta` object of one run (§22.5.1: "constructed fresh on each run"). */
+  metaObject() {
+    return Object.freeze({
+      scopeId: this.scopeId,
+      get: (read) => this.tracked(read),
+      emit: (html) => this.emit(String(html)),
+      cleanup: (fn) => {
+        if (typeof fn !== "function") throw new TypeError("meta.cleanup(callback): callback must be a function");
+        if (!this.disposed) this.cleanups.push(fn);
+      },
+      interval: (ms, fn) => this.startTimer("interval", ms, fn),
+      timeout: (ms, fn) => this.startTimer("timeout", ms, fn),
+      clearInterval: (id) => this.stopTimer("interval", id),
+      clearTimeout: (id) => this.stopTimer("timeout", id),
+    });
+  }
+  dispose() {
+    if (this.disposed) return;
+    this.discharge();
+    this.disposed = true;
+    this.cleanups = [];                              // one a cleanup registered while discharging never runs
+    queue.delete(this);
+    unsubscribe(this);
+    for (const t of this.tasks) t.cancel();
+    this.tasks.clear();
+    this.pending = [];
+    stats.effects--;
+  }
+}
+
+/** A runtime `^{}` block (SPEC §22.5), owned by `scope`; `ph` its placeholder element. */
+export function metaEffect(scope, ph, scopeId, body) {
+  requireScope(scope, "a runtime ^{} block");
+  new MetaEffect(scope, ph, scopeId, body);
 }
 
 export function on(scope, el, event, handler) {
