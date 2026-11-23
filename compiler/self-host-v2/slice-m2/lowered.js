@@ -563,8 +563,11 @@ export const PROGRAMS = {
 export function compileProgram(mods, name) {
   const files = PROGRAMS[name].map((f) => ({ path: f.path, src: readSlice(f.rel) }));
   const r = frontEnd(mods, files);
-  if (r.diags.length > 0) {
-    throw new Error(`the bootstrap front end reported diagnostics for ${name}:\n` + r.diags.map((d) => `${d.code} ${d.file}@${d.span.start}: ${d.message}`).join("\n"));
+  // An Info diagnostic is a nudge, not a defect (§34: "Warning and Info codes do not fail the compile"):
+  // the valuesem fixture declares `function log()`, which is W-LOG-SHADOWED (§20.6.7, s482-as-adjacency).
+  const bad = r.diags.filter((d) => d.severity !== "Info");
+  if (bad.length > 0) {
+    throw new Error(`the bootstrap front end reported diagnostics for ${name}:\n` + bad.map((d) => `${d.code} ${d.file}@${d.span.start}: ${d.message}`).join("\n"));
   }
   return r;
 }
