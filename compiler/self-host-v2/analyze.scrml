@@ -1189,7 +1189,57 @@ ${
                                 isEnum: false, members: [], src: td }]);
             k = k + 1;
         }
+        // s482 (s482-meta-phase3) — SPEC §22.5.4: "The compiler-known type `TypeInfo` names an
+        // entry for a compiler that types `reflect()` results: `TypeInfo:struct = { kind: string,
+        // name: string, fields: FieldInfo[], variants: string[] }` with `FieldInfo:struct = { name:
+        // string, type: string }`" (ruling:user-voice-scrml.md-S481-meta-four item 3). Built-in
+        // structs, in scope everywhere and shadowed by a user type of the same name, as the
+        // built-in enums are. Their Syms (and their members') are FIXED (metaInfoSym, negative
+        // ids), not minted, so they shift no other Sym of any program; lower ships them only when
+        // the Core names them (a runtime `reflect`).
+        for (const md of metaInfoDecls()) {
+            let ms: Sym[] = [];
+            for (const n of typeMemberNames(md.body)) { ms = ms.concat([metaInfoSym(md.name, n)]); }
+            out = out.concat([{ nid: -1, name: md.name, file: builtinFile(), exported: false, sym: metaInfoSym(md.name, ""),
+                                isEnum: false, members: ms, src: md }]);
+        }
         return { stubs: out, st: st };
+    }
+
+    export fn typeInfoName() -> string { return "TypeInfo"; }
+    export fn fieldInfoName() -> string { return "FieldInfo"; }
+
+    fn metaInfoDecls() -> ATypeDecl[] {
+        return [
+            builtinStruct(fieldInfoName(), [builtinField("name", "string", false), builtinField("type", "string", false)]),
+            builtinStruct(typeInfoName(), [builtinField("kind", "string", false), builtinField("name", "string", false),
+                                           builtinField("fields", fieldInfoName(), true), builtinField("variants", "string", true)]),
+        ];
+    }
+
+    // The fixed Sym of a `TypeInfo` / `FieldInfo` part ("" — the type itself): -3000.. (the
+    // Appendix H interfaces hold -2000..-2299).
+    export fn metaInfoSym(ty: string, member: string) -> Sym {
+        const names: string[] = ["", "kind", "name", "fields", "variants"];
+        if (ty == fieldInfoName()) {
+            if (member == "") return mkSym(-3010, ty);
+            if (member == "name") return mkSym(-3011, member);
+            return mkSym(-3012, member);
+        }
+        const i: int = names.indexOf(member);
+        if (member == "") return mkSym(-3000, ty);
+        return mkSym(-3000 - i, member);
+    }
+
+    fn builtinStruct(name: string, fs: ATypeField[]) -> ATypeDecl {
+        return { nid: -1, span: mkSpan(0, 0), exported: false, name: name, body: ATypeBody.StructBody(fs) };
+    }
+
+    // A built-in struct field of the named type (`tape` — a tape of it).
+    fn builtinField(name: string, ty: string, tape: boolean) -> ATypeField {
+        let at: AType = { nid: -1, span: mkSpan(0, 0), k: ATypeK.TName(ty) };
+        if (tape) at = { nid: -1, span: mkSpan(0, 0), k: ATypeK.TSeq(at, []) };
+        return { nid: -1, span: mkSpan(0, 0), isLet: false, name: name, ty: at, vals: [] };
     }
 
     // s451 (Ue) — the built-in error enums, written as the SPEC writes them:
@@ -1828,6 +1878,14 @@ ${
                             out = out.concat([{ file: fs.file, local: n.name, sym: typeDefSym(ti.def), orig: n.orig, from: n.from }]);
                         }
                     }
+                }
+                // s482 r1 (review of #2080, LOW-2) — a user type named `TypeInfo` / `FieldInfo` in scope
+                // here shadows the compiler-known one (§22.5.4; as a user `Error` shadows the built-in
+                // enum), yet a `reflect` still gives the built-in: a message naming both read "expects
+                // `TypeInfo`, and this value is `TypeInfo`". The built-in is noted where it is named
+                // (aliasNote), so the two stay apart.
+                if (n.kind == NameKind.KType && (n.name == typeInfoName() || n.name == fieldInfoName())) {
+                    out = out.concat([{ file: fs.file, local: n.name, sym: metaInfoSym(n.name, ""), orig: n.name, from: builtinFile() }]);
                 }
             }
         }
@@ -9934,6 +9992,13 @@ ${
     //                           §22.5.1 "opaque intervalId", a `string` here: INTERIM, the
     //                           bootstrap has no opaque type; the runtime keys it per block)
     //   clearInterval / clearTimeout(id: string)  no value
+    // s482 (s482-meta-phase3):
+    //   reflect(name: string, entries: TypeInfo[]) -> TypeInfo (a string-literal name: the
+    //                           type's literal, which names a type) / TypeInfo | not (any
+    //                           other name, §22.5.4 "Unknown names SHALL return `not`") —
+    //                           meta.scrml builds `entries` (the runtime type registry)
+    //   subscribe(@x, f: (v: T) => void) -> () => void   (§22.5.1 "Returns an unsubscribe
+    //                           function"; T the cell's type)
     fn metaOpCallee(callee: AExpr) -> string {
         const m: MethodCall | not = memberCall(callee);
         if (m is not) return "";
@@ -9949,15 +10014,61 @@ ${
         if (op == "timeout") return PrimOp.MetaTimeout;
         if (op == "clearInterval") return PrimOp.MetaClearInterval;
         if (op == "clearTimeout") return PrimOp.MetaClearTimeout;
+        if (op == "reflect") return PrimOp.MetaReflect;
+        if (op == "subscribe") return PrimOp.MetaSubscribe;
         return not;
     }
 
     fn metaArity(op: string) -> int {
-        if (op == "interval" || op == "timeout") return 2;
+        if (op == "interval" || op == "timeout" || op == "reflect" || op == "subscribe") return 2;
         return 1;
     }
 
     fn voidFnType() -> Type { return Type.Fn([], not, false, not); }
+
+    // s482 (s482-meta-phase3) — the compiler-known `TypeInfo` (§22.5.4), and a tape of it
+    export fn typeInfoType() -> Type { return Type.Named(metaInfoSym(typeInfoName(), "")); }
+    fn typeInfoTape() -> Type { return Type.Seq(typeInfoType(), fixedSeq()); }
+
+    // `^.reflect(name, entries)`: `TypeInfo` when the name is a string literal that one of the
+    // entries carries as its `name` (the lookup cannot miss); `TypeInfo | not` otherwise — a
+    // computed name, or a literal naming no type (`meta.types.reflect("Nope")`, §22.5.4 "Unknown
+    // names SHALL return `not`")
+    fn metaReflectType(name: AExpr, entries: AExpr) -> Type {
+        const lit: string | not = strLitOf(name);
+        if (lit is given) {
+            for (const en of arrayElems(entries)) {
+                if (entryName(en) == lit) return typeInfoType();
+            }
+        }
+        return Type.Maybe(typeInfoType());
+    }
+
+    fn strLitOf(e: AExpr) -> string | not {
+        const k: AExprK = e.k;
+        return match k {
+            .Str(v: x) :> x,
+            // no-default-arm: one question of an expression — is it a string literal
+            _ :> not
+        };
+    }
+
+    // a registry entry's `name` (meta.scrml entryExpr: an object literal), "" when it has none
+    fn entryName(e: AExpr) -> string {
+        const k: AExprK = e.k;
+        const ps: AProp[] = match k {
+            .ObjectLit(props: xs) :> xs,
+            // no-default-arm: one question of an entry — its props
+            _ :> []
+        };
+        for (const p of ps) {
+            if (p.name == "name") {
+                const v: string | not = strLitOf(p.value);
+                if (v is given) return v;
+            }
+        }
+        return "";
+    }
 
     fn resolveMetaCall(env: Env, e: AExpr, op: string, args: AExpr[], st0: AS) -> RX {
         const po: PrimOp | not = metaPrimOp(op);
@@ -9972,13 +10083,25 @@ ${
             return plain(not, addValue(re.st, e.nid, ValueFact.VMethod(po)));
         }
         if (op == "cleanup") {
-            const sc: AS = resolveMetaCallback(env, args[0], op, st0);
+            const sc: AS = resolveMetaCallback(env, args[0], op, not, st0);
             return plain(not, addValue(sc, e.nid, ValueFact.VMethod(po)));
         }
         if (op == "interval" || op == "timeout") {
             const rm: RX = resolveExpr(env, args[0], Type.Num, st0);
-            const sf: AS = resolveMetaCallback(env, args[1], op, rm.st);
+            const sf: AS = resolveMetaCallback(env, args[1], op, not, rm.st);
             return plain(Type.Str, addValue(sf, e.nid, ValueFact.VMethod(po)));
+        }
+        if (op == "reflect") {
+            const rn: RX = resolveExpr(env, args[0], Type.Str, st0);
+            const rl: RX = resolveExpr(env, args[1], typeInfoTape(), rn.st);
+            return plain(metaReflectType(args[0], args[1]), addValue(rl.st, e.nid, ValueFact.VMethod(po)));
+        }
+        if (op == "subscribe") {
+            const rs: RX = resolveExpr(env, args[0], not, st0);
+            let cty: Type | not = rs.x.ty;
+            if (cty is not) cty = Type.Str;      // (unreached: meta.scrml names a cell, whose type is known)
+            const sb: AS = resolveMetaCallback(env, args[1], op, cty, rs.st);
+            return plain(voidFnType(), addValue(sb, e.nid, ValueFact.VMethod(po)));
         }
         const ri: RX = resolveExpr(env, args[0], Type.Str, st0);
         return plain(not, addValue(ri.st, e.nid, ValueFact.VMethod(po)));
@@ -9992,11 +10115,40 @@ ${
     // `let` locals, `if` / `else`, and calls of the block's `meta` — isMetaCallExpr); anything
     // else in it, and a named function as the callback, are refused by name (INTERIM,
     // g-boot-meta-runtime-residue-s482).
-    fn resolveMetaCallback(env: Env, lam: AExpr, op: string, st0: AS) -> AS {
+    // s482 (s482-meta-phase3): `meta.subscribe`'s callback takes the cell's new value — `pty` the
+    // cell's type, its one parameter (written bare, or `: T` naming that type); the others take none.
+    fn resolveMetaCallback(env: Env, lam: AExpr, op: string, pty: Type | not, st0: AS) -> AS {
         if (!isLambda(lam)) return addDiag(st0, env.file, lam.span, "E-BOOTSTRAP-UNSUPPORTED", "the callback of `meta." + op + "(…)` is built only as an arrow written in place (`() => { … }`) — a named function or another function value is not in the bootstrap yet (INTERIM, g-boot-meta-runtime-residue-s482)");
-        if (lambdaParams(lam).length != 0) return addDiag(st0, env.file, lam.span, "E-BOOTSTRAP-UNSUPPORTED", "the callback of `meta." + op + "(…)` takes no parameters (§22.5.1: the runtime calls it with none) — write `() => { … }`");
+        if (pty is not && lambdaParams(lam).length != 0) return addDiag(st0, env.file, lam.span, "E-BOOTSTRAP-UNSUPPORTED", "the callback of `meta." + op + "(…)` takes no parameters (§22.5.1: the runtime calls it with none) — write `() => { … }`");
+        if (pty is given && lambdaParams(lam).length > 1) return addDiag(st0, env.file, lam.span, "E-BOOTSTRAP-UNSUPPORTED", "the callback of `meta." + op + "(…)` takes at most one parameter, the cell's new value (§22.5.1) — write `(v) => { … }`");
         let st: AS = st0;
-        const env2: Env = noNarrows(sealEvent(env));
+        let env2: Env = noNarrows(sealEvent(env));
+        let psyms: Sym[] = [];
+        let pts: Type[] = [];
+        if (pty is given) {
+            pts = [pty];
+            const aps: AParam[] = lambdaAParams(lam).concat(lambdaTypedParams(lam));
+            for (const pn of lambdaParams(lam)) {
+                const rs: RSym = mint(reservedName(st, env.file, lam.span, pn), pn);
+                st = rs.st;
+                psyms = psyms.concat([rs.s]);
+                for (const p of aps) {
+                    if (p.name == pn) {
+                        if (p.lin) st = addDiag(st, env.file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "a `lin` parameter on a `meta." + op + "` callback is not in the bootstrap (INTERIM) — drop `lin`");
+                        const at: AType | not = p.ty;
+                        if (at is given && !hasErrIn(fileErrs(env.g.files, env.file), at.span)) {
+                            const rt: RType = resolveTypeFn(teAt(env.g.te, env.file), at, st);
+                            st = rt.st;
+                            if (!rt.unresolved && !sameType(rt.t, pty)) {
+                                st = addDiag(st, env.file, at.span, "E-TYPE-031", "the parameter `" + pn + "` is declared `" + typeName(rt.t) + "`, and `meta." + op + "` passes it the cell's new value, which is `" + typeName(pty) + "` (§22.5.1)");
+                            }
+                        }
+                    }
+                }
+                st = addAnnot(st, rs.s, pty);
+                env2 = withLocal(env2, { name: pn, s: rs.s, ty: pty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "" });
+            }
+        }
         const blk: ABlock | not = lambdaBlock(lam);
         if (blk is given) {
             st = lamBodyCheck(env, blk, [], st);
@@ -10009,9 +10161,63 @@ ${
                 st = resolveExpr(withFx(env2, noFailCtx()), b, not, st).st;
             }
         }
-        const ft: Type = voidFnType();
-        st = addValue(st, lam.nid, ValueFact.VLambda([], ft));
+        // s482 r1 (s482-meta-phase3, HIGH-1 / LOW-3): no nested registration of the block's
+        // `meta` in a callback, and no call that may write a cell (decided on the summary)
+        st = metaNestedRegs(env, lam, op, st);
+        const ft: Type = Type.Fn(pts, not, false, not);
+        st = addValue(st, lam.nid, ValueFact.VLambda(psyms, ft));
+        st = addPending(st, PendRule.MetaCb(lam, env.file, op));
         return addPending(st, PendRule.FnValue(-1, env.fx.fnSym, env.file, lam.span, ""));
+    }
+
+    // s482 r1 (LOW-3) — a `meta.subscribe` / `meta.interval` / `meta.timeout` / `meta.cleanup`
+    // INSIDE a callback registers again on every call of the callback: a subscription callback
+    // run on each change, or an interval's tick, would add one more subscription / timer /
+    // cleanup per call, each living until the block's run ends (§22.5.1 gives a registration
+    // the run's lifetime; it says nothing of one made by a callback). Refused by name — a
+    // registration stands in the block's own body, where it is made once per run. INTERIM
+    // (g-boot-meta-runtime-residue-s482): the capable form owns a callback's registrations by
+    // that callback's invocation.
+    fn metaNestedRegs(env: Env, lam: AExpr, op: string, st0: AS) -> AS {
+        let st: AS = st0;
+        let es: AExpr[] = [];
+        const b: AExpr | not = lambdaBody(lam);
+        if (b is given) es = [b];
+        const blk: ABlock | not = lambdaBlock(lam);
+        if (blk is given) es = blockExprsDeep(blk);
+        for (const x of es) {
+            for (const r of metaRegsIn(x)) {
+                st = addDiag(st, env.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", "`meta." + metaOpCallee(calleeOrSelf(r)) + "(…)` inside the callback of `meta." + op + "(…)` would register again on every call of the callback, each registration living until the block's run ends — a registration stands in the block's own body, where it is made once per run (§22.5.1; INTERIM, g-boot-meta-runtime-residue-s482: a registration owned by the callback's call is not built). Move it out of the callback");
+            }
+        }
+        return st;
+    }
+
+    fn isMetaRegOp(op: string) -> boolean {
+        return op == "subscribe" || op == "interval" || op == "timeout" || op == "cleanup";
+    }
+
+    // the outermost `meta` registration calls in `e` (a nested one's own callback is judged
+    // when it is resolved)
+    fn metaRegsIn(e: AExpr) -> AExpr[] {
+        const c: AExpr | not = calleeOf(e.k);
+        if (c is given && isMetaRegOp(metaOpCallee(c))) return [e];
+        let out: AExpr[] = [];
+        for (const x of exprKids(e)) { out = out.concat(metaRegsIn(x)); }
+        for (const bb of exprBlocksIn(e)) {
+            for (const y of blockExprsDeep(bb)) { out = out.concat(metaRegsIn(y)); }
+        }
+        return out;
+    }
+
+    // every statement expression of a block, its nested statement blocks included
+    fn blockExprsDeep(b: ABlock) -> AExpr[] {
+        let out: AExpr[] = [];
+        for (const s of b.stmts) {
+            out = out.concat(stmtExprs(s));
+            for (const kb of stmtKidBlocks(s)) { out = out.concat(blockExprsDeep(kb)); }
+        }
+        return out;
     }
 
     // s478 (g-boot-s20-builtins-unbuilt-s473, g-bootstrap-twin-log-unknown-s451) — the built-in
@@ -36162,6 +36368,7 @@ ${
         const s: Sym | not = innerNamed(ty);
         if (s is not) return "";
         for (const a of al) {
+            if (a.file == file && a.sym.id == s.id && a.from == builtinFile()) return " (the compiler's built-in `" + a.orig + "` of §22.5.4, which this file's own `" + a.local + "` type shadows by name)";
             if (a.file == file && a.sym.id == s.id) return " (`" + a.local + "` is `" + a.orig + "`, declared in `" + a.from + "`)";
         }
         return "";
@@ -36176,6 +36383,14 @@ ${
     fn shownStruct(env: Env, s: Sym) -> string {
         const ti: TypeInfo | not = typeInfoOf(env.g.types, s);
         if (ti is not) return "`" + s.hint + "`";
+        // s482 r1 (LOW-2): the compiler-known `TypeInfo` / `FieldInfo` where a user type of that name shadows it
+        if (ti.file == builtinFile()) {
+            for (const u of env.g.types) {
+                if (u.file != builtinFile() && u.name == ti.name && inScope(env.g.te.link, env.file, NameKind.KType, u.name, u.file)) {
+                    return "`" + s.hint + "` (the compiler's built-in `" + ti.name + "` of §22.5.4, which this file's own `" + ti.name + "` type shadows by name)";
+                }
+            }
+        }
         const als: string[] = boundAs(env.g.te.link, env.file, NameKind.KType, ti.name, ti.file);
         if (als.length == 0 || als.indexOf(ti.name) >= 0) return "`" + s.hint + "`";
         return "`" + als[0] + "` (`" + ti.name + "`, declared in `" + ti.file + "`)";
@@ -38052,7 +38267,9 @@ ${
             .MetaInterval :> ts,
             .MetaTimeout :> ts,
             .MetaClearInterval :> ts,
-            .MetaClearTimeout :> ts
+            .MetaClearTimeout :> ts,
+            .MetaReflect :> ts,
+            .MetaSubscribe :> ts
         };
     }
 
@@ -38845,7 +39062,9 @@ ${
             .MetaInterval :> VType.Unknown,
             .MetaTimeout :> VType.Unknown,
             .MetaClearInterval :> VType.Unknown,
-            .MetaClearTimeout :> VType.Unknown
+            .MetaClearTimeout :> VType.Unknown,
+            .MetaReflect :> VType.Unknown,
+            .MetaSubscribe :> VType.Unknown
         };
     }
 
@@ -39227,6 +39446,12 @@ ${
             return rvt(known(Type.Str), ts);
         }
         if (op == "clearInterval" || op == "clearTimeout") return rvt(VType.Unknown, checkValue(env, exprType0(ts, args[0].nid), Type.Str, args[0].span, "the timer id of `meta." + op + "` (§22.5.1)", ts));
+        // s482 (s482-meta-phase3) — the registry lookup and the subscription (resolveMetaCall)
+        if (op == "reflect") {
+            ts = checkValue(env, exprType0(ts, args[0].nid), Type.Str, args[0].span, "the type name of `reflect` (§22.4.2)", ts);
+            return rvt(known(metaReflectType(args[0], args[1])), ts);
+        }
+        if (op == "subscribe") return rvt(known(voidFnType()), ts);
         return rvt(VType.Unknown, ts);
     }
 
@@ -50755,17 +50980,21 @@ ${
         // (-1: no function — a handler, markup, an initializer): refused where the summary
         // shows what the bootstrap's function types cannot carry (fnValueDiags).
         FnValue(target: int, caller: int, file: string, span: ASpan, name: string),
+        // s482 r1 (s482-meta-phase3, HIGH-1) — a runtime `^{}` block's callback (`op`: subscribe /
+        // interval / timeout / cleanup): refused where its body reaches a cell write through a
+        // call, or a call the analysis cannot resolve (metaCbDiags)
+        MetaCb(lam: AExpr, file: string, op: string),
     }
     type Pending:struct = { at: int, rule: PendRule }
 
-    fn rulesPass(s: Summary, st: AS) -> AS {
+    fn rulesPass(s: Summary, t: Tables, st: AS) -> AS {
         if (st.pend.length == 0) return st;
         let out: Diag[] = [];
         let k: int = 0;
         let i: int = 0;
         for (; i <= st.diags.length; ) {
             for (; k < st.pend.length && st.pend[k].at == i; ) {
-                out = out.concat(decide(s, st.pend[k].rule));
+                out = out.concat(decide(s, t, st.pend[k].rule));
                 k = k + 1;
             }
             if (i < st.diags.length) out = out.concat([st.diags[i]]);
@@ -50774,14 +51003,154 @@ ${
         return { facts: st.facts, diags: out, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: [], lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets, locs: st.locs };
     }
 
-    fn decide(s: Summary, r: PendRule) -> Diag[] {
+    fn decide(s: Summary, t: Tables, r: PendRule) -> Diag[] {
         return match r {
             .IfNoValue(fnSym: f, diag: d) :> onlyIf(yieldsNoValue(s, f), d),
             .RemoteOr(caller: c, remote: r, local: l) :> remoteOr(s, c, r, l),
             .IfClock(fnSym: f, diag: d) :> onlyIf(readsClock(s, f), d),
             .PureCall(fnSym: f, bare: a, clocked: b) :> either(readsClock(s, f), b, a),
-            .FnValue(target: t, caller: c, file: f, span: sp, name: n) :> fnValueDiags(s, t, c, f, sp, n)
+            .FnValue(target: tg, caller: c, file: f, span: sp, name: n) :> fnValueDiags(s, tg, c, f, sp, n),
+            .MetaCb(lam: l, file: f, op: o) :> metaCbDiags(s, t, l, f, o)
         };
+    }
+
+    // s482 r1 (s482-meta-phase3, HIGH-1) — a runtime `^{}` callback writes no reactive cell,
+    // directly or THROUGH A CALL. A subscription callback runs inside the runtime's flush of the
+    // change that fired it: a cell write there marks the subscription (or another) stale again in
+    // the same flush — `meta.subscribe("n", v => { const z = bump(); })` with `bump` writing `@n`
+    // re-ran forever and hung the page. A timer / cleanup callback is held to the same body rule
+    // (s482-meta-runtime: its direct writes were already refused). The judgement is the no-write
+    // rule's (§6.7.4), read from the same effect summary: the callback's body is scanned as an
+    // `<effect>` body is (scanExpr — calls of scrml functions, `function` and `fn` alike, and
+    // functions handed on as values, closed transitively by the summary), and a call the analysis
+    // cannot resolve (through a local, a parameter, a field — a function value) fails closed
+    // (§6.7.4 rule 4). s482 r2: so does a call reaching a `<host src>`-backed function (§21.3.1)
+    // — directly, through a wrapper at any depth, or as a value (hostChain): host code has no
+    // write summary. A direct write is the binder's (lamBodyCheck), reported once there.
+    // INTERIM (g-boot-meta-runtime-residue-s482): §22.5.1 does not rule whether a callback may
+    // write state; the capable form is a callback whose writes are batched after the flush.
+    fn metaCbDiags(s: Summary, t: Tables, lam: AExpr, file: string, op: string) -> Diag[] {
+        const scan: BodyScan = scanExpr({ t: t, file: file }, lam, emptyScan());
+        const who: string = "the callback of `meta." + op + "(…)`";
+        const why: string = "a runtime `^{}` callback writes no reactive cell, directly or through a called function — a write made while the runtime delivers a change re-runs the subscriptions it reaches in that same pass (INTERIM, g-boot-meta-runtime-residue-s482). Make the write in an event handler, or derive the value";
+        let out: Diag[] = [];
+        for (const r of scan.refs) {
+            const i: int = nodeIdx(s.nodes, r.sym);
+            if (i < 0) {
+                out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", who + " reaches `" + r.name + "`, which has no write summary — the compiler cannot prove it writes no reactive cell, and the rule fails closed (§6.7.4 rule 4): " + why, r.file, r.span)]);
+            } else {
+                const sw: Witness | not = writeWitness(s, i);
+                const su: UWitness | not = openWitness(s, i);
+                if (sw is given) {
+                    let how: string = " writes `" + sw.site.cell + "` through a call: `" + chainText(sw.chain) + " → " + sw.site.cell + "`";
+                    if (r.asValue) how = " hands `" + r.name.replace("()", "") + "` on as a function value, and it writes `" + sw.site.cell + "`: `" + chainText(sw.chain) + " → " + sw.site.cell + "`";
+                    out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", who + how + " — " + why, r.file, r.span)]);
+                } else if (su is given) {
+                    out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", who + " reaches a call the compiler cannot resolve, through `" + chainText(su.chain) + "`: " + su.site.what + " — it cannot prove the callback writes no reactive cell, and the rule fails closed (§6.7.4 rule 4): " + why, r.file, r.span)]);
+                } else {
+                    // s482 r2 (#2080 r1 review HIGH-1r) — a `<host src>`-backed function (§21.3.1) has
+                    // no scrml body: the summary holds it with no write, yet its JS can write a cell
+                    // (it can fire a DOM event whose handler writes one — probe p-5wwuPb looped 100
+                    // times a click). Unproven, so refused: directly, through a scrml wrapper at any
+                    // depth, or handed on as a value (INTERIM, g-boot-meta-runtime-residue-s482).
+                    // s482 r3 (#2080 r2 review MED-1): a stdlib `import:host` wrapper of an
+                    // allow-listed module (pureHostFile) is proven and not refused.
+                    const hr: HostReach = hostChain(s, t, r.sym);
+                    const hc: string[] = hr.chain;
+                    // a `<host>`-backed function itself named as a value is the binder's refusal
+                    // (fnNameRef: "a host-backed function … used as a value is not in the bootstrap")
+                    if (hc.length > 0 && !(r.asValue && hc.length == 1)) {
+                        let how: string = " calls `" + hc[hc.length - 1] + "`, " + hr.what + ", through `" + chainText(hc) + "`";
+                        if (hc.length == 1) how = " calls `" + hc[0] + "`, " + hr.what;
+                        if (r.asValue) how = " hands `" + r.name.replace("()", "") + "` on as a function value, and it reaches `" + hc[hc.length - 1] + "`, " + hr.what + ", through `" + chainText(hc) + "`";
+                        out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", who + how + " — host code is outside the analysis (it can write a cell, e.g. by firing a DOM event whose handler writes one), so the compiler cannot prove the callback writes no reactive cell, and the rule fails closed (§6.7.4 rule 4): " + why, r.file, r.span)]);
+                    }
+                }
+            }
+        }
+        for (const u of scan.unproven) {
+            out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", u.what + " — the compiler cannot prove " + who + " writes no reactive cell, and the rule fails closed (§6.7.4 rule 4): " + why + ". Call a declared scrml function by its name", u.file, u.span)]);
+        }
+        return out;
+    }
+
+    // s482 r2 (#2080 r1 review HIGH-1r) — the chain of display labels (`ck()` … `clickB()`) from
+    // callable `from` down to the first UNPROVEN host-backed function it reaches through the
+    // references its body makes (calls and function values), transitively; chain [] — none.
+    // `what` names that function's kind for the diagnostic. A query on the summary alone, for
+    // any rule that must treat host code as unproven: the `<effect>` no-write rule takes it
+    // next, allow-list and all (ruling:user-voice-scrml.md-S482-effect-host-call,
+    // g-boot-effect-host-call-hang-s482).
+    //
+    // s482 r3 (#2080 r2 review MED-1) — WHICH host code is unproven:
+    //   - a `<host>` binding of a user file (`<host src>` or a targeted `<host>`; HostFn.bind
+    //     given) — ALWAYS unproven: its JS is the author's, and can do anything (fire a DOM
+    //     event whose handler writes a cell);
+    //   - a stdlib `import:host` wrapper (§21.3.1.1; HostFn.bind `not`, `module`/`file` the
+    //     stdlib host file it calls) — unproven UNLESS that file is on PURE_HOST_FILES below;
+    //     the diagnostic names the stdlib module (`scrml:<module>`), never a `<host>` the
+    //     author did not write.
+    // PURE_HOST_FILES (pureHostFile) — the stdlib host files whose JS provably cannot call
+    // back into page code or dispatch a DOM event: each export takes only `number` / `string` /
+    // `int` values (no function, no object the page made), touches no DOM / global but `Math` /
+    // `Number` / a module-local RegExp, imports nothing, and returns a value:
+    //   - `math/host.js` (scrml:math): floor/ceil/trunc/round*/abs/min/max/isNaN over `Math` /
+    //     `Number`; parseInt/parseFloat/toNumber read a string by code unit / a local RegExp;
+    //     the only side effect is a thrown E-INT-CONVERSION-RT trap (no cell write);
+    //   - `random/host.js` (scrml:random): random/randomInt over `Math.random()` only.
+    // A new entry needs the same reading of its file's JS (the effect lane reuses this list).
+    // Every other stdlib host module (e.g. the scrml:compiler wrappers) stays fail-closed.
+    type HostReach:struct = { chain: string[], what: string }
+
+    fn pureHostFile(module: string, file: string) -> boolean {
+        return file == "host.js" && (module == "math" || module == "random");
+    }
+
+    // "" — `sym` is not an unproven host-backed function; else how the diagnostic names it.
+    fn unprovenHostWhat(t: Tables, sym: int) -> string {
+        for (const f of t.fns) {
+            if (f.sym.id == sym) {
+                const h: HostFn | not = f.host;
+                if (h is not) return "";
+                if (h.bind is given) return "a `<host>`-backed function (§21.3.1)";
+                if (h.module != "" && pureHostFile(h.module, h.file)) return "";
+                if (h.module != "") return "a host-backed function of the stdlib module `scrml:" + h.module + "` (its `import:host` file `" + h.file + "`, §21.3.1.1), which is not on the compiler's list of stdlib host files proven to call back into no page code";
+                return "a host-backed function (§21.3.1)";
+            }
+        }
+        return "";
+    }
+
+    fn hostChain(s: Summary, t: Tables, from: int) -> HostReach {
+        let seen: int[] = [];
+        let todo: int[] = [from];
+        let via: int[] = [-1];
+        let at: int = 0;
+        for (; at < todo.length; ) {
+            const id: int = todo[at];
+            if (seen.indexOf(id) < 0) {
+                seen = seen.concat([id]);
+                const i: int = nodeIdx(s.nodes, id);
+                if (i >= 0) {
+                    const what: string = unprovenHostWhat(t, id);
+                    if (what != "") {
+                        let out: string[] = [];
+                        let k: int = at;
+                        for (; k >= 0; ) {
+                            out = [s.nodes[nodeIdx(s.nodes, todo[k])].label].concat(out);
+                            k = via[k];
+                        }
+                        return { chain: out, what: what };
+                    }
+                    for (const r of s.nodes[i].f.scan.refs) {
+                        todo = todo.concat([r.sym]);
+                        via = via.concat([at]);
+                    }
+                }
+            }
+            at = at + 1;
+        }
+        return { chain: [], what: "" };
     }
 
     // s478 (s478-boot-fn-type) — what a function value's type cannot carry in the bootstrap,
@@ -55360,22 +55729,29 @@ ${
     // diagnostics lead the program's.
     export fn analyzeSources(files00: FileAst[], srcs: Source[], entry: string, keyBase: string, routeBase: string, nextId0: int) -> TypedProgram {
         const mr: MetaRun = metaFiles(files00, nextId0);
-        const tp: TypedProgram = analyzeExpanded(mr.files, srcs, entry, keyBase, routeBase, mr.next);
+        const tp: TypedProgram = analyzeExpanded(mr.files, srcs, entry, keyBase, routeBase, mr.next, mr.diags);
         if (mr.diags.length == 0) return tp;
         return { files: tp.files, tables: tp.tables, diags: mr.diags.concat(tp.diags), infos: tp.infos };
     }
 
-    fn analyzeExpanded(files0: FileAst[], srcs: Source[], entry: string, keyBase: string, routeBase: string, nextId0: int) -> TypedProgram {
+    // `metaDs0`: the first meta pass's diagnostics (analyzeSources reports them) — a re-read
+    // file's meta pass reports only what that pass did not (s482 r2, nsMetaNotes).
+    fn analyzeExpanded(files0: FileAst[], srcs: Source[], entry: string, keyBase: string, routeBase: string, nextId0: int, metaDs0: Diag[]) -> TypedProgram {
         let nextId: int = nextId0;
         const r0: ARun = analyzeRun(files0, entry, keyBase, routeBase, nextId >= 0, []);
         let files: FileAst[] = files0;
         let r1: ARun = r0;
+        let nsNotes: Diag[] = [];
         if (r0.nsAt.length > 0) {
             const rr: NsReread = nsReread(files0, srcs, r0.nsAt);
             if (rr.changed) {
                 // s481: a re-read file is parsed from its source again, its `^{}` blocks
                 // with it — replaced again (their diagnostics were reported by the first pass)
                 const mr2: MetaRun = metaFiles(rr.files, nextId);
+                // s482 r2 (#2080 r1 review MED): a refusal ONLY the re-read finds — a `^{}` body
+                // naming a namespace member, `m.x` one name now — is reported; it was dropped with
+                // its block, silently (no effect, an empty element)
+                nsNotes = nsMetaNotes(metaDs0, mr2.diags);
                 files = mr2.files;
                 nextId = mr2.next;
                 r1 = analyzeRun(files, entry, keyBase, routeBase, nextId >= 0, []);
@@ -55415,7 +55791,17 @@ ${
         // the composed program will run
         // s475-boot-literal-carriers: only when some carrier's failure set is not its declared enum (ARun.retype)
         if (r1.retype) r1 = analyzeRun(files, entry, keyBase, routeBase, nextId >= 0, r1.carriers);
-        if (r1.plans.length == 0 || hasErrorDiag(r1.tp.diags)) return withNotes(withNotes(r1.tp, epNotes), r1.unused);
+        // s482 r3 (#2080 r2 review LOW-1): the re-read's notes join every other list — never an
+        // early return that drops `epNotes`, the lint or the plan composition. The lint
+        // (W-UNUSED-BINDING) is judged only over a compile with no Error, so an Error among the
+        // notes withholds it, as an Error in the run does (analyzeRun); a non-Error note leaves
+        // the composition to run and joins its diagnostics.
+        const tp1: TypedProgram = withNotes(r1.tp, nsNotes);
+        if (r1.plans.length == 0 || hasErrorDiag(tp1.diags)) {
+            let un1: Diag[] = r1.unused;
+            if (hasErrorDiag(nsNotes)) un1 = [];
+            return withNotes(withNotes(tp1, epNotes), un1);
+        }
         const r2: ARun = analyzeRun(composeFiles(files, r1.plans, next), entry, keyBase, routeBase, false, r1.carriers);
         // the plans' warnings join the composed program's diagnostics, and no diagnostic names the
         // synthesized batch (`#F`, `F#batch` — review L2): it is "F (its composed server batch)"
@@ -55423,10 +55809,24 @@ ${
         for (const p of r1.plans) { notes = notes.concat(p.notes); }
         let ds: Diag[] = [];
         for (const d of r2.tp.diags.concat(notes)) { ds = ds.concat([newDiag(d.code, batchNamesOut(r1.plans, d.message), d.file, d.span)]); }
+        ds = ds.concat(nsNotes);
         // s480: the lint of the files as written (r1), only when the composed program has no Error
         let un: Diag[] = [];
         if (!hasErrorDiag(ds)) un = r1.unused;
         return withNotes(withNotes({ files: r2.tp.files, tables: r2.tp.tables, diags: ds, infos: r2.tp.infos }, epNotes), un);
+    }
+
+    // The re-read meta pass's diagnostics the first pass did not report (by code, file and span).
+    fn nsMetaNotes(first: Diag[], again: Diag[]) -> Diag[] {
+        let out: Diag[] = [];
+        for (const d of again) {
+            let seen = false;
+            for (const f of first) {
+                if (f.code == d.code && f.file == d.file && f.span.start == d.span.start && f.span.end == d.span.end) seen = true;
+            }
+            if (!seen) out = out.concat([d]);
+        }
+        return out;
     }
 
     fn withNotes(tp: TypedProgram, notes: Diag[]) -> TypedProgram {
@@ -55742,7 +56142,7 @@ ${
         // s452 (dpa-066): THE EFFECT SUMMARY — once, over the bound tables —
         // and the binder's decisions that read it (rulesPass, M3)
         const sum: Summary = summarize(ra.g, bound);
-        st = rulesPass(sum, st);
+        st = rulesPass(sum, bound, st);
         // s449: the no-write rule over every accepted effect (§6.7.4)
         const effectDiags: Diag[] = effectPass(ra.g, bound, st.effects, sum).concat(requestPass(bound, sum)).concat(requestWarnPass(ra.g, bound));
         // s444 Phase B: dead validators (RULED S442 (5)) and the forms that take `novalidate` (RULED S442 (3))
