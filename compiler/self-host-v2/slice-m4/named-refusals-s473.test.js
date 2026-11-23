@@ -69,7 +69,9 @@ const CASES = [
   ["snippet type", P(`    function f(s: snippet) -> int { return 1; }`), UNS],
   ["renders on an enum variant", P(`    type E:enum = { Bad(why: string) renders <p>x</p>, Worse }`), UNS],
   ["httpStatus(…) on a variant", P(`    type ApiError:enum = { NotFound(r: string) httpStatus(404), Gone }`), UNS],
-  ["^{ } in logic", P(`    let <count:int=0/>\n    function bump() { ^{ emit("x"); } @count = @count + 1; }`), UNS],
+  // s481 (s481-boot-meta): the "^{ } in logic" row is gone — `^{}` is read and checked (meta.scrml);
+  // a compile-time block that emits from a function body is §22.4.1's E-META-EVAL-002, its own code
+  // (slice-m2/meta-s481.test.js)
   ["use foreign:", P(`    use foreign:ml { predict }`), UNS],
   ["use", `use scrml:ui\n<program>\n<main><p>x</p></main>\n</program>\n`, UNS],
   // s478 (s478-boot-optional-chain): `?.` member reads are BUILT (§42.3.6); the optional CALL stays refused

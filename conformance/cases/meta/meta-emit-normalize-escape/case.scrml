@@ -1,3 +1,5 @@
+<program>
 ^{
-  emit("<pre id=\"n\">a\\nb</pre>")
+  emit("<pre id=\"n\">a\\nb</pre>");
 }
+</program>

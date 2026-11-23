@@ -3,8 +3,8 @@
 <x> = 0
 <div>
 ^{
-  meta.get("x")
-  meta.emit("<p>" + meta.get("constructor") + "</p>")
+  meta.get("x");
+  meta.emit("<p>" + meta.get("constructor") + "</p>");
 }
 </div>
 </program>

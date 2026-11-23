@@ -153,7 +153,6 @@ Use this for small, project-local utilities. No ceremony, no tooling, no manifes
 
 `^{}` runs at compile time. It works over a closed set of meta primitives (`emit()`, `reflect(Type)`, and a few others — SPEC §22): it can generate markup from compile-time data or introspect your types. It is **not** a host escape hatch — no DOM, no SQL, no file or network I/O, and no `eval`.
 
-<!-- gate: spec-ahead [E-BOOTSTRAP-UNSUPPORTED] — the bootstrap has no ^{} meta context yet -->
 ```scrml
 <program>
   type Link:struct = { href: string, label: string }

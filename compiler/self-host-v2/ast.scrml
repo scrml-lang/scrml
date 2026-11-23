@@ -835,4 +835,54 @@ ${
 
 
     export fn stdlibPathPrefix() -> string { return "scrml:"; }
+
+    // -------------------------------------------------------------------------
+    // s481 (s481-boot-meta) — a `^{ … }` META block (SPEC §22.2: `meta-block ::=
+    // '^{' meta-body '}'`, the body "any sequence of scrml statements and
+    // expressions"). The parser reads the body with the ONE statement reader
+    // (parse.scrml parseMetaExpr) and keeps it where it stands, as a call of the
+    // reserved callee `^` whose argument is the body as a block lambda — no
+    // identifier can spell `^`, so no source writes this call — plus a second
+    // argument (`true`) when the block stands where MARKUP stands (an element's
+    // children, a `<program>` body, the file top level), the position §22.4.1
+    // "Where emitted output lands" lets `emit()` output fill. Anywhere else (a
+    // statement of a `${ … }` logic body or a function body, a `${ … }` value)
+    // it is a logic position.
+    // meta.scrml (the first step of analysis) replaces EVERY one before any other
+    // pass reads the tree: a compile-time block by its emitted markup (or by
+    // nothing), a refused block by nothing (its diagnostic stands). INTERIM shape:
+    // a dedicated node kind is the runtime-meta phase's to add (phase 2), when a
+    // runtime block survives into analysis; until then the call form keeps the
+    // block in its place in the tree with no change to any node kind's matches.
+    // -------------------------------------------------------------------------
+    export type AMeta:struct = { nid: int, span: ASpan, body: ABlock, markup: boolean }
+
+    export fn metaCallee() -> string { return "^"; }
+
+    export fn metaOf(e: AExpr) -> AMeta | not {
+        return match e.k {
+            .Call(callee: c, args: xs) :> metaOfCall(e, c, xs),
+            // no-default-arm: one question of an expression — is it the reserved `^` call
+            _ :> not
+        };
+    }
+
+    fn metaOfCall(e: AExpr, c: AExpr, xs: AExpr[]) -> AMeta | not {
+        if (xs.length < 1 || xs.length > 2) return not;
+        const isCaret: boolean = match c.k {
+            .Name(name: n) :> n == metaCallee(),
+            // no-default-arm: one question of a callee — is it the reserved `^`
+            _ :> false
+        };
+        if (!isCaret) return not;
+        return match xs[0].k {
+            .BlockLambda(params: ps, body: b) :> metaBuilt(e, b, xs.length == 2),
+            // no-default-arm: the reserved call's argument is always a block lambda
+            _ :> not
+        };
+    }
+
+    fn metaBuilt(e: AExpr, b: ABlock, atMarkup: boolean) -> AMeta | not {
+        return { nid: e.nid, span: e.span, body: b, markup: atMarkup };
+    }
 }
