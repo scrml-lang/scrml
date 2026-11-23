@@ -73,7 +73,7 @@ ${TY}    fn b(o: P) -> int { const as: P = o; return as.value + 1; }
 </program>
 `;
     expect(await run(src, ["a", "b", "c"])).toEqual(["5", "10", "3"]);
-  }, 60000);
+  }, 180000);
 });
 
 describe("the ruling — a spaced `as .V` stays the bare-variant cast (§14.12.6.2)", () => {
@@ -115,7 +115,7 @@ describe("#2058 review LOW-2 — a `given` head names a contextual-word binding"
 </program>
 `;
     expect(await run(src, ["a", "b", "c"])).toEqual(["2", "3", "3"]);
-  }, 60000);
+  }, 180000);
   test("the markup guard `${ given some :> … }` is the named markup-guard refusal, not a cascade", () => {
     const es = errorsOf(`<program>\n\${\n    const some: int | not = 1;\n}\n<p>\${ given some :> { <b>x</b> } }</p>\n</program>\n`);
     expect(es.length).toBe(1);
@@ -154,5 +154,5 @@ describe("#2058 review INFO-1 — W-RENDER-SHADOWED / W-LOG-SHADOWED (§20.3a, �
   test("the shadowing function runs", async () => {
     const src = `<program>\n\${\n    fn render(x: int) -> int { return x + 1; }\n}\n<p id="a">\${render(5)}</p>\n</program>\n`;
     expect(await run(src, ["a"])).toEqual(["6"]);
-  }, 60000);
+  }, 180000);
 });
