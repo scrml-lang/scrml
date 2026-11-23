@@ -21964,6 +21964,13 @@ ${
         let lits: string[] = [];
         let wild = false;
         let notSeen = false;
+        // s482 (lane s482-place-fu, #2078 review LOW-1) — a `not` NAMED by some arm, a wildcard
+        // alternation's alternate included (`.A :> …, not | _ :> …`): only the E-TYPE-044 fact
+        // (FPlain notArm, "a `not` arm on a subject whose type does not include `| not`") reads it.
+        // `notSeen` keeps a wildcard alternation's `not` out (as its other alternates are kept out
+        // of `covered`): it feeds `maybe`, `absentDone` and W-MATCH-001, and on a subject that is
+        // not `| not` it would turn `maybe` true.
+        let notNamed = false;
         let want: Type | not = expected;
         let result: Type | not = not;
         let parms: PlainArm[] = [];
@@ -22017,6 +22024,7 @@ ${
                 notSeen = dNot;
                 lits = dLits;
             }
+            if (dNot) notNamed = true;
             if (dup && !wild && isAlt) st = addDiag(st, env.file, a.span, "E-TYPE-023", "an alternate of this arm names a case that an earlier arm, or an earlier alternate of this arm, already takes, so that alternate is unreachable — drop it (§18.14.2 E-TYPE-023: duplicate match arm; §18.2 alternation)");
             if (dup && !wild && !isAlt) st = addDiag(st, env.file, a.span, "E-TYPE-023", "a second arm for the same case — the first arm already takes it, so this one is unreachable (§18.14.2 E-TYPE-023: duplicate match arm)");
             if (idx == -1) wild = true;
@@ -22077,7 +22085,7 @@ ${
         // `sk.code`) refuses the match's coverage too: it was never judged, so the typer does
         // not widen the value by `not` (typePlain coverageRefused — one report per construct;
         // before, `return match p { … }` over a struct `p` was also E-TYPE-031 `string | not`).
-        st = addFail(r2.st, e.nid, FailFact.FPlain({ es: sk.es, kind: sk.kind, maybe: maybe, known: sk.known, wild: wild, exhaustive: exh, notArm: notSeen, refused: covRefused || sk.code != "",
+        st = addFail(r2.st, e.nid, FailFact.FPlain({ es: sk.es, kind: sk.kind, maybe: maybe, known: sk.known, wild: wild, exhaustive: exh, notArm: notNamed, refused: covRefused || sk.code != "",
                                                       stmt: stmt, scrut: r1.s, pick: r2.s, arms: parms }));
         if (!exh && result is given) result = Type.Maybe(unMaybe(result));
         return plain(result, st);
