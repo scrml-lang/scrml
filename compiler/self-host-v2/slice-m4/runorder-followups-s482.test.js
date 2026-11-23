@@ -278,8 +278,8 @@ ${RUN}
   }, 120000);
 
   test("legal: a function value in an event handler is not judged", async () => {
-    // (what it shows is g-boot-handler-reach-runs-binding-early-s482: the printer runs `k` before
-    // the body when a handler reaches it — pre-existing, not judged here)
+    // (and it does not run `k` before the body — s482-handler-reach,
+    // g-boot-handler-reach-runs-binding-early-s482: `k` runs at its place, 5)
     const src = `<program>
 ${RUN}
 <button id="x" onclick=\${ out = run(g); }>go</button>
@@ -288,6 +288,7 @@ ${RUN}
 </program>
 `;
     expect(await errCodes(src)).toEqual([]);
+    expect(await texts(src, ["b"])).toEqual(["5"]);
   }, 120000);
 });
 

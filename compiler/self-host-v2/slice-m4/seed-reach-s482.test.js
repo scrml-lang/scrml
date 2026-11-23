@@ -364,7 +364,7 @@ let <c:int=(k + 0) persist="local" key="t.seedreach.b"/>`));
     expect(early.map((d) => d.code)).toEqual([]);
   }, 120000);
 
-  test("an event handler reading the cell early is not judged (g-boot-handler-reach-runs-binding-early-s482 stays open)", async () => {
+  test("an event handler reading the cell early is not judged, and the cell's seed runs at its place", async () => {
     const src = P(`\${ let out: int = 0; }
 <button id="b" onclick=\${ out = @c; }>go</button>
 \${ const k: int = n + 0; }
@@ -372,10 +372,10 @@ let <c:int=(k + 0)/>
 <p id="r">\${@c}</p>`);
     const es = await errors(src);
     expect(es.map((d) => d.code)).toEqual([]);
-    // KNOWN WRONG VALUE, pinned as it is today (#2063 review LOW-1): the source order gives 5.
-    // The printer's reach walks the handler → `@c`'s seed → `k` and runs `k` before the body,
-    // missing `n = 5` — g-boot-handler-reach-runs-binding-early-s482 (the handler → cell seed
-    // path, open). When that gap closes this becomes ["5"].
-    expect(await texts(src, ["r"])).toEqual(["1"]);
+    // #2063 review LOW-1 pinned `1` here: the printer's reach walked the handler → `@c`'s seed →
+    // `k` and ran `k` before the body, missing `n = 5`. s482-handler-reach
+    // (g-boot-handler-reach-runs-binding-early-s482): the handler runs after the body and is not
+    // walked, so `k` runs at its place — the source order's 5.
+    expect(await texts(src, ["r"])).toEqual(["5"]);
   }, 120000);
 });
