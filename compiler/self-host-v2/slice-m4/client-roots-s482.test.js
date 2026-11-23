@@ -136,6 +136,41 @@ let <out:string=""/>
   }, 120000);
 });
 
+describe("A (imports) — an imported module's functions the program never references are not printed (§41.9)", () => {
+  test("a5: `import { used }` — `used` is printed and runs; the module's other functions (exported or not) and the constant only they read are not", async () => {
+    const sub = join(dir, "a5");
+    const { mkdirSync } = await import("node:fs");
+    mkdirSync(sub, { recursive: true });
+    writeFileSync(join(sub, "scrml.toml"), "");
+    writeFileSync(join(sub, "lib.scrml"), `\${
+    const LKEY: string = "zz-lib-secret";
+    export function used(s: string) -> string { return s + "."; }
+    export function unusedExp() -> string { return LKEY; }
+    function priv() -> string { return "p"; }
+}
+`);
+    const file = join(sub, "app.scrml");
+    writeFileSync(file, `\${
+    import { used } from "./lib.scrml";
+    export function exportedHere() -> string { return "eh"; }
+}
+<program>
+<p id="c">\${used("a")}</p>
+</program>
+`);
+    const res = await compileSource(file);
+    expect(res.ok).toBe(true);
+    expect(fnDecl(res.client.js, "used")).toBe(true);
+    expect(fnDecl(res.client.js, "unusedExp")).toBe(false);
+    expect(fnDecl(res.client.js, "priv")).toBe(false);
+    // the entry's own export: the client artifact exports nothing (a library entry is refused, §21.5),
+    // so nothing outside the artifact can name it
+    expect(fnDecl(res.client.js, "exportedHere")).toBe(false);
+    expect(res.client.js).not.toContain("zz-lib-secret");
+    expect(await texts(res, ["c"])).toEqual(["a."]);
+  }, 120000);
+});
+
 // =============================================================================
 // B — every way the client reaches a function keeps it (fail closed: a dropped function the client
 // needs is a ReferenceError)

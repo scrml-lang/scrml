@@ -9,3 +9,9 @@ Branch `s482-client-roots` from origin/main 3e539ae73 (contains #2053).
 
 ## Item 2 — g-boot-server-only-init-no-server-artifact-s481 (LOW)
 - pending
+- Item 2 done: printServerBuild prints a module-init-only server artifact when serverInits is non-empty.
+- Test fallout: tests that print functions nothing calls now name them via printProgramExposing / load-program `expose` (template-slot-fuzz, templates, loops, tape-inplace, host-*, error-*, else-failable) or reach them in source (shared-graph-walks F2).
+- Commit 43fe11932: hook PASS.
+- Corpus (2968 files, base vs head): newly rejected 0, codes 0, html 0, server 0; 20 client.js diffs, every one a removed unreached function (+ its header/blank), no dangling reference.
+- Conformance base vs head: identical verdicts (PASS 778, FAIL 3, CRASH 0).
+- known-gaps: both records marked resolved-by=s482-client-roots.
