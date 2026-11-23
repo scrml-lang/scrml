@@ -85,6 +85,15 @@ async function load(out, ids) {
   }
 }
 
+// the CLI's refusal: its exit code and the error codes it printed
+function refused(src) {
+  const file = join(dir, `c${n++}.scrml`);
+  writeFileSync(file, src);
+  const p = Bun.spawnSync(["bun", join(ROOT, "scripts/scrml-boot.ts"), "compile", file, "--output-dir", file + ".out"], { cwd: ROOT, stdout: "pipe", stderr: "pipe", env: { ...process.env, NO_COLOR: "1" } });
+  const text = p.stderr.toString() + p.stdout.toString();
+  return { exit: p.exitCode, codes: [...new Set(text.match(/E-[A-Z0-9-]+/g) ?? [])] };
+}
+
 function skip() {
   if (!browser) { console.log(`[skip] Chromium unavailable: ${launchError}`); return true; }
   return false;
@@ -143,5 +152,66 @@ describe("an initializer in `<textarea>` / `<title>` runs just before the elemen
 </program>
 `);
     expect(await load(out, ["o", "o2"])).toEqual({ errors: [], texts: ["6", "7 6"] });
+  }, 120000);
+});
+
+// #2082 review HIGH-1 — a `bind:` of a later cell, before the initializer, reads the cell at the mount
+// and runs its seed there (`n = 5`); head r0 compiled both shapes and Chromium showed k = 1. Each is
+// refused now; its control (the initializer outside the construct / after the textarea) shows 5.
+describe("a `bind:` before the initializer runs the bound cell's seed (Chromium, #2082 HIGH-1)", () => {
+  const PRE = `\${ let n: int = 1; }
+\${ function bumps() -> string { n = 5; return "s"; } }
+<program>
+`;
+  test("construct: refused (head r0: Chromium k = 1)", () => {
+    const r = refused(PRE + `<div if=(true)><input bind:value=@s/>\${ const k: int = n + 0; }<p id="o">\${k}</p></div>
+let <s:string=(bumps())/>
+</program>
+`);
+    expect(r.exit).not.toBe(0);
+    expect(r.codes).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+  }, 120000);
+
+  test("construct control (no construct): k = 5, source order", async () => {
+    if (skip()) return;
+    const out = build(PRE + `<input bind:value=@s/>\${ const k: int = n + 0; }<p id="o">\${k}</p>
+let <s:string=(bumps())/>
+</program>
+`);
+    expect(await load(out, ["o"])).toEqual({ errors: [], texts: ["5"] });
+  }, 120000);
+
+  test("textarea: refused (head r0: Chromium k = 1; base 5)", () => {
+    const r = refused(PRE + `<textarea id="o2" bind:value=@s>\${ const k: int = n + 0; }</textarea><p id="o">\${k}</p>
+let <s:string=(bumps())/>
+</program>
+`);
+    expect(r.exit).not.toBe(0);
+    expect(r.codes).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+  }, 120000);
+
+  test("textarea control (initializer after it): k = 5, source order", async () => {
+    if (skip()) return;
+    const out = build(PRE + `<textarea id="o2" bind:value=@s></textarea>\${ const k: int = n + 0; }<p id="o">\${k}</p>
+let <s:string=(bumps())/>
+</program>
+`);
+    expect(await load(out, ["o", "o2"])).toEqual({ errors: [], texts: ["5", "s"] });
+  }, 120000);
+});
+
+// #2082 review LOW-1 — a literal attribute value (`rows=3`) is no code: the acting initializer after it
+// compiles (head r0 refused it) and runs in source order
+describe("an acting initializer after a literal attribute (Chromium, #2082 LOW-1)", () => {
+  test("rows=3: bump() runs first, the textarea then shows n = 5", async () => {
+    if (skip()) return;
+    const out = build(`\${ let n: int = 1; }
+\${ function bump() -> int { n = 5; return 0; } }
+<program>
+<textarea id="o2" rows=3>\${ const k: int = bump(); }\${n}</textarea>
+<p id="o">\${k}</p>
+</program>
+`);
+    expect(await load(out, ["o", "o2"])).toEqual({ errors: [], texts: ["0", "5"] });
   }, 120000);
 });

@@ -11765,9 +11765,37 @@ ${
         if (lo < 0) return true;
         for (const it of items) {
             const n: ANode | not = markupOfItem(it);
-            if (n is given && (regionBlocks(n, lo, hi).length > 0 || regionUses(t, n, lo, hi).length > 0)) return true;
+            if (n is given && (codeBlocksOf(regionBlocks(n, lo, hi)).length > 0 || regionUses(t, n, lo, hi).length > 0)) return true;
         }
         return false;
+    }
+
+    // s482 r1 (#2082 review LOW-1) — `bs` without the blocks that are only a literal value (an
+    // attribute's `rows=3`, `hidden=true`): a literal neither observes nor writes anything.
+    fn codeBlocksOf(bs: ABlock[]) -> ABlock[] {
+        let out: ABlock[] = [];
+        for (const b of bs) { if (!literalBlock(b)) out = out.concat([b]); }
+        return out;
+    }
+
+    fn literalBlock(b: ABlock) -> boolean {
+        if (b.stmts.length != 1) return false;
+        const sk: AStmtK = b.stmts[0].k;
+        const x: AExpr | not = match sk {
+            .Eval(e: y) :> y,
+            // no-default-arm: only an expression block (exprBlock) is a literal value
+            _ :> not
+        };
+        if (x is not) return false;
+        const k: AExprK = x.k;
+        return match k {
+            .Num(raw: r) :> true,
+            .Str(v: v) :> true,
+            .Bool(v: v) :> true,
+            .NotLit :> true,
+            // no-default-arm: any other expression may be code
+            _ :> false
+        };
     }
 
     // The first member of the if-chain whose `else-if=` / `else` member is ns[i] (lower.scrml
@@ -11826,6 +11854,7 @@ ${
         if (lo < 0) return bodyWritesOf(g, t, sum, writes, sites, lets, file, items, pfields);
         let blocks: ABlock[] = [];
         let uses: int[] = [];
+        let binds: int[] = [];
         for (const it of items) {
             const k: AItemK = it.k;
             const c: AConst | not = match k {
@@ -11842,10 +11871,12 @@ ${
             if (n is given) {
                 blocks = blocks.concat(regionBlocks(n, lo, hi));
                 uses = unionIds(uses, regionUses(t, n, lo, hi));
+                binds = unionIds(binds, regionBindCells(t, g.program, pfields, n, lo, hi));
             }
         }
-        // the cells the code there uses (with the components' code, below), then the seeds they run
-        let used: int[] = blocksCells(t, sum, usesR, file, blocks, g.program.id, pfields);
+        // the cells the code there uses (with the components' code, below) — a `bind:` there
+        // included: mounting the element reads its cell (#2082 review HIGH-1) — then the seeds they run
+        let used: int[] = unionIds(blocksCells(t, sum, usesR, file, blocks, g.program.id, pfields), binds);
         let bw: BodyW = blocksWrites(g, t, sum, writes, sites, lets, file, blocks, pfields);
         // the components used there, and those they use, each once
         let seen: int[] = [];
@@ -11865,6 +11896,7 @@ ${
                                 const rn: ANode = { nid: -1, span: r.span, k: ANodeK.Elem(r) };
                                 cb = cb.concat(bodyCodeBlocks(rn));
                                 next = unionIds(next, regionUses(t, rn, -1, 2147483647));
+                                used = unionIds(used, regionBindCells(t, g.program, pfields, rn, -1, 2147483647));
                             }
                             bw = mergeBodyW(bw, blocksWrites(g, t, sum, writes, sites, lets, ds.file, cb, pfields));
                             used = unionIds(used, blocksCells(t, sum, usesR, ds.file, cb, g.program.id, pfields));
@@ -11967,6 +11999,33 @@ ${
             out = bodyElemBlocks(bare);
         }
         for (const kid of e.kids) { out = out.concat(regionBlocks(kid, lo, hi)); }
+        return out;
+    }
+
+    // s482 r1 (#2082 review HIGH-1) — the program cells (Sym ids) named by a `bind:` on an element
+    // that starts between `lo` and `hi` in `n` (bindCellOf, as the seed-reach judgment reads one).
+    fn regionBindCells(t: Tables, prog: Sym, pfields: FieldInfo[], n: ANode, lo: int, hi: int) -> int[] {
+        if (n.span.end <= lo || n.span.start >= hi) return [];
+        const k: ANodeK = n.k;
+        let out: int[] = [];
+        const e: AElem | not = elemOfNodeK(k);
+        if (e is given) {
+            if (e.span.start >= lo) {
+                for (const a of e.attrs) {
+                    const c: int = bindCellOf(t, prog, pfields, a);
+                    if (c >= 0) out = unionIds(out, [c]);
+                }
+            }
+            for (const kid of e.kids) { out = unionIds(out, regionBindCells(t, prog, pfields, kid, lo, hi)); }
+        }
+        const gf: AFor | not = match k {
+            .Gather(f: x) :> x,
+            // no-default-arm: only an element or a gather holds nodes
+            _ :> not
+        };
+        if (gf is given) {
+            for (const r of gatherRows(gf)) { out = unionIds(out, regionBindCells(t, prog, pfields, r, lo, hi)); }
+        }
         return out;
     }
 
@@ -12644,17 +12703,25 @@ ${
     // carries no read fact, no write effect), so the cell is taken from that fact; a use before
     // the cell's place computes its seed there (§7.6 rule (b) S482).
     fn bodyBindReach(cx: BodyCx, a: AAttr) -> Diag[] {
-        const k: AttrKind | not = attrFact(cx.t.attrs, a.nid);
-        if (k is not) return [];
-        const ix: int = programFieldBound(cx.g.program, k);
-        if (ix < 0 || ix >= cx.pfields.length) return [];
-        const c: BodyCell | not = cellOfSym(cx.cells, cx.pfields[ix].sym.id);
+        const c: BodyCell | not = cellOfSym(cx.cells, bindCellOf(cx.t, cx.g.program, cx.pfields, a));
         if (c is not) return [];
         const pos: int = a.span.start;
         if (!cellRunsAt(c, pos)) return [];
         const inner: SeedReach | not = cellReach(cx, c, pos, [c.sym]);
         if (inner is given) return [laterPlaceDiagHow(inner.bp, "this `" + a.name + "=`", cellHop(c, inner), cx.file, a.span)];
         return [];
+    }
+
+    // The program cell (its Sym id) a `bind:` attribute names, else -1: the resolver records the
+    // target on the attribute (AttrKind.ABind), not on the `@c` node. Shared by the seed-reach
+    // judgment (bodyBindReach) and the construct-writes bound (regionBindCells, #2082 HIGH-1).
+    fn bindCellOf(t: Tables, prog: Sym, pfields: FieldInfo[], a: AAttr) -> int {
+        if (a.name.substring(0, 5) != "bind:") return -1;
+        const k: AttrKind | not = attrFact(t.attrs, a.nid);
+        if (k is not) return -1;
+        const ix: int = programFieldBound(prog, k);
+        if (ix < 0 || ix >= pfields.length) return -1;
+        return pfields[ix].sym.id;
     }
 
     // One display: a bare name of a later binding (direct), a read of a cell that runs its seed

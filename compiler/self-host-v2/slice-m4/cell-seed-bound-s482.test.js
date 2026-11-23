@@ -94,4 +94,40 @@ let <z:int=(bump())/>
 `);
     expect(d.map((x) => x.code)).toContain("E-FILE-SCOPE-INIT-IN-CONSTRUCT");
   }, 120000);
+
+  // #2082 review HIGH-1 — a `bind:` names its cell on the attribute (AttrKind.ABind), not on the `@s`
+  // node: mounting the element reads `@s` and runs its seed there; head r0 missed it and showed k = 1
+  test("refused: the cell is named there by a `bind:` (head r0: compiled, k = 1; base: refused)", async () => {
+    const d = await errors(`<program>
+\${ let n: int = 1; }
+\${ function bumps() -> string { n = 5; return "s"; } }
+<div if=(true)><input bind:value=@s/>\${ const k: int = n + 0; }<p id="o">\${k}</p></div>
+let <s:string=(bumps())/>
+</program>
+`);
+    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(d[0].message).toContain("the initializer of `const k` reads `n`");
+  }, 120000);
+
+  test("refused: a `bind:` on a nested element there", async () => {
+    const d = await errors(`<program>
+\${ let n: int = 1; }
+\${ function bumps() -> string { n = 5; return "s"; } }
+<div if=(true)><label><span><input bind:value=@s/></span></label>\${ const k: int = n + 0; }<p>\${k}</p></div>
+let <s:string=(bumps())/>
+</program>
+`);
+    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+  }, 120000);
+
+  test("legal: a `bind:` of a later cell AFTER the initializer runs its seed after it", async () => {
+    expect(await texts(`<program>
+\${ let n: int = 1; }
+\${ function bumps() -> string { n = 5; return "s"; } }
+<div if=(true)>\${ const k: int = n + 0; }<p id="o">\${k}</p><input bind:value=@s/></div>
+let <s:string=(bumps())/>
+<p id="o2">\${n}</p>
+</program>
+`, ["o", "o2"])).toEqual(["1", "5"]);
+  }, 120000);
 });

@@ -129,4 +129,28 @@ describe("1 — an initializer in `<textarea>` / `<title>` runs just before the 
 </program>
 `, ["o2", "o"])).toEqual(["0", "5"]);
   }, 120000);
+
+  // #2082 review HIGH-1 — the `bind:` reads `@s` at the mount, before the initializer: its seed runs there
+  test("refused: a `bind:` of the element names a later cell whose seed writes what the initializer reads (head r0: k = 1; base: 5)", async () => {
+    const d = await errors(`<program>
+\${ let n: int = 1; }
+\${ function bumps() -> string { n = 5; return "s"; } }
+<textarea id="o2" bind:value=@s>\${ const k: int = n + 0; }</textarea><p id="o">\${k}</p>
+let <s:string=(bumps())/>
+</program>
+`);
+    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(d[0].message).toContain("the initializer of `const k` reads `n`, which the program body writes inside `<textarea>`, before it");
+  }, 120000);
+
+  // #2082 review LOW-1 — a literal attribute value is no code: `rows=3` does not refuse an acting initializer
+  test("legal: an acting initializer after a literal attribute (rows=3) — source order (head r0: refused)", async () => {
+    expect(await values(`<program>
+\${ let n: int = 1; }
+\${ function bump() -> int { n = 5; return 0; } }
+<textarea id="o2" rows=3 hidden=false>\${ const k: int = bump(); }\${n}</textarea>
+<p id="o">\${k}</p>
+</program>
+`, ["o", "o2"])).toEqual(["0", "5"]);
+  }, 120000);
 });
