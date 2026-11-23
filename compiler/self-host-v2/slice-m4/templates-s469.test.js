@@ -35,7 +35,11 @@ const clean = (src) => {
   expect(mods.check.checkCore(r.core)).toEqual([]);
   return r;
 };
-const js = (src) => mods.print.printProgram(clean(src).core, "t.client.js", "scrml-runtime.js").js;
+// s482 (s482-client-roots): these tests read how a function is LOWERED, and many name functions nothing
+// in their program calls — an unreached function is not printed (§12.2 Trigger 6), so every function is
+// named to the printer's test entry (print.scrml printProgramExposing).
+const allFns = (core) => core.fns.map((f) => f.sym.id);
+const js = (src) => { const c = clean(src).core; return mods.print.printProgramExposing(c, "t.client.js", "scrml-runtime.js", allFns(c)).js; };
 // a function returning `body` (a template), in a program that renders it
 const fnProg = (decls, params, body) =>
   `<program>\n${decls}\n    fn f(${params}) -> string {\n        return ${body};\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n`;
@@ -265,7 +269,7 @@ describe("E — emitted JavaScript", () => {
 const jsOf = (src) => {
   const r = run(src);
   expect(r.diags.filter((d) => !d.code.startsWith("W-")).map((d) => `${d.code}: ${d.message}`)).toEqual([]);
-  return mods.print.printProgram(r.core, "t.client.js", "scrml-runtime.js").js;
+  return mods.print.printProgramExposing(r.core, "t.client.js", "scrml-runtime.js", allFns(r.core)).js;
 };
 
 describe("H1 — a WARNING in a slot does not refuse the template", () => {

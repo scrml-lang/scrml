@@ -33,9 +33,9 @@ SPEC §47 (Output Name Encoding) was found unimplemented in the bootstrap with n
 <!-- @generated:coverage-totals START (do not edit — `bun scripts/spec-coverage-check.ts --write`) -->
 | status | rows |
 |---|---:|
-| BUILT | 322 |
-| PARTIAL | 160 |
-| REFUSED-LOUD | 299 |
+| BUILT | 326 |
+| PARTIAL | 163 |
+| REFUSED-LOUD | 292 |
 | DEFERRED-RULED | 59 |
 | N/A | 221 |
 | SILENT-ACCEPT | 15 |
@@ -718,18 +718,18 @@ SILENT rows carrying a gap id: 46 of 46.
 
 | § | title | status | evidence | gap ids | note |
 |---|---|---|---|---|---|
-| §22 | Metaprogramming | REFUSED-LOUD | see subsections | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) No `E-META-*` code exists in the bootstrap (severity.scrml has none). Every `^{` is refused, but only markup gets a named refusal. |
-| §22.1 | Overview | N/A | prose | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) |
-| §22.2 | The `^{}` meta context | REFUSED-LOUD | parse.scrml `skipSigil` (~7186): in markup, "a `^{…}` context in markup is not in the bootstrap (§3.1)" E-BOOTSTRAP-UNSUPPORTED (probe p22a-meta-markup). In a function body: `E-PARSE-EXPR` "expected an expression, found `^`" (p22b-meta-logic). In a file-top logic block: `E-PARSE-ITEM` (p22d-meta-toplevel). | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) Loud in every position. In logic positions the code is a generic parse code, not a refusal that names the construct (family g-bootstrap-unimplemented-construct-reported-as-generic-code). · S473 D28: `^{` in logic is a named refusal (refusals.scrml; slice-m4/named-refusals-s473.test.js) |
-| §22.3 | Context preservation | REFUSED-LOUD | covered by the §22.2 refusal | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) |
-| §22.4 (+.1 emit, .2 reflect) | Compile-time meta | REFUSED-LOUD | `^{` is refused. `reflect(int)` outside meta gives E-SCOPE-001 "`reflect` is not declared" (p22c-reflect). | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) §22.11 names E-META-008 for `reflect()` outside meta. The bootstrap reports E-SCOPE-001 instead. It is loud, but with the wrong code. · S473 D28: `reflect()` outside `^{}` → E-META-008 (refusals.scrml; slice-m4/named-refusals-s473.test.js) |
-| §22.5 | Runtime meta | REFUSED-LOUD | covered by §22.2 | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) |
-| §22.6 | DG tracking for runtime meta | REFUSED-LOUD | covered | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) |
-| §22.7 | Runtime meta guard (E-META-001, `meta.runtime`) | REFUSED-LOUD | covered. The bootstrap has no `meta.runtime` setting. | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) |
-| §22.8 | Phase separation (E-META-005) | REFUSED-LOUD | covered | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) |
-| §22.9 | Interaction (E-META-006/007/009) | REFUSED-LOUD | covered | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) |
-| §22.10 | Codegen contract | REFUSED-LOUD | covered | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) |
-| §22.11 | Error code summary | REFUSED-LOUD | no E-META-* emitted. The umbrella refusal stands in for them. | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) |
+| §22 | Metaprogramming | PARTIAL | see subsections | g-boot-meta-runtime-unbuilt-s481 | (S481, s481-boot-meta) compile-time `^{}` is built (meta.scrml: static checks, interpreter, splice); a runtime block is refused by name. |
+| §22.1 | Overview | N/A | prose | — | (S481) |
+| §22.2 | The `^{}` meta context | BUILT | parse.scrml `parseMetaExpr` / `parseMetaNode` (markup, program body, file top, statement and value positions); a body parse error is E-META-002. Tests: slice-m2/meta-s481.test.js (static codes). | — | (S481) |
+| §22.3 | Context preservation | PARTIAL | meta.scrml `envOf` / `evalCaptured`: the file's `const`s and functions are captured and evaluated on demand, held to the allow-list; an imported binding is refused at evaluation. Tests: slice-m2/meta-s481.test.js (captured const / function). | g-boot-meta-imported-capture-s481 | (S481) the encoded-name-registry bullet struck (S473 D4). |
+| §22.4 (+.1 emit, .2 reflect) | Compile-time meta | BUILT | meta.scrml `runBlock` (the scrml interpreter, step + depth bounds → E-META-EVAL-001), `callEmit` / `normalizeEmit`, `callReflect` (impl#1's shape), `spliceOut` + emit-gate.scrml (E-META-EVAL-002). Tests: slice-m2/meta-s481.test.js (eval, splice, drift, differential vs impl#1); conformance meta/ compile-time cases PASS. | g-boot-meta-emit-plain-markup-only-s481 | (S481) emitted output plain markup only (INTERIM). |
+| §22.5 | Runtime meta | REFUSED-LOUD | meta.scrml `metaBlock` step 3: a runtime block is E-BOOTSTRAP-UNSUPPORTED by name. Test: slice-m2/meta-s481.test.js. | g-boot-meta-runtime-unbuilt-s481 | (S481) phase 2. |
+| §22.6 | DG tracking for runtime meta | REFUSED-LOUD | covered by §22.5 | g-boot-meta-runtime-unbuilt-s481 | (S481) |
+| §22.7 | Runtime meta guard (E-META-001, `meta.runtime`) | REFUSED-LOUD | covered by §22.5. The bootstrap has no `meta.runtime` setting (no surface specifies one). | g-boot-meta-runtime-unbuilt-s481 | (S481) |
+| §22.8 | Phase separation (E-META-005) | BUILT | meta.scrml `staticDiags` (`emit` / `emit.raw` + a runtime value); a literal `reflect` beside one is a runtime block (S481 ruling item 1). Test: slice-m2/meta-s481.test.js. | — | (S481) |
+| §22.9 | Interaction (E-META-006/007/009) | BUILT | meta.scrml `staticDiags`: `lift` E-META-006, `?{}` in a runtime block E-META-007, nested in compile-time E-META-009; `?{}` in a compile-time block is E-META-EVAL-001 (INTERIM, as impl#1). Test: slice-m2/meta-s481.test.js. | — | (S481) |
+| §22.10 | Codegen contract | REFUSED-LOUD | covered by §22.5 | g-boot-meta-runtime-unbuilt-s481 | (S481) |
+| §22.11 | Error code summary | PARTIAL | E-META-001/002/003/005/006/007/008/009/010 and E-META-EVAL-001/002 are emitted (meta.scrml, parse.scrml, refusals.scrml E-META-008). Test: slice-m2/meta-s481.test.js. | g-boot-meta-runtime-unbuilt-s481 | (S481) the runtime-only codes wait on phase 2. |
 | §22.12 | Approach C (closed allow-list; S130 extension to `${}`) | BUILT | The bootstrap's binder is a closed scope. `fetch` gives E-SCOPE-001 (p22e-ambient). `setInterval` gives E-SCOPE-001 (p22g-setinterval). `process.env` gives E-SCOPE-001 (earlier p22e variant). `console.log` and `Math.floor` give E-BOOTSTRAP-UNSUPPORTED (p22h-globals). `bun.eval` / `eval` give E-LOGIC-EXECUTABLE-SINK … | g-bootstrap-unimplemented-construct-reported-as-generic-code | (P4) `Date.now()` is admitted (analyze.scrml method allow-list). That is a JS-host ambient, but Approach C names no rule for it. |
 | §22.13 | Manifest `[capabilities] host-import` | PARTIAL | parse.scrml `judgeNestedImport` (~2408) and analyze `checkHostImport`: E-IMPORT-008 when the file is not under `stdlibPathPrefix()` (probe p22f-import-host fires E-IMPORT-008). Tests: slice-m4/import-host-s472.test.js, math-port-s472.test.js. | g-bootstrap-unimplemented-construct-reported-as-generic-code, g-boot-host-import-manifest-not-read-s473 | (P4) Missing: the bootstrap never reads `scrml.toml`. The allow-list is a hard-coded stdlib path, and `E-MANIFEST-001` (invalid value) is absent. In v1 this is equivalent in effect, because "disabled" and "self-host-only" give an adopter no opt-in. NO GAP for the manifest read. |
 

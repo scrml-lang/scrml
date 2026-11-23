@@ -303,7 +303,8 @@ describe("rules 4 / 5 / 6 / 8 / 11 — the target's shape, roots, parameters and
       ["go(a: HTMLAnchorElement, u: string) = a.href = u", "hostUrl("],
     ]) {
       const r = clean(P("  " + line));
-      const js = mods().print.printProgram(r.core, "t.client.js", "scrml-runtime.js").js;
+      // s482 (s482-client-roots): every function named to the printer — an unreached one is not printed (§12.2 Trigger 6)
+      const js = mods().print.printProgramExposing(r.core, "t.client.js", "scrml-runtime.js", r.core.fns.map((f) => f.sym.id)).js;
       expect([line, js.includes(guard), js.includes("hostInert(")]).toEqual([line, true, true]);
     }
   });

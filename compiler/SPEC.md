@@ -9447,7 +9447,7 @@ ${ let loud = greeting.toUpperCase(); }
   2. **(b) Evaluated per artifact.** Any other non-constant initializer is evaluated at module initialization, once (§7.4.2's one-shot evaluation) — the client bundle and the server bundle each hold their own copy, evaluated in that artifact. ~~in EVERY artifact that reads the binding~~ **Which artifact runs it (S481).** Every file-scope initializer runs, whether or not any code reads the binding, once, in the artifact its reach places it in. ~~The client artifact runs every file-scope initializer, whether or not any code reads the binding. The one exception is a binding that only server code reads: it stays out of the client, and the server runs it.~~ ~~Rule (a) keeps every initializer runnable in the client.~~ *(struck S481 r1 — the next sentences.)* A binding is **server-only** when only server code reads it, or when no code reads it and its initializer reaches server-only code — directly, or through a function it calls, at any depth: a function only server code reaches (placed on the server by its callers, §12.2 Trigger 5), or another server-only binding. A server-only binding stays out of the client artifact — nothing its initializer reaches is printed there because of it — and the server artifact runs its initializer, once, at module initialization, in source order. The client artifact runs every other initializer. The server artifact also runs the initializers of the bindings its code reads. A tool runs every one (the S480 sentence above). Rule (a) refuses only a reach the initializer would wait on; a call of a function the server holds only because server code alone reaches it does not wait, so it is not refused, and it places the binding on the server. An initializer that does nothing observable (no call, no write, no read of an instance) and that no code reads MAY be left out of every artifact: running it cannot be observed. **The program body is one sequence (S481).** The program body runs once, top to bottom, in source order, and that sequence is the module initialization. A file-scope initializer written in the `<program>` body runs in its place in that sequence: after the body-top statements (§40.8), the other initializers and the displays written before it, and before those written after it. Its place is where its `${ }` stands, at any depth: one written inside an element runs among that element's children — after what is written before it there, before what follows — not after the whole element *(S481 r2, clarifying: #2041 re-review MED-1)*. ~~⚑ **INTERIM (bootstrap, g-boot-nested-init-place-in-construct-s481):** inside a construct whose content does not render once, in place — an `if=` / `else-if=` / `else` element, a component's slot content, a `<match>`, `<pre>` / `<code>` raw content — "in its place" names no single point of the one run, and a file-scope initializer runs once; the bootstrap runs it just after that construct.~~ *(struck S482 — the next sentences.)* **Inside a construct whose content does not render once, in place (S482).** Inside the content of an `if=` / `else-if=` / `else` element, a component's slot content, or a `<match>` arm *(S482 r1)*, at any depth, "in its place" names no single point of the one run — that content renders when, and as often as, the branch shows or the arm's variant is the matched value, or where the component puts its `<slot/>` — and a file-scope initializer runs once. A file-scope initializer written there that **acts** — a call, a write, a `?{}` query, a foreign block — SHALL be a compile error, **`E-FILE-SCOPE-INIT-IN-CONSTRUCT`**, whose message names the construct. Declare the binding before the construct, or compute the value where the content needs it. One that does not act runs once, just after the construct: nothing can observe where it ran. (An initializer scoped to the branch, run each time it shows, is a different feature, not this rule.) ~~A `<match>` arm cannot hold a declaration (the parser refuses one there), and `<pre>` / `<code>` content is raw text (§4.17): neither holds a place.~~ *(struck S482 r1 — #2053 review HIGH-1: only a `${ }` written directly in an arm is a parse error; one in an element of an arm is a declaration there, at any depth, so the arm is named in the sentence above.)* `<pre>` / `<code>` content is raw text (§4.17): it holds no place. Inside an `<each>` row a declaration is refused (E-BOOTSTRAP-UNSUPPORTED, unchanged). An element whose content the HTML parser reads as text — `<textarea>` and `<title>` (RCDATA), `<script>` and `<style>` — holds no place either: an initializer written in one runs just after the element *(S482, clarifying: #2041 r2 review LOW-1 — a place printed inside `<textarea>` became its text in a browser)*. So `${ let n = 1; } ${ n = 5; } ${ const k = n; }` gives `k` the value 5, and `const unused = bump();` calls `bump` even though nothing reads `unused`. An initializer written outside the body (in an imported file, or outside the `<program>`) runs before the body, in link order, then source order. ~~⚑ **Open (S481):** where cell construction sits in this sequence — a cell's initializer and a component's use-site value, which §66.7.6 rule 5 runs at program construction, "before any user code runs".~~ *(resolved S482 — the next sentences.)* **Each seed is computed at its place (S482).** A cell's initializer (its seed) runs at the cell's place in the run — where its declaration stands in the program body; the seeds of an instance the body mounts unconditionally — its use-site values and its own cells' initializers, and those of the instances it mounts — run at the instance's place, where it is mounted. The records are still created at program construction (§66.7.6 rule 1), so component identity (L12) is unchanged. A read of a seed before its place — a display, a statement, another seed, a function they call — computes it then, on demand; a write of the cell before its place runs the seed first. Either way a seed runs once. A seed whose running cannot be observed (one that does nothing and reads no binding or cell — a literal) MAY be computed at construction. ⚑ **INTERIM (bootstrap, g-boot-persist-seed-at-construction-s482):** a persisted cell's seed (`persist=`, §6.14 — the default used when storage holds no value) is not held to its place: it is computed at construction, before the body, and what it reaches runs early (`${ n = 5; } ${ const k = n + 0; } let <c:int=(k) persist="local" key="app.c"/>` shows 1; without `persist=` it shows 5). The capable alternative: restore from storage at construction as §6.14 says, and when storage holds no value, compute the default at the cell's place like any other seed *(S482 r1, #2053 review LOW-1)*. (ruling:user-voice-scrml.md-S481-run-order-followups item 1: *"each seed is computed at its place in the sequence; records are still created at construction, so component identity (L12) is unchanged; a read of a seed before its place computes it early, on demand. Amends §66.7.6 rule 5."*) **Body code reads only the bindings whose place is before it (S482).** A display — an interpolation, an attribute value that is not an event handler, a component's use-site value — or a body-top statement, at any depth of the `<program>` body, that reaches a file-scope binding whose place in the run comes after it — directly, or through a function it calls, at any depth — SHALL be **`E-SCOPE-001`**: the binding is not initialized when that code runs. A read and a write both count. This is the S479 initializer rule below, extended to body code (ruling:user-voice-scrml.md-S481-run-order-followups item 2: *"E-SCOPE-001, the S479 file-scope-initializer rule extended to body code"*). ~~Code that does not run in the body is not judged: an event handler (it runs on the event), the body of a function value the body passes on but does not call, an `<effect>` / `<request>`.~~ ~~As for an initializer, the judgment follows direct calls; a reach only through a function value is not proven to run in the body, and the implementation then runs the binding before the body (the INTERIM in the provenance below).~~ *(struck S482 r1 — the next sentences.)* **A function value in body code counts as called (S482 r1).** A function value that body code names or writes — a function named as a value (an argument, a record field, a value assigned or stored) or a function expression — counts as if it were called where it stands, as §6.7.4 rule 3 counts one: whatever receives it may call it while the body runs (`${ out = run(g); }`, `run` calling `g`). So does a function value inside a function that body code reaches, at any depth. A nested function declaration (§7.3.1) inside a function that body code reaches is not run by being declared: what it reaches counts only through a call of it or its use as a value, at every depth *(S482 r2, clarifying: #2053 r1 review MED-A)*. A function value handed to host or other outside code — a `<host>` binding's parameter, a scheduler — counts as called too: host code may call it synchronously, while the body runs, before the later binding is initialized. §6.7.1a rule 3m (a value handed outside a mount body is not counted) does not carry over: it is about a write the outside world makes later, when the mount's state is already set; here the binding the callback reads may not exist yet when it is called. ⚑ **INTERIM (g-boot-body-reach-host-fn-value-s482):** this counts every host receiver as calling synchronously, so it over-refuses a callback the host only calls later (an event listener); the capable alternative is a host binding signature that declares whether it calls the callback during the call or later, judging only the former *(S482 r2, prov=pa-ruled)*. Code that does not run in the body is not judged: an event handler (an `on…=` attribute — it runs on the event), an `<effect>` / `<request>` (they run after the mount). A function value handed on but never called while the body runs is judged as called all the same (it is refused when it reaches a later binding); move the binding before it. A binding declared outside the body runs before it, so it has no later place. **An initializer reads only the file-scope bindings initialized before it (S479).** An initializer that reaches a file-scope binding declared after it — directly, or through a function it calls, at any depth — SHALL be **`E-SCOPE-001`**, the same error as reading the later binding directly: that binding is not initialized when the initializer runs. Reaching the binding being initialized, through a call, is the same error. A read and a write both count.
   > **Provenance (S481, one source-ordered body):** ruling:user-voice-scrml.md-S481-body-run-order ("⭐ RULED — program-body run order: one source-ordered sequence (#2025 review P1–P3), PA rec adopted") — rec: *"one rule. The program body runs once, top to bottom, in source order, and that sequence is the module initialization. Every file-scope initializer runs whether or not anything reads it, so the S480 tool ruling extends to web programs. A display of a `free` value reads it where it stands."* — owner: *"yes, adopt your rec on P1–P3"* · resolves gap `g-spec-file-scope-unread-init-web-s481` (P1), and `g-spec-file-scope-init-vs-body-top-write-s481` (P2) in part (the ⚑ above stays open) · **supersedes:** *"in EVERY artifact that reads the binding"* for the client (it left an unread initializer out: `const unused = bump();` never ran there, while a tool ran it — S480), and *"evaluated at module initialization"* read as "before the program body" (an initializer ran before a body-top write written above it: `${ n = 5; } ${ const k = n; }` gave `k` the value 1). The server-only exception keeps the S472 rule that a value only server code reads never reaches the client (first a PA reading; RULED S481, ruling:user-voice-scrml.md-S481-run-order-followups item 3 — the S481 r1 provenance below). · **Direction of change:** a run-time behavior change, on the bootstrap, for a web program with an unread initializer that has an effect, or with an initializer after a body-top statement that writes what it reads; no compile result changes. Bootstrap: `compiler/self-host-v2/lower.scrml` `programMarks` / `lowerMarked` (a Core `View.Init` at each binding's place) and `compiler/self-host-v2/print.scrml` `bodyInits` / `clientConsts` (the client runs each initializer in its place, and every one no artifact reads). **INTERIM (bootstrap):** when code that runs before the place reaches the binding — ~~the construction (§66.7.6) of the program or of a declaration it constructs (one an instance, a mount, or a shared reference names anywhere in the program, conditional or not, after the place or before it, including the use-site values of the instances the body mounts unconditionally), a §25.7 CSS bridge, an earlier display or statement, or a function one of them calls~~ *(narrowed S482 — each seed now runs at its place, and a direct reach from body code is E-SCOPE-001, both above)* the construction (§66.7.6) of a declaration the body does not mount (one a shared reference, or a function's lift, names), a seed that is not computed at its place (a persisted cell's default), a §25.7 CSS bridge, an earlier read of a seed or a lazy derived value whose initializer reaches it~~, or body code that reaches it only through a function value~~ *(struck S482 r1: a function value in body code now counts as called — E-SCOPE-001 above)* — the initializer runs at module initialization, before the body, as before S481, so it is never read unset. The order then differs from the source only when an earlier body-top statement writes what that initializer reads. ~~`${ n = 5; } ${ const k = n; } <card n=(k)/>` with `<card>` reading its value gives `k` the value 1.~~ *(S482: it gives 5 — the card's seed runs at its mount.)* A declaration nothing names is never constructed, so its code does not count (S481 r1, #2041 review M2: an unused component reading `k` had made `k` early). impl#1 not changed (S471 policy); impl#1 already runs P1 and P2 in source order.
   > **Provenance (S482, each seed at its place):** ruling:user-voice-scrml.md-S481-run-order-followups item 1 — *"**Where cell / component construction sits in the sequence.** §66.7.6 (S437 O59) puts construction "before any user code runs" with use-site initializers "the one sanctioned user code at construction"; that conflicts with one source-ordered body when a seed reads what an earlier body-top statement writes (`${ n = 5; } ${ const k = n + 0; } <c:int=(k)/>` shows 1; source order gives 5). Rec: *"each seed is computed at its place in the sequence; records are still created at construction, so component identity (L12) is unchanged; a read of a seed before its place computes it early, on demand. Amends §66.7.6 rule 5."* RULED yes."* — owner: *"yes, adopt your recs on all three"* · resolves the S481 ⚑ on cell construction (struck above) · **supersedes:** §66.7.6 rule 5's *"Use-site initializers (§66.9 rule 8) are the one sanctioned user code at construction"* (struck there) · **Direction of change:** a run-time behavior change, on the bootstrap, for a program whose seed acts, or reads a binding or a cell an earlier body-top statement writes: the seed runs at its place, not before the body; no compile result changes. Bootstrap: `compiler/self-host-v2/slice-m1/runtime/runtime.js` `hold` / `seed` / `seedAll` (a held seed stays owed past construction; `Cell.land` runs it before a write); `compiler/self-host-v2/print.scrml` `heldFields` / `liveSeedDecl` (which seeds are held), `holdJs` (the program's factory holds them), `seedPlaceJs` / `instanceJs` (`rt.seed` at a cell's place, `rt.seedAll` at an instance's mount), `reachOf` (a binding a seed reaches is early only when the seed can run before the binding's place); `compiler/self-host-v2/lower.scrml` `programMarks` / `initView` (a cell's declaration is its place); `compiler/self-host-v2/check.scrml` C21 (that place names the cell). impl#1 not changed (S471 policy).
-  > **Provenance (S481 r1, server-only reach):** ruling:user-voice-scrml.md-S481-run-order-followups ("⭐ RULED — body run order follow-ups from #2041 (construction place, later-binding reach, server-only), PA recs adopted") item 3 — *"**"Every initializer runs" means "in some artifact".** A binding only server code reads stays out of the client (S472 placement). Rec: *"confirm — any other reading leaks into the client."* RULED yes."* — owner: *"yes, adopt your recs on all three"*. It was first written as a PA reading: S481's *"Every file-scope initializer runs whether or not anything reads it"* read with the S472 placement — *"a value read only by server code never reaches the client artifact"* (the bootstrap's `constsReadIn` rule since S472) — and §12.2 Trigger 5 (a function only server code reaches is placed on the server). An unread initializer that reaches server-only code therefore runs in the server artifact. Raised by the #2041 S239 review (H1: the first S481 build put such an initializer in the client, and with it the server-only constant or helper it reached — `const keyTag = tag(API_KEY);` printed `API_KEY`'s value into the client; M1: the same initializer written outside the body ran in no artifact). · **supersedes:** *"The client artifact runs every file-scope initializer … The one exception is a binding that only server code reads"* and *"Rule (a) keeps every initializer runnable in the client"* (both struck above; neither was true of a helper placed by Trigger 5) · **Direction of change:** a run-time behavior change, on the bootstrap: such an initializer now runs at the server artifact's module initialization (before, nowhere); the client artifact holds less; no compile result changes. Bootstrap: `compiler/self-host-v2/print.scrml` `serverInits` (built on `callsServerOnly` and `constsReached`), `bodyInits`, `clientConsts`; `compiler/self-host-v2/print-server.scrml` `serverConsts` / `serverReach`. impl#1 not changed (S471 policy). Residue: when the server function that reaches the helper is never called, the server artifact is not printed (it routes nothing), so the initializer runs nowhere — it reaches only dead server code.
+  > **Provenance (S481 r1, server-only reach):** ruling:user-voice-scrml.md-S481-run-order-followups ("⭐ RULED — body run order follow-ups from #2041 (construction place, later-binding reach, server-only), PA recs adopted") item 3 — *"**"Every initializer runs" means "in some artifact".** A binding only server code reads stays out of the client (S472 placement). Rec: *"confirm — any other reading leaks into the client."* RULED yes."* — owner: *"yes, adopt your recs on all three"*. It was first written as a PA reading: S481's *"Every file-scope initializer runs whether or not anything reads it"* read with the S472 placement — *"a value read only by server code never reaches the client artifact"* (the bootstrap's `constsReadIn` rule since S472) — and §12.2 Trigger 5 (a function only server code reaches is placed on the server). An unread initializer that reaches server-only code therefore runs in the server artifact. Raised by the #2041 S239 review (H1: the first S481 build put such an initializer in the client, and with it the server-only constant or helper it reached — `const keyTag = tag(API_KEY);` printed `API_KEY`'s value into the client; M1: the same initializer written outside the body ran in no artifact). · **supersedes:** *"The client artifact runs every file-scope initializer … The one exception is a binding that only server code reads"* and *"Rule (a) keeps every initializer runnable in the client"* (both struck above; neither was true of a helper placed by Trigger 5) · **Direction of change:** a run-time behavior change, on the bootstrap: such an initializer now runs at the server artifact's module initialization (before, nowhere); the client artifact holds less; no compile result changes. Bootstrap: `compiler/self-host-v2/print.scrml` `serverInits` (built on `callsServerOnly` and `constsReached`), `bodyInits`, `clientConsts`; `compiler/self-host-v2/print-server.scrml` `serverConsts` / `serverReach`. impl#1 not changed (S471 policy). Residue: when the server function that reaches the helper is never called, the server artifact is not printed (it routes nothing), so the initializer runs nowhere — it reaches only dead server code. *(Resolved S482 — lane s482-client-roots, gap `g-boot-server-only-init-no-server-artifact-s481`: the server artifact is printed whenever such a binding exists, module initialization only — an empty route manifest — so the initializer runs there. Bootstrap: `print-server.scrml` `printServerBuild`.)*
   > **Provenance (S482, body code reaching a later place):** ruling:user-voice-scrml.md-S481-run-order-followups ("⭐ RULED — body run order follow-ups from #2041 (construction place, later-binding reach, server-only), PA recs adopted") item 2 — *"**A display or statement that calls a function reaching a binding whose place is later.** Rec: *"E-SCOPE-001, the S479 file-scope-initializer rule extended to body code"* — newly-rejecting; measure the corpus count before it lands. RULED yes."* — owner: *"yes, adopt your recs on all three"* · **supersedes:** the S481 INTERIM's *"an earlier display or statement, or a function one of them calls"* as a trigger to run a binding before the body — for a direct reach it is now this error ~~(a reach only through a function value keeps the INTERIM)~~ *(S482 r1: a reach through a function value too — below)* · **Direction of change:** newly-rejecting, on the bootstrap. Measured (lane s482-runorder-followups): of 2960 `.scrml` files under `examples/`, `samples/`, `benchmarks/` and `conformance/cases/`, 0 newly rejected (one conformance case already refused by the bootstrap on its parse errors gains one more report). Bootstrap: `compiler/self-host-v2/analyze.scrml` `bodyReachDiags` ~~(on the S479 direct-call closure `usesD`)~~. **S482 r1 (#2053 review MED-1; prov=pa-ruled, S482 r1):** `${ n = 5; } ${ out = run(g); } ${ const k = n + 0; }`, with `run` calling `g` and `g` reading `k`, compiled and showed `k` = 1 (it ran `k` before the body) — a silent wrong value under ruling item 2's "calls a function reaching a binding whose place is later". The PA reads "calls" as §6.7.4 rule 3 counts a call: a function value body code names or writes (an argument, a record field, a value assigned; a function expression) counts as called, transitively ~~(the closure `uses`, which counts function values and nested functions as rule (a) of S479 does, not the direct-call `usesD`)~~ (the closure `usesR`, not the direct-call `usesD`). **S482 r2 (#2053 r1 review MED-A):** the r1 closure also counted a nested function declaration a reached function never calls, so `${ out = h(); }` with `h` declaring a never-called `inner` that reads a later `k` was refused (E-SCOPE-001, "`h()` … uses `k`") though it runs correctly (`1 | 7` on main); `usesR` holds nested declarations back (`heldSpansIn`) in every reached function, so one counts only through a call of it or its use as a value, and the message names the path (`calls h(), which reaches inner(), which uses k`). **S482 r2 (#2053 r1 review LOW, prov=pa-ruled):** a function value handed to host code stays counted as called (fail-closed: host code may call it synchronously during the body) — the sentence and ⚑ INTERIM above, gap `g-boot-body-reach-host-fn-value-s482`. Newly-rejecting, measured first (base dd240c4c9 vs r1, the 2964 corpus files): 0 newly rejected, 0 code or output changes. Over-refusal: a function value handed to code that never calls it while the body runs (`${ apply(g) }` with `apply` ignoring it; one stored for later, or handed to a host subscription) is refused when it reaches a later binding — the corpus holds none; the fix is to declare the binding before it. A conditional PA ruling: owner may veto, then this returns to the INTERIM. impl#1 not changed (S471 policy); on the conformance case (`body-top/display-reaches-later-binding-neg`) it already reports E-SCOPE-001, for its own reason (it does not see a `${ }` block's declaration from a function declared in an earlier block — "Undeclared identifier `k`").
   > **Provenance (S482, an acting initializer inside a conditional construct):** ruling:user-voice-scrml.md-S481-nested-init-chain-comments ("⭐ RULED — nested initializers in conditional constructs; comments / `#{}` between if-chain members (#2041 r2), PA recs adopted") item 1 — *"**A file-scope initializer that acts, written inside `if=` content, a component's slot content, or a `<match>`** (today: runs once, unconditionally, just after the construct — INTERIM). Rec: *"make it a compile error naming the construct; refusing means nobody is surprised. The capable alternative, an initializer scoped to the branch, is a different feature. This newly rejects 0 corpus programs."* RULED yes."* — owner: *"aprove both, lets wrap"* · resolves gap `g-boot-nested-init-place-in-construct-s481` · **supersedes:** the S481 r2 INTERIM struck above (an acting initializer ran once, unconditionally, just after the construct) · the code name `E-FILE-SCOPE-INIT-IN-CONSTRUCT` is minted here (§34: the `E-FILE-SCOPE-*` family of §7.6; no existing code names a place) · "acts" is §7.6's own complement of an initializer that "does nothing observable": a call, a write, a query, a foreign block · **Direction of change:** newly-rejecting, on the bootstrap. Measured (lane s482-runorder-followups, the same 2960 files): 0 newly rejected (two `samples/` gauntlet programs the bootstrap already refuses gain one report each). **S482 r1 (#2053 review HIGH-1):** the ruling names `<match>`, and an acting initializer in an element of a `<match>` arm was not refused (it ran once, whichever arm showed) — now refused, naming the arm (`constructAt`); re-measured over the 2964 corpus files: 0 newly rejected. Bootstrap: `compiler/self-host-v2/analyze.scrml` `constructInitDiags` / `constructAt`. impl#1 not changed (S471 policy; Nominal there).
   3. **(c) A file-scope `let` is per-artifact state.** A server function SHALL NOT write a file-scope `let`, **`E-FILE-SCOPE-LET-SERVER-WRITE`**: the server artifact's copy would be per-process mutable state shared by every request, a cross-user leak. Per-user server state belongs in a session (§20.5) or the database; client state in a cell. Every write form counts — an assignment, a tape edit (§66.12.6 rule 3), a write to a part of the binding (§66.11.4) — and so does a write made by a function the server function calls, directly or transitively: that call runs on the server, in the server artifact, on the server function's behalf (a server function is judged by its static call graph, as §12.4 judges it for E-ROUTE-002). A write made while an initializer runs at module initialization (rule (b)) is not a server function's write: it runs once per artifact, not per request. **A tool program without `serve=` is exempt (S479).** A `kind="tool"` program (§64) with no `serve=` attribute has no client boundary (§64.5.1), no requests and no other users: a file-scope `let` its functions write is the one process's own state, not state shared across requests, so rule (c) does not apply to it. A `kind="tool"` program WITH `serve=` (§64.9, in any form — a well-formed port or not) is NOT exempt: it is a listener-owning headless serve-target that mounts routes and answers requests from many users, so a file-scope `let` its functions write is per-process state shared across requests again, and rule (c) applies to it as to any server function.
@@ -27811,7 +27811,15 @@ state that are in scope where `^{}` appears are accessible inside the meta block
   that are lexically in scope at the point where `^{}` appears.
 - A `^{}` meta context SHALL have access to the type registry, including all user-declared
   types and compiler-synthesized types (e.g., §14.8 generated table types).
-- A `^{}` meta context SHALL have access to the encoded variable name registry (see ADR-001).
+- ~~A `^{}` meta context SHALL have access to the encoded variable name registry (see ADR-001).~~
+  *(struck S481: the encoded-name registry is impl#1's — §47.1–§47.5, output name encoding, are an impl#1
+  annex, not a language obligation (S473 D4) — and nothing in the closed primitive set of §22.5.1 or §22.4
+  exposes it, so the sentence named no observable obligation.)*
+
+  > **Provenance:** ruling:user-voice-scrml.md S473 D4 "your recs on all" (*"§47.1–§47.5 (output name
+  > encoding) are NOT a language obligation. They are demoted to an impl#1 annex"*) — the S481 `^{}` design
+  > read (F1) found this §22.3 bullet still binding a registry D4 had demoted. **Direction of change:** inert —
+  > no program can observe the registry; no implementation builds a surface for it.
 - The mechanism by which access is provided SHALL differ between compile-time and runtime
   meta (see §22.4 and §22.5 respectively). Both modes SHALL satisfy the access guarantees
   stated above.
@@ -27861,6 +27869,113 @@ the form) rather than evaluating the block without it.
 > implementation, not the language.
 >
 > **Provenance:** ruling:user-voice-scrml.md S458 "1a" (the allow-list landing) — S459 PA review nit 1 of PR #1359; governing text §22.2 (meta-body), §22.4 (evaluate and inline), §22.9 ("`^{}` blocks MAY contain `match` expressions"). **Direction of change: newly-accepting** (`while`, `function`, `break` / `continue`, `match` now evaluate) **and newly-rejecting** (the refused forms above were silently dropped, now `E-META-EVAL-001`).
+
+**The evaluation bound (S481).** Compile-time evaluation is deterministic and bounded by a STEP COUNT,
+never a clock, so a body is accepted or refused the same way on every machine. A body that runs past
+the bound is refused with `E-META-EVAL-001`, naming the bound; it is never evaluated in part. The
+bound covers work and size as well as statements, so a short body cannot take the compiler's memory:
+
+- **Steps.** At most 1,000,000 evaluation steps per block, and calls nested at most 64 deep. A
+  built-in's work counts toward the same step count: one step per 1,024 characters a built-in
+  produces or reads, or list elements it copies (`+` and templates by the length of the text they
+  build, `repeat`, `padStart` / `padEnd`, `concat`, `slice`, `split`, `join`, `push`, `sort`,
+  `emit`), and one step per 16 elements of a list or record it walks (`==` on lists and records, a
+  list turned to text, `includes`, `map` / `filter`, and — S482 — a record literal, an object spread
+  `{ ...r }` and a field write `r.k = v`, each by the fields it copies; a spread into a record that
+  already has fields also by the pairs of keys it compares). S482 r4: every operation the evaluator
+  performs is charged at least its worst-case cost as a function of its inputs — a substring search
+  (`indexOf`, `includes`, `split`, `replace`, `replaceAll`) runs in time linear in the two strings and
+  is charged their length; reading, writing or declaring a binding, a record member read and a call's
+  arguments are charged by the bindings, keys and arguments the evaluator searches or copies (one step
+  per 1,024, each comparison weighed by the length of the name compared); a function value made at
+  run time is charged the walk of its body.
+- **The compile-wide step total (S482).** The step bound is per block, and a compile may hold any
+  number of blocks, so all the `^{}` blocks of ONE COMPILE together — every file's, imported files
+  included, refused blocks too — may take at most 4,000,000 steps (4 × the per-block bound), counted
+  as the step bound counts them. The block that reaches the total is refused with `E-META-EVAL-001`
+  naming it, and once it is spent every further block of the compile is refused the same way, before
+  it runs. (A namespace re-read parses a file again and runs its blocks once more, so a compile runs
+  at most twice the total — the same rule as the emit budget.) The largest total any corpus program,
+  conformance case or documentation snippet takes is 223 steps.
+- **Size.** No single value may exceed 16 Mi (16,777,216): the characters of a string, or a list or
+  record counted with everything it holds (a list holding the same list twice counts it twice). No
+  list may hold more than 1 Mi (1,048,576) elements, and values nest at most 256 levels deep. The
+  output of `emit()` / `emit.raw()` in one block is a string under the same bound. Each size is
+  checked before the value is built.
+- **Allocation (S482).** What a block's built-ins allocate is counted as it is made and never given
+  back, at most 256 Mi (268,435,456) units per block: a character of a string a built-in builds
+  counts 1, a list slot or record field it copies 8, an element value it creates 128 (`split`, a
+  string's characters in a spread or a `for … of`, `reflect`). A body past it is refused with
+  `E-META-EVAL-001` naming the bound; element values are counted before they are made.
+- **The emit budget (S482; one per compile since S482 r4).** All the `^{}` blocks of ONE COMPILE
+  together — every file's, imported files included — may emit at most 1 Mi (1,048,576) characters
+  and 64 Ki (65,536) `<` characters, and the markup they splice may hold at most 32 Ki (32,768) nodes
+  (elements and text) and 32 Ki attributes; one emitted element may carry at most 1 Ki (1,024)
+  attributes, emitted elements nest at most 256 levels deep, and reading the output may raise at most
+  1 Ki problems. The block that would pass one is refused with `E-META-EVAL-001` naming the bound.
+  The characters and `<` characters are counted as the body runs, and `emit()` text past the budget is
+  refused before its escapes are read (§22.4.1). The nodes, attributes, nesting and problems are
+  counted by the markup reader itself as it reads the emitted text, and it stops at the first excess,
+  before its cost grows past the text's — emitted output is never read past the budget.
+- **Plain markup only, as it is read (S482 r4).** The markup reader reads emitted output as plain
+  markup (§22.4.1): at the first construct that is not — a `${…}` logic block, a `#{…}` CSS block, a
+  `^{…}`, `!{…}`, `?{…}` or `_{…}` block, a declaration, an instance reference `<*…>`, a structural
+  element (`<match>`, `<db>`, `<schema>`, `<host>`, `<program>`, `<effect>`, `<request>`, `<theme>`), a
+  typed or namespaced attribute, a call in a tag, or an attribute value that is not quoted — it stops
+  and the block is refused with `E-META-EVAL-002` naming the construct. Such output was always
+  refused; it is now refused without reading the construct (a few kilobytes of brackets in a logic
+  block drove the logic reader past the compiler's stack).
+
+Building a long string by repeated `+` costs its length at each step; `.map(…).join("")` or one
+`emit()` per piece builds it at the cost of its length once. A list built by `push` in a loop costs its
+length once: a `push` to a binding whose list no other value holds appends in place (a list read in
+any other way since — kept in another binding, a container or a call, or read inside a callback such
+as `.map((x) => xs)` — is copied first, so the value taken earlier is unchanged and no list can come to
+hold itself, §66.10). A method that changes the list it is called on (`push`, `pop`, `sort`,
+`reverse`) changes the binding's list as it stands after the call's arguments are evaluated, so an
+argument that changes the same binding is seen (`t.push(t.push(2))` appends to the list the inner
+`push` made, and a name bound to `t` earlier keeps its own value); an argument that ASSIGNS the binding
+(`t.push((t = [9]).length)`) is refused with `E-META-EVAL-001`, since JavaScript would change the list
+`t` named before the assignment (S482 r5).
+
+> **Provenance:** ruling:user-voice-scrml.md S481 "⭐ RULED — `^{}` meta in the bootstrap: four design
+> questions" item 4 (*"a scrml interpreter over the bootstrap's own syntax tree, as the permanent design,
+> not impl#1's run-JS-in-a-sandbox. It stays deterministic and in scrml (S114, S452), bounded by a step
+> count rather than a clock."* — PERMANENT; ruling:user-voice-scrml.md-S481-meta-four). The numbers are
+> the S481 PA default (PR #2045 r1, review MED-1: a three-line body doubling a list reached 24 GB RSS,
+> and a doubled string ended in a host `RangeError`). Emitted by the bootstrap at
+> `compiler/self-host-v2/meta.scrml` (`tick`, `charge`, `made`, `maxSize` / `maxElems` / `maxNest`).
+> The allocation bound and the emit budget are the S482 PA default (PR #2045 r3, re-review HIGH-1..3:
+> forty 60-byte blocks of `emit("…".repeat(1000000))` passed 6 GB; `<i></i>` emitted 262,144 times ran
+> past 60 seconds in the markup reader; fourteen `s.split("")` of a 1 Mi string reached 2 GB inside the
+> step bound; a 1,000-field `{ ...r }` in a loop was charged no steps and ran 37 minutes of CPU per block).
+> The per-compile budget, the reader's own bounds, the plain-markup reading and the charged searches are
+> the S482 r4 PA default (PR #2045 r4, re-review HIGH-2..4 and MED-1: a worst-case `indexOf` ran one
+> block for minutes inside the step bound; forty imported files multiplied the per-file budget to
+> 2.2 GB; one emitted element of 150,000 attributes, or 256 elements of 1,024 repeated attributes, ran
+> past 60 seconds in the reader; 7,000 nested elements ended in a host `RangeError`); the cost model is
+> stated as an invariant and checked operation by operation (the bootstrap's
+> `compiler/self-host-v2/meta.scrml` THE BINDINGS / THE SEARCH, and `parse.scrml` FRAGMENT MODE).
+> The compile-wide step total is the S482 r5 PA default (PR #2045 r5, re-review HIGH-2: forty blocks
+> (7 KB of source in all), each running just inside the per-block bound, took 54 seconds; with the total they are
+> refused after the fourth in about 6 seconds).
+> **impl#1 status:** impl#1 bounds a compile-time body by a 5-second `node:vm` timeout (a clock) and
+> does not bound a single allocation or a file's emitted output; a host `RangeError` there is reported
+> as `E-META-EVAL-001`.
+> **Direction of change: newly-rejecting** only for bodies past the bound (none in the corpus or the
+> conformance cases); newly-accepting for `repeat` counts past 100,000 (an S481 bootstrap cap, removed).
+
+> **Bootstrap status (S481 r1, INTERIM — `g-boot-meta-closure-by-value-s481`).** The bootstrap's
+> evaluator keeps the bindings a function or lambda captures BY VALUE. It refuses, with
+> `E-META-EVAL-001` naming the binding, the two cases where that would differ from reading the binding
+> itself: a write from inside a function or lambda to a binding outside it, and a write to a binding
+> after a function or lambda that reads it was made (a lambda written directly as the argument of a
+> list method that calls it — `map`, `filter`, `forEach`, `some`, `every`, `find`, `findIndex`,
+> `reduce`, `sort` — is kept by nobody and is exempt; the exemption is the callback argument alone,
+> argument 0: a lambda in any other argument, such as `reduce`'s initial value, which `reduce` returns,
+> is pinned like any other — S482 r3). Aliasing is not one of them: a binding taken
+> from another is a snapshot (§66.10 item 1), so `const b = a; b.push(2)` leaves `a` unchanged. The
+> capable alternative is a binding store threaded through the evaluator, closures holding binding ids.
 
 Compile-time meta blocks have access to the type registry via `reflect()` (see §22.4.2).
 Phase-separation rules (§22.8) apply to compile-time meta.
@@ -28072,6 +28187,21 @@ Given a call `reflect(expr)` inside a `^{}` block:
   runtime values is a runtime block; its `reflect()` calls that happen to have literal
   arguments are still emitted as `meta.types.reflect(...)` calls in the runtime block output.
   The inlining optimization (strategy 1) applies only when the ENTIRE block is compile-time.
+  A literal argument does not change this: `^{ const i = reflect(User); meta.emit("<p>" + i.name + "</p>") }`
+  is a RUNTIME block whose `reflect(User)` resolves by the runtime path, and it compiles — it is not a
+  phase mix (§22.8), and `E-META-005` does not apply to it.
+
+  > **Provenance:** ruling:user-voice-scrml.md S481 "⭐ RULED — `^{}` meta in the bootstrap: four design
+  > questions" item 1 (*"compile it (§22.4.2), and drop the E-META-005 trigger from §22.8 for this case"*;
+  > ruling:user-voice-scrml.md-S481-meta-four). Resolves the §22.4.2 / §22.8 contradiction the S481 design read
+  > found (F2). **Direction of change:** newly-accepting — a runtime block holding a literal `reflect(T)` was
+  > `E-META-005` in impl#1.
+  >
+  > **impl#1 status (S481).** impl#1 still reports `E-META-005` for this block (meta-checker.ts
+  > `bodyMixesPhases` counts a PascalCase `reflect(User)` as a compile-time pattern); impl#1 is frozen (S471),
+  > so this is a carried impl#1 divergence. The bootstrap classifies by this paragraph (meta.scrml
+  > `isCompileTime`); it builds compile-time `^{}` only, so it refuses such a block today as a runtime block
+  > not yet built (`E-BOOTSTRAP-UNSUPPORTED`), never as `E-META-005`.
 - `reflect(unknownLiteral)` where the literal does not match any known type name SHALL be a
   compile error (E-META-003: reflect() called on unknown type).
 - `reflect(variable)` where `variable` could hold an unknown type name at runtime SHALL
@@ -28336,13 +28466,14 @@ all types that are in scope at any runtime `^{}` breakout point.
 ```javascript
 {
   TypeName: {
-    kind: "struct" | "enum" | "union",
+    kind: "struct" | "enum" | …,   // the declaration's kind (a primitive: "primitive")
+    name: "TypeName",
     fields: [          // present when kind === "struct"
-      { name: "fieldName", type: "TypeName" | primitive },
+      { name: "fieldName", type: "string" },   // `type`: the field's written type, as text
       ...
     ],
     variants: [        // present when kind === "enum"
-      { name: "VariantName" },
+      "VariantName",   // the variant NAMES, as strings
       ...
     ]
   },
@@ -28350,8 +28481,31 @@ all types that are in scope at any runtime `^{}` breakout point.
 }
 ```
 
+~~`kind: "struct" | "enum" | "union"` … `variants: [ { name: "VariantName" }, … ]`~~ *(struck S481 — the
+shape above is the rule; see the provenance below.)*
+
 The shape of each type entry SHALL be identical to what `reflect(TypeName)` produces in
-compile-time meta (§22.4).
+compile-time meta (§22.4): an object with `kind` and `name`; a struct's `fields`, each
+`{ name, type }` with `type` the field's written type as text; an enum's `variants`, the
+variant names as strings (as §14.4.2: "`.variants` is an array of variant-NAME strings").
+A declared type of any other kind carries `kind` and `name` only.
+
+The compiler-known type `TypeInfo` names an entry for a compiler that types `reflect()`
+results: `TypeInfo:struct = { kind: string, name: string, fields: FieldInfo[], variants: string[] }`
+with `FieldInfo:struct = { name: string, type: string }`.
+
+> **Provenance:** ruling:user-voice-scrml.md S481 "⭐ RULED — `^{}` meta in the bootstrap: four design
+> questions" item 3 (*"adopt impl#1's shape, as the permanent rule. `variants` is a list of name strings,
+> `fields` is `{name, type}`, plus `kind` and `name`. Amend §22.5.4 to match. Add a compiler-known `TypeInfo`
+> type so the bootstrap can type-check uses of it."* — PERMANENT; ruling:user-voice-scrml.md-S481-meta-four) ·
+> supersedes: *"kind: "struct" | "enum" | "union" … variants: [ { name: "VariantName" } ]"* (the struck shape,
+> which neither implementation produced — impl#1's compile-time `createReflect` and, since S211, its runtime
+> registry return name strings). **Direction of change:** inert for impl#1 (the rule now states what it
+> produces); meaning-changing only for a reader of the struck `{ name }` variant shape, which no
+> implementation returned. *(⚑ OPEN — owner question, S481: what a `TypeInfo`-typed read of the member a kind
+> does not carry (`fields` of an enum) yields — absent, as impl#1's entry has it, or the empty list. The
+> bootstrap's compile-time evaluator returns impl#1's entry as is (absent); the question binds the typed
+> runtime-`^{}` phase. Gap `g-boot-meta-typeinfo-absent-member-s481`.)*
 
 **The `meta.types` API:**
 
@@ -28473,10 +28627,22 @@ executes at program run time. These phases SHALL NOT be mixed in a single `^{}` 
 
 **Normative statements:**
 
-- A `^{}` block SHALL NOT reference both compile-time API patterns (e.g., `reflect()`,
-  `emit()`, `emit.raw()`) and runtime-only values in the same block.
-- The compiler SHALL reject any `^{}` block that mixes compile-time and runtime access
-  patterns (E-META-005).
+- ~~A `^{}` block SHALL NOT reference both compile-time API patterns (e.g., `reflect()`,
+  `emit()`, `emit.raw()`) and runtime-only values in the same block.~~
+- ~~The compiler SHALL reject any `^{}` block that mixes compile-time and runtime access
+  patterns (E-META-005).~~
+- A `^{}` block SHALL NOT use a compile-time-only output API — `emit()` or `emit.raw()` — and a
+  runtime-only value (an `@cell`, the `meta` object, a runtime binding) in the same block. The
+  compiler SHALL reject such a block (E-META-005).
+- A `reflect()` call is not a compile-time-only pattern for this rule: a block holding
+  `reflect(T)` (literal argument or not) beside a runtime-only value is a runtime block, and
+  its `reflect()` resolves by §22.4.2's runtime path — no `E-META-005`.
+
+  > **Provenance:** ruling:user-voice-scrml.md-S481-meta-four item 1 (*"compile it (§22.4.2), and drop the
+  > E-META-005 trigger from §22.8 for this case"*) · supersedes: the two struck bullets above (*"A `^{}` block
+  > SHALL NOT reference both compile-time API patterns (e.g., `reflect()`, `emit()`, `emit.raw()`) and
+  > runtime-only values in the same block."*). **Direction of change:** newly-accepting (a literal `reflect`
+  > beside a runtime value); unchanged for `emit` / `emit.raw` beside one.
 - `reflect(expr)` is the single programmer-facing API for type reflection. The compiler
   resolves `reflect(expr)` to either a compile-time inline (when `expr` is a literal) or a
   `meta.types.reflect(expr)` call (when `expr` is a runtime variable), per §22.4.2.
@@ -37961,6 +38127,11 @@ Value-native maps (§59) hash a **runtime key value** rather than a `ResolvedTyp
 - **Runtime `^{}` blocks** (non-deterministic per §22.6): `reflect()` decodes the encoded variable name using the runtime decode table bundled in `clientJs`.
 
 #### 47.2.2 Return Type
+
+*(S481: the LANGUAGE's `reflect()` result is §22.5.4's entry — `kind`, `name`, a struct's `fields` of
+`{ name, type }` with `type` the written type as text, an enum's `variants` as name strings
+(ruling:user-voice-scrml.md-S481-meta-four item 3, PERMANENT). The nested `TypeDescriptor` below described
+impl#1's planned decode table and binds nothing; where it differs from §22.5.4, §22.5.4 governs.)*
 
 `reflect()` returns a `TypeDescriptor` object:
 

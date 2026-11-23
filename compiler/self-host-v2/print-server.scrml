@@ -51,7 +51,7 @@ ${
              findFn, findServerFn, findDb } from "./core.scrml";
     import { Node, allNodes } from "./walk.scrml";
     import { JsExpr, JsStmt, JsProp, jid, jstr, jnum, jcall, jmember, jmcall, sexpr, printModule } from "./js.scrml";
-    import { RouteOut, Ctx, coreRefusal, sliceName, serverCtx, serverFnJs, envelopedFnJs, symNameOf, routeJs, routeName, routePath, calledServerFns, routeEntryChecks,
+    import { RouteOut, Ctx, coreRefusal, sliceName, serverCtx, serverFnJs, envelopedFnJs, symNameOf, routeJs, routeName, routePath, calledServerFnsWith, shakeProgram, routeEntryChecks,
              sqlTextName, dbVarName, hostImports, hostFnJs, constsReadIn, constStmts, serverInits, wireOrNull, channelRefusal, chOpsJs,
              ChReset, chFoldWhy, chResets, chValueJs, chEdgesJs } from "./print.scrml";
 
@@ -71,25 +71,35 @@ ${
     // the server half keys off it today: a dev build's createServer wraps its host in `rt.devBuild`, so
     // database driver text reaches the client (§19.8.4 / §19.9.1 S474); a production artifact prints no
     // marker and withholds that text whatever its host passes (server-runtime.js `isDevBuild`).
-    export fn printServerBuild(p: CoreProgram, jsFile: string, runtimeFile: string, dev: boolean) -> ServerOutput {
+    export fn printServerBuild(p0: CoreProgram, jsFile: string, runtimeFile: string, dev: boolean) -> ServerOutput {
         // s468 fix round 1 (F3): the gate at emission — a Core checkCore rejects is never printed
-        const ill: string[] = coreRefusal(p);
+        const ill: string[] = coreRefusal(p0);
         if (ill.length > 0) return { js: "", refused: ill, routes: [] };
-        const refused: string[] = serverPrintRefusal(p);
+        const refused: string[] = serverPrintRefusal(p0);
         if (refused.length > 0) return { js: "", refused: refused, routes: [] };
-        const routed: ServerFn[] = calledServerFns(p);
+        // s482 r1 (#2061 review M1/M2): the program the client artifact is printed from too
+        // (print.scrml shakeProgram — no unreached nested function, no unconstructed component)
+        const p: CoreProgram = shakeProgram(p0, []);
+        // s481 r1 (#2041 review H1/M1): the bindings no code reads whose initializer reaches
+        // server-only code — this artifact runs them (print.scrml serverInits)
+        const si: int[] = serverInits(p);
+        // s482 r1 (#2061 review M3): the server functions the client CAN call — one only an
+        // unreached client function calls gets no route (print.scrml calledServerFnsWith)
+        const routed: ServerFn[] = calledServerFnsWith(p, [], si);
         // s478 (s478-boot-endpoint): §61.6 "An `<endpoint>` declaration SHALL emit a server
         // route-handler" — a program with endpoints has a server half even when its client
         // calls nothing
         // s478 (s478-boot-channel): §38.8 "The compiler emits a WebSocket upgrade route at
         // `/_scrml_ws/<name>`" — a program with a channel has a server half too
-        if (routed.length == 0 && p.endpoints.length == 0 && p.channels.length == 0) return { js: "", refused: [], routes: [] };
+        // s482 (s482-client-roots; g-boot-server-only-init-no-server-artifact-s481): and a program
+        // with such a binding has a server half even when it routes nothing — S481 "every
+        // file-scope initializer runs … in the artifact its reach places it in"
+        // (ruling:user-voice-scrml.md-S481-run-order-followups item 3): the artifact is module
+        // initialization only (an empty manifest; createServer answers no route)
+        if (routed.length == 0 && p.endpoints.length == 0 && p.channels.length == 0 && si.length == 0) return { js: "", refused: [], routes: [] };
         const epRefused: string[] = endpointRefusal(p).concat(channelRefusal(p));
         if (epRefused.length > 0) return { js: "", refused: epRefused, routes: [] };
         const ctx: Ctx = serverCtx(p);
-        // s481 r1 (#2041 review H1/M1): the bindings no code reads whose initializer reaches
-        // server-only code — this artifact runs them (print.scrml serverInits)
-        const si: int[] = serverInits(p);
         const reach: int[] = serverReach(p, routed.concat(endpointFns(p)), false, si);
 
         // s472 (boot-math-port): the host modules the reached functions call (§21.3.1 —

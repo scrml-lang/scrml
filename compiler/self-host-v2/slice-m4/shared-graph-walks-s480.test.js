@@ -535,15 +535,18 @@ describe("F2 — a `<host src=>` result over a shared struct graph: the descript
     return { out, r, js: readFileSync(join(out, "program.client.js"), "utf8") };
   }
 
+  // s482 (s482-client-roots): the binding `dg` is printed only when something reaches it (§12.2
+  // Trigger 6 — an unreached function is not printed), so each page below reads it (a reader)
+  const deep = (depth) => Array.from({ length: depth }, () => "f0").join(".");
   test("16 fields per struct, depth 4: a small client.js (base: 6.3 MB)", async () => {
-    const d = project({ "glue.js": glue(16, 4), [ENTRY]: app(16, 4, "<p>x</p>") });
+    const d = project({ "glue.js": glue(16, 4), [ENTRY]: app(16, 4, '<p id="o">${r1()}</p>', reader("r1", deep(4))) });
     const r = await compileSource(join(d, ENTRY));
     expect(r.diagnostics.filter((x) => x.severity === "error")).toEqual([]);
     expect(r.client.js.length).toBeLessThan(64_000);
   }, 120_000);
 
   test("depth 8: linear growth — each struct printed once (base: out of memory past depth 5)", async () => {
-    const d = project({ "glue.js": glue(16, 8), [ENTRY]: app(16, 8, "<p>x</p>") });
+    const d = project({ "glue.js": glue(16, 8), [ENTRY]: app(16, 8, '<p id="o">${r1()}</p>', reader("r1", deep(8))) });
     const t0 = performance.now();
     const p = await compileSource(join(d, ENTRY));
     const ms = performance.now() - t0;
@@ -581,7 +584,7 @@ describe("F2 — a `<host src=>` result over a shared struct graph: the descript
   test("a descriptor WITHOUT sharing is printed inline, byte for byte as before", async () => {
     const d = project({
       "glue.js": "export function dg() { return null; }\n",
-      [ENTRY]: `<host src="./glue.js">\n  dg() -> A | not\n</host>\n<program>\n\${\n    type A:struct = { b: B, n: int[] }\n    type B:struct = { s: string, h: bool | not }\n}\n<p>x</p>\n</program>\n`,
+      [ENTRY]: `<host src="./glue.js">\n  dg() -> A | not\n</host>\n<program>\n\${\n    type A:struct = { b: B, n: int[] }\n    type B:struct = { s: string, h: bool | not }\n    function none() -> bool {\n        const v: A | not = dg();\n        return v is not;\n    }\n}\n<p>\${none()}</p>\n</program>\n`,
     });
     const r = await compileSource(join(d, ENTRY));
     expect(r.diagnostics.filter((x) => x.severity === "error")).toEqual([]);

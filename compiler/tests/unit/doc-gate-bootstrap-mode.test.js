@@ -27,7 +27,8 @@ const fence = (...body) => [`${F}scrml`, ...body, F];
 // A program the bootstrap compiles (ruled spelling), one it refuses (a `^{}` meta context is not in it; s469-boot-css: was `#{}`, which it now compiles),
 // and one impl#1 compiles but the bootstrap does not parse (legacy `<x> = v` cell).
 const GOOD = ["<program>", "    let <count:int=0/>", "    function inc() {", "        @count = @count + 1;", "    }", "    <main><button onclick=inc()>+</button><p>${@count}</p></main>", "</program>"];
-const AHEAD = ["<program>", "    <main>", "        <p>hi</p>", "        ^{ 1 }", "    </main>", "</program>"];
+// s481-boot-meta: a RUNTIME `^{}` (compile-time `^{}` is built; runtime meta is not yet)
+const AHEAD = ["<program>", "    <main>", "        <p>hi</p>", "        ^{ meta.emit(\"<b>x</b>\"); }", "    </main>", "</program>"];
 const LEGACY = ["<program>", "    <count> = 0", "    <p>${@count}</p>", "</program>"];
 
 describe("parseDocMarkers — dialect opt-in", () => {

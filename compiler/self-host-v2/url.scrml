@@ -182,11 +182,13 @@ ${
                 const url: string = text.substring(urlStart, i);
                 let end: int = url.length;
                 for (;;) { if (!(end > 0 && url.substring(end - 1, end) == ",")) { break; } end = end - 1; }
+                // (each URL is set in place — no copy of the list per URL, S482 r4:
+                // `^{}` output may carry a srcset of a hundred thousand candidates)
                 if (end < url.length) {
                     // trailing commas: the URL ends there and no descriptors follow
-                    urls = urls.concat([url.substring(0, end)]);
+                    urls[urls.length] = url.substring(0, end);
                 } else {
-                    urls = urls.concat([url]);
+                    urls[urls.length] = url;
                     let depth: int = 0;
                     let going = true;
                     for (; going && i < n; ) {
@@ -215,14 +217,14 @@ ${
         for (; i < text.length; ) {
             const c: string = text.substring(i, i + 1);
             if (isHtmlWs(c) || (comma && c == ",")) {
-                if (cur != "") out = out.concat([cur]);
+                if (cur != "") out[out.length] = cur;
                 cur = "";
             } else {
                 cur = cur + c;
             }
             i = i + 1;
         }
-        if (cur != "") out = out.concat([cur]);
+        if (cur != "") out[out.length] = cur;
         return out;
     }
 

@@ -2,7 +2,7 @@
 <label> = "hi"
 <div id="host">
 ^{
-  meta.emit("<label for=\"danger\">free stuff</label>")
+  meta.emit("<label for=\"danger\">free stuff</label>");
 }
 </div>
 </program>

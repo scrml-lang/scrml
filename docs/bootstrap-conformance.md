@@ -11,26 +11,26 @@ Scope: **1964 of 1964 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 778 | 39.6% |
+| PASS | 816 | 41.5% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 3 | 0.2% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 628 | 32.0% |
-| UNSUPPORTED | 555 | 28.3% |
+| UNSUPPORTED | 517 | 26.3% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 781; of those, 778 hold (99.6%). Runtime half executed on the bootstrap for 252 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 819; of those, 816 hold (99.6%). Runtime half executed on the bootstrap for 261 case(s).
 
-- **Vacuous** passes: 15 of 778 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **763**.
+- **Vacuous** passes: 15 of 816 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **801**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 1 of 3; the other 2 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 555.
+UNSUPPORTED by reason: bootstrap-unsupported 517.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **915** — PASS 499 · FAIL 3 · UNSUPPORTED 413. Twin holds 499 (non-vacuous 487). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **898** — PASS 500 · FAIL 3 · UNSUPPORTED 395. Twin holds 500 (non-vacuous 488). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 7 replace a twin's expectations · 14 exclude a case.
 - Superseded-code mappings applied: 8 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -134,7 +134,7 @@ NOT-TWINNED by reason (628 cases; a case counts once per distinct reason):
 | defer | 51 | 27 | · | 1 | · | 1 | 22 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 26 | 1 | · | · | · | 25 | · | · | · |
-| element-refusal | 39 | 26 | · | · | · | 11 | 2 | · | · |
+| element-refusal | 39 | 27 | · | · | · | 11 | 1 | · | · |
 | endpoint | 31 | 30 | · | · | · | · | 1 | · | · |
 | engine | 101 | 31 | · | · | · | 50 | 20 | · | · |
 | enum | 1 | 1 | · | · | · | · | · | · | · |
@@ -158,7 +158,7 @@ NOT-TWINNED by reason (628 cases; a case counts once per distinct reason):
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
 | match-leave | 46 | 22 | · | · | · | 9 | 15 | · | · |
 | md | 18 | 1 | · | · | · | 3 | 14 | · | · |
-| meta | 66 | 1 | · | · | · | 2 | 63 | · | · |
+| meta | 66 | 38 | · | · | · | 2 | 26 | · | · |
 | middleware | 6 | 3 | · | · | · | · | 3 | · | · |
 | module | 51 | 30 | · | · | · | 11 | 10 | · | · |
 | navigate | 3 | · | · | · | · | · | 3 | · | · |
@@ -207,7 +207,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (778)
+### PASS / CODES-ONLY (816)
 
 - `attr-executable-sink/base-href-data-neg` — PASS · TWIN
 - `attr-executable-sink/base-href-static-pos` — PASS · TWIN
@@ -408,6 +408,7 @@ none
 - `element-refusal/logic-bare-markup-script-pos` — PASS
 - `element-refusal/match-arm-raw-body-pos` — PASS · TWIN
 - `element-refusal/match-arm-script-pos` — PASS · TWIN
+- `element-refusal/meta-emit-raw-body-pos` — PASS
 - `element-refusal/near-names-neg` — PASS
 - `element-refusal/pre-raw-script-pos` — PASS
 - `element-refusal/raw-comment-script-pos` — PASS
@@ -732,7 +733,44 @@ none
 - `match-leave/top-level-match-arm-return-neg` — PASS · TWIN
 - `match-leave/value-arm-leave-word-in-string-not-a-leave` — PASS · TWIN
 - `md/in-logic-markup-refused` — PASS · TWIN
-- `meta/meta-reflect-outside-block-neg` — PASS · TWIN
+- `meta/emit-single-quote-inside-attr-clean` — PASS
+- `meta/emit-single-quoted-attr-reject` — PASS
+- `meta/meta-allow-list-clean-pos` — PASS
+- `meta/meta-allow-list-computed-key-neg` — PASS
+- `meta/meta-allow-list-constructor-neg` — PASS
+- `meta/meta-compiler-namespace-neg` — PASS
+- `meta/meta-emit-bare-scope-attr-neg` — PASS
+- `meta/meta-emit-clean-pos` — PASS
+- `meta/meta-emit-closed-attr-list-neg` — PASS
+- `meta/meta-emit-form-member-name-pos` — PASS
+- `meta/meta-emit-label-for-neg` — PASS
+- `meta/meta-emit-map-name-neg` — PASS
+- `meta/meta-emit-meta-descriptive-pos` — PASS
+- `meta/meta-emit-meta-http-equiv-neg` — PASS
+- `meta/meta-emit-meta-name-any-case-pos` — PASS
+- `meta/meta-emit-normalize-escape` — PASS
+- `meta/meta-emit-plain-id-name-pos` — PASS
+- `meta/meta-emit-raw-escape` — PASS
+- `meta/meta-emit-reserved-attr-neg` — PASS
+- `meta/meta-emit-script-neg` — PASS
+- `meta/meta-emit-splice-render-rt` — PASS
+- `meta/meta-emit-template-input-pos` — PASS
+- `meta/meta-emit-url-foreign-neg` — PASS
+- `meta/meta-emit-url-pos` — PASS
+- `meta/meta-emit-url-scheme-neg` — PASS
+- `meta/meta-emit-url-srcset-neg` — PASS
+- `meta/meta-emit-usemap-neg` — PASS
+- `meta/meta-eval-clean-pos` — PASS
+- `meta/meta-eval-reparse-error-neg` — PASS
+- `meta/meta-eval-runtime-error-neg` — PASS
+- `meta/meta-invalid-token-neg` — PASS
+- `meta/meta-jshost-global-neg` — PASS
+- `meta/meta-mixed-patterns-neg` — PASS
+- `meta/meta-nested-block-neg` — PASS · TWIN
+- `meta/meta-reflect-clean-pos` — PASS · TWIN
+- `meta/meta-reflect-outside-block-neg` — PASS
+- `meta/meta-reflect-unknown-type-neg` — PASS
+- `meta/meta-sql-in-runtime-block-neg` — PASS
 - `middleware/ratelimit-invalid-unit-pos` — PASS
 - `middleware/trusted-proxies-invalid-neg` — PASS
 - `middleware/trusted-proxies-invalid-pos` — PASS
@@ -988,7 +1026,7 @@ none
 - `type-state-codes/e-type-any-forbidden-pos` — PASS · TWIN
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (555)
+### UNSUPPORTED (517)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1007,7 +1045,7 @@ none
 - `apply/apply-non-inlinable-neg` — bootstrap-unsupported: `@apply` (§26.8) is not in the bootstrap — the Tailwind utility table is not; write the declarations
 - `apply/apply-unknown-utility-neg` — bootstrap-unsupported: `@apply` (§26.8) is not in the bootstrap — the Tailwind utility table is not; write the declarations
 - `apply/apply-variant-unsupported-neg` — bootstrap-unsupported: `@apply` (§26.8) is not in the bootstrap — the Tailwind utility table is not; write the declarations
-- `attr-executable-sink/meta-emit-neg` — twin · bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
+- `attr-executable-sink/meta-emit-neg` — twin · bootstrap-unsupported: `log(…)` is a language built-in (§20.6: "`log(...args)` SHALL be a compiler-managed built-in") that the bootstrap does not build yet — the location-transparent dev logger arrives with the §20 built-in
 - `attr-executable-sink/non-handler-and-raster-data-pos` — twin · bootstrap-unsupported: `online="…"` holds a `${…}` interpolation — a quoted value with `${…}` is a reactive template (§5.5.3), which is not in the bootstrap; it would be emitted as literal text. Write the value as an expres
 - `attr-executable-sink/safe-interp-pos` — twin · bootstrap-unsupported: `href="…"` holds a `${…}` interpolation — a quoted value with `${…}` is a reactive template (§5.5.3), which is not in the bootstrap; it would be emitted as literal text. Write the value as an expressi
 - `attr-executable-sink/svg-animation-literal-scheme-neg` — twin · bootstrap-unsupported: `to="…"` holds a `${…}` interpolation — a quoted value with `${…}` is a reactive template (§5.5.3), which is not in the bootstrap; it would be emitted as literal text. Write the value as an expression
@@ -1109,7 +1147,6 @@ none
 - `defer/yield-in-defer-neg` — twin · bootstrap-unsupported: `yield (a generator)` (§10.1) is not in the bootstrap yet; it is refused here by name rather than misread — generators (`function*`, `yield`) are not in the bootstrap
 - `derived/e-derived-server-only-reach-fn-path` — twin · bootstrap-unsupported: `scrml:auth` is a server-only stdlib module (§12.2 Trigger 3: its implementation reaches a host API no browser has, or it handles a credential). Calling one of its bindings SHALL place the calling fun
 - `element-refusal/handler-arrow-markup-script-pos` — bootstrap-unsupported: an arrow function stands where the bootstrap does not build a function value — a function value may be bound (`const f = …` / `let f = …`, or `f = …` to such a local), passed as an argument of a scrml
-- `element-refusal/meta-emit-raw-body-pos` — bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
 - `endpoint/cors-attr-clean` — bootstrap-unsupported: `cors=` on `<endpoint>` (§61.7 — cross-origin browser callers) is not in the bootstrap yet: it builds no CORS answer (nor the `<program cors=…>` one), so it is refused by name rather than ignored (INT
 - `engine/history-no-inner-engine-pos` — twin · bootstrap-unsupported: `history` on the state-child `<Idle>` is not in the bootstrap — a state-child reads only `rule=` (§66.13.2); the attribute would be ignored
 - `engine/internal-rule-not-composite-pos` — twin · bootstrap-unsupported: `internal:rule` on the state-child `<Idle>` is not in the bootstrap — a state-child reads only `rule=` (§66.13.2); the attribute would be ignored
@@ -1268,69 +1305,32 @@ none
 - `md/slot-text-reactive` — twin · bootstrap-unsupported: `<md>` is a scrml structural element (§67 markdown), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `md/static-tree` — bootstrap-unsupported: `<md>` is a scrml structural element (§67 markdown), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `md/url-scheme-literal-refused` — bootstrap-unsupported: `<md>` is a scrml structural element (§67 markdown), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `meta/emit-single-quote-inside-attr-clean` — bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/emit-single-quoted-attr-reject` — bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-allow-list-clean-pos` — twin · bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-allow-list-computed-key-neg` — twin · bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-allow-list-constructor-neg` — twin · bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-compiler-namespace-neg` — twin · bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-emit-bare-scope-attr-neg` — bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-emit-clean-pos` — twin · bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-emit-clobber-attributes-on-rt` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
-- `meta/meta-emit-clobber-attributes-rt` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
-- `meta/meta-emit-clobber-lastchild-rt` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
-- `meta/meta-emit-clobber-prevsibling-rt` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
-- `meta/meta-emit-closed-attr-list-neg` — bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-emit-closed-attr-list-rt` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
-- `meta/meta-emit-data-attr-pos` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
-- `meta/meta-emit-document-clobber-pos` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
-- `meta/meta-emit-form-member-name-pos` — bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-emit-label-for-neg` — bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-emit-label-output-pos` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
-- `meta/meta-emit-legit-attrs-pos` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
-- `meta/meta-emit-map-name-neg` — bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-emit-meta-descriptive-pos` — bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-emit-meta-http-equiv-neg` — bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-emit-meta-name-any-case-pos` — bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-emit-normalize-escape` — twin · bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-emit-plain-id-name-pos` — bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-emit-raw-escape` — twin · bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-emit-reserved-attr-neg` — bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-emit-runtime-bare-scope-attr-rt` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
-- `meta/meta-emit-runtime-form-member-contact-rt` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
-- `meta/meta-emit-runtime-form-member-name-rt` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
-- `meta/meta-emit-runtime-label-for-rt` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
-- `meta/meta-emit-runtime-map-id-rt` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
-- `meta/meta-emit-runtime-meta-http-equiv-rt` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
-- `meta/meta-emit-runtime-page-form-hidden-input-rt` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
-- `meta/meta-emit-runtime-page-form-submit-rt` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
-- `meta/meta-emit-runtime-page-form-template-pos` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
-- `meta/meta-emit-runtime-page-form-text-pos` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
-- `meta/meta-emit-runtime-plain-id-name-pos` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
-- `meta/meta-emit-runtime-radio-formless-rt` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
-- `meta/meta-emit-runtime-radio-in-form-pos` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
-- `meta/meta-emit-runtime-reserved-attr-rt` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
-- `meta/meta-emit-runtime-svg-template-pos` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
-- `meta/meta-emit-runtime-usemap-rt` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
-- `meta/meta-emit-script-neg` — bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-emit-splice-render-rt` — twin · bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-emit-template-input-pos` — bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-emit-url-foreign-neg` — bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-emit-url-pos` — bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-emit-url-scheme-neg` — bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-emit-url-srcset-neg` — bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-emit-usemap-neg` — bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-eval-clean-pos` — twin · bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-eval-reparse-error-neg` — twin · bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-eval-runtime-error-neg` — twin · bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-invalid-token-neg` — twin · bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-jshost-global-neg` — twin · bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-mixed-patterns-neg` — twin · bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-nested-block-neg` — twin · bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-proto-cell-name-pos` — twin · bootstrap-unsupported: a `^{…}` context in markup is not in the bootstrap (§3.1)
-- `meta/meta-reflect-clean-pos` — twin · bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-reflect-unknown-type-neg` — twin · bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
-- `meta/meta-sql-in-runtime-block-neg` — twin · bootstrap-unsupported: `^{ } in logic` (§22.2) is not in the bootstrap yet; it is refused here by name rather than misread — meta-programming is not in the bootstrap
+- `meta/meta-emit-clobber-attributes-on-rt` — twin · bootstrap-unsupported: a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap bui
+- `meta/meta-emit-clobber-attributes-rt` — twin · bootstrap-unsupported: a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap bui
+- `meta/meta-emit-clobber-lastchild-rt` — twin · bootstrap-unsupported: a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap bui
+- `meta/meta-emit-clobber-prevsibling-rt` — twin · bootstrap-unsupported: a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap bui
+- `meta/meta-emit-closed-attr-list-rt` — twin · bootstrap-unsupported: a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap bui
+- `meta/meta-emit-data-attr-pos` — twin · bootstrap-unsupported: a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap bui
+- `meta/meta-emit-document-clobber-pos` — twin · bootstrap-unsupported: a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap bui
+- `meta/meta-emit-label-output-pos` — twin · bootstrap-unsupported: a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap bui
+- `meta/meta-emit-legit-attrs-pos` — twin · bootstrap-unsupported: a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap bui
+- `meta/meta-emit-runtime-bare-scope-attr-rt` — twin · bootstrap-unsupported: a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap bui
+- `meta/meta-emit-runtime-form-member-contact-rt` — twin · bootstrap-unsupported: a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap bui
+- `meta/meta-emit-runtime-form-member-name-rt` — twin · bootstrap-unsupported: a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap bui
+- `meta/meta-emit-runtime-label-for-rt` — twin · bootstrap-unsupported: a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap bui
+- `meta/meta-emit-runtime-map-id-rt` — twin · bootstrap-unsupported: a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap bui
+- `meta/meta-emit-runtime-meta-http-equiv-rt` — twin · bootstrap-unsupported: a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap bui
+- `meta/meta-emit-runtime-page-form-hidden-input-rt` — twin · bootstrap-unsupported: a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap bui
+- `meta/meta-emit-runtime-page-form-submit-rt` — twin · bootstrap-unsupported: a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap bui
+- `meta/meta-emit-runtime-page-form-template-pos` — twin · bootstrap-unsupported: a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap bui
+- `meta/meta-emit-runtime-page-form-text-pos` — twin · bootstrap-unsupported: a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap bui
+- `meta/meta-emit-runtime-plain-id-name-pos` — twin · bootstrap-unsupported: a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap bui
+- `meta/meta-emit-runtime-radio-formless-rt` — twin · bootstrap-unsupported: a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap bui
+- `meta/meta-emit-runtime-radio-in-form-pos` — twin · bootstrap-unsupported: a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap bui
+- `meta/meta-emit-runtime-reserved-attr-rt` — twin · bootstrap-unsupported: a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap bui
+- `meta/meta-emit-runtime-svg-template-pos` — twin · bootstrap-unsupported: a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap bui
+- `meta/meta-emit-runtime-usemap-rt` — twin · bootstrap-unsupported: a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap bui
+- `meta/meta-proto-cell-name-pos` — twin · bootstrap-unsupported: a runtime `^{}` meta block (§22.5 — no `emit()` / `emit.raw()`, or a `reflect()` beside a runtime value) is not in the bootstrap yet; it is refused here by name rather than misread — the bootstrap bui
 - `middleware/duplicate-handle-neg` — twin · bootstrap-unsupported: only a declared scrml function is callable in the bootstrap — `resolve` names a value (a local, a parameter, a field), and calling a function VALUE is not in the bootstrap
 - `middleware/duplicate-handle-pos` — twin · bootstrap-unsupported: only a declared scrml function is callable in the bootstrap — `resolve` names a value (a local, a parameter, a field), and calling a function VALUE is not in the bootstrap
 - `middleware/ratelimit-invalid-unit-neg` — bootstrap-unsupported: `<program ratelimit="100/min">` is not in the bootstrap — it emits no request pipeline (§40.2), so the limit would be dropped

@@ -36,7 +36,10 @@ const clean = (src) => {
   expect(mods.check.checkCore(r.core)).toEqual([]);
   return r;
 };
-const printed = (src) => mods.print.printProgram(clean(src).core, "t.client.js", "scrml-runtime.js").js;
+// s482 (s482-client-roots): these tests read how a function is LOWERED, and many name functions nothing
+// in their program calls — an unreached function is not printed (§12.2 Trigger 6), so every function is
+// named to the printer's test entry (print.scrml printProgramExposing).
+const printed = (src) => { const c = clean(src).core; return mods.print.printProgramExposing(c, "t.client.js", "scrml-runtime.js", c.fns.map((f) => f.sym.id)).js; };
 const $ = (sel) => document.querySelector(sel);
 const btn = (label) => [...document.querySelectorAll("button")].find((b) => b.textContent === label);
 let k = 0;
