@@ -9387,6 +9387,9 @@ ${
     // `let <x…/>` / `const <x…/>` cell (§66), and a keywordless binding `y = 1` at a
     // statement start (§7.2 — a name and a lone `=` where a statement begins: the first
     // skipped token, the first on its line, or after a `;` — stmtStartIn).
+    // s482 (review NIT-1) — not inside an arrow body opened in the skipped text: `tmp = v;` in
+    // `extra(xs.map((v) => {⏎ tmp = v;⏎ }))` is the arrow's own statement, which would never
+    // have declared anything at the alias's level (inArrowBodyIn).
     fn skippedDecls(tp: TP, from: int, to: int) -> string {
         let out: string = "";
         let i: int = from;
@@ -9394,7 +9397,9 @@ ${
             const k: PTok = tp.toks[i];
             const n: PTok = tp.toks[i + 1];
             let named: string = "";
-            if ((k.cls == TC.Keyword || k.cls == TC.Ident) && ["const", "let", "function", "fn", "type"].indexOf(k.text) >= 0) {
+            if (inArrowBodyIn(tp, from, i)) {
+                named = "";
+            } else if ((k.cls == TC.Keyword || k.cls == TC.Ident) && ["const", "let", "function", "fn", "type"].indexOf(k.text) >= 0) {
                 if (n.cls == TC.Ident) {
                     named = k.text + " " + n.text;
                 } else if ((k.text == "const" || k.text == "let") && (tk(n, "{") || tk(n, "["))) {
@@ -9412,6 +9417,20 @@ ${
             i = i + 1;
         }
         return out;
+    }
+
+    // Is toks[i] inside an arrow body `=> { … }` whose `{` is in the skipped text toks[from, i)?
+    fn inArrowBodyIn(tp: TP, from: int, i: int) -> boolean {
+        let arrows: boolean[] = [];
+        let j: int = from;
+        for (; j < i; ) {
+            const t: PTok = tp.toks[j];
+            if (tk(t, "(") || tk(t, "[")) arrows = arrows.concat([false]);
+            if (tk(t, "{")) arrows = arrows.concat([j > from && tk(tp.toks[j - 1], "=>")]);
+            if ((tk(t, ")") || tk(t, "]") || tk(t, "}")) && arrows.length > 0) arrows = arrows.slice(0, arrows.length - 1);
+            j = j + 1;
+        }
+        return arrows.indexOf(true) >= 0;
     }
 
     // A destructuring pattern as written, from its opener at toks[at] to its closer (in
@@ -10176,6 +10195,9 @@ ${
     // attribute value, a `${ "}" }` slot, an `<!-- … -->` comment or the body text does not end
     // the value. A legacy cell read `{<count>}`, `{<count> == 1}` or `{ <n> < 2 }` is not an
     // element and keeps its block reading (as before s482); so does an element never closed.
+    // s482 (review LOW-A) — that holds inside a `${ … }` slot too (`${ <p if={<count>}>hi</p> }`):
+    // the extent walker answers "never closed" when a body-text `}` closes the value before
+    // the "element" does, so the slot's `}` is never taken as the value's closer.
     // PERMANENT capable form: read the element with the markup reader as the value
     // (an AAttrValue markup variant) when `<errorBoundary>` is built.
     fn markupAttrValueEnd(mp: MP) -> int {

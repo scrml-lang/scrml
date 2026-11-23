@@ -124,3 +124,56 @@ describe("LOW-3 — skippedDecls names only declarations", () => {
     expect(msg(`        y = 1;\n        const QQZ = 1;`)).toContain("the declarations in it (`y = …`, `const QQZ`) are not declared");
   });
 });
+
+// s482-markup-value-lowa — the #2085 review (~/.cache/scrml/review/s482-2085/review.md).
+// LOW-A — a legacy cell read in a `${ … }` slot (`${ <p if={<count>}>hi</p> }`, `{<n> > 0}`)
+//   was read as a markup value whose "element" the enclosing `</p>` closed, so the slot's `}`
+//   was taken as the value's closer: the span ran to `{<count>}>hi</p> }` and a seven-error
+//   cascade ended in "`<program>` is never closed". Now a body-text `}` that closes the value
+//   first makes it not an element (lex.scrml markupAttrValueExtentAt). RED ON BASE.
+// NIT-1 — a `;`-terminated line in an arrow body inside the skipped text (`extra(xs.map((v) =>
+//   {⏎ tmp = v;⏎ }))`) was named as a declaration. RED ON BASE.
+describe("LOW-A — a legacy cell read in a `${ … }` slot keeps its block reading", () => {
+  const slot = (value, body) => `<program>\n    let <n:int=0/>\n    \${ <p if=${value}>${body}</p> }\n</program>\n`;
+  for (const [value, body] of [["{<n>}", "hi"], ["{<n> > 0}", "x"]]) {
+    test(`\`if=${value}\` in a slot: no markup-value refusal, no cascade past the slot`, () => {
+      const src = slot(value, body);
+      const r = run(src);
+      expect(mvDiag(r)).toBeUndefined();
+      const cs = codes(r);
+      expect(cs).not.toContain("E-PARSE-TAG");
+      expect(cs).not.toContain("E-PARSE-UNCLOSED");
+      expect(errs(r).length).toBeLessThanOrEqual(4);
+      const nr = errs(r).find((d) => d.code === "E-MARKUP-STATEMENT-NOT-RENDERED");
+      expect(src.slice(nr.span.start, nr.span.end)).toBe(`<p if=${value}>${body}</p>`);
+    });
+  }
+
+  test("a closed element in a slot attribute is still one markup-value refusal", () => {
+    const src = `<program>\n    \${ <div header={<b>x</b>}>y</div> }\n</program>\n`;
+    const r = run(src);
+    const d = mvDiag(r);
+    expect(src.slice(d.span.start, d.span.end)).toBe(`{<b>x</b>}`);
+    expect(codes(r).filter((c) => c.startsWith("E-PARSE"))).toEqual([]);
+  });
+
+  test("a `{ … }` balanced in the body text does not end the value", () => {
+    const src = P(`    <div header={<b>a {x} b</b>}>y</div>`);
+    const d = mvDiag(run(src));
+    expect(src.slice(d.span.start, d.span.end)).toBe(`{<b>a {x} b</b>}`);
+  });
+});
+
+describe("NIT-1 — an arrow body's statements in the skipped text are not named", () => {
+  test("`tmp = v;` and `const t = v;` in an arrow body name nothing", () => {
+    const r = run(P(`    type A = number extra(xs.map((v) => {\n        const t = v;\n        tmp = v;\n    }))\n    <p>hi</p>`));
+    expect(codes(r)).toEqual(["E-STMT-MISSING-SEMICOLON"]);
+    expect(errs(r)[0].message).not.toContain("are not declared");
+  });
+
+  test("the pinned `extra(⏎ y = 1;⏎)` still names `y`", () => {
+    expect(msg2(`        y = 1;`)).toContain("the declarations in it (`y = …`) are not declared");
+  });
+});
+
+const msg2 = (body) => errs(run(P(`    type A = number extra(\n${body}\n    )\n    <p>hi</p>`)))[0].message;
