@@ -27356,8 +27356,9 @@ ${
     // a `#{}` block renders nothing. Every other child is refused, fail closed:
     //  - an element of any kind (a use, an `<each>`, an `if=` element, `<*x/>`) — mkElem's `c.raw` check;
     //  - an `<effect>` / `<request>` — written as an element, the same §24.5 refusal;
-    //  - a `${ for … lift }` — its rows are markup or values inserted at an anchor; a text-only one could be
-    //    one more part of the value, but it is not built (INTERIM, E-BOOTSTRAP-UNSUPPORTED).
+    //  - a `${ for … lift }` / a `${ if … }` lowered to one — rawGather: markup rows are elements there
+    //    (E-HTML-PARSER-REPAIR, §24.5); a text-only one could be one more part of the value, but it is not
+    //    built (INTERIM, E-BOOTSTRAP-UNSUPPORTED, g-boot-rcdata-text-lift-s482).
     fn mkRawNode(g: Globals, sa: AS, file: string, n: ANode, c: MkCx) -> MkFault[] {
         const k: ANodeK = n.k;
         return match k {
@@ -27369,8 +27370,26 @@ ${
             .Run(b: rb0) :> [],
             .Effect(w: x) :> [{ nid: n.nid, file: file, span: n.span, code: "E-HTML-PARSER-REPAIR", msg: rawTextMsg("effect", c.raw) }],
             .Request(r: x) :> [{ nid: n.nid, file: file, span: n.span, code: "E-HTML-PARSER-REPAIR", msg: rawTextMsg("request", c.raw) }],
-            .Gather(f: lf) :> [{ nid: n.nid, file: file, span: n.span, code: "E-BOOTSTRAP-UNSUPPORTED", msg: rawGatherMsg(c.raw) }]
+            .Gather(f: lf) :> rawGather(file, n, lf, c.raw)
         };
+    }
+
+    // s482 (#2069 review LOW-1) — a `${ for … lift }`, or a `${ if … }` lowered to one (a branch that lifts
+    // markup or is a markup value, parse.scrml parseTier0If), inside a raw-text / RCDATA element. A row that
+    // is MARKUP is an element inside that element: §24.5 item 2 ("an element (with any hole in it) inside an
+    // HTML raw-text or RCDATA element … the parser reads that content as text") — E-HTML-PARSER-REPAIR,
+    // PERMANENT. Rows that are only values (`lift s`) could be one more part of the element's text value;
+    // that is not built (INTERIM, g-boot-rcdata-text-lift-s482).
+    fn rawGather(file: string, n: ANode, lf: AFor, raw: string) -> MkFault[] {
+        const what: string = isTier0If(lf) ? "a `${ if … }`" : "a `${ for … lift }`";
+        if (gatherRows(lf).length > 0) {
+            return [{ nid: n.nid, file: file, span: n.span, code: "E-HTML-PARSER-REPAIR", msg: rawRowMsg(what, raw) }];
+        }
+        return [{ nid: n.nid, file: file, span: n.span, code: "E-BOOTSTRAP-UNSUPPORTED", msg: rawGatherMsg(what, raw) }];
+    }
+
+    fn rawRowMsg(what: string, raw: string) -> string {
+        return what + " whose row or branch is markup puts an element inside `<" + raw + ">`: the HTML parser reads the content of `<" + raw + ">` as raw text (HTML §13.2.6.4.7), so the element and every hole in it never reach the page (SPEC §24.5) — move it out of the `<" + raw + ">`, or compute the text in a function and interpolate that (an interpolated value inside one is fine): `${ rowsText(@xs) }`";
     }
 
     // s482 — §34 W-RCDATA-BIND-VALUE-CONTENT-CONFLICT: a `<textarea>` with BOTH `bind:value` and a `${…}`
@@ -27394,8 +27413,8 @@ ${
         return [];
     }
 
-    fn rawGatherMsg(raw: string) -> string {
-        return "a `${ for … lift }` inside `<" + raw + ">` is not in the bootstrap: the HTML parser reads the content of `<" + raw + ">` as one text (HTML §13.2.6.4.7), so it is printed as one text value — its static text and its `${expr}` values — and a row can have no place in it (SPEC §24.5). Compute the text in a function and interpolate it: `${ rowsText(@xs) }`";
+    fn rawGatherMsg(what: string, raw: string) -> string {
+        return what + " that lifts text values inside `<" + raw + ">` is not in the bootstrap (INTERIM, g-boot-rcdata-text-lift-s482): the HTML parser reads the content of `<" + raw + ">` as one text (HTML §13.2.6.4.7), so it is printed as one text value — its static text and its `${expr}` values — and a row can have no place in it (SPEC §24.5). Compute the text in a function and interpolate it: `${ rowsText(@xs) }`";
     }
 
     // fix round 1 of #1945 (MED-2): a branch's literal text (`<A>"text"</>`, an Interp of a string

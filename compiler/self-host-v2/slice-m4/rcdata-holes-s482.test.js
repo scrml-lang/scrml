@@ -247,11 +247,51 @@ function note(v: int) { }
 `, "error")).toContain("E-HTML-PARSER-REPAIR");
   }, 120000);
 
-  test("a `${ for … lift }` in a textarea: E-BOOTSTRAP-UNSUPPORTED (INTERIM)", async () => {
-    expect(await codes(`<program>
+  test("a `${ for … lift }` of text values in a textarea: E-BOOTSTRAP-UNSUPPORTED (INTERIM, g-boot-rcdata-text-lift-s482)", async () => {
+    const res = await result(`<program>
 <xs:string[]=(["a", "b"])/>
 <textarea id="t">L \${ for (x of @xs) { lift x; } }</textarea>
 </program>
-`, "error")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+`);
+    const errs = res.diagnostics.filter((d) => d.severity === "error");
+    expect(errs.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(errs[0].message).toContain("a `${ for … lift }` that lifts text values inside `<textarea>`");
+    expect(errs[0].message).toContain("g-boot-rcdata-text-lift-s482");
+  }, 120000);
+
+  // s482 (#2069 review LOW-1): markup rows are an element inside the RCDATA element — §24.5 item 2, PERMANENT
+  // (E-HTML-PARSER-REPAIR), and the message names the construct written: a `${ if … }` is not a `for`.
+  test("a `${ if … }` lifting markup in a textarea: E-HTML-PARSER-REPAIR naming the `if`", async () => {
+    const res = await result(`<program>
+<x:string="hi"/>
+<textarea id="t">\${ if (@x == "hi") { lift <b>q</b>; } }</textarea>
+</program>
+`);
+    const errs = res.diagnostics.filter((d) => d.severity === "error");
+    expect(errs.map((d) => d.code)).toEqual(["E-HTML-PARSER-REPAIR"]);
+    expect(errs[0].message).toContain("a `${ if … }` whose row or branch is markup puts an element inside `<textarea>`");
+    expect(errs[0].message).not.toContain("for … lift");
+  }, 120000);
+
+  test("a value-form `${ if … }` with markup branches in a title: E-HTML-PARSER-REPAIR naming the `if`", async () => {
+    const res = await result(`<program>
+<x:string="hi"/>
+<title>t \${ if (@x == "hi") { <b/> } else { <i/> } }</title>
+</program>
+`);
+    const errs = res.diagnostics.filter((d) => d.severity === "error");
+    expect(errs.map((d) => d.code)).toEqual(["E-HTML-PARSER-REPAIR"]);
+    expect(errs[0].message).toContain("a `${ if … }` whose row or branch is markup puts an element inside `<title>`");
+  }, 120000);
+
+  test("a `${ for … lift <b> }` in a textarea: E-HTML-PARSER-REPAIR", async () => {
+    const res = await result(`<program>
+<xs:string[]=(["a", "b"])/>
+<textarea id="t">\${ for (s of @xs) { lift <b>\${s}</b>; } }</textarea>
+</program>
+`);
+    const errs = res.diagnostics.filter((d) => d.severity === "error");
+    expect(errs.map((d) => d.code)).toEqual(["E-HTML-PARSER-REPAIR"]);
+    expect(errs[0].message).toContain("a `${ for … lift }` whose row or branch is markup");
   }, 120000);
 });
