@@ -103,6 +103,16 @@ describe("s482 phase 3 — TypeInfo, the compiler-known type (ruling item 3)", (
     expect(errMsgs(r)).toEqual([]);
   });
 
+  test("s482 r1 LOW-2: where a user `TypeInfo` shadows the name, a message naming the built-in says so", () => {
+    const a = run(P(`    type TypeInfo:struct = { x: string }\n<div>^{ const i: TypeInfo = reflect(User); meta.emit(i.x); }</div>`));
+    expect(errs(a)).toEqual(["E-TYPE-031"]);
+    expect(errMsgs(a)[0]).toContain("expects `TypeInfo`, and this value is `TypeInfo` (the compiler's built-in `TypeInfo` of §22.5.4, which this file's own `TypeInfo` type shadows by name)");
+    const b = run(P(`    type TypeInfo:struct = { x: string }\n<div>^{ const i = reflect(User); meta.emit(i.x); }</div>`));
+    expect(errMsgs(b)).toEqual(["E-TYPE-004: `TypeInfo` (the compiler's built-in `TypeInfo` of §22.5.4, which this file's own `TypeInfo` type shadows by name) has no field `x`"]);
+    // no user `TypeInfo`: the plain name
+    expect(errMsgs(run(P(`<div>^{ const i = reflect(User); meta.emit(i.x); }</div>`)))).toEqual(["E-TYPE-004: `TypeInfo` has no field `x`"]);
+  });
+
   test("compile-time reflect: an enum's `fields` and a struct's `variants` are the EMPTY list (the runtime entry's members)", () => {
     const r = run(P(`<div>^{ const c = reflect(Color); const u = reflect(User); emit(\`<p>\${c.fields.length}|\${c.variants.length}|\${u.fields.length}|\${u.variants.length}|\${c.kind}|\${c.name}</p>\`); }</div>`));
     expect(errMsgs(r)).toEqual([]);
@@ -204,13 +214,19 @@ describe("s482 r1 — a runtime ^{} callback reaches no cell write, not through 
 // 2. the runtime (happy-dom; the bootstrap runtime module)
 // ---------------------------------------------------------------------------
 let rt, dir;
+// s482 r1 (review of #2080, LOW-1): registered by this file only if no other file did, and unregistered
+// when this file ends, so a later file in the same process finds the host's globals
+let registered = false;
 beforeAll(async () => {
-  if (!globalThis.document) GlobalRegistrator.register({ url: "http://localhost/" });
+  if (!globalThis.document) { GlobalRegistrator.register({ url: "http://localhost/" }); registered = true; }
   dir = mkdtempSync(join(tmpdir(), "s482-meta3-rt-"));
   copyFileSync(RUNTIME, join(dir, "scrml-runtime.js"));
   rt = await import(join(dir, "scrml-runtime.js"));
 }, { timeout: 60000 });
-afterAll(() => { if (dir) rmSync(dir, { recursive: true, force: true }); });
+afterAll(async () => {
+  if (dir) rmSync(dir, { recursive: true, force: true });
+  if (registered) { await GlobalRegistrator.unregister(); registered = false; }
+});
 
 function page(id) {
   document.body.innerHTML = `<span data-scrml-meta="${id}"></span>`;

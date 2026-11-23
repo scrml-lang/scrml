@@ -1879,6 +1879,14 @@ ${
                         }
                     }
                 }
+                // s482 r1 (review of #2080, LOW-2) — a user type named `TypeInfo` / `FieldInfo` in scope
+                // here shadows the compiler-known one (§22.5.4; as a user `Error` shadows the built-in
+                // enum), yet a `reflect` still gives the built-in: a message naming both read "expects
+                // `TypeInfo`, and this value is `TypeInfo`". The built-in is noted where it is named
+                // (aliasNote), so the two stay apart.
+                if (n.kind == NameKind.KType && (n.name == typeInfoName() || n.name == fieldInfoName())) {
+                    out = out.concat([{ file: fs.file, local: n.name, sym: metaInfoSym(n.name, ""), orig: n.name, from: builtinFile() }]);
+                }
             }
         }
         return out;
@@ -36022,6 +36030,7 @@ ${
         const s: Sym | not = innerNamed(ty);
         if (s is not) return "";
         for (const a of al) {
+            if (a.file == file && a.sym.id == s.id && a.from == builtinFile()) return " (the compiler's built-in `" + a.orig + "` of §22.5.4, which this file's own `" + a.local + "` type shadows by name)";
             if (a.file == file && a.sym.id == s.id) return " (`" + a.local + "` is `" + a.orig + "`, declared in `" + a.from + "`)";
         }
         return "";
@@ -36036,6 +36045,14 @@ ${
     fn shownStruct(env: Env, s: Sym) -> string {
         const ti: TypeInfo | not = typeInfoOf(env.g.types, s);
         if (ti is not) return "`" + s.hint + "`";
+        // s482 r1 (LOW-2): the compiler-known `TypeInfo` / `FieldInfo` where a user type of that name shadows it
+        if (ti.file == builtinFile()) {
+            for (const u of env.g.types) {
+                if (u.file != builtinFile() && u.name == ti.name && inScope(env.g.te.link, env.file, NameKind.KType, u.name, u.file)) {
+                    return "`" + s.hint + "` (the compiler's built-in `" + ti.name + "` of §22.5.4, which this file's own `" + ti.name + "` type shadows by name)";
+                }
+            }
+        }
         const als: string[] = boundAs(env.g.te.link, env.file, NameKind.KType, ti.name, ti.file);
         if (als.length == 0 || als.indexOf(ti.name) >= 0) return "`" + s.hint + "`";
         return "`" + als[0] + "` (`" + ti.name + "`, declared in `" + ti.file + "`)";

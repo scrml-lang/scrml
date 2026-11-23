@@ -48,3 +48,17 @@ Scratch: ~/.cache/scrml/review/s482-meta-phase3/.
 - s34-census --check-new PASS; types-gate OK (182 unchanged); gen-bootstrap-severity current; gen-md-shim
   current; snippet-gate 120/0 (9 spec-ahead, 0 stale); claim-gate 0 failed; corpus-compile-floor PASS;
   e2e-render-map 259/0.
+
+## r1 (fix round, review of #2080 @ c4804a601; merged origin/main 685f6f2c2)
+- [x] ab54bf918 HIGH-1 (a) compile: `metaCbDiags` (PendRule.MetaCb, decided on the effect summary in rulesPass, which
+      now takes the bound Tables): a runtime callback (subscribe / interval / timeout / cleanup) is scanned as an
+      `<effect>` body (scanExpr); a call of a writing `function` / `fn` (transitively), a writing function as a value,
+      and an unresolvable call (through a local) are refused E-BOOTSTRAP-UNSUPPORTED naming the chain. (b) runtime:
+      `MetaSubscription` capped per flush (metaMaxRuns, 100) with a console.error, as MetaEffect.
+      MED-2: `MetaEffect.deliver` runs the subscriptions a change queued before the re-run disposes them.
+      LOW-3: `metaNestedRegs` refuses a meta registration inside any meta callback by name.
+      Hook: first attempt failed on shard-1 MEMORY ceiling (not a test); retried unchanged, PASS.
+- [ ] LOW-1 (happy-dom unregister in afterAll in both files; meta-runtime Chromium server on node:http), LOW-2
+      (built-in TypeInfo/FieldInfo noted in messages where a user type shadows it — aliasNote / shownStruct; shadowing
+      kept, as the built-in `Error` enum), records (SPEC §22.5 r1 status paragraph; gap residue bullets; new
+      g-boot-meta-reflect-registry-scope-s482 for MED-1, INTERIM, owner question).
