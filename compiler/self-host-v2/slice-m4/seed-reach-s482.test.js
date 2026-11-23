@@ -128,6 +128,88 @@ let <d:int=(k + 0)/>`), ["uses `@c` before its place", "uses `@d` before its pla
   }, 120000);
 });
 
+// s482-seed-reach r1 (#2063 review HIGH-1, MED-1, LOW-2). Red on 83a3344db: every refusal below
+// compiled — Chromium showed `a` / `false` / `2 | 1` where the source order gives `b` / `true` /
+// `6 | 5`; the `one=` case was skipped as if it were a handler; the chain note was repeated.
+describe("(a) r1 — `bind:`, a gather, `one=`", () => {
+  const S = `\${ let s: string = "a"; }
+\${ s = "b"; }`;
+  const PS = (body) => `<program>\n${S}\n${body}\n</program>\n`;
+
+  test("`bind:value=@c` before the cell's place (the review's u-bind-value: Chromium `a`)", async () => {
+    await refusedNaming(PS(`<input id="i" bind:value=@c/>
+\${ const k: string = s + ""; }
+let <c:string=(k + "")/>
+<p id="r">\${@c}</p>`), ["this `bind:value=` uses `@c` before its place", "that seed reads `k`"]);
+  }, 120000);
+
+  test("`bind:checked=@c` before the cell's place (u-bind-checked: Chromium `false`)", async () => {
+    await refusedNaming(`<program>
+\${ let s: boolean = false; }
+\${ s = true; }
+<input id="i" type="checkbox" bind:checked=@c/>
+\${ const k: boolean = s; }
+let <c:boolean=(k)/>
+<p id="r">\${@c}</p>
+</program>
+`, ["this `bind:checked=` uses `@c` before its place", "that seed reads `k`"]);
+  }, 120000);
+
+  test("`bind:value=@c` whose seed reads a later cell whose seed reads `k` (u-bind-derived)", async () => {
+    await refusedNaming(PS(`<input id="i" bind:value=@c/>
+\${ const k: string = s + ""; }
+let <c:string=(@d + "")/>
+let <d:string=(k + "")/>
+<p id="r">\${@c}</p>`), ["this `bind:value=` uses `@c` before its place", "uses `@d` before its place", "reads `k`"]);
+  }, 120000);
+
+  test("a gather `\${ for … { lift … } }` reading the cell in a lifted row (u-gather: Chromium `2 | 1`)", async () => {
+    await refusedNaming(P(`<ul>\${ for (const x of [1]) { lift <li>\${@c + x}</li>; } }</ul>
+\${ const k: int = n + 0; }
+let <c:int=(k + 0)/>
+<p id="s">\${@c}</p>`), ["this display uses `@c` before its place", "that seed reads `k`"]);
+  }, 120000);
+
+  test("a gather reading a derived cell (u-gather-derived)", async () => {
+    await refusedNaming(P(`<ul>\${ for (const x of [1]) { lift <li>\${@d + x}</li>; } }</ul>
+<d:int=(k + 0)/>
+\${ const k: int = n + 0; }
+<p id="s">\${k}</p>`), ["this display reads `@d`, a derived value computed when it is read, and its formula reads `k`"]);
+  }, 120000);
+
+  test("a gather reading a later binding directly — the S481 body rule (u-gather-binding)", async () => {
+    await refusedNaming(P(`<ul>\${ for (const x of [1]) { lift <li>\${k + x}</li>; } }</ul>
+\${ const k: int = n + 0; }
+<p id="s">\${k}</p>`), ["this display reads `k`"]);
+  }, 120000);
+
+  test("a gather whose iterable reads a later binding", async () => {
+    await refusedNaming(P(`<ul>\${ for (const x of [k]) { lift <li>\${x}</li>; } }</ul>
+\${ const k: int = n + 0; }
+<p id="s">\${k}</p>`), ["this display reads `k`"]);
+  }, 120000);
+
+  test("`one=@c` is an ordinary attribute (§5.2 rule 1), judged as a display", async () => {
+    await refusedNaming(PS(`<p id="o" one=@c>x</p>
+\${ const k: string = s + ""; }
+let <c:string=(k + "")/>
+<p id="r">\${@c}</p>`), ["this attribute value uses `@c` before its place"]);
+  }, 120000);
+
+  test("a chain of seeds gives the why of a seed hop once (#2063 review LOW-2, u-chain3)", async () => {
+    const es = await errors(P(`<p id="r">\${@a}</p>
+let <a:int=(@b + 0)/>
+let <b:int=(@c + 0)/>
+\${ const k: int = n + 0; }
+let <c:int=(k + 0)/>`));
+    const shown = es.find((d) => d.message.includes("this display uses `@a`"));
+    expect(shown).toBeDefined();
+    expect(shown.message).toContain("uses `@b` before its place");
+    expect(shown.message).toContain("uses `@c` before its place");
+    expect(shown.message.split("runs its seed first if it has not run").length - 1).toBe(1);
+  }, 120000);
+});
+
 describe("(b) a seed at its own place reaching a later binding is E-SCOPE-001", () => {
   test("directly (the review's y-cell-seed-direct)", async () => {
     await refusedNaming(P(`let <c:int=(k + 0)/>
@@ -188,6 +270,26 @@ let <c:int=(g())/>
 });
 
 describe("legal shapes still compile, with the source-order values", () => {
+  test("r1: `bind:value=@c` after `k`'s place compiles and shows the source-order value (u-bind-value-ok: `b`)", async () => {
+    const src = `<program>
+\${ let s: string = "a"; }
+\${ s = "b"; }
+\${ const k: string = s + ""; }
+<input id="i" bind:value=@c/>
+let <c:string=(k + "")/>
+<p id="r">\${@c}</p>
+</program>
+`;
+    expect(await texts(src, ["r"])).toEqual(["b"]);
+  }, 120000);
+
+  test("r1: a gather after the cell's place compiles (6 | 5)", async () => {
+    expect(await texts(P(`\${ const k: int = n + 0; }
+let <c:int=(k + 0)/>
+<ul>\${ for (const x of [1]) { lift <li id="g">\${@c + x}</li>; } }</ul>
+<p id="s">\${@c}</p>`), ["g", "s"])).toEqual(["6", "5"]);
+  }, 120000);
+
   test("a seed reading an EARLIER binding, the cell read after its place (5 | 5)", async () => {
     expect(await texts(P(`\${ const k: int = n + 0; }
 let <c:int=(k + 0)/>
@@ -258,10 +360,17 @@ let <c:int=(k + 0) persist="local" key="t.seedreach.b"/>`));
   }, 120000);
 
   test("an event handler reading the cell early is not judged (g-boot-handler-reach-runs-binding-early-s482 stays open)", async () => {
-    const es = await errors(P(`\${ let out: int = 0; }
+    const src = P(`\${ let out: int = 0; }
 <button id="b" onclick=\${ out = @c; }>go</button>
 \${ const k: int = n + 0; }
-let <c:int=(k + 0)/>`));
+let <c:int=(k + 0)/>
+<p id="r">\${@c}</p>`);
+    const es = await errors(src);
     expect(es.map((d) => d.code)).toEqual([]);
+    // KNOWN WRONG VALUE, pinned as it is today (#2063 review LOW-1): the source order gives 5.
+    // The printer's reach walks the handler → `@c`'s seed → `k` and runs `k` before the body,
+    // missing `n = 5` — g-boot-handler-reach-runs-binding-early-s482 (the handler → cell seed
+    // path, open). When that gap closes this becomes ["5"].
+    expect(await texts(src, ["r"])).toEqual(["1"]);
   }, 120000);
 });
