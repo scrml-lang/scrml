@@ -70,3 +70,9 @@ Base: #2079 (s482-construct-init-fu) head f0281eca2, rebased onto origin/main on
       Tests: slice-m4 cell-seed-bound (+6: h03, h07, h01 refused; non-initial state's body refused;
       controls = 5; default-deny `<errors>` refused + its control 1/5); Chromium
       rcdata-init-place-chromium (+4: h03/h07 CLI refusals, h04/h08 controls = 5), 13 pass, not skipped.
+      Gates (head b2f1d716a; base main d64e7e060): pre-commit hook PASS (58089 pass / 0 fail);
+      pretest exit 0; bootstrap-conformance --json PASS 845 / FAIL 4 / UNSUPPORTED 491 / NOT-TWINNED 628,
+      CRASH 0, byte-identical to base but for the timing line; corpus differential + byte-compare (2972
+      files, html/js/server) 0 newly rejected / 0 newly accepted / 0 code changes / 0 output diffs /
+      0 throws — the default-deny fallback rejects no corpus file; s34-census --check-new PASS (1 row);
+      types-gate OK (182 unchanged); corpus-compile-floor PASS; e2e-render-map 259 pass / 0 fail.
