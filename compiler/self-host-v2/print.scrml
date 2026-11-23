@@ -2946,6 +2946,11 @@ ${
     }
 
     fn buildEl(ctx: Ctx, v: View, tag: string, attrs: Attr[], ks: View[], path: int[], ns: string) -> Built {
+        // s482: the content of a raw-text / RCDATA element holding a `${}` is one text value, set on the
+        // element itself (wireHole → textContentJs): the element is printed empty and is its own hole
+        if (textContentKids(ns, tag, ks) is given) {
+            return { nodes: [HNode.HElem(tag, staticAttrs(attrs), [])], holes: [{ path: path, v: v, ns: ns }] };
+        }
         let kids: View[] = ks;
         if (isHtmlInNs(ns, tag.toLowerCase()) && dropsLeadingLf(tag)) kids = cutLeadingNewline(ks);
         const inner: Built = buildNodes(ctx, kids, path, elChildNs(ns, tag, attrs));
@@ -2985,6 +2990,79 @@ ${
             .Reach :> ks,
             .Gather :> ks
         };
+    }
+
+    // s482 (g-boot-rcdata-hole-anchor-s482) — the HTML parser reads the content of a raw-text / RCDATA
+    // element (`<textarea>`, `<title>`, and `<xmp>` `<iframe>` `<noembed>` `<noframes>` `<noscript>`; HTML
+    // §13.2.6.4.7) as ONE text node: a hole's `<!---->` anchor printed there is text, so the child-index
+    // path to it names no node and the mount threw (`<textarea>a ${@x} b</textarea>` rendered nothing).
+    // So when such an element (in the HTML namespace — an SVG `<title>` is markup) holds a `${}`, its
+    // content is one text value: the concatenation of its text and its interpolated values, in order,
+    // kept equal to that value by ONE hole on the element (rt.textContent). analyze mkRawNode refused
+    // every other child, so these kids are text and `${}` values only — `not` (printed as written)
+    // otherwise, and when there is no `${}`. `<textarea>`'s one dropped line ending is cut here, as the
+    // parser would cut it (§24.5 item 2: "treat the body as the written one without that line ending").
+    // `<plaintext>` is refused (analyze mkRepair); `<script>` / `<style>` are refused everywhere (§4.17).
+    fn textContentKids(ns: string, tag: string, ks: View[]) -> View[] | not {
+        const t: string = tag.toLowerCase();
+        if (!isHtmlInNs(ns, t) || !isTextContentTag(t)) return not;
+        let dyn: boolean = false;
+        for (const k of ks) {
+            const kind: int = textPartKind(k);
+            if (kind < 0) return not;
+            if (kind == 1) dyn = true;
+        }
+        if (!dyn) return not;
+        if (dropsLeadingLf(tag)) return cutLeadingNewline(ks);
+        return ks;
+    }
+
+    fn isTextContentTag(t: string) -> boolean {
+        return ["textarea", "title", "xmp", "iframe", "noembed", "noframes", "noscript"].indexOf(t) >= 0;
+    }
+
+    // 0 a text, 1 an interpolated value, -1 anything else
+    fn textPartKind(v: View) -> int {
+        return match v {
+            .Text(text: t) :> 0,
+            .Dyn(e: e) :> 1,
+            // no-default-arm: one question of a view — is it a part of a text value; every other form is not
+            _ :> -1
+        };
+    }
+
+    // The element's text value, wired on its hole: `rt.textContent(scope$, el, () => ["a ", x, " b"])`.
+    // A `<textarea>` with `bind:value` gets none — §34 W-RCDATA-BIND-VALUE-CONTENT-CONFLICT: "`bind:value`
+    // wins … and the reactive content interpolation is dropped" (analyze mkBindContent reports it).
+    fn textContentJs(ctx: Ctx, tag: string, attrs: Attr[], ks: View[], node: JsExpr) -> JsStmt[] {
+        const tc: View[] | not = textContentKids(ctx.ns, tag, ks);
+        if (tc is not) return [];
+        if (bindsValue(attrs)) return [];
+        let parts: JsExpr[] = [];
+        for (const k of tc) { parts = parts.concat(textPartJs(ctx, k)); }
+        return [sexpr(rtCall(ctx, "textContent", [scopeVar(), node, jthunk(JsExpr.JArray(parts))]))];
+    }
+
+    fn textPartJs(ctx: Ctx, v: View) -> JsExpr[] {
+        return match v {
+            .Text(text: t) :> [jstr(t)],
+            .Dyn(e: e) :> [exprJs(ctx, e)],
+            // no-default-arm: textContentKids admitted only text and `${}` values
+            _ :> []
+        };
+    }
+
+    fn bindsValue(attrs: Attr[]) -> boolean {
+        for (const a0 of attrs) {
+            const a: Attr = a0;
+            const b: boolean = match a {
+                .Bind(kind: k) :> bindProp(k) == "value",
+                // no-default-arm: one question of an attribute — is it a `bind:value`
+                _ :> false
+            };
+            if (b) return true;
+        }
+        return false;
     }
 
     fn cutTextView(cut: View, left: string, rest: View[]) -> View[] {
@@ -3131,7 +3209,7 @@ ${
         const node: JsExpr = jid(nodeVar(h.path));
         const v: View = h.v;
         return match v {
-            .El(attrs: attrs) :> only(attrsJs(ctx, attrs, node)),
+            .El(tag: t, attrs: attrs, kids: ks) :> only(attrsJs(ctx, attrs, node).concat(textContentJs(ctx, t, attrs, ks, node))),
             .Text :> only([]),
             .RawText :> only([]),
             .Dyn(e: e) :> only([sexpr(rtCall(ctx, "text", [scopeVar(), node, jthunk(exprJs(ctx, e))]))]),
