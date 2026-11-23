@@ -20,3 +20,13 @@ Scratch: `~/.cache/scrml/review/s482-seed-reach/` (base tree `base/`, probes `p/
 
 ## Next
 - final gates (pretest, conformance base vs head, s34-census, types-gate, snippet/claim gates, corpus floor, md shim), push, PR.
+
+## r1 (#2063 review fix round)
+
+- merged origin/main (#2045, #2060); severity.scrml regenerated (85efb48ed).
+- HIGH-1: `bind:` attributes judged — analyze.scrml bodyBindReach (cell from the AttrKind.ABind fact; read + write at the attribute). Attribute audit: if= / show= / class: / each in= / key= / use-site value / bound attr carry a read fact on `@c`; as= / each as= name no cell; ref= and other namespaced forms refused. `one=` / `online=` / `onboarding=` now judged (eventName, not the `on` prefix).
+- MED-1: Tier-0 gathers judged — bodyGatherReach (loop as a statement + each lifted row as body markup). NOT judged, per SPEC §7.6 rule (b) S482 text: `<effect>` / `<request>` (owner question; new gap g-boot-effect-fires-in-body-before-place-s482 — an effect a body write triggers runs in the body). `#{}` bridge reads stay the §7.6 INTERIM (bridge read at construction, before the body; probe r1-css-after shows 1 with the `#{}` after every place).
+- LOW-1: handler → cell seed path added to g-boot-handler-reach-runs-binding-early-s482 (+ `<request>` body via the same printer reach); handler test pins today's `1`.
+- LOW-2: cellHop gives the seed note once per chain.
+- INFO-1: #2061 noted on g-boot-nested-decl-reach-runs-binding-early-s482 (open).
+- Tests: seed-reach-s482 36/0 head; 9 of the new tests red on 85efb48ed's analyzer.
