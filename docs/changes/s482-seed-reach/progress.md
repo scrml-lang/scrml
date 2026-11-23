@@ -13,5 +13,10 @@ Scratch: `~/.cache/scrml/review/s482-seed-reach/` (base tree `base/`, probes `p/
 - Head sweep: all refusal probes E-SCOPE-001; legal shapes compile with the right values.
 - Found (pre-existing, not this lane): a never-called nested function declaration in a function body code calls still makes the printer run the binding early (`x-body-nested-never`: `3 | 1`, should be `3 | 5`) — filed as a gap.
 
+- Commit 8820ef89a (analyze) — hook PASS (57677 pass).
+- Corpus differential (2968 files via compileSource, base 62d36cabd vs head): 0 newly rejected, 0 newly ok, 0 code changes, 0 output diffs over the 305 files that compile on both.
+- Tests: slice-m4/seed-reach-s482.test.js — base 9 pass / 16 fail (every refusal), head 25 / 0.
+- SPEC §7.6 rule (b) "A seed reads only the bindings whose place is before it runs (S482)", provenance INTERIM item struck, §34 E-SCOPE-001 row. Gaps: (a) resolved, (b) filed + resolved, g-boot-nested-decl-reach-runs-binding-early-s482 filed (open).
+
 ## Next
-- corpus differential, tests, SPEC §7.6 / §34, gap records, gates, PR.
+- final gates (pretest, conformance base vs head, s34-census, types-gate, snippet/claim gates, corpus floor, md shim), push, PR.
