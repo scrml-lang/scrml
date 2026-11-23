@@ -2954,7 +2954,9 @@ ${
     // initializer runs ONCE (§7.6). s482 (ruling:user-voice-scrml.md-S481-nested-init-chain-
     // comments item 1): one that ACTS is refused there (analyze constructInitDiags,
     // E-FILE-SCOPE-INIT-IN-CONSTRUCT; in a row, E-BOOTSTRAP-UNSUPPORTED), so only one that does
-    // not act reaches here, and it is put just after the construct (unobservable). (`<match>`
+    // not act reaches here, and it is put just after the construct (unobservable: s482-small-followups
+    // also refuses one that reads a binding body code writes — analyze constructReadDiags; when the
+    // construct's content reads it, the printer runs it earlier, at module initialization). (`<match>`
     // arms cannot hold a declaration; `<pre>` / `<code>` content is raw text.) s482: so is one
     // inside an element the HTML parser reads as text (`<textarea>`, `<title>`, `<script>`,
     // `<style>` — isTextOnlyElem): an anchor there is text, not a comment (#2041 r2 review LOW-1).
