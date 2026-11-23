@@ -17,5 +17,13 @@ Rulings: user-voice-scrml.md "RULED — `/` after `as` by adjacency; `lin` as a 
 - Every self-host file now parses to the end; the only parse-level codes left are E-PARSE-ARM (named
   payload binders `.X(f: v)` / `(fn: x)`, and 7 alternation refusals) + their E-SCOPE-REDECLARE.
 
+- Commit 1 (59e1b23c4): the code above; hook PASS (57693 pass / 0 fail).
+- Tests: slice-m4/selfhost-residue-s482.test.js — head 14/14; base e178c32c8 12 fail / 2 pass (the
+  spaced-regex guard and the bare `is .Str` control).
+- SPEC: §7.2.2 rule 4 + §14.12.6.2 (`/` touching `as`), §35.2 (`lin` binding name), §49.2.4 (`of`).
+- Gaps: g-boot-self-host-parse-residue-s482 resolved (and its `lin` text cites the ruling); filed
+  g-impl1-as-touching-dot-cast-s482 (carried), g-boot-of-name-member-read-s482 and
+  g-boot-is-qualified-variant-s482 (owner questions).
+
 ## Next
-- tests (slice-m4/selfhost-residue-s482.test.js), SPEC sentences, gap records, gates, PR.
+- final gates, PR.

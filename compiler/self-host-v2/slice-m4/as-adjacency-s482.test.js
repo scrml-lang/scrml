@@ -88,7 +88,7 @@ describe("the ruling — a spaced `as .V` stays the bare-variant cast (§14.12.6
     expect(lexed(`import * as m from "./x"`)).toEqual(["Keyword:import", "Star:*", "Keyword:as", "Ident:m", "Keyword:from", "StringLit:\"./x\"", "Eof:"]);
     expect(lexed(`export { a as b }`)).toEqual(["Keyword:export", "LBrace:{", "Ident:a", "Keyword:as", "Ident:b", "RBrace:}", "Eof:"]);
   });
-  test("only the `.` decision changes: a `/` after `as` is read as before", () => {
+  test("a SPACED `/` after `as` is read as before (a touching one divides: selfhost-residue-s482.test.js)", () => {
     expect(lexed("as /re/")).toEqual(["Keyword:as", "RegexLit:/re/", "Eof:"]);
   });
 });

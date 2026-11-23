@@ -1,0 +1,9 @@
+// §14.12.6.2 (S482) — a `.` touching `as` is member access on the name `as`, never the cast's bare
+// variant: `return a as.Published;` is `return a` followed by `as.Published` — a missing `;`.
+<program>
+${
+    type S:enum = { Draft, Published }
+    fn f(a: S) -> S { return a as.Published; }
+}
+<p id="r">${f(.Draft)}</p>
+</program>
