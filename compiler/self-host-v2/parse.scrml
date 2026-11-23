@@ -9382,19 +9382,70 @@ ${
 
     // s479 r2 (LOW-C) — the declarations in toks[from, to) (aliasTrailing's skipped
     // text), each as its keyword and name: "`const QQZ`, `function qqf`", or "".
+    // s482 (g-boot-alias-skipped-decls-incomplete-s480) — and the declarations with no
+    // name right after a keyword: a destructuring (`const { a, b }`, `const [c]`), a
+    // `let <x…/>` / `const <x…/>` cell (§66), and a keywordless binding `y = 1` at a
+    // statement start (§7.2 — a name and a lone `=` where a statement begins: the first
+    // skipped token, the first on its line, or after a `;` / `{`).
     fn skippedDecls(tp: TP, from: int, to: int) -> string {
         let out: string = "";
         let i: int = from;
         for (; i + 1 < to; ) {
             const k: PTok = tp.toks[i];
             const n: PTok = tp.toks[i + 1];
-            if ((k.cls == TC.Keyword || k.cls == TC.Ident) && ["const", "let", "function", "fn", "type"].indexOf(k.text) >= 0 && n.cls == TC.Ident) {
+            let named: string = "";
+            if ((k.cls == TC.Keyword || k.cls == TC.Ident) && ["const", "let", "function", "fn", "type"].indexOf(k.text) >= 0) {
+                if (n.cls == TC.Ident) {
+                    named = k.text + " " + n.text;
+                } else if ((k.text == "const" || k.text == "let") && (tk(n, "{") || tk(n, "["))) {
+                    named = k.text + " " + destructClose(tp, i + 1, to);
+                } else if ((k.text == "const" || k.text == "let") && tk(n, "<") && i + 2 < to && tp.toks[i + 2].cls == TC.Ident) {
+                    named = k.text + " <" + tp.toks[i + 2].text + "/>";
+                }
+            } else if (k.cls == TC.Ident && tk(n, "=") && stmtStartIn(tp, from, i)) {
+                named = k.text + " = …";
+            }
+            if (named != "") {
                 if (out != "") out = out + ", ";
-                out = out + "`" + k.text + " " + n.text + "`";
+                out = out + "`" + named + "`";
             }
             i = i + 1;
         }
         return out;
+    }
+
+    // A destructuring pattern as written, from its opener at toks[at] to its closer (in
+    // [at, to)): "{ a, b }", "[c]" (a nested group is cut to "…").
+    fn destructClose(tp: TP, at: int, to: int) -> string {
+        const brace: boolean = tk(tp.toks[at], "{");
+        const close: string = brace ? "}" : "]";
+        let out: string = "";
+        let j: int = at + 1;
+        let going = true;
+        for (; going && j < to && !tk(tp.toks[j], close); ) {
+            const t: PTok = tp.toks[j];
+            if (tk(t, "{") || tk(t, "[")) {
+                out = out + "…";
+                going = false;
+            } else if (tk(t, ",")) {
+                out = out + ", ";
+            } else {
+                if (out != "" && !out.endsWith(" ")) out = out + " ";
+                out = out + t.text;
+            }
+            j = j + 1;
+        }
+        if (brace) return "{ " + out + " }";
+        return "[" + out + "]";
+    }
+
+    // Does toks[i] begin a statement inside the skipped text toks[from, …)? It is the first
+    // skipped token, the first on its line, or follows a `;` / `{`.
+    fn stmtStartIn(tp: TP, from: int, i: int) -> boolean {
+        if (i == from) return true;
+        const p: PTok = tp.toks[i - 1];
+        if (p.line != tp.toks[i].line) return true;
+        return tk(p, ";") || tk(p, "{");
     }
 
     // Past the tokens on `line` from `tp` that cannot start a statement or item: it stops
@@ -10047,6 +10098,10 @@ ${
             const t2: TP = expectRegionEnd(r.tp);
             return { v: AAttrValue.Paren(r.e), mp: backToMarkup(mp, t2) };
         }
+        if (c == "{" && !handler && markupValueOpens(mp)) {
+            const rm: RValue | not = markupAttrValue(mp, name);
+            if (rm is given) return rm;
+        }
         if (c == "{") {
             const tp2: TP = withInFn(regionTP(mp, LexStop.Balanced), 2);
             const n0: int = tp2.diags.length;
@@ -10076,6 +10131,46 @@ ${
         if (wordOperatorAt(r3.tp)) return trailingWordOperator(mp, r3.tp, handler, name);
         const t4: TP = expectRegionEnd(r3.tp);
         return { v: AAttrValue.Bare(r3.e), mp: backToMarkup(mp, t4) };
+    }
+
+    // s482 (g-boot-e-type-045-in-misread-markup-s479) — a `{ … }` value that opens with a
+    // tag (`fallback={<div class="x">Could not load</>}`, §19.6.2's markup value, its terse
+    // `/}` closer included): MARKUP, which the bootstrap does not build as an attribute value
+    // (its one consumer, `<errorBoundary>`, is not in the bootstrap — analyze refuses it by
+    // name). INTERIM: it is refused by name, once, over the whole value, and its text is
+    // never read as code — before this the value was read as statements (E-PARSE-EXPR at the
+    // `<`, then the element's text as expressions: `not load` an E-TYPE-045, and a cascade
+    // past the element). The value ends at the `}` that balances its `{` (braces counted by
+    // character: the element's text and `${ … }` slots hold balanced braces); with none
+    // before the file's end the reading is the block one, as before. Not on an event
+    // handler, whose `{ … }` is a statement list (§5.2.3).
+    // PERMANENT capable form: read the element with the markup reader as the value
+    // (an AAttrValue markup variant) when `<errorBoundary>` is built.
+    fn markupValueOpens(mp: MP) -> boolean {
+        let k: int = 1;
+        for (; isSpaceCh(chAt(mp, k)); ) { k = k + 1; }
+        if (chAt(mp, k) != "<") return false;
+        const c1: string = chAt(mp, k + 1);
+        return (c1 >= "a" && c1 <= "z") || (c1 >= "A" && c1 <= "Z");
+    }
+
+    fn markupAttrValue(mp: MP, name: string) -> RValue | not {
+        let depth: int = 0;
+        let k: int = 0;
+        let end: int = -1;
+        for (; end < 0 && mp.pos + k < mp.src.length; ) {
+            const ch: string = chAt(mp, k);
+            if (ch == "{") depth = depth + 1;
+            if (ch == "}") {
+                depth = depth - 1;
+                if (depth == 0) end = k + 1;
+            }
+            k = k + 1;
+        }
+        if (end < 0) return not;
+        const m: MP = mAdv(mp, end);
+        const md: MP = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "markup as an attribute value (`" + name + "={<tag …>…</>}`, §19.6.2) is not in the bootstrap yet (the markup value of `<errorBoundary fallback=>`, §19.6, which the bootstrap does not build); it is refused here by name rather than read as code", mp.pos, m.pos);
+        return { v: AAttrValue.Bare(recoveredAt(md, mp.pos)), mp: md };
     }
 
     // s478 (boot-durations) — a DURATION value (§6.13.3, §51.12.3, §51.12.3.1):
@@ -15245,8 +15340,17 @@ ${
     //  - else → prose: more words follow it on its line (`not a clue`, the `not need a
     //    validator.` of `It does not need a validator.`), or its operand is a bare word
     //    with no `;` (`not done⏎`) — a sentence fragment, never a statement written as one.
+    // s482 (g-boot-body-top-not-stmt-with-parse-error-s480) — a statement that also
+    // carries an E-PARSE-* error is not code whatever its tokens (`not 100%`, `not @x +`,
+    // `not (really`): it did not parse as a statement, so the line is prose (§4.18.7 "not
+    // valid code"), one E-UNQUOTED-DISPLAY-TEXT, as any other line that fails to parse.
     fn notStmtIsCode(before: TP, r: RStmt) -> boolean {
         if (r.tp.i <= before.i + 1) return false;
+        let i: int = before.diags.length;
+        for (; i < r.tp.diags.length; ) {
+            if (r.tp.diags[i].code.startsWith("E-PARSE-")) return false;
+            i = i + 1;
+        }
         const last: PTok = r.tp.toks[r.tp.i - 1];
         if (tk(last, ";")) return true;
         if (!atEnd(r.tp) && cur(r.tp).line == last.line) return false;
