@@ -2541,7 +2541,8 @@ ${
                 // a range is walked, not built (S481 r1: no list of its numbers)
                 const rl: MR = evalE(env, lo, s);
                 const rh: MR = evalE(env, hi, rl.s);
-                s = rh.s;
+                // a bound is read as a number, a list through its text (S482 r6)
+                s = chargeW(rh.s, numW(rl.v) + numW(rh.v));
                 let i: number = toNum(rl.v);
                 let top: number = toNum(rh.v);
                 if (inc) top = top + 1;
@@ -2613,7 +2614,7 @@ ${
 
     fn textOf(v: MV, s: MS) -> SR {
         const w: number = walkCost(v);
-        const s1: MS = chargeW(s, w);
+        const s1: MS = noFnText(v, "the value", chargeW(s, w));
         if (s1.err != "") return { str: "", s: s1 };
         return { str: jsStr(v), s: s1 };
     }
@@ -2694,9 +2695,69 @@ ${
             .VStr(s: x) :> strNum(x),
             .VBool(b: x) :> boolNum(x),
             .VNot :> 0,
+            .VTape(xs: ys) :> tapeNum(ys),
             // no-default-arm: every other value is NaN as a number
             _ :> 0 / 0
         };
+    }
+
+    // JavaScript's Number(list) is Number(list.join(",")) (S482 r6, review MED-1): an empty
+    // list is 0; two or more elements are NaN (the text holds a ",", in no number); one
+    // element is its text read as a number (`[1]` is 1, `[[2]]` 2, `[not]` 0). The caller
+    // charges the list's size first (numW), as `join` does.
+    fn tapeNum(xs: MV[]) -> number {
+        if (xs.length == 0) return 0;
+        if (xs.length > 1) return 0 / 0;
+        if (isAbsent(xs[0])) return 0;
+        return strNum(jsStr(xs[0]));
+    }
+
+    // The size of a value read as a number (THE BUDGET): a list is read through its text
+    // (tapeNum), so its size; a scalar is read in one step (a string's text is charged
+    // by its length where it is read).
+    fn numW(v: MV) -> number {
+        return match v {
+            .VTape(w: w) :> w,
+            // no-default-arm: only a list's number is read through a walk
+            _ :> 0
+        };
+    }
+
+    fn argsW(args: MV[]) -> number {
+        let n: number = 0;
+        for (const a of args) { n = n + numW(a); }
+        return n;
+    }
+
+    // A function read as text (S482 r6): JavaScript gives its source, which a value of the
+    // evaluator does not hold — so the read is refused, never "[function …]". A list's text
+    // is its elements' (join); a record's is "[object Object]" whatever it holds.
+    fn fnInText(v: MV) -> boolean {
+        return match v {
+            .VFn(f: f) :> true,
+            .VTape(xs: xs) :> anyFnInText(xs),
+            // no-default-arm: no other value's text is a function's
+            _ :> false
+        };
+    }
+
+    fn anyFnInText(xs: MV[]) -> boolean {
+        for (const x of xs) { if (fnInText(x)) return true; }
+        return false;
+    }
+
+    fn fnTextMsg(what: string) -> string {
+        return what + " reads a function as text — JavaScript gives the function's source text, which the compile-time evaluator does not have; call the function, or read its result";
+    }
+
+    fn noFnText(v: MV, what: string, s: MS) -> MS {
+        if (s.err == "" && fnInText(v)) return failS(s, fnTextMsg(what));
+        return s;
+    }
+
+    fn noFnTexts(xs: MV[], what: string, s: MS) -> MS {
+        if (s.err == "" && anyFnInText(xs)) return failS(s, fnTextMsg(what));
+        return s;
     }
 
     fn strNum(s: string) -> number {
@@ -2942,10 +3003,16 @@ ${
         if (r.s.err != "") return r;
         return match op {
             .Not :> vr(MV.VBool(!truthy(r.v)), r.s),
-            .Neg :> vr(MV.VNum(0 - toNum(r.v)), charge(r.s, strLen(r.v))),
+            .Neg :> negOf(r.v, chargeW(charge(r.s, strLen(r.v)), numW(r.v))),
             .IsGiven :> vr(MV.VBool(!isAbsent(r.v)), r.s),
             .IsNot :> vr(MV.VBool(isAbsent(r.v)), r.s)
         };
+    }
+
+    // unary `-`: its operand is read whole, charged BEFORE it is read (a list through its text)
+    fn negOf(v: MV, s: MS) -> MR {
+        if (s.err != "") return vr(MV.VUndef, s);
+        return vr(MV.VNum(0 - toNum(v)), s);
     }
 
     fn evalTernary(env: MEnv, t: AExpr, y: AExpr, n: AExpr, s: MS) -> MR {
@@ -2981,16 +3048,25 @@ ${
             if (q.s.err != "") return vr(MV.VUndef, q.s);
             if (q.code != "") return { v: MV.VUndef, s: failCode(q.s, q.code, eqMsg(q.code, a, b)) };
         }
+        // an operand read as a number or compared is read whole, charged BEFORE it is read
+        // (THE BUDGET; S482 r6, review MED-1: a list is read through its text, as `join`);
+        // two operands compared as text must not hold a function (fnInText)
+        let sn: MS = st;
+        if (readsOperands(op)) {
+            sn = chargeW(charge(st, strLen(a) + strLen(b)), numW(a) + numW(b));
+            if (relOp(op) && textPrim(a) && textPrim(b)) sn = noFnText(b, "a comparison", noFnText(a, "a comparison", sn));
+            if (sn.err != "") return vr(MV.VUndef, sn);
+        }
         return match op {
             .Add :> addValues(a, b, st),
-            .Sub :> vr(MV.VNum(toNum(a) - toNum(b)), charge(st, strLen(a) + strLen(b))),
-            .Mul :> vr(MV.VNum(toNum(a) * toNum(b)), charge(st, strLen(a) + strLen(b))),
-            .Div :> vr(MV.VNum(toNum(a) / toNum(b)), charge(st, strLen(a) + strLen(b))),
-            .Mod :> vr(MV.VNum(toNum(a) % toNum(b)), charge(st, strLen(a) + strLen(b))),
-            .Lt :> vr(MV.VBool(lessThan(a, b)), charge(st, strLen(a) + strLen(b))),
-            .Gt :> vr(MV.VBool(lessThan(b, a)), charge(st, strLen(a) + strLen(b))),
-            .Le :> vr(MV.VBool(notGreater(a, b)), charge(st, strLen(a) + strLen(b))),
-            .Ge :> vr(MV.VBool(notGreater(b, a)), charge(st, strLen(a) + strLen(b))),
+            .Sub :> vr(MV.VNum(toNum(a) - toNum(b)), sn),
+            .Mul :> vr(MV.VNum(toNum(a) * toNum(b)), sn),
+            .Div :> vr(MV.VNum(toNum(a) / toNum(b)), sn),
+            .Mod :> vr(MV.VNum(toNum(a) % toNum(b)), sn),
+            .Lt :> vr(MV.VBool(lessThan(a, b)), sn),
+            .Gt :> vr(MV.VBool(lessThan(b, a)), sn),
+            .Le :> vr(MV.VBool(notGreater(a, b)), sn),
+            .Ge :> vr(MV.VBool(notGreater(b, a)), sn),
             .Eq :> vr(MV.VBool(sameValue(a, b)), compareCharge(st, a, b)),
             .Ne :> vr(MV.VBool(!sameValue(a, b)), compareCharge(st, a, b)),
             .Pipe :> bad(st, "the pipe operator `|` is not a form the compile-time evaluator evaluates"),
@@ -3124,7 +3200,8 @@ ${
     // built (THE BUDGET).
     fn addValues(a: MV, b: MV, s0: MS) -> MR {
         if (isNumericV(a) && isNumericV(b)) return vr(MV.VNum(toNum(a) + toNum(b)), s0);
-        const s: MS = willBuild(chargeW(s0, walkCost(a) + walkCost(b)), textLen(a) + textLen(b));
+        const s1: MS = willBuild(chargeW(s0, walkCost(a) + walkCost(b)), textLen(a) + textLen(b));
+        const s: MS = noFnText(b, "`+`", noFnText(a, "`+`", s1));
         if (s.err != "") return vr(MV.VUndef, s);
         return vr(MV.VStr(jsStr(a) + jsStr(b)), s);
     }
@@ -3157,15 +3234,34 @@ ${
         };
     }
 
+    // JavaScript's relational comparison (S482 r6, review MED-1): each side is made a
+    // primitive first — a list is its text (join), a record "[object Object]" — and two
+    // texts compare as text, anything else as numbers.
     fn lessThan(a: MV, b: MV) -> boolean {
-        if (isStrV(a) && isStrV(b)) return strOf(a) < strOf(b);
+        if (textPrim(a) && textPrim(b)) return jsStr(a) < jsStr(b);
         return toNum(a) < toNum(b);
     }
 
     fn notGreater(a: MV, b: MV) -> boolean {
-        if (isStrV(a) && isStrV(b)) return strOf(a) <= strOf(b);
+        if (textPrim(a) && textPrim(b)) return jsStr(a) <= jsStr(b);
         return toNum(a) <= toNum(b);
     }
+
+    // Is a value's primitive (JavaScript's ToPrimitive, hint number) a string?
+    fn textPrim(v: MV) -> boolean {
+        return match v {
+            .VStr(s: x) :> true,
+            .VTape(xs: xs) :> true,
+            .VRec(keys: k) :> true,
+            .VFn(f: f) :> true,
+            // no-default-arm: a number, a boolean, `not`, absent, a variant are not text here
+            _ :> false
+        };
+    }
+
+    fn readsOperands(op: BinOp) -> boolean { return op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div || op == BinOp.Mod || relOp(op); }
+
+    fn relOp(op: BinOp) -> boolean { return op == BinOp.Lt || op == BinOp.Gt || op == BinOp.Le || op == BinOp.Ge; }
 
     fn evalAssign(env: MEnv, t: AExpr, v: AExpr, s: MS) -> MR {
         const rv: MR = evalE(env, v, s);
@@ -3417,9 +3513,15 @@ ${
     }
 
     // A record made from its lists: its walk (mkRec sums its size) charged, its size checked.
+    // S482 r6: a record with a `toString` / `valueOf` field is refused by name — JavaScript
+    // CALLS it wherever the record is read as text or as a number (`"" + r`, `r * 2`, a
+    // list's `join`), where the evaluator gives "[object Object]" / NaN.
     fn madeRec(ks: string[], vs: MV[], s: MS) -> MR {
         const s1: MS = chargeW(s, ks.length);
         if (s1.err != "") return vr(MV.VUndef, s1);
+        for (const k of ks) {
+            if (k == "toString" || k == "valueOf") return bad(s1, "a record with a `" + k + "` field — JavaScript calls it wherever the record is read as text or as a number, which the compile-time evaluator does not; name the field otherwise");
+        }
         return made(mkRec(ks, vs), s1, 0);
     }
 
@@ -3430,8 +3532,8 @@ ${
         if (ri.s.err != "") return ri;
         const v: MV = ro.v;
         return match v {
-            .VTape(xs: xs) :> vr(atIndex(xs, toNum(ri.v)), ri.s),
-            .VStr(s: x) :> vr(charAtV(x, toNum(ri.v)), ri.s),
+            .VTape(xs: xs) :> idxOf(ri.v, ri.s, true, xs, ""),
+            .VStr(s: x) :> idxOf(ri.v, ri.s, false, [], x),
             .VRec(keys: ks, vals: vs) :> recIndex(ks, vs, ri.v, ri.s),
             .VNot :> bad(ri.s, "indexes `not` (a TypeError)"),
             .VUndef :> bad(ri.s, "indexes an absent value (a TypeError)"),
@@ -3444,6 +3546,15 @@ ${
         const t: SR = textOf(k, s);
         if (t.s.err != "") return vr(MV.VUndef, t.s);
         return vr(recGet(ks, vs, t.str), recScan(t.s, ks, t.str));
+    }
+
+    // `x[k]` on a list (`xs`) or a string (`str`): the key read as a number, a list
+    // through its text — charged BEFORE it is read (S482 r6)
+    fn idxOf(k: MV, s0: MS, isList: boolean, xs: MV[], str: string) -> MR {
+        const s: MS = chargeW(s0, numW(k));
+        if (s.err != "") return vr(MV.VUndef, s);
+        if (isList) return vr(atIndex(xs, toNum(k)), s);
+        return vr(charAtV(str, toNum(k)), s);
     }
 
     fn atIndex(xs: MV[], n: number) -> MV {
@@ -3466,7 +3577,7 @@ ${
             out = out + qs[i];
             if (i < xs.length && s.err == "") {
                 const r: MR = evalE(env, xs[i], s);
-                s = willBuild(chargeW(r.s, walkCost(r.v)), out.length + textLen(r.v));
+                s = noFnText(r.v, "a template literal", willBuild(chargeW(r.s, walkCost(r.v)), out.length + textLen(r.v)));
                 if (s.err == "") out = out + jsStr(r.v);
             }
             i = i + 1;
@@ -4016,8 +4127,13 @@ ${
     // THE BUDGET: a method that reads its string is charged by its length, one
     // that builds a string by the length it builds — checked before it is built.
     fn strMethod(x: string, m: string, args: MV[], s0: MS) -> MR {
-        if (m == "charAt") return vr(MV.VStr(strOf(charAtOr(x, toIntInf(argNum(args, 0, 0))))), s0);
-        if (m == "at") return vr(charAtV(x, relAt(argNum(args, 0, 0), x.length)), s0);
+        if (m == "charAt" || m == "at") {
+            // the position is read as a number, a list through its text (S482 r6)
+            const sp: MS = chargeW(s0, argsW(args));
+            if (sp.err != "") return vr(MV.VUndef, sp);
+            if (m == "charAt") return vr(MV.VStr(strOf(charAtOr(x, toIntInf(argNum(args, 0, 0))))), sp);
+            return vr(charAtV(x, relAt(argNum(args, 0, 0), x.length)), sp);
+        }
         if (m == "toString") return vr(MV.VStr(x), s0);
         let argT: number = 0;
         let argW: number = 0;
@@ -4025,7 +4141,9 @@ ${
             argT = argT + strLen(a);
             argW = argW + walkCost(a);
         }
-        const s: MS = chargeW(charge(s0, x.length + argT), argW);
+        let s: MS = chargeW(charge(s0, x.length + argT), argW);
+        // an argument is read as text or as a number: never a function's text (S482 r6)
+        for (const a of args) { s = noFnText(a, "`." + m + "()`'s argument", s); }
         if (s.err != "") return vr(MV.VUndef, s);
         if (m == "toLowerCase") return madeStr(x.toLowerCase(), s);
         if (m == "toUpperCase") return madeStr(x.toUpperCase(), s);
@@ -4224,7 +4342,10 @@ ${
         return n;
     }
 
-    fn numMethod(x: number, m: string, args: MV[], s: MS) -> MR {
+    fn numMethod(x: number, m: string, args: MV[], s0: MS) -> MR {
+        // an argument is read as a number, a list through its text (S482 r6)
+        const s: MS = chargeW(s0, argsW(args));
+        if (s.err != "") return vr(MV.VUndef, s);
         if (m == "toFixed") {
             const d: number = argNum(args, 0, 0);
             // JavaScript Number.prototype.toFixed: ToIntegerOrInfinity (NaN is 0), then a
@@ -4271,12 +4392,22 @@ ${
     // `tw`: the list's size (THE BUDGET: a walk of it costs that much).
     fn tapeMethod(env: MEnv, o: AExpr, xs: MV[], tw: number, td: int, m: string, args: MV[], s0: MS) -> MR {
         let s: MS = s0;
+        // a position / limit / separator argument is read as a number or as text, a list
+        // through its text — charged before it is read (S482 r6, review MED-1)
+        if (m == "at" || m == "join" || m == "toString" || m == "includes" || m == "indexOf" || m == "slice") {
+            s = chargeW(s, argsW(args));
+            if (s.err != "") return vr(MV.VUndef, s);
+        }
         if (m == "at") return vr(atIndex(xs, relAt(argNum(args, 0, 0), xs.length)), s);
         if (m == "join" || m == "toString") {
             let sep: string = ",";
-            if (m == "join") sep = argStr(args, 0, ",");
+            if (m == "join") {
+                s = noFnText(argOr(args, 0), "`.join()`'s separator", s);
+                if (s.err != "") return vr(MV.VUndef, s);
+                sep = argStr(args, 0, ",");
+            }
             // the text is no longer than the list's size plus its separators
-            const s2: MS = willBuild(chargeW(s, tw), tw + sep.length * xs.length);
+            const s2: MS = noFnTexts(xs, "`." + m + "()`", willBuild(chargeW(s, tw), tw + sep.length * xs.length));
             if (s2.err != "") return vr(MV.VUndef, s2);
             return vr(MV.VStr(joinWith(xs, sep)), s2);
         }

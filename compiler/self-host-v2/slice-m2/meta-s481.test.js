@@ -733,6 +733,43 @@ describe("s482 r5 — MED-1: position and limit arguments are JavaScript's", () 
   });
 });
 
+describe("s482 r6 — MED-1: a list read as a number or as text is JavaScript's (ToNumber(join), ToString)", () => {
+  // each value is bun's for the same JavaScript expression (`not` is null); red on d9056f56a
+  const cases = [
+    [`"abca".indexOf("a", [1])`, 3], [`"a,b,c".split(",", [2]).length`, 2], [`[1, 2, 1].indexOf(1, [1])`, 2], [`"ab".repeat([2])`, "abab"],
+    [`[2] * 2`, 4], [`(255).toString([16])`, "ff"], [`[] * 1`, 0], [`[1, 2] * 1`, NaN],
+    [`[[2]] - 0`, 2], [`["16"] * 1`, 16], [`[not] * 1`, 0], [`[[]] * 1`, 0], [`[true] * 1`, NaN], [`-[3]`, -3], [`[5] % [3]`, 2],
+    [`"abc".charAt([1])`, "b"], [`"abc".at([1])`, "b"], [`"abc".slice([1])`, "bc"], [`(1.25).toFixed([1])`, "1.3"],
+    [`[1, 2, 3].at([1])`, 2], [`[1, 2, 3].slice([1]).length`, 2], [`"abca".includes("a", [4])`, false], [`"abc".startsWith("b", [1])`, true],
+    [`"abc".padStart([5], "-")`, "--abc"],
+    // a list compared with a list / a string compares as text; with a number, as numbers
+    [`[3] < [10]`, false], [`[10] < [9]`, true], [`[10] < 9`, false], [`"10" < [9]`, true],
+    // a list read as text (already JavaScript's; pinned)
+    [`"x" + [1, 2]`, "x1,2"], [`"abc".padStart(7, [1, 2])`, "1,21abc"], [`[1, 2].join([3, 4])`, "13,42"], [`"a1,2b".indexOf([1, 2])`, 1],
+  ];
+  test("each expression gives the value JavaScript gives", () => {
+    const body = cases.map(([e], i) => `emit("<p>${i}:" + (${e}) + "</p>");`).join(" ");
+    const out = html(D(body));
+    for (let i = 0; i < cases.length; i++) expect(out).toContain(`<p>${i}:${String(cases[i][1])}</p>`);
+  }, 60000);
+  test("a template literal reads a nested list as JavaScript's text", () => {
+    expect(html(D("emit(`<p>a${[1, [2, 3]]}b</p>`);"))).toContain("<p>a1,2,3b</p>");
+  });
+  test("a function read as text is refused by name (JavaScript gives its source)", () => {
+    for (const e of [`"" + f`, `[f, 1].join("-")`, `"abc".indexOf(f)`, `[f] < "a"`]) {
+      expect(evalErr(D(`const f = (x) => x; emit("<p>" + (${e}) + "</p>");`))).toContain("reads a function as text");
+    }
+    expect(evalErr(D("const f = (x) => x; emit(`<p>${f}</p>`);"))).toContain("reads a function as text");
+    // as a number a function is NaN in JavaScript too: not refused
+    expect(html(D(`const f = (x) => x; emit("<p>" + (f * 1) + "</p>");`))).toContain("<p>NaN</p>");
+  });
+  test("a record with a `toString` / `valueOf` field is refused by name; a plain record is [object Object] / NaN", () => {
+    expect(evalErr(D(`const r = { toString: () => "x" }; emit("<p>" + r + "</p>");`))).toContain("a record with a `toString` field");
+    expect(evalErr(D(`const r = { valueOf: () => 5 }; emit("<p>" + (r * 2) + "</p>");`))).toContain("a record with a `valueOf` field");
+    expect(html(D(`const r = { a: 1 }; emit("<p>" + r + "|" + (r * 1) + "</p>");`))).toContain("<p>[object Object]|NaN</p>");
+  });
+});
+
 describe("s482 r5 — LOW-1: a `const` arrow with annotated parameters is a typed position (§14.10)", () => {
   const T = (body) => P(`    type C:enum = { A, B }\n    type D:enum = { A, Zzz }\n<div id="m">^{ ${body} }</div>`);
   test("a call's bare variant the parameter's enum does not declare is E-TYPE-063", () => {

@@ -119,3 +119,14 @@ Rulings: user-voice-scrml.md S480 census build order item 2; ruling:user-voice-s
       vs r4 head 6cdb377e7 0 diffs; 181 probes (r4rev p/**, r4 p/, r5 p/) max 6.1 s / 554 MB, 0 exit 2, 0 timeouts;
       k1/k2/k4/k6 equal impl#1's JavaScript values
 - [ ] push + PR body ### r5
+
+## r6 (S482 — re-review ~/.cache/scrml/review/s482-2045-r5rev/review.md, brief s482-briefs/fix-2045-r6.md; tiny, final)
+- [x] MED-1 `toNum` of a list is JavaScript's ToNumber(join(",")) (tapeNum: [] 0, one element its text, 2+ NaN),
+      charged by the list's size (numW / argsW) BEFORE it is read, at every number read (arithmetic, unary `-`,
+      relational, range bounds, index key, string/number/list method arguments)
+- [x] relational `<` `<=` `>` `>=`: two text primitives (string / list / record) compare as text, else as numbers (JS)
+- [x] ToString audit: `"x" + [1,2]`, template, padStart filler, join separator, indexOf needle already JS; split with a
+      list separator stays refused by name; a FUNCTION read as text (JS: its source) is now refused by name (fnInText);
+      a record with a `toString` / `valueOf` field is refused by name at construction (JS calls it on conversion)
+- [x] LOW-1 filed g-boot-meta-not-sort-order-s482 (record only)
+- [x] tests: meta-s481.test.js "s482 r6" (4 tests; 3 red on base d9056f56a, the template pin passes on both)
