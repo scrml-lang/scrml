@@ -141,6 +141,40 @@ describe("s482 — refused by name, never misread (INTERIM, g-boot-meta-runtime-
   });
 });
 
+// s482 r1 (review of #2067, MED-1) — the placeholder `<span data-scrml-meta>` is judged by the
+// E-HTML-PARSER-REPAIR check as the span it is (§24.5): where an author-written `<span>` is
+// refused, so is a runtime block. Red on 048787db9: every family below compiled clean (the table
+// family did not mount in Chromium; the raw-text family showed the placeholder as text).
+describe("s482 r1 — a runtime block where its placeholder span cannot stand (MED-1, §24.5 / §22.12)", () => {
+  const B = `^{ meta.emit("<b>E</b>"); }`;
+  const refused = (body) => {
+    const r = run(P(body));
+    expect([body, errs(r)]).toEqual([body, ["E-HTML-PARSER-REPAIR"]]);
+    expect(r.diags.find((d) => d.code === "E-HTML-PARSER-REPAIR").message).toContain("placeholder `<span data-scrml-meta>`");
+  };
+  test("the table family: table / tbody / thead / tfoot / tr / colgroup, and an `if=` arm rooted at a <tr>", () => {
+    for (const b of [`<table id="t">${B}</table>`, `<table><tbody>${B}</tbody></table>`, `<table><thead>${B}</thead></table>`,
+                     `<table><tfoot>${B}</tfoot></table>`, `<table><tbody><tr>${B}</tr></tbody></table>`,
+                     `<table><colgroup>${B}</colgroup></table>`,
+                     `let <x:bool=true/>\n<table><tbody><tr if=@x>${B}</tr></tbody></table>`]) refused(b);
+  });
+  test("the raw-text / RCDATA family: textarea / title / xmp / iframe / noscript", () => {
+    for (const b of [`<form><textarea>${B}</textarea></form>`, `<title>${B}</title>`, `<xmp>${B}</xmp>`,
+                     `<iframe>${B}</iframe>`, `<noscript>${B}</noscript>`]) refused(b);
+  });
+  test("the inert family: an HTML <template>'s content, at any depth (one report per block)", () => {
+    for (const b of [`<template>${B}</template>`, `<template><div><p>${B}</p></div></template>`,
+                     `<template><table>${B}</table></template>`]) refused(b);
+  });
+  test("legal positions are unchanged: div, p, li, td, form, caption, select / optgroup / option, the program body", () => {
+    for (const b of [`<div>${B}</div>`, `<p>${B}</p>`, `<ul><li>${B}</li></ul>`, `<table><tbody><tr><td>${B}</td></tr></tbody></table>`,
+                     `<form>${B}</form>`, `<table><caption>${B}</caption></table>`, `<select><optgroup label="g">${B}</optgroup></select>`,
+                     `<select><option>${B}</option></select>`, `${B}\n<p>x</p>`]) {
+      expect([b, errMsgs(run(P(b)))]).toEqual([b, []]);
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 2. the runtime (happy-dom; the bootstrap runtime module, imported AFTER the DOM is registered —
 //    the gate captures the platform's accessors at load)

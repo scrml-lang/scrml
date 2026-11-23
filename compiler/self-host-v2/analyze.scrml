@@ -27123,7 +27123,7 @@ ${
         for (const n of nodes) {
             let cn: MkCx = c;
             const k: ANodeK = n.k;
-            const e: AElem | not = mkElemOf(k);
+            const e: AElem | not = mkElemOf(n);
             if (e is given) {
                 if (mkPrintsElem(g, file, e)) {
                     const t: string = e.tag.toLowerCase();
@@ -27149,14 +27149,17 @@ ${
         return out;
     }
 
-    fn mkElemOf(k: ANodeK) -> AElem | not {
+    // The element a node puts in its template: an element, or a runtime `^{}` block's placeholder
+    // `<span>` (mkMetaPlace) — the first element of a template root decides its mode either way.
+    fn mkElemOf(n: ANode) -> AElem | not {
+        const k: ANodeK = n.k;
         return match k {
             .Elem(e: e) :> e,
             .Text(text: t) :> not,
             .Interp(e: x) :> not,
             .DeclNode(d: x) :> not,
             .Effect(w: x) :> not,
-            .Run(b: rb0) :> not,
+            .Run(b: rb0, meta: mt) :> mkMetaPlace(n, mt),
             .Request(r: x) :> not,
             .Css(c: x) :> not,
             .Gather(f: lf) :> not
@@ -27217,11 +27220,60 @@ ${
             .Interp(e: x) :> mkLitText(file, n, x, c),
             .DeclNode(d: x) :> [],
             .Effect(w: x) :> [],
-            .Run(b: rb0) :> [],
+            .Run(b: rb0, meta: mt) :> mkMetaRun(g, sa, file, n, mt, c),
             .Request(r: x) :> [],
             .Css(c: x) :> [],
             .Gather(f: lf) :> mkBranch(g, sa, file, rowsOfBlock(lf.body), c)
         };
+    }
+
+    // s482 r1 (review of #2067, MED-1) — a RUNTIME `^{}` block (meta "" — a body-top run, which
+    // renders a comment) renders a placeholder `<span data-scrml-meta>` where it stands (print.scrml
+    // runHole): the place its `meta.emit` output goes (§22.12). That span is markup the parser reads
+    // like any other, so it is judged as the span it is — by this check's own rules, with nothing
+    // added: inside a table part it is foster-parented out, inside a raw-text / RCDATA element it is
+    // text (§24.5). A fault is reported at the block, naming the placeholder.
+    fn mkMetaPlace(n: ANode, mt: string) -> AElem | not {
+        if (mt == "") return not;
+        return { nid: n.nid, span: n.span, star: false, tag: "span", attrs: [], kids: [], binds: [], parens: false };
+    }
+
+    fn mkMetaRun(g: Globals, sa: AS, file: string, n: ANode, mt: string, c: MkCx) -> MkFault[] {
+        const e: AElem | not = mkMetaPlace(n, mt);
+        if (e is not) return [];
+        let out: MkFault[] = [];
+        for (const f of mkElem(g, sa, file, e, c)) {
+            out = out.concat([{ nid: f.nid, file: f.file, span: f.span, code: f.code, msg: mkMetaMsg(f.msg) }]);
+        }
+        return out;
+    }
+
+    // Every runtime `^{}` block in an HTML `<template>`'s content `nodes` (at any depth) a fault of
+    // `done` does not already name — refused: its placeholder is in the inert template content,
+    // where the gate never finds it (§22.12 then writes into a fresh span at the end of `<body>`).
+    fn mkInertMeta(file: string, nodes: ANode[], done: MkFault[]) -> MkFault[] {
+        let out: MkFault[] = done;
+        for (const n of nodes) {
+            const k: ANodeK = n.k;
+            const mt: string = match k {
+                .Run(b: rb0, meta: m) :> m,
+                // no-default-arm: one question of a node — is it a runtime `^{}` block
+                _ :> ""
+            };
+            if (mt != "") {
+                let seen: boolean = false;
+                for (const x of out) { if (x.nid == n.nid) seen = true; }
+                if (!seen) out = out.concat([{ nid: n.nid, file: file, span: n.span, code: "E-HTML-PARSER-REPAIR",
+                                               msg: mkMetaMsg("inside an HTML `<template>` it is inert content, never in the page (HTML §4.12.3), so the gate would not find it (§22.12)") }]);
+            }
+            const e: AElem | not = elemOfANode(n);
+            if (e is given) out = mkInertMeta(file, e.kids, out);
+        }
+        return out;
+    }
+
+    fn mkMetaMsg(why: string) -> string {
+        return "a runtime `^{}` block renders a placeholder `<span data-scrml-meta>` where it stands — the place its `meta.emit` output goes (§22.12) — and that span is judged as one written here: " + why + ". Move the block where a `<span>` may stand (inside a `<td>`, a `<div>`, a `<p>`)";
     }
 
     // fix round 1 of #1945 (MED-2): a branch's literal text (`<A>"text"</>`, an Interp of a string
@@ -27358,7 +27410,9 @@ ${
         // s475: `<plaintext>` is one fault — what it holds is its text either way (one report, no cascade)
         if (t == "plaintext" && out.length > 0) return out;
         // s475: an HTML `<template>`'s content is parsed apart, "in template" — a root of its own
-        if (t == "template" && isHtmlInNs(c.ns, t)) return out.concat(mkNodes(g, sa, file, e.kids, mkRoot(htmlNs(), c.depth)));
+        // s482 r1 (MED-1): it is also INERT — the page never runs or shows it (its content is a
+        // DocumentFragment, HTML §4.12.3), so a runtime `^{}` block there has no place in the page
+        if (t == "template" && isHtmlInNs(c.ns, t)) return mkInertMeta(file, e.kids, out.concat(mkNodes(g, sa, file, e.kids, mkRoot(htmlNs(), c.depth))));
         return out.concat(mkNodes(g, sa, file, e.kids, mkKid(ns, t, mkQuoted(e.attrs, "encoding"), kc)));
     }
 
