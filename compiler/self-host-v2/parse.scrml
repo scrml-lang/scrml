@@ -764,6 +764,9 @@ ${
             } else if (isVariantTest(r.tp)) {
                 // s480 (s480-boot-cheap-wins): `expr is .V` — the single-variant test (§18.17)
                 r = variantTest(r, start);
+            } else if (isQualVariantTest(r.tp)) {
+                // s482-selfhost-parse-residue: `expr is T.V` — refused by name, read as `is .V`
+                r = qualVariantTest(r, start);
             } else if (isPresenceTest(r.tp)) {
                 // s460: `expr is given` / `expr is not` — a postfix presence
                 // test (§42.2.2, §42.2.4), binding tighter than a prefix `!`
@@ -1149,9 +1152,39 @@ ${
         return peekAt(tp, 1).cls == TC.Variant;
     }
 
+    // s482-selfhost-parse-residue — `expr is T.V`, a QUALIFIED variant after `is`. §18.17's grammar is
+    // `is-expression ::= expression 'is' '.' VariantName` ("The `.VariantName` form is always shorthand
+    // (no type prefix required); the type is inferred from the left-hand operand") — a qualified
+    // `T.V` is not in it (impl#1 accepts it; whether the SPEC should is an owner question,
+    // g-boot-is-qualified-variant-s482). Before this the bootstrap read `x is` as a name `is` and
+    // stopped there: inside an object literal (`{ k: x is T.V }`) the parser then swallowed the rest
+    // of the file. Now it is refused at the `T.V` by name, with the fix-it, and read as the test of
+    // `.V` — so nothing after it cascades.
+    fn isQualVariantTest(tp: TP) -> boolean {
+        if (!isWord(tp, "is")) return false;
+        if (tp.i == 0) return false;
+        const a: PTok = peekAt(tp, 1);
+        const b: PTok = peekAt(tp, 2);
+        const c: PTok = peekAt(tp, 3);
+        if (a.cls != TC.Ident || b.cls != TC.Punct || !tk(b, ".")) return false;
+        if (c.cls != TC.Ident && c.cls != TC.Keyword) return false;
+        return touching(a, b) && touching(b, c);
+    }
+
+    fn qualVariantTest(r: RExpr, start: int) -> RExpr {
+        const q: PTok = peekAt(r.tp, 1);
+        const vt: PTok = peekAt(r.tp, 3);
+        const d: TP = diagAt(r.tp, "E-PARSE-EXPECTED", "`is` takes a bare variant — write `is ." + vt.v + "`, not `is " + q.v + "." + vt.v + "`: the variant is resolved against the left operand's enum (§18.17: `is-expression ::= expression 'is' '.' VariantName`; \"The `.VariantName` form is always shorthand (no type prefix required); the type is inferred from the left-hand operand\")", q);
+        return variantTestAt(r, start, vt, adv(adv(adv(adv(d)))));
+    }
+
     fn variantTest(r: RExpr, start: int) -> RExpr {
-        const vt: PTok = peekAt(r.tp, 1);
-        let t: TP = adv(adv(r.tp));
+        return variantTestAt(r, start, peekAt(r.tp, 1), adv(adv(r.tp)));
+    }
+
+    // The test of the variant `vt`, read on from `past` (the token after it).
+    fn variantTestAt(r: RExpr, start: int, vt: PTok, past: TP) -> RExpr {
+        let t: TP = past;
         // s480 r1 (#2028 F4): `x is .V(…)` — §18.17: "The `is` operator SHALL NOT bind or expose
         // payload fields. For payload access, use `match`." The grammar is `expression 'is' '.'
         // VariantName`; a `(…)` after the variant on its line is a payload pattern, refused here by
@@ -3272,7 +3305,7 @@ ${
     fn typedArrowAhead(tp: TP) -> boolean {
         const a: PTok = peekAt(tp, 1);
         let named: boolean = bindNameTok(a) && tk(peekAt(tp, 2), ":");
-        if (a.cls == TC.Keyword && a.v == "lin" && bindNameTok(peekAt(tp, 2)) && tk(peekAt(tp, 3), ":")) named = true;
+        if (linKeywordAt(tp, 1) && bindNameTok(peekAt(tp, 2)) && tk(peekAt(tp, 3), ":")) named = true;
         if (!named) return false;
         const close: int = parenClose(tp);
         if (close < 0) return false;
@@ -4173,7 +4206,7 @@ ${
         if (isLocusRow(t)) return misplacedRowStmt(tp, start);
         if (isLogicRowTok(t)) return logicBareStmt(tp, start, "markup standing as a statement in a `" + interpOpen() + " … }` logic block (bare markup, an implied-`lift` arm, §10) is not in the bootstrap — write the markup in the body, under `if=` (§17.1) or `<each>` (§17.7)");
         if (isWord(tp, "let") || isWord(tp, "const")) return parseLocal(tp);
-        if (isWord(tp, "lin")) return parseLinLocal(tp);   // s471 (§35.2)
+        if (linKeywordAt(tp, 0)) return parseLinLocal(tp);   // s471 (§35.2); s482: else `lin` is a name
         if (deferAhead(tp)) return parseDefer(tp);      // s451 (§19.16.1)
         if (failAhead(tp)) return parseFail(tp);        // s451 (Ue, §19.3.1)
         if (isWord(tp, "fail")) return bareFail(tp);    // s469 (§7.2.2 rule 10: reserved here)
@@ -6987,8 +7020,33 @@ ${
         return x.cls == TC.Keyword && isContextualName(x.v);
     }
 
+    // s482-selfhost-parse-residue — `lin` (linKeywordAt, below) and `of` are binding names too.
+    // `of`: SPEC §49.2.4 calls it "the contextual keyword `of`" (rule 3: "a `for-binder` followed by
+    // the contextual keyword `of` → the iterate head"), it is no ECMAScript strict-mode reserved word,
+    // and no SPEC sentence reserves it (§7.2). Its keyword reading stands only AFTER a for-binder, so
+    // a binding site (`let of = …`, a parameter, `for (const of of xs)` — binderThen reads the binder
+    // first) cannot be confused with it. Only the BINDING is admitted: the lexer still reads `of` as
+    // the operator keyword it is in a for-head (a value follows it), so a touching `of.x` / `of/2`
+    // lexes as a bare variant / a regular expression (g-boot-of-name-member-read-s482, an owner question).
     fn isContextualName(w: string) -> boolean {
-        return ["from", "server", "as", "pure", "render", "some"].indexOf(w) >= 0;
+        return ["from", "server", "as", "pure", "render", "some", "lin", "of"].indexOf(w) >= 0;
+    }
+
+    // s482-selfhost-parse-residue — `lin` is a binding NAME too (owner ruling S482, user-voice-scrml.md
+    // "RULED — `/` after `as` by adjacency; `lin` as a binding name", item 2: "allow it the way `as`
+    // and `from` now are; after `const` or `let` it can't be confused with the keyword"; isContextualName).
+    // Its keyword reading always takes a NAME next (§35.2 `lin-declaration ::= 'lin' identifier (':'
+    // type-annotation)? '=' expression ';'`; §35.2.1 `parameter ::= ['lin'] identifier ':'
+    // type-annotation`), so the NEXT token decides: `lin` is the keyword where an identifier follows it,
+    // or a contextual word that is itself followed by `=` / `:` (`lin from = …`); anywhere else it is
+    // the name (`lin = 5;`, `lin.x;`, `lin(1);`, `lin as .V`).
+    fn linKeywordAt(tp: TP, k: int) -> boolean {
+        const w: PTok = peekAt(tp, k);
+        if (w.cls != TC.Keyword || w.v != "lin") return false;
+        const n: PTok = peekAt(tp, k + 1);
+        if (n.cls == TC.Ident) return true;
+        if (!bindNameTok(n)) return false;
+        return tk(peekAt(tp, k + 2), "=") || tk(peekAt(tp, k + 2), ":");
     }
 
     fn parseFail(tp: TP) -> RStmt {
@@ -8154,7 +8212,7 @@ ${
         for (;;) {
             if (!(!isP(t, ")") && !atEnd(t))) { break; }
             const lt: PTok = cur(t);
-            if (lt.cls == TC.Keyword && lt.v == "lin") {
+            if (linKeywordAt(t, 0)) {   // s482: `(lin: T) -> …` names a parameter `lin`
                 t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a `lin` parameter in a function type is not in the bootstrap (INTERIM — §35.2.1 builds `lin` on a declaration's own parameters; a function TYPE does not carry it). Drop `lin` here, or call the function by its name", lt);
                 t = adv(t);
             }
@@ -9346,7 +9404,7 @@ ${
             // s471 — `lin name: T` (§35.2.1: "parameter ::= ['lin'] identifier ':' type-annotation")
             const lt: PTok = cur(t);
             let isLin = false;
-            if (lt.cls == TC.Keyword && lt.v == "lin" && bindNameTok(peekAt(t, 1))) {
+            if (linKeywordAt(t, 0)) {   // s482: `lin: T` / `lin, …` names a parameter `lin`
                 isLin = true;
                 t = adv(t);
             }
