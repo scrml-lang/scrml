@@ -144,10 +144,13 @@ export function batch(fn) {
 // same batch was removing still ran. A flush started while one is running now
 // returns at once; the running loop picks up everything queued.
 let flushing = false;
+// s482 r1 — which flush is running (a runtime `^{}` block counts its runs per flush, MetaEffect.run)
+let flushSeq = 0;
 
 function flush() {
   if (flushing) return;
   flushing = true;
+  flushSeq++;
   try { drainQueues(); } finally { flushing = false; restoreTries.clear(); }
 }
 
@@ -5482,7 +5485,34 @@ export function run(scope, body) {
 // Timer ids (`meta.interval` / `meta.timeout`) are strings the run's own registry
 // keys — a clear with an id this block did not register (another block's, or a
 // forged one) finds nothing and is a no-op (§22.5.1); never a host handle.
+//
+// s482 r1 (review of #2067) —
+// CYCLES (MED-2). Two blocks that each `meta.set` the cell the other `meta.get`s
+// would re-run each other forever (the page hung). impl#1 re-runs a block
+// SYNCHRONOUSLY inside the write that changed its dependency, and drops a re-run of
+// a block that is still running (its re-entrancy guard) — so a change a block's own
+// run caused, directly or through the runs it set off, never re-runs it. Here a
+// re-run is queued for the flush, so the same rule is carried as the run's CAUSE:
+// every run knows the blocks whose runs led to it (`chain`), and a change made
+// during it never re-runs a block on that chain. Two such blocks settle as impl#1's
+// do (probed: `x` = 2). And as impl#1, a block runs at most MAX_RUNS (100;
+// `globalThis.__scrml_max_meta_runs` overrides) times in one flush: past that it
+// logs impl#1's message (`[scrml] meta effect <id> exceeded <n> re-runs — possible
+// infinite loop`) and skips the run; the next flush counts afresh.
+// STALE HELD EMITS (MED-3). An emit made once the placeholder is in the page drops
+// the emits still held for the microtask: the newer one wins, never an older replay.
+// DEPENDENCIES ONLY WHILE RUNNING (LOW-1). A `meta.get` in a timer or cleanup
+// callback, or after the body's run has ended, reads the cell and subscribes
+// nothing (impl#1 tracks only during the run).
 // ---------------------------------------------------------------------------
+// The blocks whose runs are making the current change (null: no block is running).
+let metaChain = null;
+
+function metaMaxRuns() {
+  const n = globalThis.__scrml_max_meta_runs;
+  return typeof n === "number" && n > 0 ? n : 100;
+}
+
 class MetaEffect {
   constructor(scope, ph, scopeId, body) {
     this.ph = ph;
@@ -5497,6 +5527,10 @@ class MetaEffect {
     this.nextTimer = 0;
     this.discharging = false;
     this.pending = [];
+    this.cause = new Set();                          // the blocks whose runs queued this one's re-run
+    this.maxRuns = metaMaxRuns();
+    this.flushSeq = -1;
+    this.flushRuns = 0;
     stats.effects++;
     scope.own(() => this.dispose());
     this.run();
@@ -5504,6 +5538,11 @@ class MetaEffect {
   markStale() {
     // a change the run itself made (a `meta.set` of a cell it `meta.get`s) never re-runs it
     if (this.disposed || this.running) return;
+    // a change this block's own run set off (through the blocks it re-ran) never re-runs it
+    if (metaChain !== null) {
+      if (metaChain.has(this)) return;
+      for (const m of metaChain) this.cause.add(m);
+    }
     queue.add(this);
     if (batchDepth === 0) flush();
   }
@@ -5529,6 +5568,29 @@ class MetaEffect {
   }
   run() {
     if (this.disposed || this.running) return;
+    const chain = this.cause;
+    this.cause = new Set();
+    chain.add(this);
+    if (flushing) {
+      if (this.flushSeq !== flushSeq) { this.flushSeq = flushSeq; this.flushRuns = 0; }
+      this.flushRuns++;
+      if (this.flushRuns > this.maxRuns) {
+        if (this.flushRuns === this.maxRuns + 1) {
+          console.error("[scrml] meta effect " + this.scopeId + " exceeded " + this.maxRuns + " re-runs — possible infinite loop");
+        }
+        return;
+      }
+    }
+    const savedChain = metaChain;
+    metaChain = chain;
+    try {
+      this.runNow();
+    } finally {
+      metaChain = savedChain;
+    }
+    if (batchDepth === 0) flush();
+  }
+  runNow() {
     this.discharge();
     unsubscribe(this);
     for (const t of this.tasks) t.cancel();
@@ -5549,11 +5611,10 @@ class MetaEffect {
       batchDepth--;
       this.settled(task);
     }
-    if (batchDepth === 0) flush();
   }
-  /** A tracked read: `meta.get("x")` / a `meta.bindings.x` of a cell. */
+  /** A tracked read: `meta.get("x")` / a `meta.bindings.x` of a cell — a dependency only during the run. */
   tracked(read) {
-    if (this.disposed) return read();
+    if (this.disposed || !this.running) return untrack(read);
     const saved = tracking;
     tracking = this;
     try { return read(); } finally { tracking = saved; }
@@ -5561,6 +5622,7 @@ class MetaEffect {
   emit(html) {
     if (this.disposed) return;
     if (this.ph && this.ph.isConnected) {
+      this.pending = [];                             // an older held emit never replaces this one
       _scrml_meta_emit_insert(this.scopeId, html);
       return;
     }

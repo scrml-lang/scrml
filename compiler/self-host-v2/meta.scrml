@@ -1078,7 +1078,10 @@ ${
 
     // §22.10: "deterministic per project-relative path" and unique in the document — the
     // file's path spelled in [A-Za-z0-9_] (every other character, `_` included, as `_` + its
-    // code unit in hex, so two paths never spell one id) and the block's ordinal in the file.
+    // UTF-16 code unit in FOUR hex digits) and `_` + the block's ordinal in the file.
+    // s482 r1 (review of #2067, LOW-2): the escape is fixed-width so the spelling is injective —
+    // read from the left, a `_` always starts a 4-digit escape until the LAST `_` (the ordinal,
+    // which holds no `_`); a variable-width escape let `a_5f.scrml` and `a` + U+5F5F + `.scrml` meet.
     fn metaScopeId(file: string, n: int) -> string {
         let out: string = "scrml_meta_";
         let i: int = 0;
@@ -1087,10 +1090,17 @@ ${
             const u: int = file.charCodeAt(i);
             const alnum: boolean = (u >= 48 && u <= 57) || (u >= 65 && u <= 90) || (u >= 97 && u <= 122);
             if (alnum) out = out + ch;
-            if (!alnum) out = out + "_" + hexOf(u);
+            if (!alnum) out = out + "_" + hex4(u);
             i = i + 1;
         }
         return out + "_" + n;
+    }
+
+    // `u` (a UTF-16 code unit, 0..0xFFFF) in exactly four lower-case hex digits.
+    fn hex4(u: int) -> string {
+        let out: string = hexOf(u);
+        for (; out.length < 4; ) { out = "0" + out; }
+        return out;
     }
 
     fn hexOf(u: int) -> string {

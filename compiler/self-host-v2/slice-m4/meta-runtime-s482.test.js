@@ -49,8 +49,8 @@ describe("s482 — a runtime `^{}` block compiles (§22.5)", () => {
     expect(errMsgs(r)).toEqual([]);
     const out = print(r);
     expect(out.refused).toEqual([]);
-    expect(out.html).toMatch(/<div id="host"><span data-scrml-meta="scrml_meta_app_2escrml_1"><\/span><\/div>/);
-    expect(out.js).toContain(`rt.metaEffect(scope$, n$0_0, "scrml_meta_app_2escrml_1", (task$, meta$) => {`);
+    expect(out.html).toMatch(/<div id="host"><span data-scrml-meta="scrml_meta_app_002escrml_1"><\/span><\/div>/);
+    expect(out.js).toContain(`rt.metaEffect(scope$, n$0_0, "scrml_meta_app_002escrml_1", (task$, meta$) => {`);
     // meta.get is the block's DEPENDENCY read: a thunk the runtime runs with tracking on
     expect(out.js).toContain("meta$.emit(\"<p>\" + meta$.get(() => inst$.fields[0 /* label */].get()) + \"</p>\")");
   });
@@ -60,7 +60,7 @@ describe("s482 — a runtime `^{}` block compiles (§22.5)", () => {
     expect(errMsgs(r)).toEqual([]);
     const js = print(r).js;
     expect(js).toContain("inst$.fields[0 /* n */].set(2);");
-    expect(js).toContain(`"scrml_meta_app_2escrml_1"`);
+    expect(js).toContain(`"scrml_meta_app_002escrml_1"`);
   });
 
   test("a cell entry of meta.bindings is a dependency read, as meta.get (§22.5.2)", () => {
@@ -87,10 +87,19 @@ describe("s482 — a runtime `^{}` block compiles (§22.5)", () => {
     const src = P(`<div>^{ meta.emit("a"); }</div><div>^{ meta.emit("b"); }</div>`);
     const a = print(run(src)).html;
     expect(a).toBe(print(run(src)).html);
-    expect(a).toContain(`data-scrml-meta="scrml_meta_app_2escrml_1"`);
-    expect(a).toContain(`data-scrml-meta="scrml_meta_app_2escrml_2"`);
+    expect(a).toContain(`data-scrml-meta="scrml_meta_app_002escrml_1"`);
+    expect(a).toContain(`data-scrml-meta="scrml_meta_app_002escrml_2"`);
     const r2 = frontEnd(mods, [{ path: "a_b.scrml", src }]);
-    expect(print(r2).html).toContain(`data-scrml-meta="scrml_meta_a_5fb_2escrml_1"`);
+    expect(print(r2).html).toContain(`data-scrml-meta="scrml_meta_a_005fb_002escrml_1"`);
+  });
+
+  test("s482 r1 (LOW-2): the escape is fixed-width — the review's colliding paths spell distinct ids", () => {
+    const src = P(`<div>^{ meta.emit("<b>x</b>"); }</div>`);
+    const id = (path) => print(frontEnd(mods, [{ path, src }])).html.match(/data-scrml-meta="([^"]*)"/)[1];
+    // variable-width hex spelled both pairs alike (scrml_meta_a_5f5f_2escrml_1, scrml_meta__fcc_2escrml_1)
+    expect([id("a_5f.scrml"), id("a\u5f5f.scrml")]).toEqual(["scrml_meta_a_005f5f_002escrml_1", "scrml_meta_a_5f5f_002escrml_1"]);
+    expect([id("\u00fcc.scrml"), id("\u0fcc.scrml")]).toEqual(["scrml_meta__00fcc_002escrml_1", "scrml_meta__0fcc_002escrml_1"]);
+    expect(id("a_5f.scrml")).toBe(id("a_5f.scrml"));                // deterministic
   });
 
   test("§22.6 — a cell read only inside a runtime block is consumed (no E-DG-002)", () => {
@@ -374,6 +383,83 @@ describe("s482 — the effect (§22.5.1)", () => {
   });
 });
 
+// s482 r1 (review of #2067) — MED-2 / MED-3 / LOW-1, each red on 048787db9.
+describe("s482 r1 — cycles, stale held emits, dependencies only while running", () => {
+  test("MED-2: two blocks that meta.set each other's meta.get cell settle as impl#1's do (x = 2, y = 3), not forever", () => {
+    const scope = rt.root.child();
+    const x = rt.cell(0);
+    const y = rt.cell(0);
+    let runs = 0;
+    rt.metaEffect(scope, null, "cA", (task, meta) => { runs++; y.set(meta.get(() => x.get()) + 1); });
+    rt.metaEffect(scope, null, "cB", (task, meta) => { runs++; x.set(meta.get(() => y.get()) + 1); });
+    expect([x.peek(), y.peek()]).toEqual([2, 3]);
+    expect(runs).toBe(3);
+    // a later outside change runs the cycle once round, then stops (impl#1: the same)
+    x.set(10);
+    expect([x.peek(), y.peek()]).toEqual([12, 11]);
+    scope.dispose();
+  });
+
+  test("MED-2: the backstop — a block runs at most __scrml_max_meta_runs (impl#1: 100) times in one flush, then impl#1's message", () => {
+    const scope = rt.root.child();
+    const a = rt.cell(0);
+    const b = rt.cell(0);
+    let runs = 0;
+    globalThis.__scrml_max_meta_runs = 5;
+    capture();
+    try {
+      rt.metaEffect(scope, null, "cap", (task, meta) => { runs++; b.set(meta.get(() => a.get()) + 1); });
+      // an effect that writes what the block reads — the compiler never builds one (E-EFFECT-WRITES-STATE);
+      // it is the one path past the cause rule, so the cap is what stops it
+      rt.effect(scope, () => { a.set(b.get() + 1); });
+    } finally {
+      release();
+      delete globalThis.__scrml_max_meta_runs;
+    }
+    expect(runs).toBe(6);                                // the first run, then 5 in the flush
+    expect(logs).toEqual(["[scrml] meta effect cap exceeded 5 re-runs — possible infinite loop"]);
+    scope.dispose();
+  });
+
+  test("MED-3: a connected emit drops the emits still held — the newer one is never overwritten by an older replay", async () => {
+    document.body.innerHTML = `<div id="host"></div>`;
+    const ph = document.createElement("span");
+    ph.setAttribute("data-scrml-meta", "m4");
+    const scope = rt.root.child();
+    const s = rt.cell("old");
+    rt.metaEffect(scope, ph, "m4", (task, meta) => { meta.emit("<b>" + meta.get(() => s.get()) + "</b>"); });
+    document.querySelector("#host").appendChild(ph);    // the insert, in the same task
+    s.set("new");                                        // the re-run, connected: written now
+    expect(ph.innerHTML).toBe("<b>new</b>");
+    await tick();                                        // the held "old" is not replayed
+    expect(ph.innerHTML).toBe("<b>new</b>");
+    scope.dispose();
+  });
+
+  test("LOW-1: a meta.get in a timer or cleanup callback reads the cell and subscribes nothing (impl#1)", async () => {
+    const ph = page("l1", "");
+    const scope = rt.root.child();
+    const s = rt.cell("a");
+    const t = rt.cell(0);
+    let runs = 0;
+    rt.metaEffect(scope, ph, "l1", (task, meta) => {
+      runs++;
+      meta.get(() => t.get());
+      meta.timeout(1, () => { meta.emit("<b>timer:" + meta.get(() => s.get()) + "</b>"); });
+      meta.cleanup(() => { meta.get(() => s.get()); });
+    });
+    await tick(10);
+    expect(ph.innerHTML).toBe("<b>timer:a</b>");
+    s.set("b");
+    expect(runs).toBe(1);
+    t.set(1);                                            // a real dependency re-runs it; its cleanup's read is no dependency
+    expect(runs).toBe(2);
+    s.set("c");
+    expect(runs).toBe(2);
+    scope.dispose();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 3. the shipping path: scrml-boot compileSource → the conformance runner (happy-dom, fake clock)
 // ---------------------------------------------------------------------------
@@ -491,6 +577,20 @@ suite("s482 — Chromium", () => {
       await page.close();
     }
   }, 120000);
+
+  test("r1 MED-2: two blocks that meta.set each other's meta.get cell terminate with impl#1's result (x = 2)", async () => {
+    const { page } = await openChromium(P(`let <x:int=0/>\nlet <y:int=0/>\n<div>^{ meta.set("y", meta.get("x") + 1); }</div>\n<div>^{ meta.set("x", meta.get("y") + 1); }</div>\n<p id="o">\${@x}</p>`));
+    expect(await page.evaluate(() => document.querySelector("#o")?.textContent)).toBe("2");
+    await page.close();
+  }, 60000);
+
+  test("r1 MED-3: a block mounted by a click shows the newest emit, not a held older one", async () => {
+    const { page } = await openChromium(P(`let <show:bool=false/>\nlet <s:string="old"/>\n<section if=@show><div id="h">^{ meta.emit("<b>" + meta.get("s") + "</b>"); }</div>\n<div>^{ meta.set("s", "new"); }</div></section>\n<p id="o">\${@s}</p>\n<button id="b" onclick=\${() => { @show = true; }}>b</button>`));
+    await page.click("#b");
+    await new Promise((r) => setTimeout(r, 100));
+    expect(await page.evaluate(() => [document.querySelector("#h")?.textContent, document.querySelector("#o")?.textContent])).toEqual(["new", "new"]);
+    await page.close();
+  }, 60000);
 
   test("admitted markup renders, and re-renders on a meta.get cell change", async () => {
     const { page } = await openChromium(P(`let <label:string="hi"/>\n<div id="host">^{ meta.emit("<p id=\\"rt\\" class=\\"c\\">" + meta.get("label") + "</p>"); }</div>\n<button id="b" onclick=\${() => { @label = "changed"; }}>b</button>`));

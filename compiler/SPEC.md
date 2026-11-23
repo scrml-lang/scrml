@@ -28334,8 +28334,12 @@ always pass all four arguments.
 > **Bootstrap status (S482, s482-meta-runtime).** The bootstrap builds a runtime block that stands
 > where markup stands (an element's children, a `<program>` body). The block's scope ID (§22.10) is the
 > file's project-relative path spelled in `[A-Za-z0-9_]` (every other character, `_` included, written as
-> `_` and its code unit in hex) and the block's ordinal in the file, so it is deterministic and unique in
-> the document. The block renders impl#1's placeholder, a `<span data-scrml-meta="…">`. Its body runs
+> `_` and its UTF-16 code unit in four hex digits) and `_` plus the block's ordinal in the file. The escape
+> is fixed-width, so two paths never spell one ID; the ID is deterministic and unique in the document. The
+> block renders impl#1's placeholder, a `<span data-scrml-meta="…">`. That span is judged as any span
+> written in that position (§24.5). Where a `<span>` would be E-HTML-PARSER-REPAIR, the block is
+> E-HTML-PARSER-REPAIR too: a table part, a raw-text or RCDATA element, or the inert content of an HTML
+> `<template>`. Its body runs
 > first where it stands, in source order with the statements around it, as impl#1's inline call does
 > (probed: `run1;meta1;run2;meta2;` on both implementations). Such a block stands in markup, so it is not a
 > §22.3 "top-level" block (file scope, "outside any … markup"); a runtime block at the file top outside
@@ -28343,11 +28347,20 @@ always pass all four arguments.
 > runs again when a dependency changes.
 > The dependencies are exactly the reads §22.5.1 and §22.9 name: `meta.get("x")` and a `meta.bindings`
 > entry of a cell. A direct `@x` read in the body, or one in a function the body calls, is not a
-> dependency (impl#1 tracks only these two forms too, probed). A write the run makes itself never re-runs
-> it, as impl#1's re-entrancy guard. A `meta.emit` made while the placeholder is still in a detached
+> dependency (impl#1 tracks only these two forms too, probed). They are dependencies only while the run is
+> in progress. A `meta.get` in a timer or cleanup callback reads the cell and subscribes nothing, as in
+> impl#1. A write the run makes itself never re-runs it, as impl#1's re-entrancy guard. impl#1 re-runs a
+> block synchronously inside the write that changed its dependency, and skips a block that is still
+> running. So no change caused by a block's own run, directly or through the runs it sets off, re-runs
+> that block. The bootstrap carries that cause with each queued re-run. Two blocks that each `meta.set` a
+> cell the other `meta.get`s therefore settle as in impl#1 (probed: `x` = 2). As in impl#1, a block runs at
+> most 100 times in one flush (`globalThis.__scrml_max_meta_runs` overrides the limit). After that it logs
+> impl#1's message, `[scrml] meta effect <id> exceeded <n> re-runs — possible infinite loop`, and skips the
+> run. The next flush counts again. A `meta.emit` made while the placeholder is still in a detached
 > render (a mount builds its tree before inserting it) is handed to the gate after the insert, so the gate
-> judges the page `<form>` the block really stands in. The gate is impl#1's runtime gate, copied verbatim
-> (§22.12).
+> judges the page `<form>` the block really stands in. An emit made once the placeholder is in the page
+> drops any emits still held, so an older emit never replaces a newer one. The gate is impl#1's runtime
+> gate, copied verbatim (§22.12).
 > Literal names (ruling:user-voice-scrml.md-S481-meta-four item 2: *"accept literal names only for now,
 > resolved at compile time; a computed name gets a clear 'not supported yet' error"*; a literal naming no
 > cell: *"make it a compile error (E-SCOPE-001)"*). `meta.get` is typed as the cell it names. INTERIM
