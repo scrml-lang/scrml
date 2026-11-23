@@ -3825,16 +3825,33 @@ export function text(scope, marker, fn) {
  * place for a per-part anchor. A `<textarea>`'s content is its default value; its current value is
  * set too (SPEC §34 W-RCDATA-BIND-VALUE-CONTENT-CONFLICT: content in a `<textarea>` "compiles to a
  * reactive `.value` bind"), so a change shows even after the user has typed.
+ *
+ * `parts` is the content in order: a static text is a string, an interpolated value is a thunk. Each
+ * value is its own hole (s482, #2069 review LOW-3; SPEC §19.17 — the trap unit is the effect, and a
+ * throw blanks only the hole that threw): a thunk that throws shows "" — as `text()` shows a throwing
+ * hole — and the static text and the other values are still shown. A trap is reported once and ends
+ * there; any other throw is rethrown after the content is written, as `text()` rethrows it after its
+ * blank. The element's content is never blanked as a whole.
  */
-export function textContent(scope, el, fn) {
+export function textContent(scope, el, parts) {
   const textarea = el.localName === "textarea";
   hole(scope, () => {
-    const s = fn().map(display).join("");
+    let s = "";
+    let failed = null;
+    for (const p of parts) {
+      if (typeof p === "string") { s += p; continue; }
+      try {
+        s += display(p());
+      } catch (err) {
+        if (isTrap(err)) reportLater(err);
+        else if (failed === null) failed = { err };
+      }
+    }
     el.textContent = s;
     if (textarea) el.value = s;
+    if (failed !== null) throw failed.err;
   }, () => {
-    el.textContent = "";
-    if (textarea) el.value = "";
+    // each value blanked itself above, and the content holds the rest: nothing more to blank
   });
 }
 

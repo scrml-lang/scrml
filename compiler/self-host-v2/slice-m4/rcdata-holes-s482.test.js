@@ -73,7 +73,7 @@ describe("the artifact: no anchor inside an RCDATA element; one text value on th
   test("`a ${@x} b` — the textarea is printed empty and wired by ONE rt.textContent", async () => {
     const res = await compile(MIXED);
     expect(contents(res.client.html, "textarea")).toEqual([""]);
-    expect(res.client.js).toContain('rt.textContent(scope$, n$0, () => ["a ", inst$.fields[0 /* x */].get(), " b"]);');
+    expect(res.client.js).toContain('rt.textContent(scope$, n$0, ["a ", () => inst$.fields[0 /* x */].get(), " b"]);');
     expect(res.client.js).not.toContain("rt.at(root$, 0, 1)");
   }, 120000);
 
@@ -84,7 +84,7 @@ let <x:string="hi"/>
 </program>
 `);
     expect(contents(res.client.html, "textarea")).toEqual([""]);
-    expect(res.client.js).toContain("rt.textContent(scope$, n$0, () => [inst$.fields[0 /* x */].get()]);");
+    expect(res.client.js).toContain("rt.textContent(scope$, n$0, [() => inst$.fields[0 /* x */].get()]);");
   }, 120000);
 
   test("`<title>Page ${@n} of 3</title>` — no anchor in the title", async () => {
@@ -94,7 +94,7 @@ let <n:int=1/>
 </program>
 `);
     expect(contents(res.client.html, "title")).toEqual([""]);
-    expect(res.client.js).toContain('rt.textContent(scope$, n$0, () => ["Page ", inst$.fields[0 /* n */].get(), " of 3"]);');
+    expect(res.client.js).toContain('rt.textContent(scope$, n$0, ["Page ", () => inst$.fields[0 /* n */].get(), " of 3"]);');
   }, 120000);
 
   test("raw-text `<xmp>` / `<noscript>` with a `${}` take the same form", async () => {
@@ -105,8 +105,8 @@ let <x:string="hi"/>
 `);
     expect(contents(res.client.html, "xmp")).toEqual([""]);
     expect(contents(res.client.html, "noscript")).toEqual([""]);
-    expect(res.client.js).toContain('rt.textContent(scope$, n$0, () => ["a ", inst$.fields[0 /* x */].get()]);');
-    expect(res.client.js).toContain('rt.textContent(scope$, n$1, () => ["b ", inst$.fields[0 /* x */].get()]);');
+    expect(res.client.js).toContain('rt.textContent(scope$, n$0, ["a ", () => inst$.fields[0 /* x */].get()]);');
+    expect(res.client.js).toContain('rt.textContent(scope$, n$1, ["b ", () => inst$.fields[0 /* x */].get()]);');
   }, 120000);
 
   test("only static text, and an SVG `<title>` (markup, not RCDATA), print as before", async () => {
@@ -192,6 +192,37 @@ let <s:string="!"/>
 `;
     expect((await run(src)).ta.map((t) => t.value)).toEqual(["a! row", "b! row"]);
     expect((await run(src, [{ click: "#b" }])).ta.map((t) => t.value)).toEqual(["a? row", "b? row"]);
+  }, 120000);
+});
+
+// s482 (#2069 review LOW-3; §19.17 "a throw blanks the hole"): each `${}` part is its own hole — a part
+// that throws shows "", as a `<p>`'s text hole does, and the static text and the other parts stay.
+describe("a throwing part blanks only itself", () => {
+  const src = `<program>
+let <x:string="hi"/>
+fn boom(s: string) -> string { if (s == "yo") { return s.repeat(0 - s.length); } return s; }
+<textarea id="t">static-a \${boom(@x)} static-b \${@x}</textarea>
+<p id="o">static-a \${boom(@x)} static-b</p>
+<button id="b" onclick=@x = "yo">b</button>
+</program>
+`;
+  test("each value is its own thunk in the artifact", async () => {
+    const res = await compile(src);
+    expect(res.client.js).toContain('rt.textContent(scope$, n$0, ["static-a ", () => boom(inst$.fields[0 /* x */].get()), " static-b ", () => inst$.fields[0 /* x */].get()]);');
+  }, 120000);
+
+  test("after the throw: `static-a  static-b yo` (the `<p>` the same), not an empty element; the trap is reported", async () => {
+    expect((await run(src, [], ["o"])).ta).toEqual([{ value: "static-a hi static-b hi", text: "static-a hi static-b hi" }]);
+    // a trap is reported through reportError (§19.17 "Every trap SHALL be reported"): caught here
+    const reported = [];
+    const saved = globalThis.reportError;
+    globalThis.reportError = (e) => { reported.push(e.code); };
+    let r;
+    try { r = await run(src, [{ click: "#b" }], ["o"]); } finally { globalThis.reportError = saved; }
+    expect(r.ta).toEqual([{ value: "static-a  static-b yo", text: "static-a  static-b yo" }]);
+    expect(r.ids).toEqual(["static-a  static-b"]);
+    // once for the textarea's part, once for the `<p>`'s hole
+    expect(reported).toEqual(["E-INDEX-OUT-OF-RANGE-RT", "E-INDEX-OUT-OF-RANGE-RT"]);
   }, 120000);
 });
 

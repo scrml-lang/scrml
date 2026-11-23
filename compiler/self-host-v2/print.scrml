@@ -3031,7 +3031,9 @@ ${
         };
     }
 
-    // The element's text value, wired on its hole: `rt.textContent(scope$, el, () => ["a ", x, " b"])`.
+    // The element's text value, wired on its hole: `rt.textContent(scope$, el, ["a ", () => x, " b"])` —
+    // a static text as a string, each `${}` value as its own thunk, so a throwing value blanks only itself
+    // (runtime.js textContent; s482, #2069 review LOW-3).
     // A `<textarea>` with `bind:value` gets none — §34 W-RCDATA-BIND-VALUE-CONTENT-CONFLICT: "`bind:value`
     // wins … and the reactive content interpolation is dropped" (analyze mkBindContent reports it).
     fn textContentJs(ctx: Ctx, tag: string, attrs: Attr[], ks: View[], node: JsExpr) -> JsStmt[] {
@@ -3040,13 +3042,13 @@ ${
         if (bindsValue(attrs)) return [];
         let parts: JsExpr[] = [];
         for (const k of tc) { parts = parts.concat(textPartJs(ctx, k)); }
-        return [sexpr(rtCall(ctx, "textContent", [scopeVar(), node, jthunk(JsExpr.JArray(parts))]))];
+        return [sexpr(rtCall(ctx, "textContent", [scopeVar(), node, JsExpr.JArray(parts)]))];
     }
 
     fn textPartJs(ctx: Ctx, v: View) -> JsExpr[] {
         return match v {
             .Text(text: t) :> [jstr(t)],
-            .Dyn(e: e) :> [exprJs(ctx, e)],
+            .Dyn(e: e) :> [jthunk(exprJs(ctx, e))],
             // no-default-arm: textContentKids admitted only text and `${}` values
             _ :> []
         };
