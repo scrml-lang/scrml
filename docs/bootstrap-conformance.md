@@ -7,22 +7,22 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1965 of 1965 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1968 of 1968 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 817 | 41.6% |
+| PASS | 820 | 41.7% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 3 | 0.2% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 628 | 32.0% |
+| NOT-TWINNED | 628 | 31.9% |
 | UNSUPPORTED | 517 | 26.3% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 820; of those, 817 hold (99.6%). Runtime half executed on the bootstrap for 261 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 823; of those, 820 hold (99.6%). Runtime half executed on the bootstrap for 263 case(s).
 
-- **Vacuous** passes: 15 of 817 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **802**.
+- **Vacuous** passes: 15 of 820 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **805**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 1 of 3; the other 2 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
@@ -154,7 +154,7 @@ NOT-TWINNED by reason (628 cases; a case counts once per distinct reason):
 | maps | 13 | · | · | · | · | 13 | · | · | · |
 | markup-handler | 89 | 36 | · | · | · | 40 | 13 | · | · |
 | match-block | 23 | 12 | · | · | · | 6 | 5 | · | · |
-| match-codes | 31 | 22 | · | · | · | · | 9 | · | · |
+| match-codes | 34 | 25 | · | · | · | · | 9 | · | · |
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
 | match-leave | 46 | 22 | · | · | · | 9 | 15 | · | · |
 | md | 18 | 1 | · | · | · | 3 | 14 | · | · |
@@ -207,7 +207,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (817)
+### PASS / CODES-ONLY (820)
 
 - `attr-executable-sink/base-href-data-neg` — PASS · TWIN
 - `attr-executable-sink/base-href-static-pos` — PASS · TWIN
@@ -691,6 +691,8 @@ none
 - `match-codes/e-match-012-tnot-else-exhaustive-neg` — PASS · TWIN
 - `match-codes/e-match-012-tnot-missing-not-arm-pos` — PASS · TWIN
 - `match-codes/e-match-012-tnot-not-arm-exhaustive-neg` — PASS · TWIN
+- `match-codes/e-match-alt-binding-neg` — PASS
+- `match-codes/e-match-alt-binding-pos` — PASS
 - `match-codes/e-match-arm-markup-in-value-neg` — PASS · TWIN
 - `match-codes/e-match-arm-markup-in-value-pos` — PASS · TWIN
 - `match-codes/e-match-block-in-lift-neg` — PASS · TWIN
@@ -710,6 +712,7 @@ none
 - `match-codes/e-type-026-match-in-logic-neg` — PASS · TWIN · VACUOUS
 - `match-codes/e-type-026-match-in-markup-pos` — PASS · TWIN
 - `match-codes/is-variant-test-rt` — PASS · TWIN
+- `match-codes/match-alternation-rt` — PASS
 - `match-leave/dpa068-failable-decl-bare-return` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `match-leave/dpa068-failable-stmt-bare-fail` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `match-leave/dpa068-failable-stmt-bare-return` — PASS · TWIN (also emitted, unasserted: E-DG-002)
