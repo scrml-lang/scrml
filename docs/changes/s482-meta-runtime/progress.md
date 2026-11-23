@@ -54,3 +54,30 @@ Base: origin/main ba34ad0ba (contains #2045). Scratch: ~/.cache/scrml/review/s48
 
 ## Remaining
 - commit records; push; PR.
+
+## r1 (fix round, review of #2067: 3 MED, 2 LOW)
+- merged origin/main twice (ba3ecf216, then 31beb6d49). The second merge conflicted in analyze.scrml with
+  #2069 rcdata-holes (`mkRawNode`). Both sides kept, and `mkRawNode` routes a runtime block to `mkMetaRun` (refused).
+- MED-1 (analyze.scrml `mkMetaPlace` / `mkMetaRun` / `mkInertMeta`; `mkElemOf` takes the node): the
+  placeholder span is judged by the existing E-HTML-PARSER-REPAIR rules as a synthesized `<span>` at the block
+  (this adds no element list). An HTML `<template>`'s content is also refused, because it is inert. Pins: table
+  family, raw-text family, template family, and legal positions (div / p / li / td / form / caption / select /
+  optgroup / option / body) unchanged. Chromium: select / optgroup / option keep the span (customizable select),
+  so these stay legal.
+- MED-2 (runtime.js MetaEffect): carries impl#1's re-entrancy as a CAUSE chain on each queued re-run, plus a
+  100-run-per-flush cap that logs impl#1's message (`__scrml_max_meta_runs` overrides it). The review's
+  ping-pong gives x = 2 in Chromium, as impl#1 does. Unit pins: cycle (2, 3), then (12, 11) after an outside
+  write; the cap is pinned with a runtime-level effect writer. Red on base: the unit test hangs (no cap).
+- MED-3: a connected emit clears `pending`. Unit plus Chromium pins (twoBlocksIf). Red on base.
+- LOW-1: `tracked` subscribes only while `running` (it uses untrack otherwise). Unit pin covering a timer and a
+  cleanup read. Red on base.
+- LOW-2: meta.scrml `hex4`, a fixed 4-digit escape (injective: the last `_` separates the ordinal). Test ids now
+  `_002e`; the collisions are pinned. SPEC §22.5 bootstrap status is updated for all five items; the gap
+  residue has a bullet and a note.
+- Gates (head fc77b2eaa, the merged tree): pretest 0. Conformance main 31beb6d49 817/3/628/517/0 → head
+  842/4/628/491/0: 25 U→PASS (meta), 1 U→FAIL (meta-proto-cell-name-pos), 0 PASS→other, CRASH 0.
+  impl#1 -t meta 68/68. meta-runtime-s482 45/45 with SCRML_BROWSER_TESTS=1. Gate drift test, meta-s481
+  126/0, sync --check in sync. Emitted byte-compare (1965 cases) main vs head: 26 diffs, all meta/, 0 non-meta.
+  Corpus (76 `^{` files, fixS66): 0 newly rejected vs main and vs the PR head; no file hits the MED-1 refusal.
+  s34-census PASS, types-gate OK, snippet-gate 0 fail, claim-gate 0 fail, gen-md-shim current,
+  gen-bootstrap-severity current, corpus-compile-floor PASS, e2e-render-map 259/0.
