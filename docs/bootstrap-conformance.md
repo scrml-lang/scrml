@@ -7,30 +7,30 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1968 of 1968 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1970 of 1970 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 845 | 42.9% |
+| PASS | 848 | 43.0% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 4 | 0.2% |
+| FAIL | 3 | 0.2% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 628 | 31.9% |
 | UNSUPPORTED | 491 | 24.9% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 849; of those, 845 hold (99.5%). Runtime half executed on the bootstrap for 288 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 851; of those, 848 hold (99.6%). Runtime half executed on the bootstrap for 288 case(s).
 
-- **Vacuous** passes: 15 of 845 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **830**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 1 of 4; the other 3 are implemented checks that answered wrong.
+- **Vacuous** passes: 15 of 848 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **833**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 1 of 3; the other 2 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
 UNSUPPORTED by reason: bootstrap-unsupported 491.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **899** — PASS 526 · FAIL 4 · UNSUPPORTED 369. Twin holds 526 (non-vacuous 514). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **901** — PASS 529 · FAIL 3 · UNSUPPORTED 369. Twin holds 529 (non-vacuous 517). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 7 replace a twin's expectations · 14 exclude a case.
 - Superseded-code mappings applied: 8 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -154,11 +154,11 @@ NOT-TWINNED by reason (628 cases; a case counts once per distinct reason):
 | maps | 13 | · | · | · | · | 13 | · | · | · |
 | markup-handler | 89 | 36 | · | · | · | 40 | 13 | · | · |
 | match-block | 23 | 12 | · | · | · | 6 | 5 | · | · |
-| match-codes | 34 | 25 | · | · | · | · | 9 | · | · |
+| match-codes | 35 | 26 | · | · | · | · | 9 | · | · |
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
 | match-leave | 46 | 22 | · | · | · | 9 | 15 | · | · |
 | md | 18 | 1 | · | · | · | 3 | 14 | · | · |
-| meta | 66 | 63 | · | 1 | · | 2 | · | · | · |
+| meta | 67 | 65 | · | · | · | 2 | · | · | · |
 | middleware | 6 | 3 | · | · | · | · | 3 | · | · |
 | module | 51 | 30 | · | · | · | 11 | 10 | · | · |
 | navigate | 3 | · | · | · | · | · | 3 | · | · |
@@ -186,7 +186,7 @@ NOT-TWINNED by reason (628 cases; a case counts once per distinct reason):
 | tool | 12 | 12 | · | · | · | · | · | · | · |
 | type-state-codes | 32 | 13 | · | · | · | 6 | 13 | · | · |
 
-### FAIL (4)
+### FAIL (3)
 
 - `control-flow/loop-007-separate-while-after-decl-neg` (twin · parse-reject)
   - E-STMT-MISSING-SEMICOLON: Expected `;` to end the statement — insert `;` after `5`. A `;` ends every statement that is not block-like, the last one before a `}` included (`{ @n = @n + 1; }`); a newline does not end a statement (dpa-073 F1 / F3).
@@ -198,8 +198,6 @@ NOT-TWINNED by reason (628 cases; a case counts once per distinct reason):
   - missing W-ASSIGN-001
   - severity: W-ASSIGN-001 did not fire (expected warning)
   - E-LOOP-DO-WHILE-RETIRED: `do … while` is not a scrml loop — write a body-first `for { …; if (done) { break } }`, or, when the body uses `continue`, `for (let first = true; first || cond; first = false) { … }` (§49.3.6)
-- `meta/meta-proto-cell-name-pos` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-OPERATOR-OPERAND-TYPE
 
 ### CRASH (0)
 
@@ -209,7 +207,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (845)
+### PASS / CODES-ONLY (848)
 
 - `attr-executable-sink/base-href-data-neg` — PASS · TWIN
 - `attr-executable-sink/base-href-static-pos` — PASS · TWIN
@@ -715,6 +713,7 @@ none
 - `match-codes/e-type-026-match-in-markup-pos` — PASS · TWIN
 - `match-codes/is-variant-test-rt` — PASS · TWIN
 - `match-codes/match-alternation-rt` — PASS
+- `match-codes/match-mixed-alternates-not-pos` — PASS · TWIN
 - `match-leave/dpa068-failable-decl-bare-return` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `match-leave/dpa068-failable-stmt-bare-fail` — PASS · TWIN (also emitted, unasserted: E-DG-002)
 - `match-leave/dpa068-failable-stmt-bare-return` — PASS · TWIN (also emitted, unasserted: E-DG-002)
@@ -797,10 +796,12 @@ none
 - `meta/meta-jshost-global-neg` — PASS
 - `meta/meta-mixed-patterns-neg` — PASS
 - `meta/meta-nested-block-neg` — PASS · TWIN
+- `meta/meta-proto-cell-name-pos` — PASS · TWIN
 - `meta/meta-reflect-clean-pos` — PASS · TWIN
 - `meta/meta-reflect-outside-block-neg` — PASS
 - `meta/meta-reflect-unknown-type-neg` — PASS
 - `meta/meta-sql-in-runtime-block-neg` — PASS
+- `meta/meta-typeinfo-absent-member-empty-pos` — PASS · TWIN
 - `middleware/ratelimit-invalid-unit-pos` — PASS
 - `middleware/trusted-proxies-invalid-neg` — PASS
 - `middleware/trusted-proxies-invalid-pos` — PASS
