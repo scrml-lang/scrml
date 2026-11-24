@@ -1311,14 +1311,21 @@ ${
     // `.` ruling applied to `/`"): a `/` TOUCHING `as` is division on the name `as` (`as/2`); a
     // spaced `as /re/` keeps the regular expression. A touching `//` / `/*` is a comment either way
     // (classify reads comments first).
+    // s482-rulings-records — `of` the same way (owner ruling S482, user-voice-scrml.md "RULED — `of`
+    // adjacency follows the `as` rule", ruling:user-voice-scrml.md-S482-of-adjacency; SPEC §49.2.4):
+    // `of` binds as a name (§49.2.4), and its keyword reading (after a for-binder) takes a VALUE after
+    // it, so the previous token alone cannot decide `of .x` / `of /re/` either. A `.` or `/` touching
+    // `of` reads the name (`of.value`, `of/2`); spaced, the keyword's operand (`for (x of .Items)`,
+    // `for (x of /re/.exec(s))`).
     fn dotLastKind(st: LexState, cur: Cursor) -> TokenKind | not {
         const k: TokenKind | not = valueLastKind(st);
         if (k is not) return k;
         const c0: int = peekCode(cur, 0);
         if (c0 != 46 && c0 != 47) return k;
-        if (keywordName(k) != "as") return k;
+        const w: string = keywordName(k);
+        if (w != "as" && w != "of") return k;
         if (st.tokens[st.tokens.length - 1].span.end != cur.pos) return k;
-        return kIdent("as");
+        return kIdent(w);
     }
 
     // The (mode x event) transition table (the DD's `match (st.mode, ev)`),
