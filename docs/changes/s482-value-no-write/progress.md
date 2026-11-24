@@ -31,4 +31,4 @@ the riders"); study ~/.cache/scrml/review/s482-runorder-study/study.md. Bootstra
       diffs; s34-census --check-new PASS (5 rows); types-gate OK (182 unchanged); corpus-compile-floor PASS;
       snippet-gate 0 failed; claim-gate 0 failed; gen-bootstrap-severity current; e2e-render-map 259 pass;
       pre-commit full suite + slices PASS on every commit. New test file red on base: 19 fail / 9 pass.
-- [ ] PR (not merged)
+- [x] PR #2096 opened (not merged)
