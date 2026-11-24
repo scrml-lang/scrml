@@ -1,5 +1,6 @@
 // §7.6 rule (b) / §66.7.6 rule 5 (S482) — a cell's seed is computed at its place in the program body's one run.
-// (s482-value-no-write: the seed no longer calls `note` — a seed that writes a file-scope `let` is E-VALUE-WRITES-STATE, §6.15 A1.)
+// (s482-value-no-write r1: the seed writes nothing — a seed is a value position, §6.15 A1 — and pins its place by
+// what it READS: `n` is 5 at the seed's place and 9 after it. The writing seed is seed-computed-in-place-writes-neg.)
 <program>
 ${
     let log: string = "";
@@ -8,7 +9,8 @@ ${
 }
 ${ n = 5; }
 ${ const k: int = n + note("k"); }
-let <c:int=(k + 1)/>
+let <c:int=(k + n)/>
+${ n = 9; }
 ${ const z: int = note("z"); }
 <p id="e">${@c}</p>
 <p id="r">${log}</p>
