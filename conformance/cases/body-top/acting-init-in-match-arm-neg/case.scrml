@@ -1,4 +1,4 @@
-// §7.6 rule (b) (S482) — a file-scope initializer that acts, written inside a `<match>` arm (in an element of the arm), is E-FILE-SCOPE-INIT-IN-CONSTRUCT.
+// §7.6 rule (b) (S482) — a file-scope initializer that acts, written inside a `<match>` arm (in an element of the arm), is a value position that writes a file-scope `let`: E-VALUE-WRITES-STATE (S482, s482-value-no-write; was E-FILE-SCOPE-INIT-IN-CONSTRUCT).
 <program>
 ${
     let log: string = "";

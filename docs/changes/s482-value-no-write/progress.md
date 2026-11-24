@@ -12,6 +12,15 @@ the riders"); study ~/.cache/scrml/review/s482-runorder-study/study.md. Bootstra
 - [x] 3. A3 (§34 row pending — step 5) — E-DERIVED-READS-UNTRACKED (§34 row, gen-bootstrap-severity)
 - [~] 4. INTERIM removal: construct write-side enumeration cut to the `<request>` route only (Q6 hold not
       built — g-boot-request-runs-in-body-s482): new INTERIM g-boot-construct-request-write-s482.
-      cell-seed-bound-s482.test.js retired → value-no-write-s482.test.js. Probes base vs head: pending
-- [ ] 5. SPEC §6.15 / §7.6 (b) model R1–R6 / §6.7.4 / §34
+      cell-seed-bound-s482.test.js retired → value-no-write-s482.test.js.
+      Probes (~/.cache/scrml/review/s482-value-no-write/probes-{base,head}.txt, probes-diff.txt): 389 unique
+      of 775 (p/ q/ s*/ xf/ of s482-2076/2079/2082*/2088 + 2092 mc.scrml): 62 same value, 54 same refusal,
+      186 refused both (code moves), 86 value → refused (all E-VALUE-WRITES-STATE), 1 refused → value
+      (2076 e-viafn: 5, the source order), 0 values changed.
+      Corpus (2974 files): 1 newly rejected — conformance/cases/body-top/seed-computed-in-place (a seed
+      calling `note`; rewritten); 0 newly accepted; 4 code moves (2 conformance neg cases updated to
+      E-VALUE-WRITES-STATE; 2 gauntlet samples lose an E-FILE-SCOPE-INIT-IN-CONSTRUCT); 0 output diffs.
+- [x] 5. SPEC §6.15 widened + A3 + riders; §7.6 (b) one-page model R1–R6 (old construct paragraphs struck);
+      §6.7.4 write list amended; §34 rows (E-VALUE-WRITES-STATE, E-DERIVED-READS-UNTRACKED new,
+      E-FILE-SCOPE-INIT-IN-CONSTRUCT); severity.scrml regenerated; s34-census PASS; claim-gate 0 failed
 - [ ] gates, PR (not merged)
