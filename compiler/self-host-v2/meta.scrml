@@ -71,7 +71,15 @@ ${
     // spliced is then refused by name (no ids to give its nodes).
     export type MetaRun:struct = { files: FileAst[], next: int, diags: Diag[] }
 
-    export fn metaFiles(files: FileAst[], next0: int) -> MetaRun {
+    // s482 r2 (s482-registry-client; #2093 r1 review HIGH-1 / MED-1 / LOW-1) — the TYPE a name
+    // denotes in a file's scope: in `file`, the local name `local` (an import's alias when it has
+    // one) denotes the type declared `orig` in `from` (the file itself for its own declaration,
+    // else the declaring file its import resolves to, re-exports followed). analyze.scrml builds it
+    // from the linkage's scope with the one resolver every type use goes through (scopeHit — what
+    // stubNamed reads): typeScopes. `scope` of metaFiles; Tables.tscope (lower.scrml reflectIds).
+    export type MTypeScope:struct = { file: string, local: string, from: string, orig: string }
+
+    export fn metaFiles(files: FileAst[], next0: int, scope: MTypeScope[]) -> MetaRun {
         let next: int = next0;
         let out: FileAst[] = [];
         let diags: Diag[] = [];
@@ -79,7 +87,7 @@ ${
         // blocks draw on it, imported files included, in file order
         let used: MUsed = { chars: 0, tags: 0, nodes: 0, attrs: 0, steps: 0 };
         for (const f of files) {
-            const env: MEnv = envOf(f, files);
+            const env: MEnv = envOf(f, files, scope);
             const c0: MC = { file: f.path, env: env, next: next, diags: [], errs: f.errs, hits: 0, used: used, rt: "", wh: "", lits: [] };
             const r: RItems = mItems(c0, f.items, "program", true);
             used = r.c.used;
@@ -110,25 +118,41 @@ ${
     type MType:struct = { name: string, kind: string, fields: MField[], variants: string[] }
     type MEnv:struct = { decls: MDecl[], types: MType[], cells: string[] }
 
-    fn envOf(f: FileAst, all: FileAst[]) -> MEnv {
+    // s482 r2 (#2093 r1 review HIGH-1 / MED-1 / LOW-1): an imported type is the one ITS import
+    // names (`scope`, analyze.scrml typeScopes — the import's source and exported name, alias-aware,
+    // re-exports followed), under the name it has in this file (an alias: `import { Config as C }`
+    // binds `C` here, so the type's entry is `C` and a lookup of "Config" here finds none). Never
+    // another file's type of the same name (was: the first file in program order exporting the
+    // name). An imported name the scope binds to no type (not imported as a type, or no file
+    // declares it) adds nothing — a computed lookup of it gives `not`, a literal one is E-META-003.
+    fn envOf(f: FileAst, all: FileAst[], scope: MTypeScope[]) -> MEnv {
         let e: MEnv = { decls: [], types: primitiveTypes(), cells: [] };
         e = envItems(e, f.items);
-        // a type imported by name from another file of the program (its own declaration)
-        let imported: string[] = [];
-        for (const d of e.decls) { if (d.kind == 3) imported = imported.concat([d.name]); }
-        if (imported.length > 0) {
-            for (const g of all) {
-                if (g.path != f.path) {
-                    const ts: MType[] = typesOfItems(g.items, true);
-                    for (const t of ts) {
-                        if (imported.indexOf(t.name) >= 0 && !hasType(e.types, t.name)) {
-                            e = { decls: e.decls, types: e.types.concat([t]), cells: e.cells };
-                        }
-                    }
-                }
+        for (const d of e.decls) {
+            if (d.kind == 3 && !hasType(e.types, d.name)) {
+                const t: MType | not = importedType(f.path, d.name, all, scope);
+                if (t is given) e = { decls: e.decls, types: e.types.concat([t]), cells: e.cells };
             }
         }
         return e;
+    }
+
+    // the type the local name `local` of `file` denotes when it is imported (scope), named `local`
+    fn importedType(file: string, local: string, all: FileAst[], scope: MTypeScope[]) -> MType | not {
+        for (const s of scope) {
+            if (s.file == file && s.local == local) {
+                if (s.from == file) return not;
+                for (const g of all) {
+                    if (g.path == s.from) {
+                        for (const t of typesOfItems(g.items, true)) {
+                            if (t.name == s.orig) return { name: local, kind: t.kind, fields: t.fields, variants: t.variants };
+                        }
+                    }
+                }
+                return not;
+            }
+        }
+        return not;
     }
 
     // impl#1 buildFileTypeRegistry seeds these (reflect of a primitive: `{ kind, name }`)
