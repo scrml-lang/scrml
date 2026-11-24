@@ -315,6 +315,37 @@ describe("each alternate is judged as its own arm would be", () => {
   });
 });
 
+// s482-rulings-records — owner ruling S482 (user-voice-scrml.md "RULED — mixed alternates (variant /
+// literal / `not`) in one match arm, each valid for the subject type", ruling:user-voice-scrml.md-S482-
+// mixed-alternates; SPEC §18.2): "allow alternates of different kinds in one arm, as long as each one is
+// valid on its own for the subject's type" — `.Draft | not :> …` on `Status | not` ✓; `.Draft | 3` ✗.
+describe("mixed alternates — each valid for the subject's type (ruling S482-mixed-alternates)", () => {
+  const ST = `    type Status:enum = { Draft, Live, Gone }\n`;
+  test("`.Draft | not` on `Status | not`: clean, and with the other variants it is exhaustive (no `else`)", () => {
+    clean(prog(ST + `    fn f(s: Status | not) -> string {\n        return match s {\n            .Draft | not :> "d",\n            .Live | .Gone :> "l",\n        };\n    }`));
+  });
+  test("`.Draft | 3` on `Status | not`: the literal alternate is not valid for the subject (E-TYPE-028), once", () => {
+    expect(codes(prog(ST + `    fn f(s: Status | not) -> string {\n        return match s {\n            .Draft | 3 :> "d",\n            else :> "x",\n        };\n    }`))).toEqual(["E-TYPE-028"]);
+  });
+  test("the mixed arm runs: the variant and `not` both take it", async () => {
+    const src = `<program>
+\${
+${ST}    fn f(s: Status | not) -> string {
+        return match s {
+            .Draft | not :> "d",
+            .Live | .Gone :> "l",
+        };
+    }
+}
+<p id="a">\${f(.Draft)}</p>
+<p id="b">\${f(not)}</p>
+<p id="c">\${f(.Live)}</p>
+</program>
+`;
+    expect(await run(src, ["a", "b", "c"])).toEqual(["d", "d", "l"]);
+  }, 180000);
+});
+
 describe("the head: line breaks, guards, the legacy `!{}` lead", () => {
   test("a head over three lines, comments between them, CRLF — clean", () => {
     const src = prog(TYPES + `    fn f(k: K) -> int {\n        return match k {\n            .A | // the first\n                .B | /* then */\n                .C :> 1,\n            .D :> 2,\n        };\n    }`);

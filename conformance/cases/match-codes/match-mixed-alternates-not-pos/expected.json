@@ -1,0 +1,28 @@
+{
+  "id": "match-mixed-alternates-not-pos",
+  "description": "§18.2 (S482) — a match arm whose `|` alternates are of different kinds: `.Draft | not :> …` on a `Status | not` subject. Each alternate is a valid pattern for the subject's type, so the arm is legal; with `.Live :> …` the match is exhaustive (no `else`).",
+  "language-version": "1.0",
+  "spec": "§18.2",
+  "source-test": "compiler/self-host-v2/slice-m4/match-alternation-s482.test.js",
+  "provenance": "lane:s482-rulings-records (ruling:user-voice-scrml.md-S482-mixed-alternates; g-impl1-mixed-alternates-refused-s482)",
+  "rationale": "§18.2 (S482): \"Alternates of one arm may be of different kinds (variant, literal, `not`); each SHALL be a valid pattern for the subject's type.\" ruling:user-voice-scrml.md-S482-mixed-alternates — \"allow alternates of different kinds in one arm, as long as each one is valid on its own for the subject's type\" (`.Draft | not :> …` on `Status | not` ✓).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-PARSE-001", "E-MATCH-012", "E-TYPE-006"]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-mixed-alternates-refused-s482",
+      "fails": {
+        "codes": [
+          "emitted:E-MATCH-012=1",
+          "emitted:E-PARSE-001=1",
+          "emitted:E-TYPE-006=1",
+          "forbidden:E-MATCH-012",
+          "forbidden:E-PARSE-001",
+          "forbidden:E-TYPE-006"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,12 @@
+// §18.2 (S482) — alternates of one arm may be of different kinds; each must be valid for the subject.
+<program>
+${
+    type Status:enum = { Draft, Live }
+    fn f(s: Status | not) -> string {
+        return match s { .Draft | not :> "d", .Live :> "l" };
+    }
+}
+<p id="a">${f(.Draft)}</p>
+<p id="b">${f(not)}</p>
+<p id="c">${f(.Live)}</p>
+</program>
