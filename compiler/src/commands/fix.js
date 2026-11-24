@@ -11,7 +11,8 @@
  * does NOT implement the §66 opener dialect. So:
  *   - DEFAULT — only the rules whose output impl#1 compiles: pre-migrate, arm-pipe (§19.4.5, the
  *     `|`-led `!{}` / message arm — commands/fix-arm-pipe.js), is-some (§42.2.2a / §55.1, S462:
- *     `x is some` and the validator `<x is some>` → `is given` — commands/fix-is-some.js), client-server-call (§19.9.10, an
+ *     `x is some` and the validator `<x is some>` → `is given` — commands/fix-is-some.js), variant-colons (§14.5, S482:
+ *     the deprecated `::` variant access → `.` — commands/fix-variant-colons.js), client-server-call (§19.9.10, an
  *     unhandled client call of a server function → `!{ .Transport(_) :> return }` —
  *     commands/fix-client-server-call.js), sql-failable (§19.8.3, an unhandled `?{}` READ outside a
  *     `!` function → `!{ _ :> not }` / `!{ _ :> [] }`; every write is listed, never rewritten — S455
@@ -66,7 +67,8 @@ Apply the mechanical §63 deprecation rewrites (the §66.21 declaration class; a
 \`|\`-led \`!{}\` / engine message arm → the §18.2 match arm, §19.4.5; is-some: \`x is some\`
 and the validator \`<x is some>\` → \`is given\`, §42.2.2a / §55.1; given-presence: the in-place
 \`given x, y :> { … }\` guard → \`if (x is given && y is given) { … }\` and a \`given x :>\` match arm →
-\`else :>\`, §42.2.3; client-server-call: an
+\`else :>\`, §42.2.3; variant-colons: the deprecated \`::\` enum variant access \`E::V\` / \`::V\` →
+\`E.V\` / \`.V\`, §14.5; client-server-call: an
 unhandled client call of a server function → \`f() !{ .Transport(_) :> return }\`, §19.9.10;
 sql-failable: an unhandled \`?{}\` READ in a server function that is not \`!\` →
 \`?{…}.get() !{ _ :> not }\` / \`.all() !{ _ :> [] }\`, §19.8.3; every WRITE — any \`.run()\`, a bare
