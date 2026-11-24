@@ -28240,12 +28240,17 @@ Given a call `reflect(expr)` inside a `^{}` block:
   function the client calls, or a type-literal `reflect(T)` / `meta.types.reflect("T")` in a
   runtime block names it — and, transitively, a type reached through the struct fields and enum
   payloads of a client-used type. Client use is decided per TYPE, not per name: two files that each
-  declare a type of one name declare two types. A registry entry is the type its name denotes in the
-  file of the breakout point (that file's own declaration, else the type it imports), and it is in
-  the registry only when that type is client-used — a server-only `Config` in one file is left out
-  even when another file's `Config` is client-used. When an imported name is exported by more than
-  one other file of the program, every one of those types SHALL be client-used for the entry to be
-  kept (otherwise it is left out, and a computed `reflect` of the name returns `not`). A type reached only from
+  declare a type of one name declare two types. A registry entry is the type its name means in the
+  file of the breakout point: that file's own declaration of the name, else the declaration its
+  `import` of the name binds — the file the import names (re-exports followed) and the name that
+  file exports, never another file's type of the same name. The entry's name is the name in scope
+  in that file: under `import { Config as C } from "./lib.scrml"` the entry is named `C`, a computed
+  `reflect` of `"C"` finds it, and a computed `reflect` of `"Config"` there returns `not` (unless that
+  file also has a `Config` of its own). A name that is neither declared nor imported as a type in
+  that file has no entry. The entry is in the registry only when that one type is client-used — a
+  server-only `Config` in one file is left out even when another file's `Config` is client-used, and
+  a type-literal `reflect(Config)` makes client-used only the type `Config` means where it is
+  written. A type reached only from
   server code (a server function, a function only server code reaches, a server-only binding), only
   from `<db>` / `?{}` queries, or from no code at all, SHALL NOT be in the registry: its name, field
   names and field types are not in the client bundle, and a computed `reflect` of its name returns
@@ -28265,8 +28270,10 @@ Given a call `reflect(expr)` inside a `^{}` block:
   > it is frozen (S471) — a carried divergence. The bootstrap builds this rule (s482-registry-client:
   > print.scrml `clientRegistryIds`, over the client half #2061's reach decides; r1, #2093 review
   > HIGH-1 / LOW-1: by type identity, lower.scrml `reflectIds`, and client return types and local
-  > annotations count). The several-exporters clause is INTERIM (g-boot-meta-reflect-import-identity-s482:
-  > the capable alternative resolves an imported name through the import's own source file).
+  > annotations count; r2, #2093 r1 re-review HIGH-1 / MED-1 / LOW-1: an imported name is resolved
+  > through its own import, alias-aware — analyze.scrml `typeScopes`, the resolver every type use
+  > goes through, read by meta.scrml `envOf` and lower.scrml `entryTypeIds` — so each entry is
+  > exactly one type; g-boot-meta-reflect-import-identity-s482 resolved).
 - `meta.types.reflect()` remains available as a lower-level escape hatch for programmers
   who need to explicitly force runtime dispatch. It is not the canonical form.
 

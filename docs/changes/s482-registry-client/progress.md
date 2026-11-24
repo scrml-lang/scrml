@@ -22,3 +22,9 @@ Branch `s482-registry-client` from origin/main ae650064a. Ruling: ruling:user-vo
 - SPEC §22.4.2 bullet: identity rule, return type + local annotation, the several-exporters clause stated (INTERIM, gap-linked).
 - Pins (registry-client-s482.test.js): L9 (dbPasswordZZ/adminTokenZZ absent, reflect "none"), positive twin (both client-used → present), main client-used + lib server-only (main's present, lib's fields absent), F5, F2a.
 - Gates: pretest exit 0; conformance --json PASS 845 / FAIL 4 / NT 628 / UNS 491 / CRASH 0 (= PR head); SCRML_BROWSER_TESTS=1 registry-client + meta-phase3 + meta-runtime 114/0, slice-m2/meta-s481 126/0; corpus differential vs PR head 5850df275 (2972 files, 324 OK): 0 verdict diffs, 0 byte diffs; s34-census --check-new --base ae650064a PASS; types-gate --check OK unchanged (182); e2e-render-map 259/0.
+
+## r2 (#2093 r1 re-review, fix-2093-r2)
+- HIGH-1 + MED-1 (capable fix): analyze.scrml `typeScopes` (each file's type scope via `scopeHit`, the resolver `stubNamed` reads) → meta.scrml `envOf` (imported entry = the type the import binds, named by its local name; `metaTypeScopes` runs the same linkage over the type declarations before metaFiles) and `Tables.tscope` → lower.scrml `entryTypeIds` (exactly one id, else none). print.scrml multi-id path removed (`entryKept` / `nodeReflectLit` take one id).
+- LOW-1: aliased import — the entry is named by the local name (`C`); "Config" there → `not`. SPEC §22.4.2 states the rule.
+- Gap g-boot-meta-reflect-import-identity-s482 resolved (re-rated HIGH; the r1 "nothing server-only leaks" claim recorded as false).
+- Pins: A12, A12b, A12c, A9c, A1c (bundle grep + happy-dom); Chromium L9 + A12.
