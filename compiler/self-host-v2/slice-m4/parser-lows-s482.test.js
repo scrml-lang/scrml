@@ -100,12 +100,17 @@ describe("(4) §19.6.2 — a `{<tag>…</>}` attribute value is refused by name,
     expect(src.slice(d.span.start, d.span.end)).toBe(`{<div class="x">Could not load profile</>}`);
   });
 
-  test("the terse `/}` closer, with an apostrophe and a `${ }` slot in the text", () => {
+  // s482-closer-cleanup — there is no terse `/}` closer (retired for `</>`, §4.4, Appendix E):
+  // the value is refused E-SYNTAX-050 at the `/`, and still never read as code.
+  test("a retired `/}` closer, with an apostrophe and a `${ }` slot in the text: E-SYNTAX-050", () => {
     const src = EB(`{<div class="x">It can't load \${1}/}`);
     const r = run(src);
     expect(codes(r).filter((c) => c.startsWith("E-PARSE") || c === "E-TYPE-045")).toEqual([]);
-    const d = errs(r).find((x) => x.message.includes("markup as an attribute value"));
-    expect(src.slice(d.span.start, d.span.end)).toBe(`{<div class="x">It can't load \${1}/}`);
+    expect(errs(r).find((x) => x.message.includes("markup as an attribute value"))).toBeUndefined();
+    const d = errs(r).find((x) => x.code === "E-SYNTAX-050");
+    expect(src.slice(d.span.start, d.span.end)).toBe("/");
+    expect(src.slice(d.span.start - 2, d.span.end + 1)).toBe("1}/}");
+    expect(d.message).toContain("Did you mean `</>`?");
   });
 
   test("a `{ … }` value that is code (a comparison, a block) keeps its reading", () => {

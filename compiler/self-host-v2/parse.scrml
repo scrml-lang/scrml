@@ -44,7 +44,7 @@
 // again, S440.)
 // =============================================================================
 ${
-    import { Token, TokenKind, LexStop, LexRun, LexPause, lexFrom, lexFromMode, lexTier0, lexTier0X, ForeignExtent, foreignOpenAt, foreignExtentAt, isVoidName, markupValueExtentAt, markupAttrValueExtentAt, isKeyword, markupOpensAt } from "./lex.scrml";
+    import { Token, TokenKind, LexStop, LexRun, LexPause, lexFrom, lexFromMode, lexTier0, lexTier0X, ForeignExtent, foreignOpenAt, foreignExtentAt, isVoidName, markupValueExtentAt, markupAttrValueExtentAt, retiredValueCloserAt, isKeyword, markupOpensAt } from "./lex.scrml";
     import { Severity } from "./severity.scrml";
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, IfForm, AEffect, ARequest, AType, ATypeK, AFnFx,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport, ALink,
@@ -9389,15 +9389,20 @@ ${
     // skipped token, the first on its line, or after a `;` — stmtStartIn).
     // s482 (review NIT-1) — not inside an arrow body opened in the skipped text: `tmp = v;` in
     // `extra(xs.map((v) => {⏎ tmp = v;⏎ }))` is the arrow's own statement, which would never
-    // have declared anything at the alias's level (inArrowBodyIn).
+    // have declared anything at the alias's level (the arrow-body stack in the loop).
+    // s482-closer-cleanup (#2087 review NIT-4) — one pass: the open groups of the skipped text
+    // so far are kept as a stack (`true` = an arrow body `=> {`), and `arrowsOpen` counts the
+    // `true`s, so whether toks[i] is in an arrow body is known without rescanning toks[from, i).
     fn skippedDecls(tp: TP, from: int, to: int) -> string {
         let out: string = "";
         let i: int = from;
+        let groups: boolean[] = [];
+        let arrowsOpen: int = 0;
         for (; i + 1 < to; ) {
             const k: PTok = tp.toks[i];
             const n: PTok = tp.toks[i + 1];
             let named: string = "";
-            if (inArrowBodyIn(tp, from, i)) {
+            if (arrowsOpen > 0) {
                 named = "";
             } else if ((k.cls == TC.Keyword || k.cls == TC.Ident) && ["const", "let", "function", "fn", "type"].indexOf(k.text) >= 0) {
                 if (n.cls == TC.Ident) {
@@ -9414,23 +9419,20 @@ ${
                 if (out != "") out = out + ", ";
                 out = out + "`" + named + "`";
             }
+            // toks[i] joins the open groups the NEXT token is judged under
+            if (tk(k, "(") || tk(k, "[")) groups = groups.concat([false]);
+            if (tk(k, "{")) {
+                const arrow: boolean = i > from && tk(tp.toks[i - 1], "=>");
+                groups = groups.concat([arrow]);
+                if (arrow) arrowsOpen = arrowsOpen + 1;
+            }
+            if ((tk(k, ")") || tk(k, "]") || tk(k, "}")) && groups.length > 0) {
+                if (groups[groups.length - 1]) arrowsOpen = arrowsOpen - 1;
+                groups = groups.slice(0, groups.length - 1);
+            }
             i = i + 1;
         }
         return out;
-    }
-
-    // Is toks[i] inside an arrow body `=> { … }` whose `{` is in the skipped text toks[from, i)?
-    fn inArrowBodyIn(tp: TP, from: int, i: int) -> boolean {
-        let arrows: boolean[] = [];
-        let j: int = from;
-        for (; j < i; ) {
-            const t: PTok = tp.toks[j];
-            if (tk(t, "(") || tk(t, "[")) arrows = arrows.concat([false]);
-            if (tk(t, "{")) arrows = arrows.concat([j > from && tk(tp.toks[j - 1], "=>")]);
-            if ((tk(t, ")") || tk(t, "]") || tk(t, "}")) && arrows.length > 0) arrows = arrows.slice(0, arrows.length - 1);
-            j = j + 1;
-        }
-        return arrows.indexOf(true) >= 0;
     }
 
     // A destructuring pattern as written, from its opener at toks[at] to its closer (in
@@ -10177,9 +10179,29 @@ ${
         return { v: AAttrValue.Bare(r3.e), mp: backToMarkup(mp, t4) };
     }
 
+    // s482-closer-cleanup — a `{ … }` value whose element ends at a trailing `/` right before the
+    // value's `}` (`fallback={<div>Something went wrong/}`) uses the RETIRED trailing-slash closer:
+    // "Any source file using bare `/` or trailing content`/` closers SHALL be rejected by the
+    // compiler with a diagnostic pointing to §4.4. The diagnostic SHALL include a hint: "Did you
+    // mean `</>`?"" (Appendix E). One E-SYNTAX-050 at the `/`; the value (through its `}`) is
+    // consumed whole and never read as code. There is no terse `/}` closer (lex.scrml
+    // retiredValueCloserAt finds the `/`).
+    fn retiredCloserValue(mp: MP, name: string) -> RValue | not {
+        let k: int = 1;
+        for (; isSpaceCh(chAt(mp, k)); ) { k = k + 1; }
+        if (chAt(mp, k) != "<") return not;
+        const c1: string = chAt(mp, k + 1);
+        if (!((c1 >= "a" && c1 <= "z") || (c1 >= "A" && c1 <= "Z"))) return not;
+        const slash: int = retiredValueCloserAt(mp.src, mp.pos + k);
+        if (slash < 0) return not;
+        const m: MP = mAdv(mp, slash + 2 - mp.pos);
+        const md: MP = mDiag(m, "E-SYNTAX-050", "a trailing `/` is not a closer — the `content/` and bare `/` closers were retired for `</>` (§4.4, Appendix E), so this `/}` does not close the element in `" + name + "={…}`. Did you mean `</>`? Write `…</>}`", slash, slash + 1);
+        return { v: AAttrValue.Bare(recoveredAt(md, mp.pos)), mp: md };
+    }
+
     // s482 (g-boot-e-type-045-in-misread-markup-s479) — a `{ … }` value that IS an element
-    // (`fallback={<div class="x">Could not load</>}`, §19.6.2's markup value, its terse
-    // `/}` closer included; a component prop `header={<h1>Hi</h1>}`, §7.4.1): MARKUP, which
+    // (`fallback={<div class="x">Could not load</>}`, §19.6.2's markup value; a component
+    // prop `header={<h1>Hi</h1>}`, §7.4.1): MARKUP, which
     // the bootstrap does not build as an attribute value (`<errorBoundary>`, its main
     // consumer, is not in the bootstrap — analyze refuses it by name). INTERIM: it is refused
     // by name, once, over the whole value, and its text is never read as code — before this
@@ -10188,7 +10210,8 @@ ${
     // handler, whose `{ … }` is a statement list (§5.2.3).
     // s482-fu (review LOW-1, LOW-2) — the value is an element only when its `{` is followed by
     // a tag start (`<` and a letter), that element CLOSES (`</…>`,
-    // `</>`, `/>`, a void element's `>`, or the terse `/}`), and only space separates its end
+    // `</>`, `/>` or a void element's `>` — no `/}`: the trailing-`/` closer is retired, see
+    // retiredCloserValue), and only space separates its end
     // from the value's `}` (or, with text after it, the `}` balancing the value's `{` by
     // character count lies past the element's end). The extent is the lexer's element extent (lex.scrml
     // markupAttrValueExtentAt — the markup-value token's own walker), so a `}` in a quoted
@@ -10198,6 +10221,9 @@ ${
     // s482 (review LOW-A) — that holds inside a `${ … }` slot too (`${ <p if={<count>}>hi</p> }`):
     // the extent walker answers "never closed" when a body-text `}` closes the value before
     // the "element" does, so the slot's `}` is never taken as the value's closer.
+    // s482-closer-cleanup (#2087 review LOW-B) — the walker now tells a legacy read from prose by
+    // the closer's NAME (`</p>` cannot close `<count>`) and by where the `}` stands (right after
+    // the opener's `>` or after an operator); a `}` in prose (`<p>a } b</p>`) is text.
     // PERMANENT capable form: read the element with the markup reader as the value
     // (an AAttrValue markup variant) when `<errorBoundary>` is built.
     fn markupAttrValueEnd(mp: MP) -> int {
@@ -10234,6 +10260,8 @@ ${
     }
 
     fn markupAttrValue(mp: MP, name: string) -> RValue | not {
+        const retired: RValue | not = retiredCloserValue(mp, name);
+        if (retired is given) return retired;
         const end: int = markupAttrValueEnd(mp);
         if (end < 0) return not;
         const m: MP = mAdv(mp, end);
@@ -13075,8 +13103,59 @@ ${
             out = out.concat([textNode(m, textStart, text)]);
             m = fragNodes(mBump(m), 1);
         }
-        if (mLooking(m, "</")) m = parseCloser(m, tag);
+        let unclosed: boolean = mEof(m);
+        if (mLooking(m, "</")) {
+            const nc: int = codeCount(m.diags, "E-PARSE-CLOSER");
+            m = parseCloser(m, tag);
+            if (codeCount(m.diags, "E-PARSE-CLOSER") > nc) unclosed = true;
+        }
+        if (unclosed) m = retiredCloserIn(m, out, tag);
         return { nodes: out, mp: m };
+    }
+
+    // s482-closer-cleanup — §4.4 / Appendix E: "Any source file using bare `/` or trailing
+    // content`/` closers SHALL be rejected by the compiler with a diagnostic pointing to §4.4.
+    // The diagnostic SHALL include a hint: "Did you mean `</>`?"". A `/` in text is legal text in
+    // general (`a/b`, `and/or`, a URL), so the retired closer is named only where it explains a
+    // failure: the element was NOT closed (end of input, or a closer naming another element), and
+    // one of its own text runs has a `/` standing where a closer would — the last thing on its
+    // line (`<p>hello/`, a bare `/` line), right before a `;` (`lift <li>x/;`) or the last
+    // thing before a tag. E-SYNTAX-050 at the
+    // first such `/`; the reader's own E-PARSE-UNCLOSED / E-PARSE-CLOSER stays (the element is
+    // still unclosed). A `//` is never one (§27.1), nor the `/` of a `/>`.
+    fn retiredCloserIn(mp: MP, kids: ANode[], tag: string) -> MP {
+        let i: int = 0;
+        for (; i < kids.length; ) {
+            const n: ANode = kids[i];
+            const isText: boolean = match n.k {
+                .Text(text: s) :> true,
+                // no-default-arm: one question of a child — is it a text run
+                _ :> false
+            };
+            if (isText) {
+                const at: int = retiredSlashIn(mp.src, n.span.start, n.span.end);
+                if (at >= 0) return mDiag(mp, "E-SYNTAX-050", "a trailing `/` is not a closer — the `content/` and bare `/` closers were retired for `</>` (§4.4, Appendix E), so `<" + tag + ">` is not closed here. Did you mean `</>`? Write `</>` (or `</" + tag + ">`) in place of the `/`", at, at + 1);
+            }
+            i = i + 1;
+        }
+        return mp;
+    }
+
+    // The first `/` in src[from, to) followed only by spaces / tabs up to a line end or a `;` (a
+    // `lift <li>x/;` statement), or up to the run's end where a tag (`<`) or the end of the
+    // input follows; -1 when none.
+    fn retiredSlashIn(src: string, from: int, to: int) -> int {
+        let j: int = from;
+        for (; j < to; ) {
+            if (src.charCodeAt(j) == 47 && (j == 0 || src.charCodeAt(j - 1) != 47) && (j + 1 >= src.length || (src.charCodeAt(j + 1) != 47 && src.charCodeAt(j + 1) != 62))) {
+                let k: int = j + 1;
+                for (; k < to && (src.charCodeAt(k) == 32 || src.charCodeAt(k) == 9 || src.charCodeAt(k) == 13); ) { k = k + 1; }
+                if (k < to && (src.charCodeAt(k) == 10 || src.charCodeAt(k) == 59)) return j;
+                if (k >= to && (to >= src.length || src.charCodeAt(to) == 60)) return j;
+            }
+            j = j + 1;
+        }
+        return -1;
     }
 
     // SPEC §4.18.1b exit (2) (RULED S444 — "yes on // revised"): in free text

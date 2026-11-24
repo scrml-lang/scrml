@@ -1,0 +1,23 @@
+{
+  "id": "error-boundary-terse-fallback-closer-neg",
+  "description": "errorBoundary `fallback={<div ...>text/}` — the so-called terse `/}` markup-value closer is the RETIRED trailing-slash closer (§4.4, Appendix E), not a closer: it is refused with E-SYNTAX-050, whose message carries the Appendix E hint \"Did you mean `</>`?\". The `</>` twin (error-boundary/no-renders-falls-to-fallback) covers the rendering this case used to assert (a no-renders variant falls to the boundary's fallback markup).",
+  "language-version": "1.0",
+  "spec": "§4.4, Appendix E, §19.6.2",
+  "source-test": "compiler/self-host-v2/slice-m4/closer-cleanup-s482.test.js",
+  "rationale": "Appendix E (2026-04-09): \"Any source file using bare `/` or trailing content`/` closers SHALL be rejected by the compiler with a diagnostic pointing to §4.4. The diagnostic SHALL include a hint: 'Did you mean `</>`?'\". ruling:user-voice-scrml.md \"⭐ RULED — the `/}` 'terse closer' is the retired trailing-slash closer; Appendix E governs (S482)\" — owner: \"yes to the /} cleanup, this is bothersome to me because the / only closer was overruled for </> so long ago\". This case was a POSITIVE (S237, Peter #22) built on §19.6.2 examples that the 2026-04-09 migration missed; S482 migrated those examples to `</>` and turned the case negative. The positive rendering lives on in the `</>` twin error-boundary/no-renders-falls-to-fallback.",
+  "expect": {
+    "codes": [
+      "E-SYNTAX-050"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-terse-closer-accepted-s482",
+      "fails": {
+        "codes": [
+          "missing:E-SYNTAX-050"
+        ]
+      }
+    }
+  }
+}

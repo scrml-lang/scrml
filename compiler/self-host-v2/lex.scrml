@@ -2165,32 +2165,54 @@ ${
     // their text is not markup); `<pre>` / `<code>` are raw content to their
     // closer (§4.17); `<!-- … -->` is a comment.
     export fn markupValueExtentAt(src: string, pos: int) -> int {
-        return markupExtentFrom(src, pos, false);
+        return markupExtentFrom(src, pos, 0);
     }
 
     // s482-fu — the same extent for an element written as a `{ … }` attribute value
-    // (§19.6.2, `fallback={<div>…</>}`), which may also end at its terse `/}` closer: a
-    // `/` then `}` in the outermost element's body ends the element at the `}` (the
-    // value's closer, which the caller reads). The parser's markup-value reader uses it
+    // (§19.6.2, `fallback={<div>…</>}`). The parser's markup-value reader uses it
     // (parse.scrml markupAttrValueEnd), so the value's `}` is found by the element's
     // structure — a `}` in a quoted attribute value, a `${ … }` slot or the body text
     // does not end it.
-    // s482 (review LOW-A) — in that reading, a `}` in the body text that no `{` of the body
-    // text opened closes the VALUE before the element closes: `{<count>}` (a legacy cell read
-    // whose "element" a later `</p>` would close) or `{<n> > 0}`. The value is then not an
-    // element, and the extent is the end of the input (the "never closed" answer, which the
-    // caller reads as "not a markup value"). A `}` in a quoted attribute value, a `${ … }`
-    // slot, an `<!-- … -->` comment, a `<style>` body or the rest of a line after a `//` comment
-    // (§27.1: in a markup body, a `//` at a line start or after whitespace) never counts.
+    // s482-closer-cleanup — there is NO terse `/}` closer: the trailing-`/` closer was retired
+    // for `</>` on 2026-04-09 (§4.4, Appendix E: "Any source file using bare `/` or trailing
+    // content`/` closers SHALL be rejected"). A `/` then `}` in the body is not a closer here;
+    // retiredValueCloserAt finds it so the parser can refuse it (E-SYNTAX-050).
+    // In that reading the value is NOT an element (the extent is the end of the input, the
+    // "never closed" answer, which the caller reads as "not a markup value") when:
+    //   - a closer NAMES a different element than the one it would close (`{<count>}>hi</p>`:
+    //     a legacy cell read whose "element" the enclosing `</p>` would close — s482 review
+    //     LOW-A, now discriminated by the closer's name: #2087 review LOW-B); or
+    //   - at the outer element's level, a `}` that no `{` of the body text opened stands where
+    //     an expression would continue: right after the opener's `>` or after an operator
+    //     (`{<count>}`, `{<n> > 0}`, `{ <n> < 2 }` — a legacy read a later `</>` would close).
+    //     A `}` in prose (`<p>a } b</p>`) is text (§4.17's orphan brace, #2087 LOW-B).
+    // A `}` in a quoted attribute value, a `${ … }` slot, an `<!-- … -->` comment, a `<style>`
+    // body or a `//` line comment (§27.1: in a markup body, a `//` after whitespace runs to the
+    // end of the line — the walker skips it whole, closers included) never counts.
     export fn markupAttrValueExtentAt(src: string, pos: int) -> int {
-        return markupExtentFrom(src, pos, true);
+        return markupExtentFrom(src, pos, 1);
     }
 
-    fn markupExtentFrom(src: string, pos: int, terse: boolean) -> int {
+    // s482-closer-cleanup — the offset of a RETIRED trailing-`/` closer of the element written
+    // as a `{ … }` attribute value (`fallback={<div>oops/}`: a `/` right before a `}`, at the
+    // outer element's level, outside a `//` line comment), or -1 when the element closes, or
+    // never closes, without one. The parser refuses it: E-SYNTAX-050, "Did you mean `</>`?"
+    // (§4.4, Appendix E).
+    export fn retiredValueCloserAt(src: string, pos: int) -> int {
+        return markupExtentFrom(src, pos, 2);
+    }
+
+    // mode 0: a markup value in logic (markupValueExtentAt); 1: an attribute value's element
+    // (markupAttrValueExtentAt); 2: the retired-closer probe (retiredValueCloserAt — answers the
+    // offset of the `/`, or -1).
+    fn markupExtentFrom(src: string, pos: int, mode: int) -> int {
+        const attr: boolean = mode != 0;
+        const notFound: int = mode == 2 ? -1 : src.length;
         let i: int = pos;
         let depth: int = 0;
         let braces: int = 0;
-        let lineNote: boolean = false;
+        let bodyAt: int = pos;
+        let names: string[] = [];
         for (; i < src.length; ) {
             const c0: int = src.charCodeAt(i);
             const c1: int = i + 1 < src.length ? src.charCodeAt(i + 1) : 0;
@@ -2202,47 +2224,63 @@ ${
                 const selfClosed: boolean = oe >= 2 && src.charCodeAt(oe - 2) == 47 && src.charCodeAt(oe - 1) == 62;
                 i = oe;
                 if (selfClosed || isVoidName(name)) {
-                    if (depth == 0) return i;
+                    if (depth == 0) return mode == 2 ? -1 : i;
                 } else if (isRawName(name)) {
                     const close: int = rawNameCloseAt(src, i, name);
-                    if (close < 0) return src.length;
+                    if (close < 0) return notFound;
                     i = close + name.length + 3;
-                    if (depth == 0) return i;
+                    if (depth == 0) return mode == 2 ? -1 : i;
                 } else {
+                    if (depth == 0) bodyAt = i;
                     depth = depth + 1;
+                    if (attr) names = names.concat([name]);
                 }
             } else if (c0 == 60 && c1 == 47) {
                 const gt: int = src.indexOf(">", i);
-                if (gt < 0) return src.length;
+                if (gt < 0) return notFound;
+                if (attr) {
+                    const cn: string = src.substring(i + 2, gt).trim().toLowerCase();
+                    if (cn != "" && names.length > 0 && cn != names[names.length - 1]) return notFound;
+                    if (names.length > 0) names = names.slice(0, names.length - 1);
+                }
                 i = gt + 1;
                 depth = depth - 1;
-                if (depth <= 0) return i;
+                if (depth <= 0) return mode == 2 ? -1 : i;
             } else if (c0 == 60 && c1 == 33 && src.substring(i, i + 4) == "<!--") {
                 const ce: int = src.indexOf("-->", i + 4);
-                if (ce < 0) return src.length;
+                if (ce < 0) return notFound;
                 i = ce + 3;
             } else if (c0 == 36 && c1 == 123) {
                 i = lexFrom(src, i + 1, LexStop.Balanced).end;
-            } else if (terse && depth == 1 && c0 == 47 && c1 == 125) {
-                return i + 1;
-            } else if (terse && c0 == 47 && c1 == 47 && i > 0 && isNoteSpace(src.charCodeAt(i - 1))) {
-                lineNote = true;
-                i = i + 2;
-            } else if (terse && c0 == 10) {
-                lineNote = false;
-                i = i + 1;
-            } else if (terse && !lineNote && c0 == 123) {
+            } else if (attr && c0 == 47 && c1 == 47 && i > 0 && isNoteSpace(src.charCodeAt(i - 1))) {
+                const nl: int = src.indexOf("\n", i);
+                if (nl < 0) return notFound;
+                i = nl + 1;
+            } else if (mode == 2 && depth == 1 && braces == 0 && c0 == 47 && c1 == 125) {
+                return i;
+            } else if (attr && c0 == 123) {
                 braces = braces + 1;
                 i = i + 1;
-            } else if (terse && !lineNote && c0 == 125) {
-                if (braces == 0) return src.length;
-                braces = braces - 1;
+            } else if (attr && c0 == 125) {
+                if (braces == 0 && depth == 1 && legacyReadBefore(src, bodyAt, i)) return notFound;
+                if (braces > 0) braces = braces - 1;
                 i = i + 1;
             } else {
                 i = i + 1;
             }
         }
-        return src.length;
+        return notFound;
+    }
+
+    // Does the body text src[from, at) read as the rest of an EXPRESSION (a legacy `<cell>`
+    // read: nothing, or an operator first — `{<count>}`, `{<n> > 0}`, `{<n> == 1}`), not prose?
+    fn legacyReadBefore(src: string, from: int, at: int) -> boolean {
+        let j: int = from;
+        for (; j < at && isNoteSpace(src.charCodeAt(j)); ) { j = j + 1; }
+        if (j == at) return true;
+        const c: int = src.charCodeAt(j);
+        // = ! < > + - * % & | ?
+        return c == 61 || c == 33 || c == 60 || c == 62 || c == 43 || c == 45 || c == 42 || c == 37 || c == 38 || c == 124 || c == 63;
     }
 
     fn isNoteSpace(c: int) -> boolean { return c == 32 || c == 9 || c == 10 || c == 13; }
