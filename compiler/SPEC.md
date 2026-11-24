@@ -11,7 +11,7 @@
 > **Amendments applied:** 2026-04-08 — §51 added: State Transition Rules and `<machine>` state type (E-ENGINE-001..E-ENGINE-012, E-ENGINE-001-RT). §14.4 amended: `transitions {}` block grammar. §6.1 amended: machine-bound reactive variable declaration.
 > **Amendments applied:** 2026-04-08 — §52 added: State Authority Declarations. Two-tier authority model (`<var server>` Tier 2 — V-kill decl form per §6.1.5; `authority=` on `<Type>` Tier 1), compiler-generated sync infrastructure. §6.1.5 grammar: `state-decl` production carries the `server` decl-attr. §11.3.5 added: `protect=` / `authority=` relationship. E-AUTH-001..E-AUTH-005, W-AUTH-001.
 > **Amendments applied:** 2026-04-08 — §51 revised: `for EnumTypeName` → `for TypeName` (machines govern structs too). `self.*` in guards, `[label]` named clauses, `* => *` wildcard rules, E-ENGINE-013. Radical doubt debate Approach C.
-> **Amendments applied:** 2026-04-09 — §4.4 rewritten: three closer forms → two (`</tagname>` explicit, `</>` inferred). §4.8 deleted (bare `/` disambiguation no longer needed). §3.1 table updated. §3.2 E-CTX-002 wording updated. §4.5, §4.9 updated. §34 error codes updated. Appendix E added: migration guide. All examples updated throughout.
+> **Amendments applied:** 2026-04-09 — §4.4 rewritten: three closer forms → two (`</tagname>` explicit, `</>` inferred). §4.8 deleted (bare `/` disambiguation no longer needed). §3.1 table updated. §3.2 E-CTX-002 wording updated. §4.5, §4.9 updated. §34 error codes updated. Appendix E added: migration guide. All examples updated throughout. **(S482 correction, 2026-11-24: "all examples updated" was not true — 26 example lines and 2 prose/diagnostic renderings (`lift <li>…/;`, `fallback={<div>…/}`, `?? <p>…/}`, `<h2>…/`, bare `/` lines) survived, and the trailing-`/` form was re-adopted downstream as a "terse `/}` closer". S482 migrated every straggler to `</>`. The bootstrap refuses, with E-SYNTAX-050 and the Appendix E hint, a `/}` value closer and every trailing `content/` / bare `/` (not the end of a URL or path word) in markup it reads where that `/` leaves its element, or an element around it, unclosed. A retired closer in a region it does not read as markup text (a body or construct refused by name, logic it cannot parse, a `${ }` block inside markup a runaway raw body swallowed) is not yet named: INTERIM, g-boot-retired-closer-unread-s482. Ruling: user-voice-scrml.md, "the `/}` "terse closer" is the retired trailing-slash closer; Appendix E governs (S482)".)**
 > **Amendments applied:** 2026-04-08 — §53 added: Inline Type Predicates. Stateless value constraints (`number(>0 && <10000)`, `string(email)`), three-zone SPARK enforcement, named shape registry, `bind:value` HTML attribute generation. E-CONTRACT-001..E-CONTRACT-004-WARN.
 
 **Version:** 0.5.2-draft
@@ -6975,7 +6975,7 @@ callbacks (none were registered).
         cleanup(() => { disconnectFromRoom(); });
 
         <div class="messages">
-            ${ for (m of @messages) { lift <p>${m.text}/; } }
+            ${ for (m of @messages) { lift <p>${m.text}</>; } }
         </>
     </>
 </>
@@ -7016,7 +7016,7 @@ When `@showChat` transitions false → true a second time:
     <input bind:value=@maxPrice type="number" placeholder="Max price"/>
 
     <p>Page: ${@pageNo}</>
-    ${ for (r of @results) { lift <p>${r.name}/; } }
+    ${ for (r of @results) { lift <p>${r.name}</>; } }
 </>
 ```
 
@@ -11079,7 +11079,7 @@ A `fn name(...) { ... }` body, by contrast, **does** permit `lift`: it accumulat
 <ul>${
     function buildRows(items: Item[]) {
         for (item of items) {
-            lift <li>${item.name}/;  // Error E-SYNTAX-002
+            lift <li>${item.name}</>;  // Error E-SYNTAX-002
         }
     }
     buildRows(data);
@@ -11135,8 +11135,8 @@ The correct pattern is to collect all parallel results into named variables firs
     let listA = getListA();
     let listB = getListB();
     // compiler generates: const [listA, listB] = await Promise.all([...])
-    for (item of listA) { lift <li class="a">${item}/; }
-    for (item of listB) { lift <li class="b">${item}/; }
+    for (item of listA) { lift <li class="a">${item}</>; }
+    for (item of listB) { lift <li class="b">${item}</>; }
 </>
 ```
 
@@ -11287,15 +11287,15 @@ sequentially. This is the correct pattern (§10.5.3).
 ```scrml
 <ul>${
     getListA();             // node N_A, server call A; result discarded (sets ~)
-    lift <li>${~}/;        // lift after A — N_A.hasLift === true
+    lift <li>${~}</>;        // lift after A — N_A.hasLift === true
     getListB();             // node N_B, server call B; result discarded (sets ~)
-    lift <li>${~}/;        // lift after B — N_B.hasLift === true
-</>
+    lift <li>${~}</>;        // lift after B — N_B.hasLift === true
+}</>
 ```
 
 Analysis: N_A and N_B are independent (no `'awaits'` edge between them, as neither depends on
 the other's result). N_A.hasLift is `true` (the statement immediately following N_A in the
-block body is `lift <li>${~}/`). N_B.hasLift is `true` (same reason). The five conditions are
+block body is `lift <li>${~}</>`). N_B.hasLift is `true` (same reason). The five conditions are
 met: E-LIFT-001 fires.
 
 Expected compiler output:
@@ -11304,7 +11304,7 @@ Error E-LIFT-001: Two independent operations in the same logic block both preced
 calls. If parallelized, the `lift` calls would execute in non-deterministic order, violating
 the accumulator ordering guarantee (§10.5.1).
 
-  Logic block:  <ul>${ ... /    [line 1]
+  Logic block:  <ul>${ ... }</>    [line 1]
   Branch 1:     getListA()       [line 2] — followed by lift at [line 3]
   Branch 2:     getListB()       [line 4] — followed by lift at [line 5]
 
@@ -11316,8 +11316,8 @@ Fix: Collect all parallel results into named variables first, then lift sequenti
   let listA = getListA();
   let listB = getListB();
   // compiler generates: const [listA, listB] = await Promise.all([...])
-  for (item of listA) { lift <li>${item}/; }
-  for (item of listB) { lift <li>${item}/; }
+  for (item of listA) { lift <li>${item}</>; }
+  for (item of listB) { lift <li>${item}</>; }
 ```
 
 ### 10.6 Nested `lift` — Scoping Rule
@@ -17881,7 +17881,7 @@ const Card = <div class="card" props={
     actions?: snippet
 }>
     <div class="card__header">${render header()}</>
-    <div class="card__body">${render body() ?? <p>No content provided./}</>
+    <div class="card__body">${render body() ?? <p>No content provided.</>}</>
     <div class="card__actions" if=actions>${render actions()}</>
 </>;
 ```
@@ -17895,7 +17895,7 @@ Inside a component body, snippet props are invoked with `render`:
 
 ```scrml
 ${render header()}                     // zero-parameter
-${render body() ?? <p>Default/}        // optional with fallback
+${render body() ?? <p>Default</>}        // optional with fallback
 ${render tabPanel(tab)}                // parametric, passes argument
 ```
 
@@ -17948,7 +17948,7 @@ const TabStrip = <div class="tabs" props={
     tabs: Tab[],
     tabPanel: snippet(tab: Tab)
 }>
-    <nav>${ for (t of tabs) { lift <button onclick=setActive(t)>${t.label}/; } }</>
+    <nav>${ for (t of tabs) { lift <button onclick=setActive(t)>${t.label}</>; } }</>
     <div class="tab-content">${render tabPanel(activeTab)}</>
 </>;
 
@@ -18041,7 +18041,7 @@ const Card = <div class="card" props={
     body?: snippet
 }>
     <div class="card__header">${render header()}</>
-    <div class="card__body">${render body() ?? <p>No content./}</>
+    <div class="card__body">${render body() ?? <p>No content.</>}</>
 </>;
 ```
 
@@ -18090,10 +18090,10 @@ and pass a lambda at the call site:
 ```scrml
 <Card>
     <div slot="featured">
-        ${ for (item of items) { if (item.important) { lift <li>${item}/; } } }
+        ${ for (item of items) { if (item.important) { lift <li>${item}</>; } } }
     </>
     <div slot="body">
-        ${ for (item of items) { if (!item.important) { lift <li>${item}/; } } }
+        ${ for (item of items) { if (!item.important) { lift <li>${item}</>; } } }
     </>
 </>
 ```
@@ -18283,7 +18283,7 @@ The `if=` attribute is a structural conditional. Its value is a condition (§42.
 
 Equivalent to:
 ```scrml
-${ if (@errorMessage) { lift <div class="error-banner">${@errorMessage}/; } }
+${ if (@errorMessage) { lift <div class="error-banner">${@errorMessage}</>; } }
 ```
 
 `@errorMessage` is `string | not`, so `if=@errorMessage` is a presence test: the banner renders whenever a message is set — the empty string `""` included, because `""` is a defined value (§42.1.1) — and is removed when the cell is `not`. Were the cell a plain `string` (`""` meaning "no message"), `if=@errorMessage` would be E-COND-NOT-BOOLEAN (a string has no truthiness, §42.4); write the comparison: `<div class="error-banner" if=(@errorMessage != "")>`.
@@ -22751,7 +22751,7 @@ ${
 
 <entry> = "";
 
-<errorBoundary fallback={<div>Something went wrong/}>
+<errorBoundary fallback={<div>Something went wrong</>}>
     // content that may contain render-time calls to CLIENT failable functions
     <p>Code: ${checkCode(@entry)}</p>
 </>
@@ -22802,9 +22802,9 @@ When a `!` function call inside an `<errorBoundary>` produces an error variant:
 
 ```scrml
 // buildNav, buildContent, buildFooter: CLIENT `!` functions over cells already loaded (no server call — §13.7).
-<errorBoundary fallback={<div>Page error/}>
+<errorBoundary fallback={<div>Page error</>}>
     <header>${buildNav(@nav)}</>
-    <errorBoundary fallback={<div>Content error/}>
+    <errorBoundary fallback={<div>Content error</>}>
         ${buildContent(@article)}
     </>
     <footer>${buildFooter(@site)}</>
@@ -24540,7 +24540,7 @@ type AnalyticsError:enum = {
 
 <div class="dashboard">
     // Outer boundary catches page-level errors
-    <errorBoundary fallback={<div class="page-error">Dashboard unavailable/}>
+    <errorBoundary fallback={<div class="page-error">Dashboard unavailable</>}>
         <header>
             ${loadDashboardHeader()}
         </>
@@ -30140,9 +30140,9 @@ Source:
         .card { padding: 16px; border: 1px solid #e5e7eb; }
     }
     <div class="card" data-scrml="card">
-        <h2>${title}/
+        <h2>${title}</>
     </div>
-/
+</>
 ```
 
 Compiled CSS:
@@ -30780,7 +30780,7 @@ The `eq(@signup.password)` predicate on `<confirm>` reads `@signup.password`. Wh
 2. **`lift` statement.** Each `lift` call, in either accumulation mode or value-lift mode (§10.7, §17.6), initializes `~` to the lifted value, in addition to its mode-specific action (accumulating or designating a result).
 
    ```scrml
-   lift <li>${item.name}/;                         // accumulation mode — lifts to parent AND initializes ~
+   lift <li>${item.name}</>;                         // accumulation mode — lifts to parent AND initializes ~
    if (cond) { lift 3; } else { lift 4; }           // value-lift mode — designates result AND initializes ~
    ```
 
@@ -31015,7 +31015,7 @@ If `~` IS referenced anywhere in the current `${ }` body, ALL `lift` calls in th
     getHeader();
     let hdr = ~;               // ~ referenced — obligation is now active for ALL ~ in this context
     for (item of items) {
-        lift <li>${item.name}/;   // Error E-TILDE-002: lift reinitializes ~ but it was not consumed
+        lift <li>${item.name}</>;   // Error E-TILDE-002: lift reinitializes ~ but it was not consumed
     }
 </>
 ```
@@ -31877,7 +31877,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-EACH-NOT-SEQUENCE | §17.7.2 | `<each in=expr>` over a value that is not a sequence (§66.12.1: arrays and tuples; a map iterates through its `.entries()` / `.keys()` / `.values()` array views, §59.8). Fires only when the value is PROVABLY not a sequence: `S | not` over a sequence `S` is admitted (`not` renders `<empty>`, §17.7.4), and an unresolved `in=` type is silent (provable-or-silent). **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 3; the three SPEC-text OPEN items, #3). **Named; impl pending — Nominal / not yet emitted** (measured S440: impl#1 compiles `<each in=@n>` over a `number` cell at exit 0); impl#1 carries it (§34.0). | Error |
 | E-META-EVAL-001 | §22.4 | Compile-time meta evaluation failed at runtime — the `^{}` block body threw an exception when evaluated by the meta interpreter. The error message includes the underlying runtime error. ALSO (S459, impl#1 status per §22.4): the compile-time body contains a statement form impl#1 cannot evaluate at compile time (a payload-binding `match` arm, a multi-subject `match`, a `match` value with a block arm, a destructuring declaration, a declaration whose value is another statement form, a `?{}`, or any statement kind the serializer does not write) — the block is refused, naming the form, rather than evaluated with the statement dropped. (Catalog addition S64 audit; emitted at `compiler/src/meta-eval.ts` — `serializeNode` / `MetaSerializeRefusal`) | Error |
 | E-META-EVAL-002 | §22.4 | (S458 final review F3) a compile-time `^{}` emits markup from inside a `${}` logic body — a statement list, branch, loop, match arm or function body has no markup position to receive it (§22.4.1). Re-parsing the code emitted by a `^{}` meta block failed. The meta block produced output that is not syntactically valid scrml/JavaScript. The error message includes the underlying parse error. ALSO (S457, impl#1 status per §22.4.1): the emitted output contains something other than standard markup elements, text and comments with plain attribute values — a `${}` logic block, a `?{}`, a function, a declaration, a component or a scrml structural element, which would reach code generation without the type system and route inference. ALSO (S459 round 3, PA addendum 3): the emitted output carries an attribute whose name is not on the closed attribute list of §22.12 for its element's namespace (§22.4.1), or an `id` / `name` value in the `_scrml` / `__scrml` namespace. ALSO (S459 round 4, PA decisions F2 / F4): an `id` / `name` value the `document` half of §22.12's *Named properties* rule refuses (it names a member of `document`; the form half is a run-time rule only — ruling:user-voice-scrml.md S460 "n4 b"), or a URL-valued attribute whose value the §5.2 rule 3 test refuses (`javascript:`, a leading-space or `java<LF>script:` spelling, a non-raster `data:` image, …). ALSO (ruling:user-voice-scrml.md S458 "your recs on all four" · PA-ruled S459 consequence (bare data-scrml = the component CSS scope root, emit-css @scope)): the emitted output carries an attribute whose name (ASCII case folded) is `data-scrml` or begins with `data-scrml-` — the compiler-owned attribute namespace of §22.4.1; the runtime `meta.emit` gate refuses the same attribute at run time (§22.12), with no code. (Catalog addition S64 audit; emitted at `compiler/src/meta-eval.ts` — `reparseEmitted` and `checkEmittedNodes`) **Provenance:** ruling:user-voice-scrml.md S457 (the S457 meta allow-list arc) + ruling:user-voice-scrml.md S458 "1a" + ruling:user-voice-scrml.md S458 "your recs on all four". | Error |
-| E-SYNTAX-050 | §4 | Bare `/` is no longer a valid closer for an open tag. Use `</>` to close the most recently opened tag, or use the explicit form `</TagName>`. **Scoping note (S111 — quoted-text model, scope b):** this code fires from the block splitter's `looksLikeCloser` bare-`/` heuristic, which is a **free-text-mode** mechanism. Under §4.18 it continues to fire in plain-markup free-text bodies (`<p>`, `<h1>`, …), but it SHALL NOT fire inside a **code-default body** (engine state-child / match arm / `:`-shorthand body) — there a `/` is an ordinary operator character of the code-default expression grammar, not a closer-shaped token, and the free-text bare-`/` heuristic does not run. (Catalog addition S64 audit; emitted at `compiler/src/block-splitter.js`) | Error |
+| E-SYNTAX-050 | §4 | Bare `/` is no longer a valid closer for an open tag. Use `</>` to close the most recently opened tag, or use the explicit form `</TagName>`. **Scoping note (S111 — quoted-text model, scope b):** this code fires from the block splitter's `looksLikeCloser` bare-`/` heuristic, which is a **free-text-mode** mechanism. Under §4.18 it continues to fire in plain-markup free-text bodies (`<p>`, `<h1>`, …), but it SHALL NOT fire inside a **code-default body** (engine state-child / match arm / `:`-shorthand body) — there a `/` is an ordinary operator character of the code-default expression grammar, not a closer-shaped token, and the free-text bare-`/` heuristic does not run. (Catalog addition S64 audit; emitted at `compiler/src/block-splitter.js`) **S482 (Appendix E):** the trailing-slash `/}` value closer (`fallback={<div>…/}`) is the same retired form — there is no "terse" closer — and is refused with this code; the diagnostic carries the Appendix E hint "Did you mean `</>`?". A trailing `content/` or bare `/` (the last thing on its line, before a `;`, or before a tag) is named by this code where it leaves its element, or an element around it, unclosed — in the retired reading the `/` closed its element, so the closer written for an outer element was spent on it. A `/` in text is otherwise text, and a `/` ending a URL or path word (`http://x.com/`, `a/b/`) is never named. | Error |
 | E-UNQUOTED-DISPLAY-TEXT | §4.18.7, §4.18, §4.14, §18.0.1, §51.0, §40.8 | (S111 — quoted-text model, scope b.) A run of bare (unquoted) source characters appears in a **code-default body** — an engine state-child body (§51.0), a match block-form arm body (§18.0.1), a `:`-shorthand body (§4.14), or (S441) a `<program>` / `<page>` / `<channel>` body (§40.8; valid code there is a statement sequence, and a markup element is a second declared-text form; one diagnostic per maximal run of invalid statements, which raise nothing else), or (S472) a `<db>` body (§4.18.1 S472 amendment — an item body: a run that is a valid statement there is `E-DB-BODY-STATEMENT`, not this code; one diagnostic per run of consecutive prose lines) — and the run is neither a valid scrml expression (identifier, keyword, call, member access, literal, nested `<tag>` markup-as-value, `${...}` interpolation — per §4.18.2) nor a `"..."` display-text literal (§4.18.3). In a code-default body the default is code and display text is the explicit `"..."`-quoted exception; a bare prose run is therefore an error. **Fire condition:** the block splitter / tokenizer, scanning a code-default-mode body, encounters a non-whitespace run that is not valid code and not a display-text literal. The diagnostic SHALL identify the offending run and suggest wrapping it in a display-text literal (`"<the run>"`). **Does NOT fire** in free-text-mode bodies — a bare prose run in a plain-markup `<p>` / `<h1>` body is display text, unchanged. This is the enforcement code for the explicit text/code boundary the quoted-text model establishes. (**Wired S441** at the `<program>` / `<page>` / `<channel>` locus in both front ends — `compiler/src/ast-builder.js` `rejectBodyTopProse` and `compiler/native-parser/parse-markup.js` `rejectBodyTopProseNative`; immediate error, no §63 window, per ruling:user-voice-scrml.md S441 "declared-prose implementation: \"yes to all four\"" (*"yes to all four, your recs on the rest"*). **Wired S472** at the `<db>` locus in the bootstrap — emitted at `compiler/self-host-v2/parse.scrml` (`dbProseDiag`) — per ruling:user-voice-scrml.md S472 "⭐ RULED — `<db>` body + client reads, Q1–Q6 = PA recs" item 3 (*"loose prose is `E-UNQUOTED-DISPLAY-TEXT`"*); impl#1 reads a `<db>` body as markup (carried divergence, S471 policy). The three code-bearing loci remain spec-ahead-of-implementation per the established §34 pattern — S68 A5-1, S78 backfill; Wave 2+ of the quoted-text-model implementation arc wires them. Authority: `scrml-support/archive/changes/quoted-text-model/IMPLEMENTATION-ROADMAP.md`.) | Error |
 | W-DISPLAY-TEXT-OVERQUOTE | §4.18.7, §4.18.1, §4.18.3, §18.0.1, §51.0 | (S181 — the inverse of E-UNQUOTED-DISPLAY-TEXT.) A `"..."` display-text literal is the **sole content** of a **plain-markup element** (an HTML element — NOT a component, NOT a scrml structural element) that is **nested inside a code-default body** (an engine state-child body §51.0, a match block-form arm body §18.0.1, or a `:`-shorthand body §4.14). The nested plain-markup element opens a **free-text body** (§4.18.1 — body modes nest), so the `"..."` the adopter wrote (correct in the enclosing code-default body) renders **literally** — the quote marks appear in the output. This surfaces the over-quoting footgun: the mirror of E-UNQUOTED-DISPLAY-TEXT, which is the UNDER-quoting case (bare prose in the code-default body itself, where a literal is required). **Fire condition:** a plain-markup element (`getElementShape(tag) !== null`) nested in one of the three code-default-body loci whose body, after ignoring whitespace-only formatting, is exactly one display-text literal (`"..."` with no interior unescaped `"`). **Does NOT fire:** a `"..."` directly in the code-default body (the CORRECT §4.18.3 display-text literal); bare free text in a plain-markup body; a `"..."` in plain markup OUTSIDE any code-default-body context; a NON-sole-content quoted string (`<p>"a" and "b"</p>` — the adopter clearly intends literal quotes); a `:`-shorthand body that IS a display-text literal (the quotes are stripped per §4.18.3 — correct, no footgun). The diagnostic SHALL suggest bare free text (`<p>On the way.</p>`). Partitions into `result.warnings` (non-fatal). Fire site: `type-system.ts` `checkDisplayTextOverquote` (the type pass — the FileAST carries the engine `bodyChildren` / match arm bodies and the wired W-/I- diagnostic stream). Reserved for promotion to a hard reject only if the under-quoting E-UNQUOTED-DISPLAY-TEXT is wired (they share the code-default-body boundary). | Info |
 | E-PARSEVARIANT-TYPE-NOT-ENUM | §41.13, §53.14 | Second argument to `parseVariant` is not a bare scrml-native `:enum` type identifier. Struct types, named-shape types, refinement-type literals, string literals, and arbitrary expressions are rejected. Resolution: pass an enum type as the second argument; for struct-shape boundary parsing, use a server-function normalization step or §53.4 SPARK boundary refinement on assignment. (Stage TS — type-system pass; catalog addition S65 — parseVariant Path-A architectural commit) | Error |
@@ -47891,7 +47891,7 @@ E-CONTRACT-003: Inline predicate references external reactive variable '@maxMana
     <machine name=HpRange for=number> {
         * => * given (value >= 0 && value <= @maxMana)
     }
-    /
+    </>
     <hp>: HpRange = 100
 ```
 
@@ -48051,7 +48051,7 @@ E-CONTRACT-003: Inline predicate references external reactive variable '@maxScor
     <machine name=ScoreRange for=number> {
         * => * given (value >= 0 && value <= @maxScore)
     }
-    /
+    </>
     <playerScore>: ScoreRange = 0
 ```
 
