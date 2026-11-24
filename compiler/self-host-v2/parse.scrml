@@ -3103,7 +3103,7 @@ ${
         const t: PTok = cur(tp);
         // the element's own reader, over the file's offsets (the span is padded to
         // its offset, so every diagnostic it reports is at its place in the file)
-        const m0: MP = { src: " ".repeat(t.start) + t.text, pos: t.start, nid: tp.nid, diags: [], file: tp.file, hoist: [], dbFns: [], hosts: [], pages: [], eps: [], chans: [], onchs: [], schemaN: 0, tables: [], ns: tp.ns, lim: noLim() };
+        const m0: MP = { src: " ".repeat(t.start) + t.text, pos: t.start, nid: tp.nid, diags: [], file: tp.file, hoist: [], dbFns: [], hosts: [], pages: [], eps: [], chans: [], onchs: [], schemaN: 0, tables: [], ns: tp.ns, lim: noLim(), slash: noSlash() };
         const rn: RNodeOne = parseMarkupNode(m0);
         let ds: Diag[] = rn.mp.diags;
         // text the token holds past the element the reader read (the lexer's extent
@@ -5644,7 +5644,7 @@ ${
             }
         }
         const back: MP = backToMarkup(lr.mp, t);
-        const m: MP = { src: back.src, pos: back.pos, nid: back.nid, diags: back.diags, file: back.file, hoist: back.hoist.concat(hoisted), dbFns: back.dbFns, hosts: back.hosts, pages: back.pages, eps: back.eps, chans: back.chans, onchs: back.onchs, schemaN: back.schemaN, tables: back.tables, ns: back.ns, lim: back.lim };
+        const m: MP = { src: back.src, pos: back.pos, nid: back.nid, diags: back.diags, file: back.file, hoist: back.hoist.concat(hoisted), dbFns: back.dbFns, hosts: back.hosts, pages: back.pages, eps: back.eps, chans: back.chans, onchs: back.onchs, schemaN: back.schemaN, tables: back.tables, ns: back.ns, lim: back.lim, slash: back.slash };
         const n: ANode = { nid: m.nid, span: mkSpan(start, m.pos), k: ANodeK.Text("") };
         return { n: n, mp: mBump(m) };
     }
@@ -9894,7 +9894,7 @@ ${
     // `lim` (s481 r4, PR #2045 review HIGH-4 / MED-1): the FRAGMENT reader's bounds
     // (parseFragment — the markup a compile-time `^{}` block emits; `on` is false for
     // every source file, which this leaves exactly as it was). See FRAGMENT MODE below.
-    type MP:struct = { src: string, pos: int, nid: int, diags: Diag[], file: string, hoist: AItem[], dbFns: ADbFn[], hosts: AHostBind[], pages: APage[], eps: AEndpoint[], chans: AChannel[], onchs: AOnchange[], schemaN: int, tables: SchemaTable[], ns: PNs, lim: PLim }
+    type MP:struct = { src: string, pos: int, nid: int, diags: Diag[], file: string, hoist: AItem[], dbFns: ADbFn[], hosts: AHostBind[], pages: APage[], eps: AEndpoint[], chans: AChannel[], onchs: AOnchange[], schemaN: int, tables: SchemaTable[], ns: PNs, lim: PLim, slash: RSlashes }
 
     // =========================================================================
     // FRAGMENT MODE (s481 r4 — `^{}` output, SPEC §22.4 "The emit budget"). A
@@ -9925,7 +9925,7 @@ ${
     }
 
     fn withLim(mp: MP, l: PLim) -> MP {
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: l };
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: l, slash: mp.slash };
     }
 
     // The fragment reader stops here (the first reason stands).
@@ -9990,7 +9990,7 @@ ${
 
     fn parseCssNode(mp: MP) -> RCss {
         const r: CssParsed = parseCssBlock(mp.src, mp.pos, mp.nid);
-        let m: MP = { src: mp.src, pos: r.end, nid: r.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim };
+        let m: MP = { src: mp.src, pos: r.end, nid: r.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim, slash: mp.slash };
         for (const e of r.errs) { m = mDiag(m, e.code, e.text, e.start, e.end); }
         const n: ANode = { nid: m.nid, span: r.css.span, k: ANodeK.Css(r.css) };
         return { n: n, mp: mBump(m) };
@@ -10005,15 +10005,15 @@ ${
     fn atInterp(mp: MP) -> boolean { return chAt(mp, 0) == "$" && chAt(mp, 1) == "{"; }
 
     fn mAdv(mp: MP, n: int) -> MP {
-        return { src: mp.src, pos: mp.pos + n, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim };
+        return { src: mp.src, pos: mp.pos + n, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim, slash: mp.slash };
     }
 
     fn mAt(mp: MP, pos: int) -> MP {
-        return { src: mp.src, pos: pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim };
+        return { src: mp.src, pos: pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim, slash: mp.slash };
     }
 
     fn mBump(mp: MP) -> MP {
-        return { src: mp.src, pos: mp.pos, nid: mp.nid + 1, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim };
+        return { src: mp.src, pos: mp.pos, nid: mp.nid + 1, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim, slash: mp.slash };
     }
 
     fn mDiag(mp: MP, code: string, msg: string, start: int, end: int) -> MP {
@@ -10021,7 +10021,7 @@ ${
         if (mp.lim.dead) return mp;
         if (mp.lim.on && mp.diags.length >= mp.lim.cap.diags) return fragStop(mp, "diags");
         const d: Diag = newDiag(code, msg, mp.file, mkSpan(start, end));
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags.concat([d]), file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim };
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags.concat([d]), file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim, slash: mp.slash };
     }
 
     fn mLooking(mp: MP, s: string) -> boolean {
@@ -10127,7 +10127,7 @@ ${
     // consumed token (the Eof sentinel's start = where the lexer stopped).
     fn backToMarkup(mp: MP, tp: TP) -> MP {
         const eof: PTok = tp.toks[tp.toks.length - 1];
-        return { src: mp.src, pos: eof.start, nid: tp.nid, diags: tp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim };
+        return { src: mp.src, pos: eof.start, nid: tp.nid, diags: tp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim, slash: mp.slash };
     }
 
     // After a region's expression: anything left before the Eof is an error.
@@ -10214,7 +10214,23 @@ ${
         if (!((c1 >= "a" && c1 <= "z") || (c1 >= "A" && c1 <= "Z"))) return not;
         const slash: int = retiredValueCloserAt(mp.src, mp.pos + k);
         if (slash < 0) return not;
-        const m: MP = mAdv(mp, slash + 2 - mp.pos);
+        let brace: int = slash + 1;
+        for (; brace < mp.src.length && mp.src.charCodeAt(brace) != 125; ) { brace = brace + 1; }
+        // #2095 review LOW-2: a `/}` inside a nested element (`{<div><b>x/}</div>}`) — the
+        // closers written after it, up to the value's own `}`, are the value's too (one refusal)
+        let end: int = brace + 1;
+        let k2: int = end;
+        for (; k2 < mp.src.length && isSpaceCh(mp.src.substring(k2, k2 + 1)); ) { k2 = k2 + 1; }
+        let tail = false;
+        for (; mp.src.charCodeAt(k2) == 60 && mp.src.charCodeAt(k2 + 1) == 47; ) {
+            const gt: int = mp.src.indexOf(">", k2);
+            if (gt < 0) break;
+            k2 = gt + 1;
+            tail = true;
+            for (; k2 < mp.src.length && isSpaceCh(mp.src.substring(k2, k2 + 1)); ) { k2 = k2 + 1; }
+        }
+        if (tail && mp.src.charCodeAt(k2) == 125) end = k2 + 1;
+        const m: MP = mAdv(mp, end - mp.pos);
         const md: MP = mDiag(m, "E-SYNTAX-050", "a trailing `/` is not a closer — the `content/` and bare `/` closers were retired for `</>` (§4.4, Appendix E), so this `/}` does not close the element in `" + name + "={…}`. Did you mean `</>`? Write `…</>}`", slash, slash + 1);
         return { v: AAttrValue.Bare(recoveredAt(md, mp.pos)), mp: md };
     }
@@ -10280,10 +10296,11 @@ ${
     }
 
     fn markupAttrValue(mp: MP, name: string) -> RValue | not {
-        const retired: RValue | not = retiredCloserValue(mp, name);
-        if (retired is given) return retired;
+        // #2095 review LOW-2: a value that reads as a CLOSED element is that element, its text
+        // `/` and `}` included (`header={<p>a/}b</p>}` — a `}` in prose is text, §4.17); only a
+        // value that does not is asked for a retired `/}` closer
         const end: int = markupAttrValueEnd(mp);
-        if (end < 0) return not;
+        if (end < 0) return retiredCloserValue(mp, name);
         const m: MP = mAdv(mp, end);
         let whose: string = "";
         if (name == "fallback") whose = " (`fallback=` is `<errorBoundary>`'s markup value, §19.6, which the bootstrap does not build)";
@@ -10457,7 +10474,7 @@ ${
     }
 
     fn withDiagsOf(mp: MP, ds: Diag[]) -> MP {
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim };
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim, slash: mp.slash };
     }
 
     fn recoveredAt(mp: MP, start: int) -> AExpr {
@@ -11753,7 +11770,7 @@ ${
             const inside: boolean = d.span.start >= start && d.span.end <= end;
             if (d.code != "W-STRING-INTERP-LITERAL" || !inside) keep = keep.concat([d]);
         }
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: keep, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim };
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: keep, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim, slash: mp.slash };
     }
 
     // F9: a literal `$`+`{` in a scrml string is interpolation under impl#1 —
@@ -12866,6 +12883,19 @@ ${
         m = rk.mp;
         if (close < 0) {
             m = mDiag(mAt(m, end), "E-PARSE-UNCLOSED", "`<" + o.name + ">` is never closed — a raw-content body runs to its `</" + lower + ">` (§4.17)", o.start, end);
+            // s482-closer-cleanup (#2095 review MED-1) — a raw body that never closes because a
+            // retired closer ended it (`<code>${cmd(t)}/`): its retired closers are named (RETIRED
+            // CLOSERS) — the first one ended the raw element in the retired reading, and the
+            // markup the body then swallowed (never read as markup) holds the rest
+            if (!fragOn(m)) {
+                let hit: RSlash[] = m.slash.hit;
+                let owner: string = o.name;
+                for (const at of retiredSlashesIn(m.src, start, end)) {
+                    hit = hit.concat([{ at: at, tag: owner }]);
+                    owner = "";
+                }
+                m = withSlash(m, { cand: m.slash.cand, hit: hit });
+            }
         } else {
             m = mAt(m, close + 3 + lower.length);
         }
@@ -13124,63 +13154,141 @@ ${
             m = fragNodes(mBump(m), 1);
         }
         let unclosed: boolean = mEof(m);
+        let ownName = false;
         if (mLooking(m, "</")) {
+            ownName = !mLooking(m, "</>");
             const nc: int = codeCount(m.diags, "E-PARSE-CLOSER");
             m = parseCloser(m, tag);
             if (codeCount(m.diags, "E-PARSE-CLOSER") > nc) unclosed = true;
         }
-        if (unclosed) m = retiredCloserIn(m, out, tag);
+        // s482-closer-cleanup — the retired closers this element's text may hold (see RETIRED
+        // CLOSERS below): kept unless the element was closed by its OWN name (`</p>` for `<p>`,
+        // which no retired reading would have spent elsewhere); named when it, or an element
+        // around it, is left unclosed
+        if (unclosed || !ownName) m = slashKeep(m, out, tag);
+        if (unclosed) m = slashHit(m, mp.pos, m.pos);
         return { nodes: out, mp: m };
     }
 
-    // s482-closer-cleanup — §4.4 / Appendix E: "Any source file using bare `/` or trailing
-    // content`/` closers SHALL be rejected by the compiler with a diagnostic pointing to §4.4.
-    // The diagnostic SHALL include a hint: "Did you mean `</>`?"". A `/` in text is legal text in
-    // general (`a/b`, `and/or`, a URL), so the retired closer is named only where it explains a
-    // failure: the element was NOT closed (end of input, or a closer naming another element), and
-    // one of its own text runs has a `/` standing where a closer would — the last thing on its
-    // line (`<p>hello/`, a bare `/` line), right before a `;` (`lift <li>x/;`) or the last
-    // thing before a tag. E-SYNTAX-050 at the
-    // first such `/`; the reader's own E-PARSE-UNCLOSED / E-PARSE-CLOSER stays (the element is
-    // still unclosed). A `//` is never one (§27.1), nor the `/` of a `/>`.
-    fn retiredCloserIn(mp: MP, kids: ANode[], tag: string) -> MP {
-        let i: int = 0;
-        for (; i < kids.length; ) {
-            const n: ANode = kids[i];
+    // =========================================================================
+    // RETIRED CLOSERS (s482-closer-cleanup; #2095 review MED-1, LOW-1, NIT-2). §4.4 / Appendix E:
+    // "Any source file using bare `/` or trailing content`/` closers SHALL be rejected by the
+    // compiler with a diagnostic pointing to §4.4. The diagnostic SHALL include a hint: "Did you
+    // mean `</>`?"". A `/` in text is legal text in general (`a/b`, `and/or`, a URL), so a
+    // retired closer is named only where it explains a failure. Each markup text run (parseKids'
+    // own runs — the one text reader) is scanned for a `/` standing where a closer would: the
+    // last thing on its line (`<p>hello/`, a bare `/` line), right before a `;` (`lift <li>x/;`),
+    // or the last thing before a tag — and not the end of a URL / path word (`http://x.com/`,
+    // `a/b/`). Such a `/` is a CANDIDATE (MP.slash.cand, with the element whose text holds it).
+    // In the retired reading the `/` closed that element, so the `</>` (or `</x>`) meant for an
+    // element around it was spent closing it instead, and that outer element ends unclosed. So:
+    // when an element is left unclosed (end of input, or a closer naming another element), every
+    // candidate inside it is a HIT, wherever it is nested — a child's text, a `lift` row in a
+    // `${ for … }`, a closed sibling. Each hit is one E-SYNTAX-050 at its `/`, in source order,
+    // after the file is read (slashDiags); the reader's own E-PARSE-UNCLOSED / E-PARSE-CLOSER
+    // stay (the element is still unclosed). A `//` is never one (§27.1), nor the `/` of a `/>`.
+    // Not in FRAGMENT MODE (a `^{}` output is not source a person wrote).
+    // =========================================================================
+    type RSlash:struct = { at: int, tag: string }
+    type RSlashes:struct = { cand: RSlash[], hit: RSlash[] }
+
+    fn noSlash() -> RSlashes { return { cand: [], hit: [] }; }
+
+    fn withSlash(mp: MP, s: RSlashes) -> MP {
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim, slash: s };
+    }
+
+    // The candidates in `<tag>`'s own text runs (its direct Text kids), kept.
+    fn slashKeep(mp: MP, kids: ANode[], tag: string) -> MP {
+        if (fragOn(mp)) return mp;
+        let add: RSlash[] = [];
+        for (const n of kids) {
             const isText: boolean = match n.k {
                 .Text(text: s) :> true,
                 // no-default-arm: one question of a child — is it a text run
                 _ :> false
             };
             if (isText) {
-                const at: int = retiredSlashIn(mp.src, n.span.start, n.span.end);
-                if (at >= 0) return mDiag(mp, "E-SYNTAX-050", "a trailing `/` is not a closer — the `content/` and bare `/` closers were retired for `</>` (§4.4, Appendix E), so `<" + tag + ">` is not closed here. Did you mean `</>`? Write `</>` (or `</" + tag + ">`) in place of the `/`", at, at + 1);
+                for (const at of retiredSlashesIn(mp.src, n.span.start, n.span.end)) { add = add.concat([{ at: at, tag: tag }]); }
             }
-            i = i + 1;
         }
-        return mp;
+        if (add.length == 0) return mp;
+        return withSlash(mp, { cand: mp.slash.cand.concat(add), hit: mp.slash.hit });
     }
 
-    // The first `/` in src[from, to) followed only by spaces / tabs up to a line end or a `;` (a
-    // `lift <li>x/;` statement), or up to the run's end where a tag (`<`) or the end of the
-    // input follows; -1 when none. A text run's span also covers what parseKids skips without
-    // splitting the run — a `//` line comment (§4.18.1b: after whitespace), an `<!-- … -->`
-    // comment, a `#{ … }` / `${ … }` block — so those are skipped here too (their `/` is never a
-    // closer: `// no Date.now() /` at a line end is a comment).
-    fn retiredSlashIn(src: string, from: int, to: int) -> int {
+    // An element whose body is src[from, to) was left unclosed: its candidates are hits.
+    fn slashHit(mp: MP, from: int, to: int) -> MP {
+        let keep: RSlash[] = [];
+        let hit: RSlash[] = mp.slash.hit;
+        let moved = false;
+        for (const c of mp.slash.cand) {
+            if (c.at >= from && c.at < to) {
+                hit = hit.concat([c]);
+                moved = true;
+            } else {
+                keep = keep.concat([c]);
+            }
+        }
+        if (!moved) return mp;
+        return withSlash(mp, { cand: keep, hit: hit });
+    }
+
+    // After the file is read: one E-SYNTAX-050 per hit, in source order (a `/` already refused
+    // as a `{ … /}` value's closer — retiredCloserValue — is not named twice).
+    fn slashDiags(mp: MP) -> MP {
+        let m: MP = mp;
+        let done: int[] = [];
+        for (const d of mp.diags) { if (d.code == "E-SYNTAX-050") done = done.concat([d.span.start]); }
+        let left: RSlash[] = mp.slash.hit;
+        for (; left.length > 0; ) {
+            let lo: int = 0;
+            let i: int = 1;
+            for (; i < left.length; ) {
+                if (left[i].at < left[lo].at) lo = i;
+                i = i + 1;
+            }
+            const h: RSlash = left[lo];
+            left = left.slice(0, lo).concat(left.slice(lo + 1));
+            if (done.indexOf(h.at) < 0) {
+                done = done.concat([h.at]);
+                let msg: string = "a trailing `/` is not a closer — the `content/` and bare `/` closers were retired for `</>` (§4.4, Appendix E), so this `/` does not close `<" + h.tag + ">`, and an element around it is left unclosed. Did you mean `</>`? If this `/` was meant to close `<" + h.tag + ">`, write `</>` (or `</" + h.tag + ">`) there";
+                // a `/` in a raw body that a retired closer left unclosed (its element unknown)
+                if (h.tag == "") msg = "a trailing `/` is not a closer — the `content/` and bare `/` closers were retired for `</>` (§4.4, Appendix E); this `/` stands in a raw-content body that an earlier retired closer left unclosed. Did you mean `</>`? If this `/` was meant to close an element, write `</>` there";
+                m = mDiag(m, "E-SYNTAX-050", msg, h.at, h.at + 1);
+            }
+        }
+        return withSlash(m, noSlash());
+    }
+
+    // Every `/` in the text run src[from, to) followed only by spaces / tabs up to a line end or
+    // a `;` (a `lift <li>x/;` statement), or up to the run's end where a tag (`<`) or the end of
+    // the input follows — and not ending a URL / path word (pathSlashAt). A text run's span also
+    // covers what parseKids skips without splitting the run — a `//` line comment (§4.18.1b:
+    // after whitespace), an `<!-- … -->` comment, a `#{ … }` / `${ … }` block — so those are
+    // skipped here too (their `/` is never a closer: `// no Date.now() /` at a line end is a
+    // comment). A `${ … }` block is skipped by the lexer's own balanced reader (lexFrom), so a
+    // `}` in its strings does not end it (#2095 review LOW-1).
+    fn retiredSlashesIn(src: string, from: int, to: int) -> int[] {
+        let out: int[] = [];
         let j: int = from;
         for (; j < to; ) {
             const c: int = src.charCodeAt(j);
             const c1: int = j + 1 < src.length ? src.charCodeAt(j + 1) : 0;
             if (c == 47 && c1 == 47 && j > 0 && isNoteSpaceCode(src.charCodeAt(j - 1))) {
                 const nl: int = src.indexOf("\n", j);
-                if (nl < 0 || nl >= to) return -1;
+                if (nl < 0 || nl >= to) return out;
                 j = nl;
             } else if (c == 60 && src.substring(j, j + 4) == "<!--") {
                 const ce: int = src.indexOf("-->", j + 4);
-                if (ce < 0 || ce >= to) return -1;
+                if (ce < 0 || ce >= to) return out;
                 j = ce + 2;
-            } else if ((c == 35 || c == 36 || c == 94 || c == 95 || c == 126 || c == 63 || c == 33) && c1 == 123) {
+            } else if (c == 36 && c1 == 123) {
+                const e: int = lexFrom(src, j + 1, LexStop.Balanced).end;
+                if (e > to) return out;
+                j = e - 1;
+            } else if ((c == 35 || c == 94 || c == 95 || c == 126 || c == 63 || c == 33) && c1 == 123) {
+                // a CSS (or other sigil) block: its braces, counted (a CSS `url(http://…)` is not
+                // a `//` comment, so the JS reader above is not used here)
                 let depth: int = 0;
                 let q: int = j + 1;
                 for (; q < to; ) {
@@ -13191,17 +13299,33 @@ ${
                     }
                     q = q + 1;
                 }
-                if (q >= to) return -1;
+                if (q >= to) return out;
                 j = q;
             } else if (c == 47 && (j == 0 || src.charCodeAt(j - 1) != 47) && (j + 1 >= src.length || (c1 != 47 && c1 != 62))) {
                 let k: int = j + 1;
                 for (; k < to && (src.charCodeAt(k) == 32 || src.charCodeAt(k) == 9 || src.charCodeAt(k) == 13); ) { k = k + 1; }
-                if (k < to && (src.charCodeAt(k) == 10 || src.charCodeAt(k) == 59)) return j;
-                if (k >= to && (to >= src.length || src.charCodeAt(to) == 60)) return j;
+                let closerAt = false;
+                if (k < to && (src.charCodeAt(k) == 10 || src.charCodeAt(k) == 59)) closerAt = true;
+                if (k >= to && (to >= src.length || src.charCodeAt(to) == 60)) closerAt = true;
+                if (closerAt && !pathSlashAt(src, from, j)) out = out.concat([j]);
             }
             j = j + 1;
         }
-        return -1;
+        return out;
+    }
+
+    // Does the `/` at src[j] end a URL / path word — a word (back to a space, a `>` or a `}`,
+    // within the run from `from`) that holds another `/` or a `:` (`http://x.com/`, `a/b/`,
+    // `usr/bin/`)? Such a `/` is part of the text, never a closer (#2095 review LOW-1).
+    fn pathSlashAt(src: string, from: int, j: int) -> boolean {
+        let k: int = j - 1;
+        for (; k >= from; ) {
+            const c: int = src.charCodeAt(k);
+            if (isNoteSpaceCode(c) || c == 62 || c == 125) return false;
+            if (c == 47 || c == 58) return true;
+            k = k - 1;
+        }
+        return false;
     }
 
     // space, tab, LF, CR — the bytes after which a free-text `//` opens a comment (freeTextCommentAt)
@@ -13467,7 +13591,7 @@ ${
         if (o.typed.length > 0 || hasOwn(o.own) || o.ty is given) m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "a typed or valued `<schema …>` opener is a declaration, not the §39 schema block" + why, o.start, tagEnd);
         if (o.short is given) m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "a `:`-shorthand body on `<schema>` — §39.2: the body is table declarations, between `<schema>` and its closer", o.start, tagEnd);
         if (m.schemaN > 0) m = mDiag(m, "E-SCHEMA-002", "a second `<schema>` block in this file — §39.3: \"A file SHALL NOT contain more than one `<schema>` block\"; declare every table in the first one", o.start, tagEnd);
-        m = { src: m.src, pos: m.pos, nid: m.nid, diags: m.diags, file: m.file, hoist: m.hoist, dbFns: m.dbFns, hosts: m.hosts, pages: m.pages, eps: m.eps, chans: m.chans, onchs: m.onchs, schemaN: m.schemaN + 1, tables: m.tables, ns: m.ns, lim: m.lim };
+        m = { src: m.src, pos: m.pos, nid: m.nid, diags: m.diags, file: m.file, hoist: m.hoist, dbFns: m.dbFns, hosts: m.hosts, pages: m.pages, eps: m.eps, chans: m.chans, onchs: m.onchs, schemaN: m.schemaN + 1, tables: m.tables, ns: m.ns, lim: m.lim, slash: m.slash };
         if (o.selfClosing || o.short is given) return elemFrom(o, [], m);
         const close: int = schemaCloseAt(m.src, m.pos);
         const bodyEnd: int = close < 0 ? m.src.length : close;
@@ -13489,7 +13613,7 @@ ${
             if (di >= d0 && d.code.substring(0, 2) != "W-") clean = false;
             di = di + 1;
         }
-        if (clean) m = { src: m.src, pos: m.pos, nid: m.nid, diags: m.diags, file: m.file, hoist: m.hoist, dbFns: m.dbFns, hosts: m.hosts, pages: m.pages, eps: m.eps, chans: m.chans, onchs: m.onchs, schemaN: m.schemaN, tables: rs.tables, ns: m.ns, lim: m.lim };
+        if (clean) m = { src: m.src, pos: m.pos, nid: m.nid, diags: m.diags, file: m.file, hoist: m.hoist, dbFns: m.dbFns, hosts: m.hosts, pages: m.pages, eps: m.eps, chans: m.chans, onchs: m.onchs, schemaN: m.schemaN, tables: rs.tables, ns: m.ns, lim: m.lim, slash: m.slash };
         return elemFrom(o, [], mAt(m, closer + 1));
     }
 
@@ -13506,7 +13630,7 @@ ${
             const fid: int = fnIdOfItem(it.k);
             if (fid >= 0) fns = fns.concat([{ fn: fid, db: r.e.nid, cell: cellOfLoad(rb.cells, fid), start: r.e.span.start, end: r.e.span.end }]);
         }
-        const m: MP = { src: r.mp.src, pos: r.mp.pos, nid: r.mp.nid, diags: r.mp.diags, file: r.mp.file, hoist: r.mp.hoist.concat(rb.items), dbFns: fns, hosts: r.mp.hosts, pages: r.mp.pages, eps: r.mp.eps, chans: r.mp.chans, onchs: r.mp.onchs, schemaN: r.mp.schemaN, tables: r.mp.tables, ns: r.mp.ns, lim: r.mp.lim };
+        const m: MP = { src: r.mp.src, pos: r.mp.pos, nid: r.mp.nid, diags: r.mp.diags, file: r.mp.file, hoist: r.mp.hoist.concat(rb.items), dbFns: fns, hosts: r.mp.hosts, pages: r.mp.pages, eps: r.mp.eps, chans: r.mp.chans, onchs: r.mp.onchs, schemaN: r.mp.schemaN, tables: r.mp.tables, ns: r.mp.ns, lim: r.mp.lim, slash: r.mp.slash };
         return { e: r.e, mp: m };
     }
 
@@ -13998,7 +14122,7 @@ ${
             }
         }
         ds = ds.concat(hostTargetDiags(mp.file, nameTok.v, rp.ps, target, isNew, isFn, src, mkSpan(at, end)));
-        const m: MP = { src: mp.src, pos: end, nid: t.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts.concat([hb]), pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim };
+        const m: MP = { src: mp.src, pos: end, nid: t.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts.concat([hb]), pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim, slash: mp.slash };
         return { items: [it], mp: m };
     }
 
@@ -14258,7 +14382,7 @@ ${
         const quoted: string = "\"" + text.split("\\").join("\\\\").split("\"").join("\\\"") + "\"";
         const d: Diag = newDiag("E-UNQUOTED-DISPLAY-TEXT", "display text in a `<db>` body is declared — a markup element (`<p>" + text + "</p>`) or a quoted display-text literal (`" + quoted + "`): a `<db>` body is a code-default item body, never page text (S472 ruling Q3, §4.18.1 / §4.18.7)", mp.file, mkSpan(start, end));
         const ds: Diag[] = mp.diags.slice(0, at).concat([d]).concat(mp.diags.slice(at, mp.diags.length));
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim };
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: ds, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim, slash: mp.slash };
     }
 
     // Report the keyword (its span) and resume at the tag, which then parses
@@ -14487,7 +14611,7 @@ ${
             k = k + 1;
         }
         if (depth > 0) t = diagAt(t, "E-PARSE-UNCLOSED", "`" + interpOpen() + "` is never closed", cur(tp));
-        const m: MP = { src: mp.src, pos: k, nid: t.nid, diags: t.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim };
+        const m: MP = { src: mp.src, pos: k, nid: t.nid, diags: t.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim, slash: mp.slash };
         const n: ANode = { nid: m.nid, span: mkSpan(start, m.pos), k: ANodeK.Text("") };
         return { n: n, mp: mBump(m) };
     }
@@ -14553,7 +14677,7 @@ ${
     fn markupProgram(o: Opener, mp: MP) -> RNodeOne {
         const rp: RMItems = programItem(o, programOpenerDiags(o, mp, false), false);
         const m: MP = rp.mp;
-        const mh: MP = { src: m.src, pos: m.pos, nid: m.nid, diags: m.diags, file: m.file, hoist: m.hoist.concat(rp.items), dbFns: m.dbFns, hosts: m.hosts, pages: m.pages, eps: m.eps, chans: m.chans, onchs: m.onchs, schemaN: m.schemaN, tables: m.tables, ns: m.ns, lim: m.lim };
+        const mh: MP = { src: m.src, pos: m.pos, nid: m.nid, diags: m.diags, file: m.file, hoist: m.hoist.concat(rp.items), dbFns: m.dbFns, hosts: m.hosts, pages: m.pages, eps: m.eps, chans: m.chans, onchs: m.onchs, schemaN: m.schemaN, tables: m.tables, ns: m.ns, lim: m.lim, slash: m.slash };
         const n: ANode = { nid: mh.nid, span: mkSpan(o.start, mh.pos), k: ANodeK.Text("") };
         return { n: n, mp: mBump(mh) };
     }
@@ -15134,13 +15258,17 @@ ${
             m = skipTrivia(m);
             if (mEof(m)) {
                 if (tag != "") m = mDiag(m, "E-PARSE-UNCLOSED", "`<" + tag + ">` is never closed", mp.pos, m.pos);
+                // s482-closer-cleanup — the retired closers inside it are named (RETIRED CLOSERS)
+                if (tag != "") m = slashHit(m, mp.pos, m.pos);
                 going = false;
             } else if (mLooking(m, "</")) {
                 if (tag == "") {
                     m = mDiag(m, "E-PARSE-CLOSER", "a closer with nothing open", m.pos, m.pos + 2);
                     m = mAdv(m, 2);
                 } else {
+                    const nc: int = codeCount(m.diags, "E-PARSE-CLOSER");
                     m = parseCloser(m, tag);
+                    if (codeCount(m.diags, "E-PARSE-CLOSER") > nc) m = slashHit(m, mp.pos, m.pos);
                     going = false;
                 }
             } else {
@@ -15167,7 +15295,7 @@ ${
     }
 
     fn noHoist(mp: MP) -> MP {
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: [], dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim };
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: [], dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim, slash: mp.slash };
     }
 
     fn mItem(mp: MP, start: int, k: AItemK) -> RMItems {
@@ -15646,7 +15774,7 @@ ${
     // body's own reader parseDisplayItem) — as markup items, and its `;`.
     fn bodyTopDisplay(mp: MP, tp: TP) -> RItems {
         const lit: PTok = cur(tp);
-        const at: MP = { src: mp.src, pos: lit.start, nid: tp.nid, diags: tp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim };
+        const at: MP = { src: mp.src, pos: lit.start, nid: tp.nid, diags: tp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim, slash: mp.slash };
         const d: TP = regionTP(at, LexStop.Line);
         let nodes: ANode[] = [];
         let m: MP = at;
@@ -15847,7 +15975,7 @@ ${
     }
 
     fn withPage(mp: MP, pg: APage) -> MP {
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages.concat([pg]), eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim };
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages.concat([pg]), eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim, slash: mp.slash };
     }
 
     // A `<page>` opener carries plain attributes only (the §40.8 per-route set —
@@ -15915,7 +16043,7 @@ ${
             m = r.mp;
         }
         const ch: AChannel = { nid: m.nid, span: mkSpan(o.start, m.pos), opener: mkSpan(o.start, tagEnd), attrs: o.attrs, body: mkSpan(o.start, m.pos), ctx: ctx };
-        const out: MP = { src: m.src, pos: m.pos, nid: m.nid + 1, diags: m.diags, file: m.file, hoist: m.hoist, dbFns: m.dbFns, hosts: m.hosts, pages: m.pages, eps: m.eps, chans: m.chans.concat([ch]), onchs: m.onchs, schemaN: m.schemaN, tables: m.tables, ns: m.ns, lim: m.lim };
+        const out: MP = { src: m.src, pos: m.pos, nid: m.nid + 1, diags: m.diags, file: m.file, hoist: m.hoist, dbFns: m.dbFns, hosts: m.hosts, pages: m.pages, eps: m.eps, chans: m.chans.concat([ch]), onchs: m.onchs, schemaN: m.schemaN, tables: m.tables, ns: m.ns, lim: m.lim, slash: m.slash };
         return { items: items, mp: out };
     }
 
@@ -15936,7 +16064,7 @@ ${
             }
             if (!drop) keep = keep.concat([d]);
         }
-        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: keep, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim };
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: keep, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim, slash: mp.slash };
     }
 
     // §38.13.3: "A `watches=` channel body contains exactly one `<onchange>`
@@ -15962,7 +16090,7 @@ ${
             m = ra.mp;
         }
         const oc: AOnchange = { nid: m.nid, span: mkSpan(o.start, m.pos), arms: arms };
-        const out: MP = { src: m.src, pos: m.pos, nid: m.nid + 1, diags: m.diags, file: m.file, hoist: m.hoist, dbFns: m.dbFns, hosts: m.hosts, pages: m.pages, eps: m.eps, chans: m.chans, onchs: m.onchs.concat([oc]), schemaN: m.schemaN, tables: m.tables, ns: m.ns, lim: m.lim };
+        const out: MP = { src: m.src, pos: m.pos, nid: m.nid + 1, diags: m.diags, file: m.file, hoist: m.hoist, dbFns: m.dbFns, hosts: m.hosts, pages: m.pages, eps: m.eps, chans: m.chans, onchs: m.onchs.concat([oc]), schemaN: m.schemaN, tables: m.tables, ns: m.ns, lim: m.lim, slash: m.slash };
         return { items: [], mp: out };
     }
 
@@ -16214,7 +16342,7 @@ ${
                                 arms: arms, top: ctx == "program", lowered: false, opErr: epOpenerErr(m.diags, opener) };
         // the placeholder item endpointDesugar replaces (an empty text run renders nothing)
         const n: ANode = { nid: m.nid, span: ep.span, k: ANodeK.Text("") };
-        const withEp: MP = { src: m.src, pos: m.pos, nid: m.nid, diags: m.diags, file: m.file, hoist: m.hoist, dbFns: m.dbFns, hosts: m.hosts, pages: m.pages, eps: m.eps.concat([ep]), chans: m.chans, onchs: m.onchs, schemaN: m.schemaN, tables: m.tables, ns: m.ns, lim: m.lim };
+        const withEp: MP = { src: m.src, pos: m.pos, nid: m.nid, diags: m.diags, file: m.file, hoist: m.hoist, dbFns: m.dbFns, hosts: m.hosts, pages: m.pages, eps: m.eps.concat([ep]), chans: m.chans, onchs: m.onchs, schemaN: m.schemaN, tables: m.tables, ns: m.ns, lim: m.lim, slash: m.slash };
         return mItem(mBump(withEp), o.start, AItemK.MarkupItem(n));
     }
 
@@ -16584,7 +16712,7 @@ ${
                     n = n + 1;
                 }
                 const back: MP = backToMarkup(at, t);
-                const ended: MP = { src: back.src, pos: back.pos, nid: back.nid, diags: at.diags, file: back.file, hoist: back.hoist, dbFns: back.dbFns, hosts: back.hosts, pages: back.pages, eps: back.eps, chans: back.chans, onchs: back.onchs, schemaN: back.schemaN, tables: back.tables, ns: back.ns, lim: back.lim };
+                const ended: MP = { src: back.src, pos: back.pos, nid: back.nid, diags: at.diags, file: back.file, hoist: back.hoist, dbFns: back.dbFns, hosts: back.hosts, pages: back.pages, eps: back.eps, chans: back.chans, onchs: back.onchs, schemaN: back.schemaN, tables: back.tables, ns: back.ns, lim: back.lim, slash: back.slash };
                 if (n >= 2) {
                     m = mDiag(ended, "E-ENDPOINT-MULTI-STATEMENT-ARM", "the `<" + name + ">` arm of this `<endpoint>` has a multi-statement body — an arm body is a single value-expression (the value the compiler envelopes as the JSON response, §61.5); multi-statement handler bodies are a future wave (§61.10). Reduce the arm to one expression, or move the logic into a function and call it: `<" + name + " : compute(…)>`", armStart, ended.pos);
                 } else {
@@ -17000,16 +17128,16 @@ ${
     // Parse one file in the namespace context `ns` (analyze.scrml re-parses with the value
     // offsets its first analysis proved, PNs.at).
     export fn parseFileNs(path: string, src: string, firstId: int, ns: PNs) -> Parsed {
-        const m0: MP = { src: src, pos: 0, nid: firstId, diags: [], file: path, hoist: [], dbFns: [], hosts: [], pages: [], eps: [], chans: [], onchs: [], schemaN: 0, tables: [], ns: ns, lim: noLim() };
+        const m0: MP = { src: src, pos: 0, nid: firstId, diags: [], file: path, hoist: [], dbFns: [], hosts: [], pages: [], eps: [], chans: [], onchs: [], schemaN: 0, tables: [], ns: ns, lim: noLim(), slash: noSlash() };
         const r0: RMItems = parseMarkupItems(m0, "");
-        const r1: RMItems = { items: r0.items, mp: withDiagsOf(r0.mp, markupValueDiags(r0.mp.diags, src)) };
+        const r1: RMItems = { items: r0.items, mp: slashDiags(withDiagsOf(r0.mp, markupValueDiags(r0.mp.diags, src))) };
         // s478 (s478-boot-endpoint): each `<endpoint>`'s arms, as server functions (endpointDesugar)
         const dz0: RDesugar = endpointDesugar(r1.items, r1.mp.eps, r1.mp.nid);
         // s478 (S478 open-Qs ruling item 47): each `<onchange>` arm, as a client function (onchangeDesugar)
         const oz: ROnchDesugar = onchangeDesugar(dz0.items, r1.mp.chans, r1.mp.onchs, r1.mp.tables, dz0.nid);
         const dz: RDesugar = { items: oz.items, eps: dz0.eps, nid: oz.nid };
         const m1: MP = r1.mp;
-        const r: RMItems = { items: dz.items, mp: { src: m1.src, pos: m1.pos, nid: dz.nid, diags: m1.diags, file: m1.file, hoist: m1.hoist, dbFns: m1.dbFns, hosts: m1.hosts, pages: m1.pages, eps: dz.eps, chans: m1.chans, onchs: m1.onchs, schemaN: m1.schemaN, tables: m1.tables, ns: m1.ns, lim: m1.lim } };
+        const r: RMItems = { items: dz.items, mp: { src: m1.src, pos: m1.pos, nid: dz.nid, diags: m1.diags, file: m1.file, hoist: m1.hoist, dbFns: m1.dbFns, hosts: m1.hosts, pages: m1.pages, eps: dz.eps, chans: m1.chans, onchs: m1.onchs, schemaN: m1.schemaN, tables: m1.tables, ns: m1.ns, lim: m1.lim, slash: m1.slash } };
         // `errs`: the ERROR spans only (s451) — §34: Warning and Info codes "do
         // not fail the compile", so a parse warning neither untrusts a declaration
         // nor closes the diagnostics gate.
@@ -17035,7 +17163,7 @@ ${
     export fn parseFragment(path: string, text: string, parent: string, firstId: int, cap: FragLim) -> Fragment {
         const src: string = text + "</" + parent + ">";
         const lim: PLim = { on: true, dead: false, why: "", depth: 0, nodes: 0, attrs: 0, cap: cap };
-        const m0: MP = { src: src, pos: 0, nid: firstId, diags: [], file: path, hoist: [], dbFns: [], hosts: [], pages: [], eps: [], chans: [], onchs: [], schemaN: 0, tables: [], ns: { names: [], at: [], kw: [] }, lim: lim };
+        const m0: MP = { src: src, pos: 0, nid: firstId, diags: [], file: path, hoist: [], dbFns: [], hosts: [], pages: [], eps: [], chans: [], onchs: [], schemaN: 0, tables: [], ns: { names: [], at: [], kw: [] }, lim: lim, slash: noSlash() };
         const r: RNodes = parseKids(m0, parent);
         const whole: boolean = r.mp.pos == src.length && r.mp.hoist.length == 0 && !r.mp.lim.dead;
         return { nodes: r.nodes, diags: r.mp.diags, nextId: r.mp.nid, whole: whole, stop: r.mp.lim.why, attrs: r.mp.lim.attrs };

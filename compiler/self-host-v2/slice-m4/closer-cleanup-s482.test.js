@@ -119,6 +119,69 @@ describe("(2) a trailing `content/` or bare `/` left unclosed — E-SYNTAX-050 (
   });
 });
 
+describe("(2b) #2095 review MED-1 — a retired closer inside an element a later closer left unclosed", () => {
+  // In the retired reading the `/` closed the element whose text holds it, so the `</>` meant
+  // for the element around it was spent on it, and THAT element ends unclosed: every retired
+  // closer inside an unclosed element is named, however deep. RED ON 71c5c8409 (no 050).
+  for (const [what, src, slashes] of [
+    ["`<div>⏎<p>hello/⏎</>`", P(`<div>\n<p>hello/\n</>`), ["hello/"]],
+    ["`<div>⏎<p>one/⏎<p>two</>⏎</>`", P(`<div>\n<p>one/\n<p>two</>\n</>`), ["one/"]],
+    ["`<div if=true>⏎<p>yes/⏎</>`", P(`<div if=true>\n<p>yes/\n</>`), ["yes/"]],
+    ["`lift <li>${item}/` with a newline and no `;` (SPEC's own §17.4 shape)",
+      `<program>\n    <ul>\n        \${ for (item of @items) {\n            lift <li>\${item}/\n        } }\n    </>\n</>\n`, ["}/"]],
+  ]) {
+    test(`${what}: one E-SYNTAX-050 per retired closer, with the hint`, () => {
+      const r = run(src);
+      const ds = s050(r);
+      expect(ds.map((d) => src.slice(d.span.start - (slashes[0].length - 1), d.span.end))).toEqual(slashes);
+      for (const d of ds) expect(d.message).toContain("Did you mean `</>`?");
+    });
+  }
+
+  test("NIT-2: several hits come out in source order", () => {
+    const src = P(`<div>\n<p>a/\n<span>b/\n<i>c/\n</>`);
+    const ds = s050(run(src));
+    expect(ds.map((d) => src[d.span.start - 1])).toEqual(["a", "b", "c"]);
+  });
+
+  test("LOW-1: a URL's `/` in an element unclosed for another reason is not named", () => {
+    const r = run(P(`<div>see http://x.com/\n<p>ok</p>`));
+    expect(codes(r).length).toBeGreaterThan(0);
+    expect(s050(r)).toEqual([]);
+  });
+
+  test("LOW-1: a `}` in a string does not end a `${ }` slot's skip", () => {
+    const r = run(P(`<div>\${ "}" + a /\n b }\n<p>ok</p>`));
+    expect(s050(r)).toEqual([]);
+  });
+
+  test("a closed sibling's `and/or/` inside an unclosed element is text (a path word)", () => {
+    expect(s050(run(P(`<div>\n<p>and/or/\nthings</p>\n<span>x`)))).toEqual([]);
+  });
+});
+
+describe("(2c) #2095 review LOW-2 — `/}` value shapes", () => {
+  const EB = (fb) => `<program>\n    <errorBoundary fallback=${fb}>\n        <p>body</p>\n    </>\n</program>\n`;
+  test("`err/⏎}` (space before the `}`) and an inner `<b>x/}` are each one E-SYNTAX-050, no parse cascade", () => {
+    for (const fb of [`{<div>err/\n}`, `{<div><b>x/}</div>}`]) {
+      const r = run(EB(fb));
+      expect(s050(r).length).toBe(1);
+      expect(codes(r).filter((c) => c.startsWith("E-PARSE"))).toEqual([]);
+    }
+  });
+
+  test("a value that reads as a CLOSED element keeps its prose `/}` as text (one by-name refusal)", () => {
+    for (const fb of [`{<p>a/}b</p>}`, `{<p>see https://x.com/}</p>}`]) {
+      const src = P(`    <div header=${fb}>y</div>`);
+      const r = run(src);
+      expect(s050(r)).toEqual([]);
+      const d = mvDiag(r);
+      expect(src.slice(d.span.start, d.span.end)).toBe(fb);
+      expect(codes(r).filter((c) => c.startsWith("E-PARSE"))).toEqual([]);
+    }
+  });
+});
+
 describe("(3) #2087 LOW-B — a `}` in a real markup value's prose is text", () => {
   for (const fb of [`{<p>a } b</p>}`, `{<div>oops }</div>}`]) {
     test(`\`header=${fb}\`: one refusal over the whole value`, () => {

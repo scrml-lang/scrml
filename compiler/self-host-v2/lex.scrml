@@ -2201,12 +2201,20 @@ ${
     }
 
     // s482-closer-cleanup — the offset of a RETIRED trailing-`/` closer of the element written
-    // as a `{ … }` attribute value (`fallback={<div>oops/}`: a `/` right before a `}`, at the
-    // outer element's level, outside a `//` line comment), or -1 when the element closes, or
-    // never closes, without one. The parser refuses it: E-SYNTAX-050, "Did you mean `</>`?"
-    // (§4.4, Appendix E).
+    // as a `{ … }` attribute value (`fallback={<div>oops/}`: a `/` before a `}` with only space
+    // between — `err/⏎}` too — at any element level (`{<div><b>x/}</div>}`, #2095 review LOW-2),
+    // outside a `//` line comment), or -1 when the element closes, or never closes, without one.
+    // The parser asks only when the value does not read as a closed element (markupAttrValueEnd),
+    // and refuses it: E-SYNTAX-050, "Did you mean `</>`?" (§4.4, Appendix E).
     export fn retiredValueCloserAt(src: string, pos: int) -> int {
         return markupExtentFrom(src, pos, 2);
+    }
+
+    // Is the next byte after src[from…) that is not a space / tab / CR / LF a `}`?
+    fn closeBraceAfter(src: string, from: int) -> boolean {
+        let k: int = from;
+        for (; k < src.length && isNoteSpace(src.charCodeAt(k)); ) { k = k + 1; }
+        return k < src.length && src.charCodeAt(k) == 125;
     }
 
     // mode 0: a markup value in logic (markupValueExtentAt); 1: an attribute value's element
@@ -2263,7 +2271,7 @@ ${
                 const nl: int = src.indexOf("\n", i);
                 if (nl < 0) return notFound;
                 i = nl + 1;
-            } else if (mode == 2 && depth == 1 && braces == 0 && c0 == 47 && c1 == 125) {
+            } else if (mode == 2 && depth >= 1 && braces == 0 && c0 == 47 && closeBraceAfter(src, i + 1)) {
                 return i;
             } else if (attr && c0 == 123) {
                 braces = braces + 1;
