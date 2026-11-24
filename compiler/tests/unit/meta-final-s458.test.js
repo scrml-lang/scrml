@@ -67,13 +67,13 @@ function run(clientJs, then = "") {
 }
 
 describe("S458 final F4 — meta.get / meta.set / meta.subscribe resolve an author cell name", () => {
-  test("meta-proto-cell-name-pos: meta.get(\"constructor\") reads the cell's real value 0", () => {
+  test("meta-proto-cell-name-pos: meta.get(\"constructor\") reads the cell's real value \"c\" (S482: the case's cell holds a string, ruling S482-meta-get-typed)", () => {
     const src = readFileSync(resolve(import.meta.dir, "../../../conformance/cases/meta/meta-proto-cell-name-pos/case.scrml"), "utf8");
     const r = compile(src);
     expect(r.codes).toEqual([]);
     const { out, errors, token } = run(r.clientJs);
     expect(token).not.toBe("");
-    expect(out).toEqual(["<p>0</p>"]);
+    expect(out).toEqual(["<p>c</p>"]);
     expect(errors).toEqual([]);
   });
 

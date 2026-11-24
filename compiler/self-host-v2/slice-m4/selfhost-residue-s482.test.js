@@ -10,6 +10,9 @@
 // 3. `of` (§49.2.4 "the contextual keyword `of`") is a binding name too.
 // 4. `x is T.V` (outside §18.17's grammar) is ONE named refusal — before, it cascaded, and inside an
 //    object literal it swallowed the rest of the file (g-boot-self-host-parse-residue-s482).
+//    s482-rulings-records: now ACCEPTED when `T` is the left operand's enum (ruling S482-is-qualified-
+//    variant), and `of` follows the `as` adjacency rule (ruling S482-of-adjacency) — the two describes
+//    below item 3's.
 // 5. Every self-host file parses to its end: the only parse-level codes left are the named payload-binder
 //    / alternation refusals (E-PARSE-ARM) and the E-SCOPE-REDECLARE they leave.
 //
@@ -154,22 +157,132 @@ describe("`of` as a binding name (§49.2.4: the contextual keyword `of`)", () =>
   }, 180000);
 });
 
-describe("`x is T.V` — one named refusal, no cascade (§18.17 `is-expression ::= expression 'is' '.' VariantName`)", () => {
-  const T = `    type T:enum = { Str, Num }\n    type R:struct = { k: boolean, j: int }\n`;
-  test("as a statement value, a return operand and an object-literal field value", () => {
+// s482-rulings-records — owner ruling S482 (user-voice-scrml.md "RULED — `of` adjacency follows the `as`
+// rule", ruling:user-voice-scrml.md-S482-of-adjacency; SPEC §49.2.4): a `.` or `/` touching `of` reads
+// the name; spaced, the keyword's operand. Red on base a81d8cc80: `of.value` lexed a BareVariant, `of/2`
+// a RegexLit (E-STMT-MISSING-SEMICOLON + E-TYPE-VARIANT / E-PARSE-EXPR).
+describe("`of` by adjacency (ruling S482-of-adjacency; §49.2.4)", () => {
+  test("a `.` or `/` touching `of` reads the name: member access, a call, division", () => {
+    expect(lexed("of.value")).toEqual(["Keyword:of", "Dot:.", "Ident:value", "Eof:"]);
+    expect(lexed("of.f()")).toEqual(["Keyword:of", "Dot:.", "Ident:f", "LParen:(", "RParen:)", "Eof:"]);
+    expect(lexed("x of.value")).toEqual(["Ident:x", "Keyword:of", "Dot:.", "Ident:value", "Eof:"]);
+    expect(lexed("of/2")).toEqual(["Keyword:of", "Slash:/", "NumberLit:2", "Eof:"]);
+    expect(lexed("of/2/4")).toEqual(["Keyword:of", "Slash:/", "NumberLit:2", "Slash:/", "NumberLit:4", "Eof:"]);
+  });
+  test("spaced (whitespace, a newline or a comment between), the keyword's operand: a bare variant, a regular expression", () => {
+    expect(lexed("of .Items")).toEqual(["Keyword:of", "BareVariant:.Items", "Eof:"]);
+    expect(lexed("of\n.Items")).toEqual(["Keyword:of", "BareVariant:.Items", "Eof:"]);
+    expect(lexed("of /x/")).toEqual(["Keyword:of", "RegexLit:/x/", "Eof:"]);
+    expect(lexed("of /*c*/ /x/")).toEqual(["Keyword:of", "RegexLit:/x/", "Eof:"]);
+    expect(lexed("of//c\n/x/")).toEqual(["Keyword:of", "RegexLit:/x/", "Eof:"]);
+  });
+  // s482 r1 (#2092 review LOW-1): a `for` head whose operand touches `of` has no operand (the touching
+  // `.` / `/` reads the name) — refused, and the message says to space it.
+  test("a `for` head whose operand touches `of` is refused, with a hint to space it", () => {
+    for (const [head, glyph] of [["for (const x of.items)", "."], ["for (const x of/re/.exec(s))", "/"]]) {
+      const es = errorsOf(prog(`    fn f(o: int[], s: string) -> int { ${head} { } return 1; }`));
+      const hit = es.find((e) => e.startsWith("E-PARSE-EXPR: "));
+      expect(hit).toBeDefined();
+      expect(hit).toContain("a `" + glyph + "` touching `of` reads the name `of` (§49.2.4); for the loop operand, write `of " + glyph + "…` with a space");
+    }
+  });
+  test("a binding named `of`: a field read and a division compile clean; a `for … of` loop is unchanged", () => {
+    clean(prog(`    type R:struct = { value: int }\n    fn f() -> int { const of: R = { value: 2 }; return of.value; }`));
+    clean(prog(`    fn f(x: number) -> number { const of: number = x; return of/2; }`));
+    clean(prog(`    fn f(xs: int[]) -> int { let s: int = 0; for (const x of xs) { s = s + x; } return s; }`));
+  });
+  test("the values run", async () => {
+    const src = `<program>
+\${
+    type R:struct = { value: int }
+    fn a() -> int { const of: R = { value: 7 }; return of.value; }
+    fn b(x: number) -> number { const of: number = x; return of/2/4; }
+    fn c(xs: int[]) -> int { let s: int = 0; for (const x of xs) { s = s + x; } return s; }
+}
+<p id="a">\${a()}</p>
+<p id="b">\${b(16)}</p>
+<p id="c">\${c([1, 2, 3])}</p>
+</program>
+`;
+    expect(await run(src, ["a", "b", "c"])).toEqual(["7", "2", "6"]);
+  }, 180000);
+});
+
+// s482-rulings-records — owner ruling S482 (user-voice-scrml.md "RULED — `x is T.V` accepted when `T` is
+// the left operand's enum", ruling:user-voice-scrml.md-S482-is-qualified-variant; SPEC §18.17
+// `'is' (TypeName)? '.' VariantName`). Before: one named refusal (E-PARSE-EXPECTED, this lane's
+// predecessor); now the qualified test, judged as a qualified match arm is (§18.13).
+describe("`x is T.V` — accepted when `T` is the left operand's enum (ruling S482-is-qualified-variant; §18.17)", () => {
+  const T = `    type T:enum = { Str, Num }\n    type U:enum = { Str, Other }\n    type R:struct = { k: boolean, j: int }\n`;
+  test("as a statement value, a return operand and an object-literal field value: clean", () => {
     for (const body of [
       `const b: boolean = t is T.Str; return b;`,
       `return t is T.Str;`,
       `const o: R = { k: t is T.Str, j: 1 }; return o.k;`,
     ]) {
-      const es = errorsOf(prog(T + `    fn c(t: T) -> boolean { ${body} }\n    fn d() -> int { return 1; }`));
-      expect(es.length).toBe(1);
-      expect(es[0]).toContain("E-PARSE-EXPECTED: `is` takes a bare variant — write `is .Str`, not `is T.Str`");
+      clean(prog(T + `    fn c(t: T) -> boolean { ${body} }\n    fn d() -> int { return 1; }`));
     }
+  });
+  test("a type naming another enum is E-TYPE-VARIANT; a name that is no type too; an unknown variant E-TYPE-063", () => {
+    const one = (body, code, text) => {
+      const es = errorsOf(prog(T + `    fn c(t: T) -> boolean { ${body} }`));
+      expect(es.length).toBe(1);
+      expect(es[0]).toStartWith(code + ": ");
+      expect(es[0]).toContain(text);
+    };
+    one(`return t is U.Str;`, "E-TYPE-VARIANT", "`U.Str` names `U`, but the subject is `T` (§18.13)");
+    one(`const o: R = { k: t is U.Str, j: 1 }; return o.k;`, "E-TYPE-VARIANT", "`U.Str` names `U`");
+    one(`return t is Nope.Str;`, "E-TYPE-VARIANT", "`Nope.Str` names `Nope`");
+    one(`return t is T.Nope;`, "E-TYPE-063", "`.Nope` is not a variant of `T`");
   });
   test("the bare form is clean", () => {
     clean(prog(T + `    fn c(t: T) -> boolean { const o: R = { k: t is .Str, j: 1 }; return o.k; }`));
   });
+  // s482 r1 (#2092 review LOW-3): `T` through a namespace import (`x is m.T.V`) is read as a qualified
+  // arm reads `m.T.V`; an import alias (`import { T as Q }`) makes `T.V` name no type in scope, and the
+  // message says so (before: "names `T`, but the subject is `T`").
+  test("through a namespace import, `x is m.T.V` runs; under an import alias, `T.V` is refused with a clear message", async () => {
+    writeFileSync(join(dir, "m.scrml"), "${\n    export type T:enum = { Str, Num }\n}\n");
+    const ns = `<program>
+\${
+    import * as m from "./m.scrml";
+    fn a(t: m.T) -> boolean { return t is m.T.Str; }
+}
+<p id="a">\${a(.Str)}</p>
+<p id="b">\${a(.Num)}</p>
+</program>
+`;
+    expect(await run(ns, ["a", "b"])).toEqual(["true", "false"]);
+    const file = join(dir, "alias.scrml");
+    writeFileSync(file, `<program>
+\${
+    import { T as Q } from "./m.scrml";
+    fn b(t: Q) -> boolean { return t is T.Str; }
+}
+<p id="a">\${b(.Str)}</p>
+</program>
+`);
+    const res = await compileSource(file);
+    expect(res.ok).toBe(false);
+    const es = res.diagnostics.filter((d) => d.severity === "error");
+    expect(es.map((d) => d.code)).toEqual(["E-TYPE-VARIANT"]);
+    expect(es[0].message).toContain("no type `T` is in scope here — the subject's enum `T` is in scope under another name (an import alias)");
+  }, 180000);
+  test("the values run: the qualified test answers as the bare one does", async () => {
+    const src = `<program>
+\${
+    type T:enum = { Str, Num }
+    fn q(t: T) -> boolean { return t is T.Str; }
+    fn b(t: T) -> boolean { return t is .Str; }
+}
+<p id="a">\${q(.Str)}</p>
+<p id="b">\${q(.Num)}</p>
+<p id="c">\${b(.Str)}</p>
+<p id="d">\${b(.Num)}</p>
+</program>
+`;
+    expect(await run(src, ["a", "b", "c", "d"])).toEqual(["true", "false", "true", "false"]);
+  }, 180000);
 });
 
 describe("every self-host file parses to its end", () => {

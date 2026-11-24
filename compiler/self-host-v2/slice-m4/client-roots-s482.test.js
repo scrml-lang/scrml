@@ -397,6 +397,35 @@ let <out:string=""/>
     expect(await texts(res, ["c"])).toEqual(["ok"]);
   }, 120000);
 
+  // s482 r1 (#2092 review LOW-2): the case that raised ruling S482-circular-server-only — probe
+  // s482-2061-r1rev p/f1. Two classifications satisfy §7.6 rule (b) here; the ruling takes the
+  // largest server-only set (reading B): H, C and Y stay on the server, so `zz-f1-h` is in the server
+  // artifact only and the client runs Z alone (hits 1). Reading A shipped `zz-f1-h` and showed 3.
+  test("d2b (probe f1, ruling S482-circular-server-only): initializers reading each other in a cycle — the largest server-only set", async () => {
+    const res = await compile(`<program>
+\${
+    const SALT: string = "zz-f1-salt";
+    let hits: int = 0;
+    function mix(s: string) -> string { return s + SALT; }
+    server function sv(s: string) -> string { return mix(s); }
+    function t(s: string) -> string { hits = hits + 1; return "{" + s + "}"; }
+    const H: string = t("zz-f1-h");
+    const C: string = mix(H);
+    const Y: string = t(H);
+    const Z: string = t("zz-f1-z");
+    function showHits() -> int { return hits; }
+}
+let <out:string=""/>
+<button id="go" onclick={ @out = sv("q") !{ .Transport(e) :> return }; }>go</button>
+<p id="c">\${showHits()} \${Z}</p>
+</program>
+`);
+    expect(res.client.js).not.toContain("zz-f1-h");            // reading A: H ran in the client
+    expect(res.client.js).not.toContain("zz-f1-salt");
+    expect(res.serverJs).toContain("zz-f1-h");
+    expect(await texts(res, ["c"])).toEqual(["1 {zz-f1-z}"]);
+  }, 120000);
+
   test("d3 (M1, probe o3): a nested function its outer function never reaches is not printed, nor the constant only it reads", async () => {
     const res = await compile(`<program db="./app.db">
 \${
