@@ -176,6 +176,16 @@ describe("`of` by adjacency (ruling S482-of-adjacency; §49.2.4)", () => {
     expect(lexed("of /*c*/ /x/")).toEqual(["Keyword:of", "RegexLit:/x/", "Eof:"]);
     expect(lexed("of//c\n/x/")).toEqual(["Keyword:of", "RegexLit:/x/", "Eof:"]);
   });
+  // s482 r1 (#2092 review LOW-1): a `for` head whose operand touches `of` has no operand (the touching
+  // `.` / `/` reads the name) — refused, and the message says to space it.
+  test("a `for` head whose operand touches `of` is refused, with a hint to space it", () => {
+    for (const [head, glyph] of [["for (const x of.items)", "."], ["for (const x of/re/.exec(s))", "/"]]) {
+      const es = errorsOf(prog(`    fn f(o: int[], s: string) -> int { ${head} { } return 1; }`));
+      const hit = es.find((e) => e.startsWith("E-PARSE-EXPR: "));
+      expect(hit).toBeDefined();
+      expect(hit).toContain("a `" + glyph + "` touching `of` reads the name `of` (§49.2.4); for the loop operand, write `of " + glyph + "…` with a space");
+    }
+  });
   test("a binding named `of`: a field read and a division compile clean; a `for … of` loop is unchanged", () => {
     clean(prog(`    type R:struct = { value: int }\n    fn f() -> int { const of: R = { value: 2 }; return of.value; }`));
     clean(prog(`    fn f(x: number) -> number { const of: number = x; return of/2; }`));
@@ -228,6 +238,36 @@ describe("`x is T.V` — accepted when `T` is the left operand's enum (ruling S4
   test("the bare form is clean", () => {
     clean(prog(T + `    fn c(t: T) -> boolean { const o: R = { k: t is .Str, j: 1 }; return o.k; }`));
   });
+  // s482 r1 (#2092 review LOW-3): `T` through a namespace import (`x is m.T.V`) is read as a qualified
+  // arm reads `m.T.V`; an import alias (`import { T as Q }`) makes `T.V` name no type in scope, and the
+  // message says so (before: "names `T`, but the subject is `T`").
+  test("through a namespace import, `x is m.T.V` runs; under an import alias, `T.V` is refused with a clear message", async () => {
+    writeFileSync(join(dir, "m.scrml"), "${\n    export type T:enum = { Str, Num }\n}\n");
+    const ns = `<program>
+\${
+    import * as m from "./m.scrml";
+    fn a(t: m.T) -> boolean { return t is m.T.Str; }
+}
+<p id="a">\${a(.Str)}</p>
+<p id="b">\${a(.Num)}</p>
+</program>
+`;
+    expect(await run(ns, ["a", "b"])).toEqual(["true", "false"]);
+    const file = join(dir, "alias.scrml");
+    writeFileSync(file, `<program>
+\${
+    import { T as Q } from "./m.scrml";
+    fn b(t: Q) -> boolean { return t is T.Str; }
+}
+<p id="a">\${b(.Str)}</p>
+</program>
+`);
+    const res = await compileSource(file);
+    expect(res.ok).toBe(false);
+    const es = res.diagnostics.filter((d) => d.severity === "error");
+    expect(es.map((d) => d.code)).toEqual(["E-TYPE-VARIANT"]);
+    expect(es[0].message).toContain("no type `T` is in scope here — the subject's enum `T` is in scope under another name (an import alias)");
+  }, 180000);
   test("the values run: the qualified test answers as the bare one does", async () => {
     const src = `<program>
 \${

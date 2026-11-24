@@ -49,3 +49,12 @@ Artifacts: ~/.cache/scrml/review/s482-rulings-records/ (conf-base/head.json, cor
 
 - code + tests committed (items 4, 6, 3 tests); targeted test files green (selfhost-residue 20/20,
   match-alternation 34/34, meta-runtime 43 pass / 4 skip).
+
+## r1 (fix round — #2092 review ~/.cache/scrml/review/s482-2092/review.md)
+
+- 0: merged origin/main (SPEC §7.6 hunk: main's line + the S482 largest-set sentence; known-gaps: main's new entries kept, the meta-get entry kept resolved). ad3ef2a4d.
+- MED-1: §22.5.2 let-write narrowed to a spine place + re-runs; inside a construct SHALL NOT write (S482-runorder-model-c rider Q5), ⚑ INTERIM not yet built (lane s482-value-no-write, A1); gap g-boot-meta-let-write-in-construct-s482 (probe p/mc.scrml).
+- MED-2: §18.17 says only what the ruling says; (a) `T | not`, (b) non-enum / no type → E-TYPE-VARIANT, (c) `m.T.V` labelled prov=pa-ruled lane decisions; false §18.13 wrong-enum citation struck; §34 E-TYPE-VARIANT row covers `is T.V`.
+- LOW-1: §49.2.4 direction corrected to newly-rejecting at most; E-PARSE-EXPR hint for an operand touching `of` (parse.scrml parsePrimary fallback).
+- LOW-2: client-roots d2b pins probe f1; §7.6 provenance cites d2b.
+- LOW-3: `x is m.T.V` accepted (parse.scrml isQualVariantTest / qualVariantTest via nsHeadAt); alias case message "no type `T` is in scope here — … under another name (an import alias)" (analyze.scrml plainArm, shared with match arms).

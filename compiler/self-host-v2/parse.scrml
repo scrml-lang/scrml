@@ -1160,9 +1160,18 @@ ${
     // SPEC §18.17 `'is' (TypeName)? '.' VariantName`): the test of `.V` with the qualifier kept on the
     // arm's pattern (`APat.PName(…, qual)`), so analyze judges it as it judges a qualified match arm
     // (§18.13) — a `T` that is not the left operand's enum is E-TYPE-VARIANT.
+    // s482 r1 (#2092 review LOW-3): `x is m.T.V` — `T` through a namespace import `m`, read as a
+    // qualified match arm reads `m.T.V` (nsHeadAt; the qualifier is `m.T`).
     fn isQualVariantTest(tp: TP) -> boolean {
         if (!isWord(tp, "is")) return false;
         if (tp.i == 0) return false;
+        if (nsHeadAt(tp, 1).n > 0) {
+            const nd: PTok = peekAt(tp, 4);
+            const nv: PTok = peekAt(tp, 5);
+            if (nd.cls != TC.Punct || !tk(nd, ".")) return false;
+            if (nv.cls != TC.Ident && nv.cls != TC.Keyword) return false;
+            return touching(peekAt(tp, 3), nd) && touching(nd, nv);
+        }
         const a: PTok = peekAt(tp, 1);
         const b: PTok = peekAt(tp, 2);
         const c: PTok = peekAt(tp, 3);
@@ -1172,6 +1181,8 @@ ${
     }
 
     fn qualVariantTest(r: RExpr, start: int) -> RExpr {
+        const nh: NsHead = nsHeadAt(r.tp, 1);
+        if (nh.n > 0) return variantTestAt(r, start, peekAt(r.tp, 5), nh.name, adv(adv(adv(adv(adv(adv(r.tp)))))));
         const q: PTok = peekAt(r.tp, 1);
         const vt: PTok = peekAt(r.tp, 3);
         return variantTestAt(r, start, vt, q.v, adv(adv(adv(adv(r.tp)))));
@@ -2888,7 +2899,15 @@ ${
         if (t.cls == TC.Markup) return parseMarkupValue(tp, false);  // s478: markup as a value (§1.4, §7.4.1)
         if (hashRefAhead(tp)) return mkE(adv(adv(adv(adv(tp)))), start, AExprK.HashRef(peekAt(tp, 2).v));   // s475 (S3b)
         if (isP(tp, "^") && tk(peekAt(tp, 1), "{")) return parseMetaExpr(adv(tp), start, false);   // s481: `^{ … }` (§22.2)
-        const bad: TP = diagAt(tp, "E-PARSE-EXPR", "expected an expression, found `" + t.text + "`", t);
+        // s482 r1 (#2092 review LOW-1): `for (x of.items)` / `for (x of/re/…)` — a `.` or `/`
+        // touching `of` reads the name `of` (§49.2.4, S482-of-adjacency), so the loop operand is
+        // missing; say how to write it.
+        let ofHint = "";
+        if (t.cls == TC.Punct && (tk(t, ".") || tk(t, "/")) && tp.i > 0) {
+            const pv: PTok = peekAt(tp, -1);
+            if (isNameTok(pv) && pv.v == "of" && touching(pv, t)) ofHint = " — a `" + t.text + "` touching `of` reads the name `of` (§49.2.4); for the loop operand, write `of " + t.text + "…` with a space";
+        }
+        const bad: TP = diagAt(tp, "E-PARSE-EXPR", "expected an expression, found `" + t.text + "`" + ofHint, t);
         return mkE(adv(bad), start, AExprK.Recovered);
     }
 
