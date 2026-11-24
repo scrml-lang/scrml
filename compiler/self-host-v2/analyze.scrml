@@ -11835,7 +11835,7 @@ ${
         // called (§6.7.4 rule 3) — not on the initializer rule's direct-call `usesD`. s482 r2
         // (#2053 r1 review MED-A): ~~on `uses`~~ on `usesR` — a nested function declaration a
         // reached function never calls nor uses as a value adds nothing
-        out = out.concat(constructReadDiags(g, t, sum, writes, sites, lets));
+        out = out.concat(constructReadDiags(g, t, sum, writes, sites, lets, reads, usesR));
         // s482 (lane s482-value-no-write) — §6.15 widened (A1) and §6.6 / §6.15 A3, on the same
         // closures (`writes`: the file-scope `let`s a callable writes, at any depth; `uses`: the
         // file-scope bindings it reads or writes, at any depth)
@@ -12102,18 +12102,22 @@ ${
     // body are held until the body ends"*), which the runtime does not build yet: a `<request>`'s
     // first load runs where it stands, during the body (g-boot-request-runs-in-body-s482, open), and
     // a request body is an action position that may write. So a non-acting initializer inside a
-    // construct that reads a file-scope `let` or a program cell which a `<request>` inside that
+    // construct that reads — directly, or (s482 r1, #2096 review HIGH-1) through a function it calls
+    // or hands on as a value, at any depth (initReadWritten / ReadCx; an unresolvable call fails
+    // closed) — a file-scope `let` or a program cell which a `<request>` inside that
     // construct, before the initializer, writes — its body or its attribute values, directly or
-    // through a function they call, at any depth; a request in a component used there, in the
-    // state-child bodies a `<*field/>` there renders, in a shared instance a `<*x/>` there mounts;
+    // through a function they call, at any depth; a request in the state-child bodies a
+    // `<*field/>` there renders, in a shared instance a `<*x/>` there mounts (a request in a
+    // component's `renders` is E-BOOTSTRAP-UNSUPPORTED, so none can stand in a component used there);
     // anything the walk does not understand fails closed to every request of the program body — is
     // E-FILE-SCOPE-INIT-IN-CONSTRUCT: source order runs that load first, the place before the
     // construct does not. ⚑ INTERIM (bootstrap, g-boot-construct-request-write-s482): lifted when the
     // Q6 hold is built (then the load runs after the body under both orders).
     // =========================================================================
-    fn constructReadDiags(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[]) -> Diag[] {
+    fn constructReadDiags(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[], reads: FxAtom[][], usesR: FxAtom[][]) -> Diag[] {
         let out: Diag[] = [];
         const pfields: FieldInfo[] = programCells(g);
+        const rx: ReadCx = { sum: sum, six: nodeSymIx(sum.nodes), reads: reads, usesR: usesR };
         for (const f of g.files) {
             for (const it of f.items) {
                 const k: AItemK = it.k;
@@ -12140,7 +12144,7 @@ ${
                         if (where != "" && initActWhat(c.init) == "") {
                             const lo: int = constructStart(t, tops, ci.span.start);
                             const bw: BodyW = constructRequestWrites(g, t, sum, writes, sites, lets, f.path, ps, pfields, lo, ci.span.start);
-                            const r: string = initReadWritten(t, [c.init], bw, g.program.id, pfields, cells, lo, []);
+                            const r: string = initReadWritten(t, rx, f.path, [c.init], bw, g.program.id, pfields, cells, lo, []);
                             if (r != "") {
                                 let kw: string = "const";
                                 if (c.mutable) kw = "let";
@@ -12641,14 +12645,47 @@ ${
     // program cell whose seed would run at that read — a derived cell's formula (it runs at every
     // read), or the seed of a cell whose place is at or after `lo` (not run yet when the place before
     // the construct is reached) — follows what that seed or formula reads (`seen`: cells followed).
-    fn initReadWritten(t: Tables, inits: AExpr[], bw: BodyW, prog: int, pfields: FieldInfo[], cells: BodyCell[], lo: int, seen: int[]) -> string {
+    // s482 r1 (#2096 review HIGH-1) — the read side follows calls: what each function the
+    // initializer calls or hands on as a value reads, at any depth (`reads`, the A3 closure: the
+    // file-scope bindings; `usesR`: the program cells), counts as read by the initializer; a call the
+    // analysis cannot resolve fails closed when the requests there write anything.
+    type ReadCx:struct = { sum: Summary, six: SymIx, reads: FxAtom[][], usesR: FxAtom[][] }
+
+    fn initReadWritten(t: Tables, rx: ReadCx, file: string, inits: AExpr[], bw: BodyW, prog: int, pfields: FieldInfo[], cells: BodyCell[], lo: int, seen: int[]) -> string {
         let more: AExpr[] = [];
         let seen2: int[] = seen;
+        const bwAny: boolean = bw.lets.length > 0 || bw.cells.length > 0 || bw.cellNames.length > 0;
         for (const init of inits) {
             const b: ABlock = exprBlock(init);
             for (const ne of nameExprsIn(b)) {
                 const id: int = constSymOfFact(nameFact(t.names, ne.nid));
                 if (id >= 0 && bw.lets.indexOf(id) >= 0) return "`" + letNameOf(t, id) + "`";
+            }
+            if (bwAny) {
+                const sc: BodyScan = scanValue({ t: t, file: file }, AAttrValue.Bare(init), emptyScan());
+                if (sc.unproven.length > 0) return "what a call the analysis cannot follow returns (" + sc.unproven[0].what + " — §6.7.4 rule 4: it may read anything, so the bootstrap fails closed)";
+                for (const r of sc.refs) {
+                    const j: int = ixGet(rx.six, r.sym);
+                    if (j < 0) return "what `" + r.name + "` returns (a call the analysis cannot follow — it may read anything, so the bootstrap fails closed)";
+                    for (const a of rx.reads[j]) {
+                        const id: int = atomBinding(a.key);
+                        if (a.key.indexOf("b:") == 0 && bw.lets.indexOf(id) >= 0) return "`" + letNameOf(t, id) + "` (through `" + r.name + "`, which reads it: `" + chainText(fxChain(rx.sum, rx.reads, j, a)) + " → " + letNameOf(t, id) + "`)";
+                    }
+                    for (const a of rx.usesR[j]) {
+                        if (a.key.indexOf("c:") == 0) {
+                            const cs: int = atomBinding(a.key);
+                            for (const fi of pfields) {
+                                if (fi.sym.id == cs && (bw.cells.indexOf(cs) >= 0 || bw.cellNames.indexOf("@" + fi.sym.hint) >= 0)) return "`@" + fi.sym.hint + "` (through `" + r.name + "`, which reads it: `" + chainText(fxChain(rx.sum, rx.usesR, j, a)) + " → @" + fi.sym.hint + "`)";
+                            }
+                            const bc: BodyCell | not = cellOfSym(cells, cs);
+                            if (bc is given && seen2.indexOf(cs) < 0 && (bc.derived || (lo >= 0 && bc.pos >= lo))) {
+                                seen2 = seen2.concat([cs]);
+                                const x: AExpr | not = valueExpr(bc.init);
+                                if (x is given) more = more.concat([x]);
+                            }
+                        }
+                    }
+                }
             }
             for (const a of atUsesIn(t, b)) {
                 const cs: int = progCellOf(t, a, prog, pfields);
@@ -12666,7 +12703,7 @@ ${
             }
         }
         if (more.length == 0) return "";
-        const r: string = initReadWritten(t, more, bw, prog, pfields, cells, lo, seen2);
+        const r: string = initReadWritten(t, rx, file, more, bw, prog, pfields, cells, lo, seen2);
         if (r != "") return r + " (through the seed or formula of a cell it reads)";
         return "";
     }

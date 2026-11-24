@@ -248,6 +248,54 @@ describe("INTERIM (g-boot-construct-request-write-s482): a `<request>` there run
     }, 120000);
   }
 
+  // s482 r1 (#2096 review HIGH-1): the read side follows calls — what a function the initializer calls
+  // reads, at any depth, counts (base refused these as "acting"; head before r1 showed `#o` = 1 in Chromium,
+  // source order gives 5).
+  const RQ = `    let <r:int=0/>
+    \${ function rd() -> int { return n; } }
+    \${ function rd2() -> int { return rd() + 0; } }
+`;
+  const viaCalls = [
+    ["q01 (`const k = rd() + 0`)", `    <div if=(true)><request id="rq">\${ @r = bump(); }</request>\${ const k: int = rd() + 0; }<p id="o">\${k}</p></div>
+`, "`n` (through `rd()`, which reads it: `rd() → n`)"],
+    ["t08 (in a nested `<span>`)", `    <div if=(true)><request id="rq">\${ @r = bump(); }</request><span>\${ const k: int = rd() + 0; }<b id="o">\${k}</b></span></div>
+`, "`n` (through `rd()`"],
+    ["t09 (`rd2() → rd() → n`)", `    <div if=(true)><request id="rq">\${ @r = bump(); }</request>\${ const k: int = rd2(); }<p id="o">\${k}</p></div>
+`, "`n` (through `rd2()`, which reads it: `rd2() → rd() → n`)"],
+    ["t10 (an `else` branch)", `    let <f:boolean=false/>
+    <p if=(@f)>a</p>
+    <div else><request id="rq">\${ @r = bump(); }</request>\${ const k: int = rd(); }<p id="o">\${k}</p></div>
+`, "`n` (through `rd()`"],
+  ];
+  for (const [name, body, how] of viaCalls) {
+    test("HIGH-1 " + name + ": a read through a call is refused at the reader", async () => {
+      const d = await errors(PRE + "<program>\n" + RQ + body + "</program>\n");
+      expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+      expect(d[0].message).toContain("the initializer of `const k` reads " + how);
+    }, 120000);
+  }
+
+  test("HIGH-1: a cell the request writes, read through a call, is refused too", async () => {
+    const d = await errors(PRE + `<program>
+    let <r:int=0/>
+    \${ function rdc() -> int { return @r; } }
+    <div if=(true)><request id="rq">\${ @r = bump(); }</request>\${ const k: int = rdc() + 0; }<p id="o">\${k}</p></div>
+</program>
+`);
+    const c = d.find((x) => x.code === "E-FILE-SCOPE-INIT-IN-CONSTRUCT");
+    expect(c?.message).toContain("reads `@r` (through `rdc()`, which reads it: `rdc() → @r`)");
+  }, 120000);
+
+  test("HIGH-1 positive twin: the called function reads a `let` the request does NOT write — compiles, k = 3", async () => {
+    expect(await texts(PRE + `<program>
+    let <r:int=0/>
+    \${ let m: int = 3; }
+    \${ function rdm() -> int { return m; } }
+    <div if=(true)><request id="rq">\${ @r = bump(); }</request>\${ const k: int = rdm() + 0; }<p id="o">\${k}</p></div>
+</program>
+`, ["o"])).toEqual(["3"]);
+  }, 120000);
+
   test("r01 / r02 (the request reads a later cell whose seed writes): refused at the seed", async () => {
     expect(await codes(PRE + `<program>
     let <r:string=""/>
