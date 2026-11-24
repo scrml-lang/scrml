@@ -9,4 +9,9 @@ Branch `s482-registry-client` from origin/main ae650064a. Ruling: ruling:user-vo
 - SPEC §22.4.2 amendment + §22.5.4 + bootstrap-status sentences; gap resolved.
 
 ## Gates
-- pending
+- Commit 416d5dcdc: pre-commit hook PASS (58200 pass / 0 fail).
+- pretest: OK (bundle builds; conformance CRASH 0).
+- bootstrap-conformance --json, base ae650064a vs head: identical counts (PASS 845, FAIL 4, NOT-TWINNED 628, UNSUPPORTED 491, CRASH 0) and 0 of 1968 verdict records differ.
+- Bootstrap corpus differential + byte-compare (scrml-boot compileSource over examples/ samples/ conformance/ benchmarks/, 2972 files, 324 compile OK on each side): 0 verdict diffs, 0 byte diffs (no corpus file has a computed runtime reflect, so no registry changes).
+- s34-census --check-new --base origin/main: PASS. types-gate --check: OK (unchanged). e2e-render-map: 259 pass / 0 fail.
+- SCRML_BROWSER_TESTS=1: registry-client-s482 + meta-phase3-s482 + meta-runtime-s482 109 pass / 0 fail; slice-m2/meta-s481 126 pass; named-refusals-s473 + server-artifact + client-roots-s482 139 pass.
