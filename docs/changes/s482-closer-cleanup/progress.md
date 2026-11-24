@@ -49,6 +49,25 @@ compiler with a diagnostic pointing to §4.4. The diagnostic SHALL include a hin
 
 ## Tests
 - slice-m4/closer-cleanup-s482.test.js (new); parser-lows-s482.test.js terse case → E-SYNTAX-050.
+- r2 fix (found by the corpus differential): a text run's span also covers what parseKids skips without splitting
+  the run, so examples/31-reach-discipline.scrml got a false E-SYNTAX-050 on `// … Date.now() /` (a comment).
+  retiredSlashIn now skips `//` comments, `<!-- -->`, and `#{}` / `${}` / sigil blocks. Test added.
+
+## Gates (head 2nd commit vs base a81d8cc80)
+- pre-commit hook: PASS (58202 pass, 0 fail) on commit 1. Earlier attempts failed on machine contention only
+  (beforeAll timeouts / shard memory ceiling); the flaky tool case passes alone; check.test.js lowered 42.8s
+  head vs 41.6s base.
+- bootstrap-conformance --json: PASS 845 / FAIL 4 / CRASH 0 / UNSUPPORTED 491 / NOT-TWINNED 628 on both. No bucket
+  moves. terse-fallback-closer (UNSUPPORTED) → terse-fallback-closer-neg (UNSUPPORTED: E-SYNTAX-050 now emitted;
+  still refused by name for `renders` / errorBoundary). block-015-bare-slash-pos stays UNSUPPORTED (no `<program>`)
+  but now emits its required E-SYNTAX-050.
+- corpus differential (2972 files, examples/ samples/ benchmarks/ conformance/cases): newly rejected 0, newly
+  accepted 0, byte diffs 0; code diffs 35 files, all additive +E-SYNTAX-050 (115) on files already rejected
+  (33 samples, block-015, terse-neg; terse-neg also −1 E-BOOTSTRAP-UNSUPPORTED). examples/ 0, benchmarks/ 0.
+  Spot-checked 4 samples (36 hits): every hit is a real `content/` closer line.
+- types-gate --check OK (182/115 unchanged); snippet-gate 120/0 fail; claim-gate 0 failed; corpus-compile-floor
+  --check PASS; s34-census --check-new PASS (1 changed row); gen-bootstrap-severity --check current;
+  e2e-render-map 259/0; conformance-corpus (impl#1) terse-neg XFAIL as recorded.
 
 ## 5 — Samples NOT migrated (lint lane ratchets them): 161 lines by this lane's scan (audit said 164)
 - samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-keyed-reconcile-051.scrml:7: lift <div class="card">${card.title}/

@@ -106,6 +106,12 @@ describe("(2) a trailing `content/` or bare `/` left unclosed — E-SYNTAX-050 (
     });
   }
 
+  test("a `/` ending a `//` comment or inside `<!-- -->` in an unclosed element is not named", () => {
+    const r = run(P(`<div>\n    // no Date.now() /\n    <!-- a /\n    b --> x\n<p>hi</p>`));
+    expect(codes(r).length).toBeGreaterThan(0);
+    expect(s050(r)).toEqual([]);
+  });
+
   test("an unclosed element with no trailing `/` gets no E-SYNTAX-050", () => {
     const r = run(P(`<div>\n<p>hi</p>`));
     expect(codes(r).length).toBeGreaterThan(0);
@@ -144,6 +150,6 @@ describe("(4) #2087 NIT-4 — skippedDecls is one pass", () => {
     const r = run(P(`    type A = number extra {\n${lines}\n    }\n    <p>hi</p>`));
     const ms = performance.now() - t0;
     expect(codes(r).length).toBeGreaterThan(0);
-    expect(ms).toBeLessThan(15000);
-  });
+    expect(ms).toBeLessThan(20000);
+  }, 90000); // base (quadratic) took ~26s on this shape (#2087 review NIT-4); head ~2s
 });

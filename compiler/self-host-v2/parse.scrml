@@ -13143,11 +13143,37 @@ ${
 
     // The first `/` in src[from, to) followed only by spaces / tabs up to a line end or a `;` (a
     // `lift <li>x/;` statement), or up to the run's end where a tag (`<`) or the end of the
-    // input follows; -1 when none.
+    // input follows; -1 when none. A text run's span also covers what parseKids skips without
+    // splitting the run — a `//` line comment (§4.18.1b: after whitespace), an `<!-- … -->`
+    // comment, a `#{ … }` / `${ … }` block — so those are skipped here too (their `/` is never a
+    // closer: `// no Date.now() /` at a line end is a comment).
     fn retiredSlashIn(src: string, from: int, to: int) -> int {
         let j: int = from;
         for (; j < to; ) {
-            if (src.charCodeAt(j) == 47 && (j == 0 || src.charCodeAt(j - 1) != 47) && (j + 1 >= src.length || (src.charCodeAt(j + 1) != 47 && src.charCodeAt(j + 1) != 62))) {
+            const c: int = src.charCodeAt(j);
+            const c1: int = j + 1 < src.length ? src.charCodeAt(j + 1) : 0;
+            if (c == 47 && c1 == 47 && j > 0 && isNoteSpaceCode(src.charCodeAt(j - 1))) {
+                const nl: int = src.indexOf("\n", j);
+                if (nl < 0 || nl >= to) return -1;
+                j = nl;
+            } else if (c == 60 && src.substring(j, j + 4) == "<!--") {
+                const ce: int = src.indexOf("-->", j + 4);
+                if (ce < 0 || ce >= to) return -1;
+                j = ce + 2;
+            } else if ((c == 35 || c == 36 || c == 94 || c == 95 || c == 126 || c == 63 || c == 33) && c1 == 123) {
+                let depth: int = 0;
+                let q: int = j + 1;
+                for (; q < to; ) {
+                    if (src.charCodeAt(q) == 123) depth = depth + 1;
+                    if (src.charCodeAt(q) == 125) {
+                        depth = depth - 1;
+                        if (depth == 0) break;
+                    }
+                    q = q + 1;
+                }
+                if (q >= to) return -1;
+                j = q;
+            } else if (c == 47 && (j == 0 || src.charCodeAt(j - 1) != 47) && (j + 1 >= src.length || (c1 != 47 && c1 != 62))) {
                 let k: int = j + 1;
                 for (; k < to && (src.charCodeAt(k) == 32 || src.charCodeAt(k) == 9 || src.charCodeAt(k) == 13); ) { k = k + 1; }
                 if (k < to && (src.charCodeAt(k) == 10 || src.charCodeAt(k) == 59)) return j;
@@ -13157,6 +13183,9 @@ ${
         }
         return -1;
     }
+
+    // space, tab, LF, CR — the bytes after which a free-text `//` opens a comment (freeTextCommentAt)
+    fn isNoteSpaceCode(c: int) -> boolean { return c == 32 || c == 9 || c == 10 || c == 13; }
 
     // SPEC §4.18.1b exit (2) (RULED S444 — "yes on // revised"): in free text
     // a `//` opens a comment ONLY when the byte right before it is whitespace —
