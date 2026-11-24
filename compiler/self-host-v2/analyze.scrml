@@ -12072,6 +12072,7 @@ ${
             .Interp(e: x) :> noScan(),
             .Run(b: rb) :> noScan(),
             .Css(c: x) :> noScan(),
+            // s482-place-fu2 — its `deps=` values are code (bodyCodeBlocks); it holds no markup
             .Effect(w: x) :> noScan(),
             // s482 r3 — its body and attribute values are code (bodyCodeBlocks); it holds no markup
             .Request(r: x) :> noScan(),
@@ -12252,8 +12253,8 @@ ${
     }
 
     // The code of a body node that runs in the body: its `${}` statements, its displays and attribute
-    // values, a gather's loop — never an event handler or an `<effect>` (E-EFFECT-NO-DEPS: it does
-    // not run on mount). ~~or a `<request>`~~ s482 r3 (#2082 r2 review HIGH-4, MED-3, pa-ruled): a
+    // values, a gather's loop, an `<effect>`'s `deps=` values — never an event handler or an
+    // `<effect>`'s body (E-EFFECT-NO-DEPS: it does not run on mount). ~~or a `<request>`~~ s482 r3 (#2082 r2 review HIGH-4, MED-3, pa-ruled): a
     // `<request>` that does not provably write runs at the mount (§6.7.7.1 "Scope", §6.7.7.3 rule 1;
     // `deps=[]` is mount-only), synchronously, in mount order — its body and its attribute values
     // (a server function's argument included: it is evaluated here) are code that runs there. One
@@ -12267,10 +12268,20 @@ ${
             .Gather(f: gf) :> gatherCodeBlocks(gf),
             .Text(text: x) :> [],
             .DeclNode(d: x) :> [],
-            .Effect(w: x) :> [],
+            // s482 (s482-place-fu2, #2082 r3 review HIGH-5): its body does not run at the mount
+            // (E-EFFECT-NO-DEPS), but its `deps=` list is read there — registering the effect
+            // reads each dependency, and an imported cell's seed runs at its first read
+            .Effect(w: w) :> effectDepBlocks(w),
             .Request(r: r) :> requestBlocks(r),
             .Css(c: x) :> []
         };
+    }
+
+    // An `<effect>`'s dependency expressions — never its body.
+    fn effectDepBlocks(w: AEffect) -> ABlock[] {
+        let out: ABlock[] = [];
+        for (const d of w.deps) { out = out.concat([exprBlock(d)]); }
+        return out;
     }
 
     fn requestBlocks(r: ARequest) -> ABlock[] {
