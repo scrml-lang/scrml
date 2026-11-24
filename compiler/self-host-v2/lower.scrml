@@ -630,12 +630,12 @@ ${
     // `reflect`'s registry (meta.scrml rtReflect: one `TypeInfo` record per type in scope at the
     // block, `name` its type's name) is printed with only the client-used types (print.scrml
     // regArgs). Two files may each declare a type of one name, so the name alone does not say
-    // WHICH type an entry describes. The third argument says it: per entry, the Sym ids of the
-    // type(s) the name denotes in this file, as meta.scrml envOf builds the scope — this file's
-    // own declaration of the name; else (an imported type) every other file's EXPORTED type of
-    // that name (envOf takes the first such file; the set is that one or more — print keeps
-    // the entry only when every one is client-used, so a doubt drops it). The printer strips
-    // the argument; it is never printed.
+    // WHICH type an entry describes. The third argument says it: per entry, the Sym id of the
+    // type the name denotes in this file. The printer strips the argument; it is never printed.
+    // s482 r2 (#2093 r1 review HIGH-1 / MED-1 / LOW-1): that type is read from the file's scope
+    // (Tables.tscope, analyze.scrml typeScopes) — the one meta.scrml envOf built the entry from:
+    // this file's own declaration, else the declaration its import names (alias-aware, re-exports
+    // followed). Exactly one id, or none (fail closed: the entry is dropped).
     fn reflectIds(c: LC, entries: AExpr) -> Expr {
         let out: Expr[] = [];
         for (const en of aArrayElems(entries)) {
@@ -645,21 +645,18 @@ ${
     }
 
     fn entryTypeIds(c: LC, name: string) -> Expr[] {
-        let own: Expr[] = [];
-        let other: Expr[] = [];
         if (name == "") return [];
-        for (const ti of c.t.types) {
-            if (ti.name == name && ti.file != builtinFile()) {
-                const id: Expr = Expr.Lit(Literal.Int(typeDefSym(ti.def).id));
-                if (ti.file == c.file) {
-                    own = own.concat([id]);
-                } else if (ti.exported) {
-                    other = other.concat([id]);
+        for (const sc of c.t.tscope) {
+            if (sc.file == c.file && sc.local == name) {
+                let ids: Expr[] = [];
+                for (const ti of c.t.types) {
+                    if (ti.file == sc.from && ti.name == sc.orig && ti.file != builtinFile()) ids = ids.concat([Expr.Lit(Literal.Int(typeDefSym(ti.def).id))]);
                 }
+                if (ids.length == 1) return ids;
+                return [];
             }
         }
-        if (own.length > 0) return own;
-        return other;
+        return [];
     }
 
     fn aArrayElems(e: AExpr) -> AExpr[] {
@@ -5150,7 +5147,7 @@ ${
     fn serverView(t: Tables, plan: SuspendPlan, inherited: int[]) -> Tables {
         const f: ServerFacts = t.server;
         const sf: ServerFacts = { servers: f.servers, sqls: f.sqls, dbs: f.dbs, places: f.places, inherited: inherited, plan: plan, loads: f.loads, envelopes: f.envelopes, txs: f.txs, reqReads: f.reqReads, tool: f.tool, endpoints: f.endpoints, channels: f.channels, copies: f.copies, onServer: true };
-        return { program: t.program, types: t.types, decls: t.decls, fns: t.fns, handles: t.handles, names: t.names, values: t.values, effects: t.effects, binds: t.binds, elems: t.elems, attrs: t.attrs, fails: t.fails, annots: t.annots, unresolved: t.unresolved, typing: t.typing, novalidate: t.novalidate, resets: t.resets, gated: t.gated, persists: t.persists, timings: t.timings, server: sf, css: t.css, consts: t.consts, requests: t.requests, taliases: t.taliases, waits: t.waits, rows: t.rows };
+        return { program: t.program, types: t.types, decls: t.decls, fns: t.fns, handles: t.handles, names: t.names, values: t.values, effects: t.effects, binds: t.binds, elems: t.elems, attrs: t.attrs, fails: t.fails, annots: t.annots, unresolved: t.unresolved, typing: t.typing, novalidate: t.novalidate, resets: t.resets, gated: t.gated, persists: t.persists, timings: t.timings, server: sf, css: t.css, consts: t.consts, requests: t.requests, taliases: t.taliases, tscope: t.tscope, waits: t.waits, rows: t.rows };
     }
 
     export fn lower(tp: TypedProgram) -> Lowered {

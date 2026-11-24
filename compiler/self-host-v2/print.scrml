@@ -6844,10 +6844,10 @@ ${
     // typesReached): a client type's field of a server-only type keeps that type (fail-safe — the
     // client already holds values of it). The five primitive entries are always kept.
     // s482 r1 (#2093 review): matched by the type's IDENTITY, not its name — lower.scrml
-    // reflectIds gives each registry entry the Sym id(s) of the type its name denotes in the
-    // block's file, and an entry is kept only when every one of them is client-used (HIGH-1: a
-    // server-only `Config` in one file no longer ships because another file's `Config` is
-    // client-used). Also USED (LOW-1): a client function's declared return type and a client
+    // reflectIds gives each registry entry the Sym id of the type its name denotes in the
+    // block's file (s482 r2: exactly one — the file's own declaration, else the one its import
+    // names), and an entry is kept only when that type is client-used (HIGH-1: a server-only
+    // `Config` in one file no longer ships because another file's `Config` is client-used). Also USED (LOW-1): a client function's declared return type and a client
     // local's written annotation (CoreProgram.typed), as a called server function's are.
     // =========================================================================
     fn clientRegistryIds(p: CoreProgram, roots: Node[], called: ServerFn[]) -> int[] {
@@ -7032,15 +7032,17 @@ ${
     }
 
     // a runtime `reflect` with a type LITERAL — `Prim(MetaReflect, [Lit(Str(T)), [the entry of T],
-    // [[T's Sym id]]])` (meta.scrml rtReflect; lower.scrml reflectIds) — names T: the Sym ids of
-    // the type T denotes in the block's file
+    // [[T's Sym id]]])` (meta.scrml rtReflect; lower.scrml reflectIds) — names T: the Sym id of
+    // the type T denotes in the block's file (s482 r2: one id; anything else seeds nothing)
     fn nodeReflectLit(n: Node) -> int[] {
         const a: Expr[] = reflectArgs(n);
         if (a.length != 3) return [];
         const nm: string = strLitExpr(a[0]);
         if (nm == "") return [];
         if (arrayElemsOf(a[1]).length != 1) return [];
-        return entryIds(a[2], 0);
+        const ids: int[] = entryIds(a[2], 0);
+        if (ids.length != 1) return [];
+        return ids;
     }
 
     // entry `i`'s Sym ids, from a runtime `reflect`'s third argument (lower.scrml reflectIds)
@@ -7157,8 +7159,9 @@ ${
     }
 
     // an entry (meta.scrml entryExpr: a `TypeInfo` StructOf) is kept when it is a primitive's,
-    // or when the type(s) its name denotes in the block's file (`ids`, lower.scrml reflectIds)
-    // are all ones the client uses — none given, or one not client-used, drops it (fail closed)
+    // or when the ONE type its name denotes in the block's file (`ids`, lower.scrml reflectIds)
+    // is one the client uses — none given, more than one, or one not client-used drops it
+    // (fail closed)
     fn entryKept(ctx: Ctx, en: Expr, ids: int[]) -> boolean {
         const ty: int[] = structSym(en);
         if (ty.length != 1) return false;
@@ -7173,9 +7176,8 @@ ${
             i = i + 1;
         }
         if (kind == "primitive") return true;
-        if (name == "" || ids.length == 0) return false;
-        for (const id of ids) { if (!hasInt(ctx.pix.reg, id)) return false; }
-        return true;
+        if (name == "" || ids.length != 1) return false;
+        return hasInt(ctx.pix.reg, ids[0]);
     }
 
     fn withReg(ctx: Ctx, reg: int[]) -> Ctx {

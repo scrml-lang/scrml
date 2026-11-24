@@ -69,7 +69,7 @@ ${
     import { HEntry, surfaceInterfaces, isSurfaceIface, isDomElementIface, ifaceInherits, findEntry, accessesOf, sigParams, sigResult,
              slotType, slotOptional, isCallbackSlot, slotAlternatives, slotAdmitsNot, unWaiting, entryGuards, inertTagIface,
              dictKeys, attrNameVerdict, entryConflict, runtimeGuardsBuilt, brandChecksBuilt, inertElements, eventIfaceOf } from "./host-surface.scrml";
-    import { MetaRun, metaFiles } from "./meta.scrml";
+    import { MetaRun, MTypeScope, metaFiles } from "./meta.scrml";
 
     // =========================================================================
     // THE TABLES (exported — `lower` consumes them).
@@ -530,6 +530,10 @@ ${
         consts: ConstInfo[],    // s472: the file-scope constants (constPass) — lowered once each into CoreProgram.consts
         requests: ReqFact[],   // s475 (S3a): the `<request>`s the binder accepted (§6.7.7) — lower builds a View.Request from each
         taliases: TypeAlias[],  // s474 r1 (#1715 F7): each type a file imports under an alias — diagnostics name it by the alias there
+        // s482 r2 (s482-registry-client; #2093 r1 review HIGH-1): the type each name in each file's
+        // scope denotes (typeScopes) — lower.scrml reflectIds reads which type a runtime `reflect`
+        // registry entry describes from it
+        tscope: MTypeScope[],
         // s475 S4 r1 (F2): the Sym ids of the functions that WAIT (the effect summary's `waits`, §13.2 async
         // colour: a server or split function, or one that reaches one) — known before the typer, which
         // admits a pending cell's handled waiting write by it (checkWrite, §13.9.4); [] until the summary
@@ -1890,6 +1894,38 @@ ${
             }
         }
         return out;
+    }
+
+    // s482 r2 (s482-registry-client; #2093 r1 review HIGH-1 / MED-1 / LOW-1) — each type name in
+    // each file's scope and the declaration it denotes there (scopeHit: the resolver stubNamed
+    // reads — the file's own declaration, else the one its import names, alias-aware, re-exports
+    // followed). meta.scrml envOf (the `reflect` registry's entries) and lower.scrml reflectIds
+    // (each entry's type identity) both read it, so the two agree on the type by construction.
+    fn typeScopes(lk: Linkage) -> MTypeScope[] {
+        let out: MTypeScope[] = [];
+        for (const fs of lk.scopes) {
+            let seen: string[] = [];
+            for (const n of fs.names) {
+                if (n.kind == NameKind.KType && seen.indexOf(n.name) < 0) {
+                    seen = seen.concat([n.name]);
+                    const h: ScopeName | not = scopeHit(lk, fs.file, NameKind.KType, n.name);
+                    if (h is given) out = out.concat([{ file: fs.file, local: n.name, from: h.from, orig: h.orig }]);
+                }
+            }
+        }
+        return out;
+    }
+
+    // s482 r2 — the type scopes of the files BEFORE the `^{}` blocks are replaced (metaFiles runs
+    // first): the linkage over the files' type declarations alone (its diagnostics are the real
+    // linkage's, reported there). A `^{}` block emits markup only (E-META-EVAL-002) — never a type
+    // or an import — so this is the type scope the program's own linkage gives.
+    fn metaTypeScopes(files: FileAst[]) -> MTypeScope[] {
+        let own: OwnName[] = [];
+        for (const f of files) {
+            for (const td of typeItems(f.items)) { own = own.concat([{ name: td.name, kind: NameKind.KType, file: f.path, exported: td.exported }]); }
+        }
+        return typeScopes(linkage(files, own, emptyAS()).lk);
     }
 
     // Is the `k` declaration `name` of `declFile` in scope in `file` — under its
@@ -50661,7 +50697,7 @@ ${
         return { program: t.program, types: t.types, decls: t.decls, fns: t.fns, handles: t.handles,
                  names: t.names, values: t.values, effects: t.effects, binds: t.binds, elems: t.elems,
                  attrs: t.attrs, fails: t.fails, annots: t.annots, unresolved: t.unresolved, typing: t.typing,
-                 novalidate: t.novalidate, resets: t.resets, gated: t.gated, persists: t.persists, timings: t.timings, server: t.server, css: t.css, consts: t.consts, requests: t.requests, taliases: t.taliases, waits: ws, rows: t.rows };
+                 novalidate: t.novalidate, resets: t.resets, gated: t.gated, persists: t.persists, timings: t.timings, server: t.server, css: t.css, consts: t.consts, requests: t.requests, taliases: t.taliases, tscope: t.tscope, waits: ws, rows: t.rows };
     }
 
     fn nodeIdx(nodes: Callable[], sym: int) -> int {
@@ -55823,7 +55859,7 @@ ${
     // held to every rule source is held to"). meta.scrml metaFiles; its
     // diagnostics lead the program's.
     export fn analyzeSources(files00: FileAst[], srcs: Source[], entry: string, keyBase: string, routeBase: string, nextId0: int) -> TypedProgram {
-        const mr: MetaRun = metaFiles(files00, nextId0);
+        const mr: MetaRun = metaFiles(files00, nextId0, metaTypeScopes(files00));
         const tp: TypedProgram = analyzeExpanded(mr.files, srcs, entry, keyBase, routeBase, mr.next, mr.diags);
         if (mr.diags.length == 0) return tp;
         return { files: tp.files, tables: tp.tables, diags: mr.diags.concat(tp.diags), infos: tp.infos };
@@ -55842,7 +55878,7 @@ ${
             if (rr.changed) {
                 // s481: a re-read file is parsed from its source again, its `^{}` blocks
                 // with it — replaced again (their diagnostics were reported by the first pass)
-                const mr2: MetaRun = metaFiles(rr.files, nextId);
+                const mr2: MetaRun = metaFiles(rr.files, nextId, metaTypeScopes(rr.files));
                 // s482 r2 (#2080 r1 review MED): a refusal ONLY the re-read finds — a `^{}` body
                 // naming a namespace member, `m.x` one name now — is reported; it was dropped with
                 // its block, silently (no effect, an empty element)
@@ -56232,7 +56268,7 @@ ${
         const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns, handles: ra.g.handles,
                                 names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
                                 attrs: fs.attrs, fails: fs.fails, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [], bounds: [], refines: [] },
-                                novalidate: [], resets: prr.infos, gated: [], persists: rp.infos, timings: rt.infos, server: noServerFacts(), css: css.facts, consts: ra.g.consts, requests: st.reqs, taliases: typeAliases(ra.g.te.link, ra.g.types), waits: [], rows: ra.g.rows };
+                                novalidate: [], resets: prr.infos, gated: [], persists: rp.infos, timings: rt.infos, server: noServerFacts(), css: css.facts, consts: ra.g.consts, requests: st.reqs, taliases: typeAliases(ra.g.te.link, ra.g.types), tscope: typeScopes(ra.g.te.link), waits: [], rows: ra.g.rows };
         const scopeDiags: Diag[] = checkScopes(files, bound, ra.g.te.link);
         // s452 (dpa-066): THE EFFECT SUMMARY — once, over the bound tables —
         // and the binder's decisions that read it (rulesPass, M3)
@@ -56252,7 +56288,7 @@ ${
         const typedT: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                                  names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                                  elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
-                                 novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, timings: bound.timings, server: pp.facts, css: css.facts, consts: bound.consts, requests: bound.requests, taliases: bound.taliases, waits: waitingFns(sum), rows: bound.rows };
+                                 novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, timings: bound.timings, server: pp.facts, css: css.facts, consts: bound.consts, requests: bound.requests, taliases: bound.taliases, tscope: bound.tscope, waits: waitingFns(sum), rows: bound.rows };
         // s474: the client `!` functions whose server calls compose into one request
         const cp: RCompose = composePass(ra.g, typedT, sum, allow, pp.st);
         // s475-boot-caller-transport: the transport carriers (the composed functions and the client `!`
@@ -56286,7 +56322,7 @@ ${
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
-                            novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, timings: bound.timings, server: sf, css: css.facts, consts: bound.consts, requests: bound.requests, taliases: bound.taliases, waits: waitingFns(sum), rows: bound.rows };
+                            novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, timings: bound.timings, server: sf, css: css.facts, consts: bound.consts, requests: bound.requests, taliases: bound.taliases, tscope: bound.tscope, waits: waitingFns(sum), rows: bound.rows };
         const base0: Diag[] = chScopeQuiet(domScopeDropped(cps.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags).concat(hostPlacedDiags(fns, pp.facts.servers)).concat(hostServerDiags(ra.g, pp.facts.servers)).concat(nestedFnPass(ra.g, t)).concat(eps.diags), chs.quiet, chs.calls).concat(chs.diags);
         // s471: the linear pass (§35) — after the typer (§35.5: "after type resolution and
         // route inference"; a non-exhaustive `match`'s E-TYPE-020 is in `base0`, §35.4.3)
