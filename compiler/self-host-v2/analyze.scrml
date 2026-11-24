@@ -44195,12 +44195,25 @@ ${
     // a pending cell the bootstrap does not build there (initPos `pendWhy`).
     fn declInits(g: Globals, t: Tables, ps: PlaceFact[], d: ADecl, path: string, file: string, cell: boolean, outside: boolean) -> ValuePos[] {
         let out: ValuePos[] = [];
-        if (computedValue(d.own)) out = out.concat([initPos(g, t, ps, d.isLet, d.own, path, d.span, file, (cell || outside) && d.body.length == 0 && presenceDecl(d), cell && d.body.length == 0, outside)]);
+        if (computedValue(d.own)) out = out.concat([initPos(g, t, ps, d.isLet, d.own, path, d.span, file, (cell || outside) && d.body.length == 0 && presenceDecl(d), cell && d.body.length == 0, outside, false)]);
         for (const a of d.attrs) {
-            if (computedValue(a.dflt)) out = out.concat([initPos(g, t, ps, a.isLet, a.dflt, path + "." + a.name, a.span, file, false, false, false)]);
+            if (computedValue(a.dflt)) out = out.concat([initPos(g, t, ps, a.isLet, a.dflt, path + "." + a.name, a.span, file, false, false, false, true)]);
         }
         for (const c of childFields(d.body)) { out = out.concat(declInits(g, t, ps, c, path + "." + c.name, file, false, false)); }
         return out;
+    }
+
+    fn lockedWhat(g: Globals, t: Tables, ps: PlaceFact[], v: AAttrValue, path: string, attr: boolean) -> string {
+        const derivedW: string = "the formula of derived `" + path + "`";
+        if (cellReads(v)) return derivedW;
+        const e: AExpr | not = pendingInit(v);
+        if (e is not) return derivedW;
+        // its calls, transitively: a program-cell read (or a call the walk cannot follow) keeps it derived
+        const rc: CellReach = callReach(g, t.names, e, ps);
+        if (rc.reads || rc.open != "") return derivedW;
+        if (attr) return "the default of prop `" + path + "`";
+        if (path.indexOf(".") >= 0) return "the initializer of locked field `" + path + "`";
+        return "the initializer of locked cell `" + path + "`";
     }
 
     fn presenceDecl(d: ADecl) -> boolean {
@@ -44231,10 +44244,15 @@ ${
     // the base rule valueReads applies): a client function may read cells the initializer
     // does not show — `cur()` reading `@userId` — so "locked + reads is derived and stays
     // refused (E-VALUE-SERVER-CALL)" (ruling S475 item 1) holds through it (lifeDerived).
-    fn initPos(g: Globals, t: Tables, ps: PlaceFact[], isLet: boolean, v: AAttrValue, path: string, span: ASpan, file: string, life: boolean, cell: boolean, outside: boolean) -> ValuePos {
+    // s482 r1 (#2096 review LOW-1): `attr` — an attribute (prop) default. A locked initializer counted
+    // derived only because it CALLS something (valueReads counts a call; it names no `@cell`) is not
+    // known to be derived (Q13: derived iff it reads a cell), so its message names the position plainly:
+    // "the default of prop `@cp.v`" / "the initializer of locked field `@card.v`" / "… locked cell `@c`"
+    // — when neither it nor a function it calls (callReach, transitively) reads a cell.
+    fn initPos(g: Globals, t: Tables, ps: PlaceFact[], isLet: boolean, v: AAttrValue, path: string, span: ASpan, file: string, life: boolean, cell: boolean, outside: boolean, attr: boolean) -> ValuePos {
         const rc: CellReach = lifeReach(g, t, v, ps, life);
         const derived: boolean = life ? lifeDerived(t, file, v, ps, rc) : valueReads(v).length > 0;
-        if (!isLet && derived) return { what: "the formula of derived `" + path + "`", vk: ValueKind.FormulaKind, v: v, span: span, file: file, pending: false, cellInit: false, pendWhy: "", pendCall: "", pendSelf: "" };
+        if (!isLet && derived) return { what: lockedWhat(g, t, ps, v, path, attr), vk: ValueKind.FormulaKind, v: v, span: span, file: file, pending: false, cellInit: false, pendWhy: "", pendCall: "", pendSelf: "" };
         let why: string = "";
         let oc: string = "";
         let self: string = "";

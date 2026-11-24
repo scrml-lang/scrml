@@ -107,8 +107,22 @@ let <c:int=(add())/>
 </program>
 `);
     expect(d.map((x) => x.code)).toEqual([W]);
-    // the bootstrap names a locked initializer with a call "the formula of derived" (valueReads counts a call)
-    expect(d[0].message).toContain("`@card.v` calls `bump()`, which writes `n`");
+    // s482 r1 (#2096 review LOW-1): Q13 — derived iff it reads a cell; `bump()` reads none (directly or
+    // through its calls), so the position is named as an initializer, not "the formula of derived"
+    expect(d[0].message).toContain("the initializer of locked field `@card.v` calls `bump()`, which writes `n`");
+    expect(d[0].message).not.toContain("formula of derived");
+  }, 120000);
+
+  test("LOW-1: a component prop default that writes is named as a default (a/fn26)", async () => {
+    const d = await errors(`${PRE}<program>
+<cp v:int=(bump())>
+</> renders <span>\${v}</span>
+<cp/>
+<p id="o">\${n}</p>
+</program>
+`);
+    expect(d.map((x) => x.code)).toEqual([W]);
+    expect(d[0].message).toContain("the default of prop `@cp.v` calls `bump()`, which writes `n`");
   }, 120000);
 
   test("a component's renders and a use-site value", async () => {
