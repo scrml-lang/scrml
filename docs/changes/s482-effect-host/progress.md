@@ -19,5 +19,16 @@ Tests: compiler/self-host-v2/slice-m4/effect-host-s482.test.js.
 bootstrap compileSource over examples/ samples/ benchmarks/ conformance/cases/ (2972 files), base
 451a4ce04 vs head: 324 OK → 324 OK; 0 newly rejected, 0 newly accepted, 0 code changes, 0 output diffs.
 
-## Gates
-(see below as they run)
+## Commits
+1. 233f45f6b — the three rules + INFO-1 pin + tests (hook: 58190 pass, 0 fail).
+2. SPEC §6.7.4 rule 5 + §34 E-EFFECT-WRITE-UNPROVEN row amended (S482 ruling provenance); gap resolved.
+
+## Gates (head 233f45f6b + docs)
+- effect-host-s482.test.js: 15/15 (SCRML_BROWSER_TESTS=1, Chromium included); compile refusals red on base (5 fail).
+- effect / effects-summary / meta-phase3 / meta-runtime / host-src / import-host slices (Chromium on): 196/0.
+- bootstrap-conformance --json base vs head: PASS 845 / FAIL 4 / NOT-TWINNED 628 / UNSUPPORTED 491 / CRASH 0
+  both; 0 verdict diffs (1968 cases, runtimeExecuted 288 both).
+- corpus differential + byte-compare: 2972 files, 0 newly rejected/accepted, 0 code changes, 0 output diffs.
+- s34-census --check-new: PASS (1 changed row, provenance resolves). types-gate --check: OK 182 unchanged.
+- corpus-compile-floor --check: PASS. e2e-render-map: 259/0. claim-gate 0 failed; snippet-gate 120/0.
+- gen-bootstrap-severity: not needed (no code added).
