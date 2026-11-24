@@ -5,7 +5,7 @@
 // A computed `reflect(meta.get("k"))` in a runtime `^{}` block looks its name up in a registry the
 // client artifact carries. Before this lane it held every type in scope, so a type only a
 // `server fn` used shipped its name and field names in the client JS. Now the client printer keeps
-// only the entries of the types the client half uses (print.scrml clientRegistryNames / regArgs —
+// only the entries of the types the client half uses (print.scrml clientRegistryIds / regArgs —
 // the client half as #2061's reach decides it), closed through struct fields and enum payloads.
 //
 // Pinned (red on base where marked):
@@ -24,6 +24,14 @@
 //      client-used `Config` in main with a server-only one in lib → main's present, lib's fields
 //      absent. LOW-1 — a client function's return type (probe F5) and a client local's written
 //      annotation (probe F2a) are client use (red before r1).
+//   5. r2 (#2093 r1 re-review): an imported type is the one ITS import names (analyze.scrml
+//      typeScopes — the resolver stubNamed reads; meta.scrml envOf, lower.scrml entryTypeIds), one
+//      Sym id per entry. HIGH-1 — A12 / A12b / A12c: a literal `reflect(Config)` of xb's client-used
+//      Config no longer ships xa's server-only `Config { dbPasswordZZ, adminTokenZZ }` (red before
+//      r2: the literal seeded every exporter's id). MED-1 — A9c: the entry is xd's (the import's),
+//      not xc's (the first exporter in program order). LOW-1 — A1c: under `import { Config as C }`
+//      the name in scope is `C`: a computed reflect of "C" finds it, of "Config" gives not. Chromium
+//      (SCRML_BROWSER_TESTS=1) runs L9 and A12 from the shipping path's artifacts.
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -90,6 +98,35 @@ const COLLIDE = {
     let <cc:Config=({ mainMode: "m" })/>`, SHOW("Config") + `<p>\${libLabel${n}()}</p><p>\${@cc.mainMode}</p>`),
 };
 
+// r2 — files that each EXPORT a type named `Config` (the #2093 r1 re-review probes cases6 / cases4)
+const XA = `\${\n    export type Config:struct = { dbPasswordZZ: string, adminTokenZZ: string }\n    export server fn libSrv(u: string) -> boolean { const c: Config = { dbPasswordZZ: u, adminTokenZZ: u }; return c.dbPasswordZZ == "a"; }\n}\n`;
+const XB = `\${\n    export type Config:struct = { mode: string }\n}\n`;
+const LIT2 = `<div id="o2">^{ const j = reflect(Config); let s = j.name + ":"; for (const f of j.fields) { s = s + f.name + "=" + f.type + ";"; } meta.emit("<p>" + s + "</p>"); }</div>`;
+const SHOWK = (cell, k, id) => `let <${cell}:string="${k}"/>
+<div id="${id}">^{ const j = reflect(meta.get("${cell}")); if (j is given) { let s = j.name + ":"; for (const f of j.fields) { s = s + f.name + "=" + f.type + ";"; } meta.emit("<p>" + s + "</p>"); } else { meta.emit("<p>none</p>"); } }</div>`;
+const SRVBTN = (call) => `<button onclick=\${() => { const r = ${call} !{ .Transport(_) :> false }; }}>b</button>`;
+const R2 = {
+  // A12: a literal and a computed reflect of xb's client-used Config; xa's server-only Config imported nowhere as a type
+  a12: { files: { "xa.scrml": XA, "xb.scrml": XB }, main: P(`    import { libSrv } from "./xa.scrml";
+    import { Config } from "./xb.scrml";
+    let <c:Config=({ mode: "m" })/>`, LIT2 + SHOW("Config") + `<p>\${@c.mode}</p>` + SRVBTN(`libSrv("x")`)) },
+  // A12b: the literal alone
+  a12b: { files: { "xa.scrml": XA, "xb.scrml": XB }, main: P(`    import { libSrv } from "./xa.scrml";
+    import { Config } from "./xb.scrml";
+    let <c:Config=({ mode: "m" })/>`, LIT2 + `<p>\${@c.mode}</p>` + SRVBTN(`libSrv("x")`)) },
+  // A12c: xa reached only through mid.scrml
+  a12c: { files: { "xa.scrml": XA, "xb.scrml": XB, "mid.scrml": `\${\n    import { libSrv } from "./xa.scrml";\n    export server fn mid(u: string) -> boolean { return libSrv(u); }\n}\n` }, main: P(`    import { mid } from "./mid.scrml";
+    import { Config } from "./xb.scrml";
+    let <c:Config=({ mode: "m" })/>`, LIT2 + SHOW("Config") + `<p>\${@c.mode}</p>` + SRVBTN(`mid("x")`)) },
+  // A9c: two exporters, both client-used; main imports xd's
+  a9c: { files: { "xc.scrml": `\${\n    export type Config:struct = { fromXcQQ: string }\n    export fn xcLabel() -> string { const c: Config = { fromXcQQ: "c" }; return c.fromXcQQ; }\n}\n`, "xd.scrml": `\${\n    export type Config:struct = { fromXdQQ: string }\n}\n` }, main: P(`    import { xcLabel } from "./xc.scrml";
+    import { Config } from "./xd.scrml";
+    let <c:Config=({ fromXdQQ: "d" })/>`, SHOW("Config") + `<p>\${@c.fromXdQQ}\${xcLabel()}</p>`) },
+  // A1c: an aliased import, client-used
+  a1c: { files: { "libb.scrml": XB }, main: P(`    import { Config as C } from "./libb.scrml";
+    let <c:C=({ mode: "m" })/>`, SHOW("Config") + SHOWK("k2", "C", "o2") + `<p>\${@c.mode}</p>`) },
+};
+
 // ---------------------------------------------------------------------------
 // 1 + 2. the shipping path: scrml-boot compileSource → the client bundle, then the conformance
 // runner (happy-dom)
@@ -113,6 +150,25 @@ async function compileWith(main, lib) {
   const n = seq++;
   writeFileSync(join(shipDir, `lib${n}.scrml`), lib(n));
   return compile(main(n));
+}
+
+// a main file plus named files beside it, in a directory of its own (the files' names repeat)
+async function compileFiles(c) {
+  const { compileSource } = await import("../../../scripts/scrml-boot.ts");
+  const dir = mkdtempSync(join(shipDir, "r2-"));
+  for (const [n, src] of Object.entries(c.files)) writeFileSync(join(dir, n), src);
+  const file = join(dir, "app.scrml");
+  writeFileSync(file, c.main);
+  const res = await compileSource(file);
+  if (!res.ok) throw new Error("did not compile: " + res.diagnostics.filter((d) => d.severity === "error").map((d) => d.code + " " + d.message).join("; "));
+  return res;
+}
+
+// the text of `<sel> p` for each selector, from the conformance runner (happy-dom)
+async function shownAt(res, sels) {
+  const { runBootstrapArtifact } = await import("../../../scripts/bootstrap-conformance.ts");
+  const r = await runBootstrapArtifact(res.client.html, res.client.js, [], {}, [], undefined);
+  return sels.map((sel) => String(r.body.querySelector(`${sel} p`)?.textContent ?? "<none>").trim());
 }
 
 async function shownRes(res) {
@@ -218,6 +274,42 @@ describe("s482-registry-client r1 — by type identity, not name (#2093 review H
   }, 120000);
 });
 
+describe("s482-registry-client r2 — an imported type is the one its import names (#2093 r1 re-review)", () => {
+  const SECRET_FIELDS = ["dbPasswordZZ", "adminTokenZZ"];
+  const noSecret = (res) => {
+    const client = res.client.js + res.client.html;
+    for (const f of SECRET_FIELDS) expect(client).not.toContain(f);
+  };
+
+  test("A12: literal + computed reflect(Config) of xb's client-used import — xa's server-only Config does not ship", async () => {
+    const res = await compileFiles(R2.a12);
+    noSecret(res);
+    expect(await shownAt(res, ["#o2", "#o"])).toEqual(["Config:mode=string;", "Config:mode=string;"]);
+  }, 120000);
+
+  test("A12b: the literal reflect alone", async () => {
+    const res = await compileFiles(R2.a12b);
+    noSecret(res);
+    expect(await shownAt(res, ["#o2"])).toEqual(["Config:mode=string;"]);
+  }, 120000);
+
+  test("A12c: xa reached only through another library", async () => {
+    const res = await compileFiles(R2.a12c);
+    noSecret(res);
+    expect(await shownAt(res, ["#o2", "#o"])).toEqual(["Config:mode=string;", "Config:mode=string;"]);
+  }, 120000);
+
+  test("A9c (MED-1): two client-used exporters — the entry is the imported file's (xd), not the first exporter's (xc)", async () => {
+    const res = await compileFiles(R2.a9c);
+    expect(await shownAt(res, ["#o"])).toEqual(["Config:fromXdQQ=string;"]);
+  }, 120000);
+
+  test("A1c (LOW-1): import { Config as C } — the name in scope is C; a lookup of \"Config\" gives not", async () => {
+    const res = await compileFiles(R2.a1c);
+    expect(await shownAt(res, ["#o", "#o2"])).toEqual(["none", "C:mode=string;"]);
+  }, 120000);
+});
+
 describe("s482-registry-client r1 — written types count (#2093 review LOW-1)", () => {
   test("F5: a client function's declared return type is client use", async () => {
     expect(await shown(CASES.retOnly)).toBe("Pt:x=int;y=int;");
@@ -281,7 +373,47 @@ async function chromiumShown(src) {
   return { text, js: out.js, html, errors };
 }
 
+// r2: a shipping-path build (scrml-boot compileSource — multi-file) in Chromium; the text of
+// `<sel> p` for each selector
+async function chromiumAt(res, sels) {
+  const name = `p${cseq++}`;
+  writeFileSync(join(cdir, `${name}.html`), res.client.html.replace("program.client.js", `${name}.client.js`));
+  writeFileSync(join(cdir, `${name}.client.js`), res.client.js);
+  const page = await browser.newPage();
+  const errors = [];
+  page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await page.goto(`http://127.0.0.1:${port}/${name}.html`);
+  await page.waitForFunction((s) => !!document.querySelector(s + " p"), { timeout: 10000 }, sels[0]).catch(() => {});
+  const texts = [];
+  for (const sel of sels) texts.push(await page.evaluate((s) => document.querySelector(s + " p")?.textContent ?? "<none>", sel));
+  const html = await page.evaluate(() => document.documentElement.outerHTML);
+  await page.close();
+  return { texts, html, errors };
+}
+
 suite("s482-registry-client — Chromium", () => {
+  test("L9 (r1 HIGH-1): main's server-only Config does not ship because lib's Config is client-used", async () => {
+    const res = await compileWith(COLLIDE.serverMain, LIB_CLIENT);
+    expect(res.client.html).toContain("program.client.js");
+    const r = await chromiumAt(res, ["#o"]);
+    expect(r.texts).toEqual(["none"]);
+    expect(r.html).not.toContain("dbPasswordZZ");
+    expect(res.client.js).not.toContain("dbPasswordZZ");
+    expect(r.errors).toEqual([]);
+  }, 120000);
+
+  test("A12 (r2 HIGH-1): literal + computed reflect(Config) describe xb's Config; xa's server-only fields are not in the page", async () => {
+    const res = await compileFiles(R2.a12);
+    const r = await chromiumAt(res, ["#o2", "#o"]);
+    expect(r.texts).toEqual(["Config:mode=string;", "Config:mode=string;"]);
+    expect(r.html).not.toContain("dbPasswordZZ");
+    expect(r.html).not.toContain("adminTokenZZ");
+    expect(res.client.js).not.toContain("dbPasswordZZ");
+    expect(r.errors).toEqual([]);
+  }, 120000);
+
+
   test("server-only Secret: the client JS holds neither field name, and a computed reflect of it is not", async () => {
     const r = await chromiumShown(CASES.secret);
     expect(r.js).not.toContain("passwordHash");
