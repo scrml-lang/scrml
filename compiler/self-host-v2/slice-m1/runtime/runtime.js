@@ -135,7 +135,15 @@ export function batch(fn) {
 // Render / structure effects first, then `<effect>` bodies. An effect body
 // cannot write a reactive cell (§6.7.4 — a compile error, directly or through
 // a called function), so running one queues nothing: there is no cascade to
-// order or bound, and this is a plain loop.
+// order, and this is a plain loop.
+// s482 (s482-effect-host; RULED S482, ruling:user-voice-scrml.md-S482-effect-host-call: "plus an
+// effect run cap as the backstop") — the BACKSTOP all the same: host code is outside that proof
+// (the compiler now refuses a body reaching an unproven host function, E-EFFECT-WRITE-UNPROVEN),
+// and before it glue that clicked a button whose handler wrote the effect's dep re-queued the
+// effect forever in one flush and hung the page (probe p-MeC2ee). So an `<effect>` / `<request>`
+// taken from `effectQueue` runs at most MAX_RUNS (metaMaxRuns: 100, `globalThis.__scrml_max_meta_runs`
+// overrides — the same cap and override as a runtime `^{}` block) times in one flush; past that it
+// logs the cycle once (console.error) and skips the run. The next flush counts afresh.
 //
 // One flush at a time (s449 fix round, MEDIUM-1): a render effect that writes
 // while it runs — `<each>`'s reconcile sets a surviving row's item cell before
@@ -165,6 +173,8 @@ function flush() {
 function drainQueues() {
   let first = null;
   let failed = false;
+  const effectRuns = new Map();        // s482 (s482-effect-host): runs of each queued effect, this flush
+  let maxEffectRuns = 0;
   for (;;) {
     let e = null;
     if (queue.size > 0) {
@@ -178,6 +188,17 @@ function drainQueues() {
     } else if (effectQueue.size > 0) {
       [e] = effectQueue;
       effectQueue.delete(e);
+      if (!e.disposed) {
+        if (maxEffectRuns === 0) maxEffectRuns = metaMaxRuns();
+        const n = (effectRuns.get(e) ?? 0) + 1;
+        effectRuns.set(e, n);
+        if (n > maxEffectRuns) {
+          if (n === maxEffectRuns + 1) {
+            console.error("[scrml] effect exceeded " + maxEffectRuns + " runs in one update — possible infinite loop (a dependency is written while the effect runs); the run is skipped");
+          }
+          continue;
+        }
+      }
     } else {
       break;
     }
