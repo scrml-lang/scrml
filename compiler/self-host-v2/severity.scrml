@@ -463,6 +463,7 @@ ${
             "E-SYNTAX-012" :> Severity.Error,
             "E-SYNTAX-044" :> Severity.Error,
             "E-SYNTAX-045" :> Severity.Error,
+            "E-SYNTAX-050" :> Severity.Error,
             "E-SYNTAX-064" :> Severity.Error,
             "E-SYNTAX-DURATION" :> Severity.Error,
             "E-SYNTHESIZED-WRITE" :> Severity.Error,

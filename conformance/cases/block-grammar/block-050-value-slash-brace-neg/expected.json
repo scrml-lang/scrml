@@ -1,0 +1,23 @@
+{
+  "id": "block-050-value-slash-brace-neg",
+  "description": "A `{ … }` attribute value whose element ends at a trailing `/` before the value's `}` (`header={<h1>Hi/}`) uses the RETIRED trailing-slash closer (§4.4, Appendix E) — refused with E-SYNTAX-050 and the Appendix E hint. A bootstrap-gradable twin of error-boundary/terse-fallback-closer-neg (which the bootstrap grades UNSUPPORTED: `<errorBoundary>` is refused by name).",
+  "language-version": "1.0",
+  "spec": "§4.4, Appendix E",
+  "source-test": "compiler/self-host-v2/slice-m4/closer-cleanup-s482.test.js",
+  "rationale": "Appendix E (2026-04-09): \"Any source file using bare `/` or trailing content`/` closers SHALL be rejected by the compiler with a diagnostic pointing to §4.4. The diagnostic SHALL include a hint: 'Did you mean `</>`?'\". ruling:user-voice-scrml.md \"⭐ RULED — the `/}` 'terse closer' is the retired trailing-slash closer; Appendix E governs (S482)\". #2095 review LOW-5.",
+  "expect": {
+    "codes": [
+      "E-SYNTAX-050"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-terse-closer-accepted-s482",
+      "fails": {
+        "codes": [
+          "missing:E-SYNTAX-050"
+        ]
+      }
+    }
+  }
+}
