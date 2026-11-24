@@ -26,7 +26,26 @@ Branch `s482-rulings-records` from origin/main a81d8cc80. Bootstrap-only (compil
   g-impl1-typeinfo-absent-member-s482); coverage rows §22.5 / §18.17 / §49.2.4.
 - impl#1 test compiler/tests/unit/meta-final-s458.test.js reads the case file: expects `<p>c</p>` now.
 - hook: first attempts failed on load (shard timeouts, stale `_tmp_server_fn_calls` from killed shards);
-  waiting for memory ≥14G before retrying.
+  one real failure — corpus-bridge requires each carried gap to be pinned by an xfail case: added
+  conformance match-codes/match-mixed-alternates-not-pos and meta/meta-typeinfo-absent-member-empty-pos
+  (impl#1 xfail signatures captured with `conformance/run.ts --xfail-signature`).
+- a8f5b8add committed (hook PASS: 58195 pass, 0 fail, SCRML_HOOK_SHARDS=5).
+
+## Gates (base a81d8cc80 vs head a8f5b8add)
+
+| gate | result |
+|---|---|
+| pre-commit hook (full suite) | PASS — 58195 pass / 0 fail |
+| bootstrap-conformance --json | PASS 845 → 848, FAIL 4 → 3 (meta-proto-cell-name-pos FAIL → PASS; +2 new cases PASS), CRASH 0 |
+| corpus differential (2974 files: examples, samples, benchmarks, conformance/cases) | 0 newly rejected, 0 newly accepted, 0 code changes; html/js/server byte-identical |
+| s34-census --check-new --base a81d8cc80 | PASS (no new/changed §34 rows) |
+| types-gate --check | OK — 182 diagnostics, unchanged |
+| corpus-compile-floor --check | PASS |
+| snippet-gate / claim-gate | 120 pass, 0 fail / 26 pass, 0 fail |
+| spec-coverage-check | 0 violations (4 pre-existing warnings) |
+| e2e-render-map | 259 pass, 0 fail |
+
+Artifacts: ~/.cache/scrml/review/s482-rulings-records/ (conf-base/head.json, corpus-base/head.json, h/).
 
 - code + tests committed (items 4, 6, 3 tests); targeted test files green (selfhost-residue 20/20,
   match-alternation 34/34, meta-runtime 43 pass / 4 skip).
