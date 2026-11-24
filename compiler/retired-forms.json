@@ -1,0 +1,878 @@
+{
+  "$comment": "The retired-forms ledger (S482). Ruling: scrml-support/user-voice-scrml.md S482 \"⭐ RULED — every retirement / deprecation PR adds a retired-forms ledger row and migrates\" — \"every PR that retires or deprecates a syntax form must do both: 1. add a row to the retired-forms ledger (`compiler/retired-forms.json`): the old form, the new form, its tier, the error or warning code, and the ruling citation; 2. migrate the SPEC examples, or for a deprecated form, record the starting count, which then only goes down.\" HARD rows fail scripts/retired-forms-lint.ts outside labelled negatives, allow markers and the dated `pending` debt in scripts/retired-forms-baseline.json; SOFT rows ratchet per (row, file). `legacyMarker` rows feed scripts/bootstrap-conformance.ts LEGACY_MARKERS (in `order`). A `detector` is a regex over comment- and string-stripped scrml (per line; flag `m` = over the whole text) or a builtin of the lint; null = not detectable from text (the compiler enforces it).",
+  "version": 1,
+  "rows": [
+    {
+      "id": "closer-trailing-slash",
+      "tier": "HARD",
+      "old": "`<tag>content/`, a bare `/` line, `lift <li>x/;`, `{<div>x/}`",
+      "new": "`</>` (or `</tag>`)",
+      "codes": [
+        "E-SYNTAX-050"
+      ],
+      "spec": "§4.4; Appendix E (\"Any source file using bare `/` or trailing content`/` closers SHALL be rejected\")",
+      "ruling": "scrml-support/user-voice-scrml.md S14 \"man, self closer hasnt been / for a while. the closer is </>\"; scrml-support/user-voice-scrml.md S482 \"⭐ RULED — the `/}` \\\"terse closer\\\" is the retired trailing-slash closer; Appendix E governs\"",
+      "retired": "2026-04-09",
+      "detector": {
+        "kind": "builtin",
+        "name": "trailing-slash-closer"
+      }
+    },
+    {
+      "id": "closer-double-slash",
+      "tier": "HARD",
+      "old": "`<//>`",
+      "new": "`</>`",
+      "codes": [
+        "E-SYNTAX-050"
+      ],
+      "spec": "§4.4",
+      "ruling": "scrml-support/user-voice-scrml.md (audit S482: `<//>` was never adopted)",
+      "detector": {
+        "kind": "regex",
+        "pattern": "<//>",
+        "flags": ""
+      }
+    },
+    {
+      "id": "machine-element",
+      "tier": "HARD",
+      "old": "`<machine …>`",
+      "new": "`<engine …>` (itself §66.21-soft: a `single` declaration)",
+      "codes": [
+        "E-DEPRECATED-001"
+      ],
+      "spec": "§51.0.L, §63.7, §34 E-DEPRECATED-001",
+      "ruling": "SPEC §51.0.L (S307: \"The `<machine>` keyword has been REMOVED\")",
+      "retired": "S307",
+      "detector": {
+        "kind": "regex",
+        "pattern": "<machine\\b",
+        "flags": ""
+      }
+    },
+    {
+      "id": "at-implicit-decl",
+      "tier": "HARD",
+      "old": "`@x = v` with no `<x>` declaration",
+      "new": "`let <x:T=v/>`",
+      "codes": [
+        "E-STATE-UNDECLARED"
+      ],
+      "spec": "§6.1.1–§6.1.3",
+      "ruling": "SPEC §6.1 (S123 V-kill)",
+      "retired": "S123",
+      "detector": null,
+      "note": "Not detectable from text (needs the declarations in scope); the compiler's E-STATE-UNDECLARED enforces it."
+    },
+    {
+      "id": "while-loop",
+      "tier": "HARD",
+      "old": "`while (cond) { … }`",
+      "new": "`for (cond) { … }`",
+      "codes": [
+        "E-LOOP-WHILE-RETIRED"
+      ],
+      "spec": "§49.4.1, §49.9",
+      "ruling": "scrml-support/user-voice-scrml.md S469 (one loop keyword `for`; `while` and `do…while` retired)",
+      "retired": "S469",
+      "detector": {
+        "kind": "regex",
+        "pattern": "(?<![.\\w])while\\s*\\(",
+        "flags": ""
+      },
+      "note": "A `} while (…)` do-while tail counts here too (the do-while row counts the head)."
+    },
+    {
+      "id": "do-while-loop",
+      "tier": "HARD",
+      "old": "`do { … } while (cond)`",
+      "new": "`for { …; if (done) { break; } }`",
+      "codes": [
+        "E-LOOP-DO-WHILE-RETIRED"
+      ],
+      "spec": "§49.4.1, §49.9",
+      "ruling": "scrml-support/user-voice-scrml.md S469 (one loop keyword `for`)",
+      "retired": "S469",
+      "detector": {
+        "kind": "regex",
+        "pattern": "(?<![.\\w])do\\s*\\{",
+        "flags": ""
+      }
+    },
+    {
+      "id": "writable-grant",
+      "tier": "HARD",
+      "old": "`T[writable]`",
+      "new": "`T[write]`",
+      "codes": [
+        "E-GRANT-UNKNOWN"
+      ],
+      "spec": "§66.12.2, §66.20",
+      "ruling": "scrml-support/user-voice-scrml.md S469 \"⭐ RULED (partial O10) — the position-write grant is spelled `write`, not `writable`\"",
+      "retired": "S469",
+      "detector": {
+        "kind": "regex",
+        "pattern": "\\[[^\\]\\n]*\\bwritable\\b[^\\]\\n]*\\]",
+        "flags": ""
+      }
+    },
+    {
+      "id": "flush-call",
+      "tier": "HARD",
+      "old": "`flush()`",
+      "new": "nothing — a derived read pulls (§6.6.5)",
+      "codes": [
+        "E-SCOPE-001"
+      ],
+      "spec": "§6.6 (Amendment S473 D22)",
+      "ruling": "scrml-support/user-voice-scrml.md S473 D22 \"pull-on-read is correct; `flush()` and E-REACTIVE-004 are retired.\"",
+      "retired": "S473",
+      "detector": {
+        "kind": "regex",
+        "pattern": "(?<![.\\w])flush\\s*\\(\\s*\\)",
+        "flags": ""
+      }
+    },
+    {
+      "id": "fixed-attr",
+      "tier": "HARD",
+      "old": "`<x fixed …>`",
+      "new": "nothing (a use cannot override a declaration's `renders`, §66.6.9)",
+      "codes": [
+        "E-FIXED-RETIRED"
+      ],
+      "spec": "§15.7, §66.15.1",
+      "ruling": "scrml-support/user-voice-scrml.md S473 D26 (confirmed S475 item 15)",
+      "retired": "S473",
+      "detector": {
+        "kind": "regex",
+        "pattern": "<[A-Za-z][\\w-]*\\b[^<>\\n]*\\sfixed(?=[\\s/>])",
+        "flags": ""
+      }
+    },
+    {
+      "id": "class-decl",
+      "tier": "HARD",
+      "old": "`class X { … }`",
+      "new": "a struct type + free functions (§14)",
+      "codes": [
+        "E-CLASS-NOT-IN-SCRML"
+      ],
+      "spec": "§7.2.1",
+      "ruling": "scrml-support/user-voice-scrml.md S430 \"I really want to reject class.\"",
+      "retired": "S430",
+      "detector": {
+        "kind": "regex",
+        "pattern": "(?<![\\w-])class\\s+[A-Za-z_]\\w*\\s*(?:\\{|extends\\b)",
+        "flags": ""
+      }
+    },
+    {
+      "id": "try-catch",
+      "tier": "HARD",
+      "old": "`try { … } catch …`",
+      "new": "`!{}` handlers / `match` on a failable result (§19)",
+      "codes": [
+        "E-TRY-NOT-IN-SCRML"
+      ],
+      "spec": "§7.2.1, §19",
+      "ruling": "scrml-support/user-voice-scrml.md S430 (§7.2.1 exclusions)",
+      "retired": "S430",
+      "detector": {
+        "kind": "regex",
+        "pattern": "(?<![.\\w])try\\s*\\{",
+        "flags": ""
+      }
+    },
+    {
+      "id": "throw-stmt",
+      "tier": "HARD",
+      "old": "`throw …`",
+      "new": "`fail Type.Variant(…)` in a `!` function (§19.3)",
+      "codes": [
+        "E-THROW-NOT-IN-SCRML"
+      ],
+      "spec": "§7.2.1, §19.3",
+      "ruling": "scrml-support/user-voice-scrml.md S430 (§7.2.1 exclusions)",
+      "retired": "S430",
+      "detector": {
+        "kind": "regex",
+        "pattern": "(?<![.\\w])throw\\s",
+        "flags": ""
+      }
+    },
+    {
+      "id": "async-await",
+      "tier": "HARD",
+      "old": "`async` functions, `await`",
+      "new": "plain calls — the compiler places and awaits (§19.9.8)",
+      "codes": [
+        "E-ASYNC-NOT-IN-SCRML",
+        "E-AWAIT-NOT-IN-SCRML"
+      ],
+      "spec": "§7.2.1, §19.9.8",
+      "ruling": "scrml-support/user-voice-scrml.md S430 (§7.2.1 exclusions)",
+      "retired": "S430",
+      "detector": {
+        "kind": "regex",
+        "pattern": "(?<![.\\w])(?:async\\s+(?:fn|function)\\b|async\\s*\\(|await\\s)",
+        "flags": ""
+      }
+    },
+    {
+      "id": "for-await",
+      "tier": "HARD",
+      "old": "`for await (…)`",
+      "new": "`for (… of …)` over a stream (§19.9.8)",
+      "codes": [
+        "E-FOR-AWAIT-NOT-IN-SCRML"
+      ],
+      "spec": "§7.2.1, §19.9.8",
+      "ruling": "scrml-support/user-voice-scrml.md S430 (§7.2.1 exclusions)",
+      "retired": "S430",
+      "detector": {
+        "kind": "regex",
+        "pattern": "(?<![.\\w])for\\s+await\\b",
+        "flags": ""
+      }
+    },
+    {
+      "id": "switch-stmt",
+      "tier": "HARD",
+      "old": "`switch (x) { … }`",
+      "new": "`match` (§18)",
+      "codes": [
+        "E-SWITCH-FORBIDDEN"
+      ],
+      "spec": "§7.2.1, §17",
+      "ruling": "scrml-support/user-voice-scrml.md S430 (§7.2.1 exclusions)",
+      "retired": "S430",
+      "detector": {
+        "kind": "regex",
+        "pattern": "(?<![.\\w])switch\\s*\\(",
+        "flags": ""
+      }
+    },
+    {
+      "id": "dynamic-import",
+      "tier": "HARD",
+      "old": "`import(…)`",
+      "new": "a static `import` (§21.3.2)",
+      "codes": [
+        "E-DYNAMIC-IMPORT-NOT-IN-SCRML"
+      ],
+      "spec": "§7.2.1, §21.3.2",
+      "ruling": "scrml-support/user-voice-scrml.md S430 (§7.2.1 exclusions)",
+      "retired": "S430",
+      "detector": {
+        "kind": "regex",
+        "pattern": "(?<![.\\w])import\\s*\\(",
+        "flags": ""
+      }
+    },
+    {
+      "id": "fn-type-arrow",
+      "tier": "HARD",
+      "old": "function type `(x: T) -> R`, `fn()`",
+      "new": "`(x: T) => R`",
+      "codes": [
+        "E-PARSE-TYPE"
+      ],
+      "spec": "§7.5 \"Function types (S478)\"",
+      "ruling": "scrml-support/user-voice-scrml.md S478 \"⭐ RULED — open owner questions, PA recs adopted wholesale\" (function types)",
+      "retired": "S478",
+      "detector": {
+        "kind": "regex",
+        "pattern": ":\\s*(?:\\([^()\\n]*\\)\\s*->|fn\\s*\\(\\s*\\)(?!\\s*=>))",
+        "flags": ""
+      }
+    },
+    {
+      "id": "return-type-colon",
+      "tier": "HARD",
+      "old": "`function f(): T`",
+      "new": "`function f() -> T`",
+      "codes": [
+        "E-PARSE-FN"
+      ],
+      "spec": "§7 (§34 E-PARSE-FN), §64.2",
+      "ruling": "scrml-support/user-voice-scrml.md S477 \"⭐ RULED — tool main return type spelled ->\"",
+      "retired": "S477",
+      "detector": {
+        "kind": "regex",
+        "pattern": "\\b(?:function|fn)\\s+[A-Za-z_]\\w*\\s*\\([^()\\n]*\\)\\s*:\\s*[A-Za-z]",
+        "flags": ""
+      }
+    },
+    {
+      "id": "tape-rhs",
+      "tier": "HARD",
+      "old": "`<x> = [ … ]` (a tape cell, right-hand-side form)",
+      "new": "`let <x:T[grants]=[]/>`",
+      "codes": [
+        "E-DECL-LEGACY-RHS"
+      ],
+      "spec": "§66.12.4, §66.21 (no Stage-1 window for a tape)",
+      "ruling": "scrml-support/user-voice-scrml.md S469 (a legacy tape cell is an error with no window, §66.12.4)",
+      "retired": "S469",
+      "detector": {
+        "kind": "regex",
+        "pattern": "<[A-Za-z_][\\w]*(?:\\s[^<>\\n]*)?>\\s*(?::[^=\\n]*)?=(?!=)\\s*\\[(?!\\s*:\\s*\\])",
+        "flags": ""
+      }
+    },
+    {
+      "id": "tape-js-method",
+      "tier": "HARD",
+      "old": "`.push(` / `.unshift(` / `.splice(` on a tape",
+      "new": "the grant methods `append` / `prepend` / `insert` / `remove` (§66.12.6)",
+      "codes": [
+        "E-TAPE-JS-METHOD"
+      ],
+      "spec": "§66.12.6, §66.20",
+      "ruling": "scrml-support/user-voice-scrml.md S469 (tape grant vocabulary; JS array methods refused)",
+      "retired": "S469",
+      "detector": {
+        "kind": "regex",
+        "pattern": "\\.(?:push|unshift|splice)\\s*\\(",
+        "flags": ""
+      },
+      "note": "Text cannot tell a tape from a host array; a hit on host JS (a `_{}` body is already stripped) takes an allow marker."
+    },
+    {
+      "id": "let-in-opener",
+      "tier": "HARD",
+      "old": "`<let x:T=v/>`",
+      "new": "`let <x:T=v/>`",
+      "codes": [
+        "E-DECL-LET-IN-OPENER"
+      ],
+      "spec": "§66.20, §66.21",
+      "ruling": "scrml-support/user-voice-scrml.md S447 \"your recs\" (item 2)",
+      "retired": "S447",
+      "detector": {
+        "kind": "regex",
+        "pattern": "<let\\s+[A-Za-z_]",
+        "flags": ""
+      }
+    },
+    {
+      "id": "rule-event-arrow",
+      "tier": "HARD",
+      "old": "`rule=\"ev -> V\"`",
+      "new": "`rule=.V`",
+      "codes": [
+        "E-ENGINE-RULE-LEGACY-SYNTAX"
+      ],
+      "spec": "§51.0.F, §51.3",
+      "ruling": "SPEC §51.0.F (E-ENGINE-RULE-LEGACY-SYNTAX)",
+      "detector": {
+        "kind": "regex",
+        "pattern": "\\brule\\s*=\\s*\\\"[^\\\"\\n]*->",
+        "flags": ""
+      },
+      "keepStrings": true
+    },
+    {
+      "id": "render-by-tag",
+      "tier": "HARD",
+      "old": "`<x/>` rendering a shared cell",
+      "new": "`<*x/>`",
+      "codes": [],
+      "spec": "§66.6.6, §66.21 (SAME-ARC)",
+      "ruling": "scrml-support/user-voice-scrml.md S435",
+      "retired": "S435",
+      "detector": null,
+      "note": "Not detectable from text (needs to know `x` is a cell); SAME-ARC, no window."
+    },
+    {
+      "id": "on-dismount",
+      "tier": "HARD",
+      "old": "`on dismount { … }`",
+      "new": "`cleanup(fn)` inside `<onMount>` (§6.7.3)",
+      "codes": [
+        "E-STATE-BLOCK-STATEMENT-FORM"
+      ],
+      "spec": "§6.7.1a",
+      "ruling": "scrml-support/user-voice-scrml.md S449 (3b)",
+      "retired": "S449",
+      "detector": {
+        "kind": "regex",
+        "pattern": "\\bon\\s+dismount\\b",
+        "flags": ""
+      }
+    },
+    {
+      "id": "cps-error",
+      "tier": "HARD",
+      "old": "`CpsError`",
+      "new": "`ServerCallError`",
+      "codes": [],
+      "spec": "§19 (built-in error types)",
+      "ruling": "SPEC (audit S482: CpsError→ServerCallError)",
+      "detector": {
+        "kind": "regex",
+        "pattern": "\\bCpsError\\b",
+        "flags": ""
+      }
+    },
+    {
+      "id": "angle-cell-read",
+      "tier": "HARD",
+      "old": "`<x>` read as a value (`<n> + 1`, `{<count>}`, `f(<n>)`)",
+      "new": "`@x`",
+      "codes": [
+        "E-CELL-ANGLE-READ"
+      ],
+      "spec": "§4 table (\"`@x` reads\"), §34 E-CELL-ANGLE-READ",
+      "ruling": "scrml-support/user-voice-scrml.md S482 \"⭐ RULED — every retirement / deprecation PR adds a retired-forms ledger row and migrates\" — the same answer confirmed audit R3: \"`<x>` in an expression is not a read form — §4 table: \"`@x` reads\"; the parser gives one targeted error with a fix-it to `@x`\"",
+      "retired": "S482",
+      "detector": {
+        "kind": "builtin",
+        "name": "angle-cell-read"
+      }
+    },
+    {
+      "id": "rhs-decl",
+      "tier": "SOFT",
+      "old": "`<x> = v`, `<x>: T = v` (scalar / struct cell)",
+      "new": "`let <x:T=v/>` / `<x:T=v/>` (§66.21 rule)",
+      "codes": [
+        "W-DECL-LEGACY-RHS",
+        "E-DECL-LEGACY-RHS"
+      ],
+      "spec": "§66.21 row 1, §63",
+      "ruling": "SPEC §66.21 (S435 §66 declarations)",
+      "detector": {
+        "kind": "regex",
+        "pattern": "<[A-Za-z_][\\w]*(?:\\s[^<>\\n]*)?>\\s*(?::[^=\\n]*)?=(?!=)(?!\\s*\\[(?!\\s*:\\s*\\]))",
+        "flags": ""
+      },
+      "legacyMarker": {
+        "name": "rhs-decl",
+        "order": 1,
+        "pattern": "<[A-Za-z_][\\w]*(?:\\s[^<>\\n]*)?>\\s*(?::[^=\\n]*)?=(?!=)",
+        "flags": ""
+      },
+      "note": "The lint pattern leaves out a tape right-hand side (`= [`), which is the HARD row tape-rhs."
+    },
+    {
+      "id": "const-cell",
+      "tier": "SOFT",
+      "old": "`const <x> = expr`",
+      "new": "`<x:T=(expr)/>`",
+      "codes": [
+        "W-CONST-CELL-DEPRECATED",
+        "E-CONST-CELL-DEPRECATED"
+      ],
+      "spec": "§66.21 row 2",
+      "ruling": "SPEC §66.21",
+      "detector": {
+        "kind": "regex",
+        "pattern": "\\bconst\\s+<[A-Za-z_]",
+        "flags": ""
+      },
+      "legacyMarker": {
+        "name": "const-cell",
+        "order": 2,
+        "pattern": "\\bconst\\s+<[A-Za-z_]",
+        "flags": ""
+      }
+    },
+    {
+      "id": "component-const",
+      "tier": "SOFT",
+      "old": "`const X = <root …>…</>`",
+      "new": "a §66 declaration with `renders` (§66.15)",
+      "codes": [
+        "W-COMPONENT-CONST-DEPRECATED",
+        "E-COMPONENT-CONST-DEPRECATED"
+      ],
+      "spec": "§66.21 row 3",
+      "ruling": "SPEC §66.21",
+      "detector": {
+        "kind": "regex",
+        "pattern": "\\bconst\\s+[A-Z]\\w*\\s*=\\s*<",
+        "flags": ""
+      },
+      "legacyMarker": {
+        "name": "component-const",
+        "order": 3,
+        "pattern": "\\bconst\\s+[A-Z]\\w*\\s*=\\s*<",
+        "flags": ""
+      }
+    },
+    {
+      "id": "engine-element",
+      "tier": "SOFT",
+      "old": "`<engine for=T …>`",
+      "new": "`<t:T=.X single>` (§66.13)",
+      "codes": [
+        "W-ENGINE-ELEMENT-DEPRECATED",
+        "E-ENGINE-ELEMENT-DEPRECATED"
+      ],
+      "spec": "§66.21 row 4",
+      "ruling": "SPEC §66.21",
+      "detector": {
+        "kind": "regex",
+        "pattern": "<engine\\b",
+        "flags": ""
+      },
+      "legacyMarker": {
+        "name": "engine-element",
+        "order": 4,
+        "pattern": "<engine\\b",
+        "flags": ""
+      }
+    },
+    {
+      "id": "no-program-root",
+      "tier": "SOFT",
+      "old": "an entry file with no `<program>` root",
+      "new": "a `<program>` root (§66.19)",
+      "codes": [
+        "E-PROGRAM-MISSING"
+      ],
+      "spec": "§66.19, §4.12",
+      "ruling": "SPEC §66.19 (bootstrap-conformance legacy marker)",
+      "detector": null,
+      "legacyMarker": {
+        "name": "no-program-root",
+        "order": 5,
+        "pattern": "^(?![\\s\\S]*<program\\b)",
+        "flags": ""
+      },
+      "note": "A whole-file property, not a form an example spells: bootstrap-conformance only (detector null — not linted)."
+    },
+    {
+      "id": "spaced-state-opener",
+      "tier": "SOFT",
+      "old": "`< profile …>` (space after `<`)",
+      "new": "`<profile …>`",
+      "codes": [
+        "W-WHITESPACE-001",
+        "E-WHITESPACE-001"
+      ],
+      "spec": "§4.2, §4.3, §15.15.5",
+      "ruling": "SPEC §15.15.5 (W-WHITESPACE-001)",
+      "detector": {
+        "kind": "regex",
+        "pattern": "^[ \\t]*<[ \\t]+[A-Za-z_]\\w*",
+        "flags": "m"
+      },
+      "legacyMarker": {
+        "name": "spaced-state-opener",
+        "order": 6,
+        "pattern": "^[ \\t]*<[ \\t]+[A-Za-z_]\\w*",
+        "flags": "m",
+        "noFixRule": true
+      }
+    },
+    {
+      "id": "inline-typed-state-opener",
+      "tier": "SOFT",
+      "old": "`<session { f: T }`",
+      "new": "a struct type + a typed declaration",
+      "codes": [],
+      "spec": "§4.2, §4.3",
+      "ruling": "SPEC §4.2/§4.3 (S478 triage C7, fork F2)",
+      "detector": {
+        "kind": "regex",
+        "pattern": "^[ \\t]*<[A-Za-z_]\\w*[ \\t]*\\{",
+        "flags": "m"
+      },
+      "legacyMarker": {
+        "name": "inline-typed-state-opener",
+        "order": 7,
+        "pattern": "^[ \\t]*<[A-Za-z_]\\w*[ \\t]*\\{",
+        "flags": "m",
+        "noFixRule": true
+      }
+    },
+    {
+      "id": "const-at",
+      "tier": "SOFT",
+      "old": "`const @x = expr`",
+      "new": "`<x=(expr)/>`",
+      "codes": [
+        "W-CONST-AT-DEPRECATED",
+        "E-CONST-AT-DEPRECATED"
+      ],
+      "spec": "§6.6.1, §66.21",
+      "ruling": "scrml-support/user-voice-scrml.md S482 \"⭐ RULED — every retirement / deprecation PR adds a retired-forms ledger row and migrates\" (confirmed audit R4: the fix-it is `<x=(expr)/>`, not the deprecated `const <x>`)",
+      "detector": {
+        "kind": "regex",
+        "pattern": "\\bconst\\s+@[A-Za-z_]",
+        "flags": ""
+      }
+    },
+    {
+      "id": "match-arrow-arm",
+      "tier": "SOFT",
+      "old": "a match arm `.V => …` / `.V -> …`",
+      "new": "`.V :> …`",
+      "codes": [
+        "W-MATCH-ARROW-LEGACY",
+        "E-MATCH-ARROW-LEGACY"
+      ],
+      "spec": "§18.2, §63",
+      "ruling": "SPEC §18.2 (S452 \"multiple syntaxs in logic dosnt work for me. yes, cononical version.\")",
+      "detector": {
+        "kind": "regex",
+        "pattern": "^[ \\t]*(?:\\.[A-Z]\\w*|else|_|not)(?:\\s*\\([^()\\n]*\\))?\\s*(?:=>|->)",
+        "flags": "m"
+      }
+    },
+    {
+      "id": "arm-pipe",
+      "tier": "SOFT",
+      "old": "a `|`-led arm `| .V :> …`",
+      "new": "`.V :> …`",
+      "codes": [
+        "W-ARM-PIPE-LEGACY",
+        "E-ARM-PIPE-LEGACY"
+      ],
+      "spec": "§19.4.5, §51.0.S.2.3, §63.5",
+      "ruling": "SPEC §19.4.5 (S452)",
+      "detector": {
+        "kind": "regex",
+        "pattern": "^[ \\t]*\\|\\s*(?:\\.[A-Z]|_\\s|else\\b|not\\b)",
+        "flags": "m"
+      }
+    },
+    {
+      "id": "on-mount",
+      "tier": "SOFT",
+      "old": "`on mount { … }`",
+      "new": "`<onMount>`",
+      "codes": [
+        "W-ON-MOUNT-DEPRECATED",
+        "E-ON-MOUNT-DEPRECATED"
+      ],
+      "spec": "§6.7.1a, §63",
+      "ruling": "scrml-support/user-voice-scrml.md S449",
+      "detector": {
+        "kind": "regex",
+        "pattern": "\\bon\\s+mount\\s*\\{",
+        "flags": ""
+      }
+    },
+    {
+      "id": "when-changes",
+      "tier": "SOFT",
+      "old": "`when @x changes { … }`",
+      "new": "`<effect deps=[@x]>`",
+      "codes": [
+        "W-WHEN-EFFECT-DEPRECATED",
+        "E-WHEN-EFFECT-DEPRECATED"
+      ],
+      "spec": "§6.7.4, §63",
+      "ruling": "scrml-support/user-voice-scrml.md S447",
+      "detector": {
+        "kind": "regex",
+        "pattern": "\\bwhen\\b[^\\n{]*\\bchanges\\s*\\{",
+        "flags": ""
+      }
+    },
+    {
+      "id": "pure-modifier",
+      "tier": "SOFT",
+      "old": "`pure fn` / `pure function`",
+      "new": "`fn`",
+      "codes": [
+        "W-PURE-DEPRECATED",
+        "E-PURE-DEPRECATED"
+      ],
+      "spec": "§33, §48.11",
+      "ruling": "SPEC §48.11",
+      "detector": {
+        "kind": "regex",
+        "pattern": "\\bpure\\s+(?:fn|function)\\b",
+        "flags": ""
+      }
+    },
+    {
+      "id": "is-some",
+      "tier": "SOFT",
+      "old": "`x is some`",
+      "new": "`x is given`",
+      "codes": [
+        "W-IS-SOME-DEPRECATED",
+        "E-IS-SOME-DEPRECATED"
+      ],
+      "spec": "§42.2.2a, §55.1, §63.7",
+      "ruling": "SPEC §42.2.2a",
+      "detector": {
+        "kind": "regex",
+        "pattern": "\\bis\\s+some\\b",
+        "flags": ""
+      }
+    },
+    {
+      "id": "given-presence",
+      "tier": "SOFT",
+      "old": "`given x :> { … }`",
+      "new": "`if (x is given) { … }`",
+      "codes": [
+        "W-GIVEN-PRESENCE-DEPRECATED",
+        "E-GIVEN-PRESENCE-DEPRECATED"
+      ],
+      "spec": "§42.2.3, §63.7",
+      "ruling": "SPEC §42.2.3",
+      "detector": {
+        "kind": "regex",
+        "pattern": "\\bgiven\\s+[A-Za-z_][\\w]*(?:\\s*,\\s*[A-Za-z_]\\w*)*\\s*:>",
+        "flags": ""
+      }
+    },
+    {
+      "id": "given-arrow",
+      "tier": "SOFT",
+      "old": "`given x => { … }`",
+      "new": "`given x :> { … }` (itself given-presence)",
+      "codes": [
+        "W-GIVEN-ARROW-LEGACY",
+        "E-GIVEN-ARROW-LEGACY"
+      ],
+      "spec": "§42.2.3",
+      "ruling": "SPEC §42.2.3",
+      "detector": {
+        "kind": "regex",
+        "pattern": "\\bgiven\\s+[A-Za-z_][\\w]*(?:\\s*,\\s*[A-Za-z_]\\w*)*\\s*=>",
+        "flags": ""
+      }
+    },
+    {
+      "id": "server-function",
+      "tier": "SOFT",
+      "old": "`server function f()`",
+      "new": "`function f()` (placement is inferred, §12.2)",
+      "codes": [
+        "W-DEPRECATED-SERVER-MODIFIER",
+        "E-DEPRECATED-SERVER-MODIFIER"
+      ],
+      "spec": "§12.2, §52.10",
+      "ruling": "SPEC §12.2 (server-keyword-eliminate-2026-06-10)",
+      "detector": {
+        "kind": "regex",
+        "pattern": "\\bserver\\s+(?:function|fn)\\b",
+        "flags": ""
+      }
+    },
+    {
+      "id": "type-name-synonym",
+      "tier": "SOFT",
+      "old": "`boolean` / `integer` in type position",
+      "new": "`bool` / `int`",
+      "codes": [
+        "W-TYPE-NAME-DEPRECATED",
+        "E-TYPE-NAME-DEPRECATED"
+      ],
+      "spec": "§14.13.6, §63.7",
+      "ruling": "scrml-support/user-voice-scrml.md S469 (`int` / `bool` spellings)",
+      "detector": {
+        "kind": "regex",
+        "pattern": ":\\s*(?:boolean|integer)\\b",
+        "flags": ""
+      }
+    },
+    {
+      "id": "lifecycle-arrow",
+      "tier": "SOFT",
+      "old": "lifecycle `(.A -> .B)`",
+      "new": "`(.A to .B)`",
+      "codes": [
+        "W-LIFECYCLE-LEGACY-ARROW",
+        "E-LIFECYCLE-LEGACY-ARROW"
+      ],
+      "spec": "§14.12.5",
+      "ruling": "SPEC §14.12.5",
+      "detector": {
+        "kind": "regex",
+        "pattern": "\\(\\s*\\.?[A-Z]\\w*\\s*->\\s*\\.?[A-Z]\\w*\\s*\\)",
+        "flags": ""
+      }
+    },
+    {
+      "id": "to-enum",
+      "tier": "SOFT",
+      "old": "`E.toEnum(s)`",
+      "new": "`E.parse(s)`",
+      "codes": [
+        "W-TOENUM-DEPRECATED",
+        "E-TOENUM-DEPRECATED"
+      ],
+      "spec": "§14.4.1, §63.7",
+      "ruling": "SPEC §14.4.1",
+      "detector": {
+        "kind": "regex",
+        "pattern": "\\.toEnum\\s*\\(",
+        "flags": ""
+      }
+    },
+    {
+      "id": "variant-colons",
+      "tier": "SOFT",
+      "old": "`Type::Variant`",
+      "new": "`Type.Variant`",
+      "codes": [
+        "W-VARIANT-COLONS-LEGACY"
+      ],
+      "spec": "§14 (the \"VALID ALIAS\" sentence, superseded), §63",
+      "ruling": "scrml-support/user-voice-scrml.md S482 \"⭐ RULED — `::` variant access is deprecated (§63 window: warning + `scrml fix` to `.`)\"",
+      "retired": "S482",
+      "detector": {
+        "kind": "regex",
+        "pattern": "\\b[A-Z]\\w*::[A-Z]\\w*",
+        "flags": ""
+      },
+      "note": "The deprecation BUILD (W-VARIANT-COLONS-LEGACY + the `scrml fix` rule) is a later lane; this row records the starting count, which may only go down."
+    },
+    {
+      "id": "colon-shorthand-after",
+      "tier": "SOFT",
+      "old": "`<Variant rule=…> : expr`",
+      "new": "`<Variant rule=… : expr>`",
+      "codes": [
+        "W-COLON-SHORTHAND-LEGACY-PLACEMENT",
+        "E-COLON-SHORTHAND-LEGACY-PLACEMENT"
+      ],
+      "spec": "§4.14, §51.0.I, §18.0.1",
+      "ruling": "SPEC §4.14",
+      "detector": {
+        "kind": "regex",
+        "pattern": "<[A-Z]\\w*\\b[^<>\\n]*>[ \\t]*:[ \\t]",
+        "flags": ""
+      }
+    },
+    {
+      "id": "positional-struct",
+      "tier": "SOFT",
+      "old": "`<x>: T = (a, b, c)`",
+      "new": "a by-name struct value",
+      "codes": [
+        "W-POSITIONAL-STRUCT-DEPRECATED",
+        "E-POSITIONAL-STRUCT-DEPRECATED"
+      ],
+      "spec": "§66.21",
+      "ruling": "SPEC §66.21",
+      "detector": null,
+      "note": "Not linted (indistinguishable from a parenthesized expression by text)."
+    },
+    {
+      "id": "theme-body",
+      "tier": "SOFT",
+      "old": "`<theme>` `name = value;` body",
+      "new": "token declarations (§66.17)",
+      "codes": [
+        "W-THEME-BODY-DEPRECATED",
+        "E-THEME-BODY-DEPRECATED"
+      ],
+      "spec": "§66.21, §66.17",
+      "ruling": "SPEC §66.21",
+      "detector": null,
+      "note": "Not linted (needs `<theme>` body context)."
+    }
+  ]
+}
