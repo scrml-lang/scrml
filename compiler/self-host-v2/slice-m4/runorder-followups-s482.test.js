@@ -62,37 +62,40 @@ const LOG = `\${
 // =============================================================================
 describe("E — a place inside an RCDATA element prints no anchor there (#2041 r2 LOW-1)", () => {
   test("t1: `<textarea>${ const … }</textarea>` — the textarea's template content is empty; the place still runs", async () => {
+    // s482-value-no-write: an initializer there is a value position and may not write (`note` wrote `log`)
     const src = `<program>
 ${LOG}
-<textarea id="t">\${ const a: int = note("a"); }</textarea><p id="r">\${log}</p>
+<textarea id="t">\${ const a: int = 2; }</textarea><p id="r">\${a}</p>
 </program>
 `;
     const res = await compile(src);
     expect(programTemplate(res.client.html)).toContain('<textarea id="t"></textarea>');
-    expect(await texts(src, ["r"])).toEqual(["a"]);
+    expect(await texts(src, ["r"])).toEqual(["2"]);
   }, 120000);
 
   test("t5: `<title>Hello${ const … }</title>` — the title text is only `Hello`", async () => {
+    // s482-value-no-write: an initializer there is a value position and may not write (`note` wrote `log`)
     const src = `<program>
 ${LOG}
-<title>Hello\${ const a: int = note("a"); }</title>
-<p id="r">\${log}</p>
+<title>Hello\${ const a: int = 2; }</title>
+<p id="r">\${a}</p>
 </program>
 `;
     const res = await compile(src);
     expect(res.client.html).not.toMatch(/<title>[^<]*<!--/);
-    expect(await texts(src, ["r"])).toEqual(["a"]);
+    expect(await texts(src, ["r"])).toEqual(["2"]);
   }, 120000);
 
   test("a textarea nested in an element: the place inside it runs before the place after it", async () => {
+    // s482-value-no-write: an initializer there is a value position and may not write (`note` wrote `log`)
     const src = `<program>
 ${LOG}
-<div id="w"><textarea id="t">\${ const a: int = note("a"); }</textarea>\${ const b: int = note("b"); }</div><p id="r">\${log}</p>
+<div id="w"><textarea id="t">\${ const a: int = 2; }</textarea>\${ const b: int = a + 1; }</div><p id="r">\${b}</p>
 </program>
 `;
     const res = await compile(src);
     expect(programTemplate(res.client.html)).toContain('<textarea id="t"></textarea>');
-    expect(await texts(src, ["r"])).toEqual(["ab"]);
+    expect(await texts(src, ["r"])).toEqual(["3"]);
   }, 120000);
 });
 
@@ -443,17 +446,21 @@ describe("C — an acting initializer inside if= / slot content is refused, nami
 }
 let <f:boolean=true/>`;
   test("inside an `if=` element", async () => {
+    // s482 (lane s482-value-no-write; ruling:user-voice-scrml.md-S482-runorder-model-c A1): the writer is a value
+    // position (§6.15) — refused where it writes, E-VALUE-WRITES-STATE; ~~E-FILE-SCOPE-INIT-IN-CONSTRUCT~~ at the reader
     const res = await result(`<program>
 ${LOGF}
 <p if=(@f)>\${ const a: int = note("a"); }</p>
 </program>
 `);
     const d = res.diagnostics.filter((x) => x.severity === "error");
-    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(d.map((x) => x.code)).toEqual(["E-VALUE-WRITES-STATE"]);
     expect(d[0].message).toContain("`if=` element");
   }, 120000);
 
   test("deeper inside an `else` member", async () => {
+    // s482 (lane s482-value-no-write; ruling:user-voice-scrml.md-S482-runorder-model-c A1): the writer is a value
+    // position (§6.15) — refused where it writes, E-VALUE-WRITES-STATE; ~~E-FILE-SCOPE-INIT-IN-CONSTRUCT~~ at the reader
     const res = await result(`<program>
 ${LOGF}
 <p if=(@f)>yes</p>
@@ -461,11 +468,13 @@ ${LOGF}
 </program>
 `);
     const d = res.diagnostics.filter((x) => x.severity === "error");
-    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(d.map((x) => x.code)).toEqual(["E-VALUE-WRITES-STATE"]);
     expect(d[0].message).toContain("`else` element");
   }, 120000);
 
   test("in the slot content of a component nested in another's slot content", async () => {
+    // s482 (lane s482-value-no-write; ruling:user-voice-scrml.md-S482-runorder-model-c A1): the writer is a value
+    // position (§6.15) — refused where it writes, E-VALUE-WRITES-STATE; ~~E-FILE-SCOPE-INIT-IN-CONSTRUCT~~ at the reader
     const res = await result(`<card t:string="x">
 </> renders <div>\${t}<slot/></div>
 <program>
@@ -474,7 +483,7 @@ ${LOGF}
 </program>
 `);
     const d = res.diagnostics.filter((x) => x.severity === "error");
-    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(d.map((x) => x.code)).toEqual(["E-VALUE-WRITES-STATE"]);
     expect(d[0].message).toContain("slot content of `<card>`");
   }, 120000);
 
@@ -521,72 +530,86 @@ let <ph:Ph=.Ready/>`;
     return res.diagnostics.filter((x) => x.severity === "error");
   }
   test("a non-binder arm that is not shown (the review's c-match-idle)", async () => {
+    // s482 (lane s482-value-no-write; ruling:user-voice-scrml.md-S482-runorder-model-c A1): the writer is a value
+    // position (§6.15) — refused where it writes, E-VALUE-WRITES-STATE; ~~E-FILE-SCOPE-INIT-IN-CONSTRUCT~~ at the reader
     const d = await refusal(`<match for=Ph on=@ph>
   <Idle><div><p>\${ const a: int = note("a"); }</p></div></>
   <Ready><p>ready</p></>
   <Done(n)><p>done</p></>
 </match>`);
-    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(d.map((x) => x.code)).toEqual(["E-VALUE-WRITES-STATE"]);
     expect(d[0].message).toContain("the `<Idle>` arm of `<match for=Ph>`");
   }, 120000);
 
   test("deeper, in the arm that is shown, a `let`", async () => {
+    // s482 (lane s482-value-no-write; ruling:user-voice-scrml.md-S482-runorder-model-c A1): the writer is a value
+    // position (§6.15) — refused where it writes, E-VALUE-WRITES-STATE; ~~E-FILE-SCOPE-INIT-IN-CONSTRUCT~~ at the reader
     const d = await refusal(`<match for=Ph on=@ph>
   <Idle><p>idle</p></>
   <Ready><section><div><span>\${ let a: int = note("a") + 1; }</span></div></section></>
   <Done(n)><p>done</p></>
 </match>`);
-    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(d.map((x) => x.code)).toEqual(["E-VALUE-WRITES-STATE"]);
     expect(d[0].message).toContain("the `<Ready>` arm of `<match for=Ph>`");
   }, 120000);
 
   test("the wildcard arm, and a `<match>` with no `for=`", async () => {
+    // s482 (lane s482-value-no-write; ruling:user-voice-scrml.md-S482-runorder-model-c A1): the writer is a value
+    // position (§6.15) — refused where it writes, E-VALUE-WRITES-STATE; ~~E-FILE-SCOPE-INIT-IN-CONSTRUCT~~ at the reader
     const d = await refusal(`<match on=@ph>
   <Ready><p>ready</p></>
   <_><div>\${ const a: int = note("a"); }</div></>
 </match>`);
-    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(d.map((x) => x.code)).toEqual(["E-VALUE-WRITES-STATE"]);
     expect(d[0].message).toContain("the `<_>` arm of `<match>`");
   }, 120000);
 
   test("a binder arm (also refused by the bootstrap for its binders)", async () => {
+    // s482 (lane s482-value-no-write; ruling:user-voice-scrml.md-S482-runorder-model-c A1): the writer is a value
+    // position (§6.15) — refused where it writes, E-VALUE-WRITES-STATE; ~~E-FILE-SCOPE-INIT-IN-CONSTRUCT~~ at the reader
     const d = await refusal(`<match for=Ph on=@ph>
   <Idle><p>idle</p></>
   <Ready><p>ready</p></>
   <Done(n)><p>\${ const a: int = note("a"); }</p></>
 </match>`);
-    expect(d.map((x) => x.code)).toContain("E-FILE-SCOPE-INIT-IN-CONSTRUCT");
-    expect(d.find((x) => x.code === "E-FILE-SCOPE-INIT-IN-CONSTRUCT").message).toContain("the `<Done>` arm of `<match for=Ph>`");
+    expect(d.map((x) => x.code)).toContain("E-VALUE-WRITES-STATE");
+    expect(d.find((x) => x.code === "E-VALUE-WRITES-STATE").message).toContain("the `<Done>` arm of `<match for=Ph>`");
   }, 120000);
 
   test("a `<match>` inside `if=` content: the innermost construct (the arm) is named", async () => {
+    // s482 (lane s482-value-no-write; ruling:user-voice-scrml.md-S482-runorder-model-c A1): the writer is a value
+    // position (§6.15) — refused where it writes, E-VALUE-WRITES-STATE; ~~E-FILE-SCOPE-INIT-IN-CONSTRUCT~~ at the reader
     const d = await refusal(`<div if=(@f)><match for=Ph on=@ph>
   <Idle><p>\${ const a: int = note("a"); }</p></>
   <Ready><p>ready</p></>
   <Done(n)><p>done</p></>
 </match></div>`);
-    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(d.map((x) => x.code)).toEqual(["E-VALUE-WRITES-STATE"]);
     expect(d[0].message).toContain("the `<Idle>` arm of `<match for=Ph>`");
   }, 120000);
 
   test("an `if=` element inside an arm: the `if=` (innermost) is named", async () => {
+    // s482 (lane s482-value-no-write; ruling:user-voice-scrml.md-S482-runorder-model-c A1): the writer is a value
+    // position (§6.15) — refused where it writes, E-VALUE-WRITES-STATE; ~~E-FILE-SCOPE-INIT-IN-CONSTRUCT~~ at the reader
     const d = await refusal(`<match for=Ph on=@ph>
   <Idle><p>idle</p></>
   <Ready><p if=(@f)>\${ const a: int = note("a"); }</p></>
   <Done(n)><p>done</p></>
 </match>`);
-    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(d.map((x) => x.code)).toEqual(["E-VALUE-WRITES-STATE"]);
     expect(d[0].message).toContain("`if=` element");
   }, 120000);
 
   test("an `<each>` row inside an arm (also refused for the row)", async () => {
+    // s482 (lane s482-value-no-write; ruling:user-voice-scrml.md-S482-runorder-model-c A1): the writer is a value
+    // position (§6.15) — refused where it writes, E-VALUE-WRITES-STATE; ~~E-FILE-SCOPE-INIT-IN-CONSTRUCT~~ at the reader
     const d = await refusal(`<match for=Ph on=@ph>
   <Idle><p>idle</p></>
   <Ready><ul><each in=([1, 2])><li>\${ const a: int = note("a"); }</li></each></ul></>
   <Done(n)><p>done</p></>
 </match>`);
-    expect(d.map((x) => x.code)).toContain("E-FILE-SCOPE-INIT-IN-CONSTRUCT");
-    expect(d.find((x) => x.code === "E-FILE-SCOPE-INIT-IN-CONSTRUCT").message).toContain("the `<Ready>` arm of `<match for=Ph>`");
+    expect(d.map((x) => x.code)).toContain("E-VALUE-WRITES-STATE");
+    expect(d.find((x) => x.code === "E-VALUE-WRITES-STATE").message).toContain("the `<Ready>` arm of `<match for=Ph>`");
   }, 120000);
 
   test("legal: an initializer that does not act, inside an arm", async () => {
@@ -672,6 +695,8 @@ ${cell}
   }, 120000);
 
   test("seeds with effects run in source order among the initializers (cell, then component)", async () => {
+    // s482 (lane s482-value-no-write; ruling:user-voice-scrml.md-S482-runorder-model-c A1): a seed is a value
+    // position — one that writes a file-scope `let` (`note` writes `log`) is refused where it writes.
     const src = `<card n:int=0>
     let <m:int=(note("m") + n)/>
 </> renders <span id="cm">\${m}</span>
@@ -689,10 +714,13 @@ let <c:int=(note("c"))/>
 <p id="cv">\${@c}</p>
 </program>
 `;
-    expect(await texts(src, ["r", "cv", "cm"])).toEqual(["acbmz", "1", "2"]);
+    // ~~expect(await texts(src, ["r", "cv", "cm"])).toEqual(["acbmz", "1", "2"]);~~
+    expect([...new Set(await errCodes(src))]).toEqual(["E-VALUE-WRITES-STATE"]);
   }, 120000);
 
   test("a seed read early by a sibling seed runs then, once — not again at its place", async () => {
+    // s482 (lane s482-value-no-write; ruling:user-voice-scrml.md-S482-runorder-model-c A1): a seed is a value
+    // position — one that writes a file-scope `let` (`note` writes `log`) is refused where it writes.
     const src = `<program>
 ${LOG}
 let <a:int=(note("a") + @b)/>
@@ -702,7 +730,8 @@ let <b:int=(note("b"))/>
 <p id="v">\${@a}</p>
 </program>
 `;
-    expect(await texts(src, ["r", "v"])).toEqual(["abx", "14"]);
+    // ~~expect(await texts(src, ["r", "v"])).toEqual(["abx", "14"]);~~
+    expect([...new Set(await errCodes(src))]).toEqual(["E-VALUE-WRITES-STATE"]);
   }, 120000);
 
   test("a component's seed reads the body's value at its mount (before and after a write)", async () => {
@@ -720,6 +749,8 @@ let <b:int=(note("b"))/>
   }, 120000);
 
   test("a write before its place runs the held seed first (every seed runs once)", async () => {
+    // s482 (lane s482-value-no-write; ruling:user-voice-scrml.md-S482-runorder-model-c A1): a seed is a value
+    // position — one that writes a file-scope `let` (`note` writes `log`) is refused where it writes.
     const src = `<program>
 ${LOG}
 \${ @c = 9; }
@@ -728,7 +759,8 @@ let <c:int=(note("c"))/>
 <p id="v">\${@c}</p>
 </program>
 `;
-    expect(await texts(src, ["r", "v"])).toEqual(["c", "9"]);
+    // ~~expect(await texts(src, ["r", "v"])).toEqual(["c", "9"]);~~
+    expect([...new Set(await errCodes(src))]).toEqual(["E-VALUE-WRITES-STATE"]);
   }, 120000);
 
   test("seeds in `<each>` rows are computed when the row mounts (unchanged)", async () => {
@@ -744,20 +776,22 @@ let <c:int=(note("c"))/>
   }, 120000);
 
   test("a held seed does not bring a server-only value into the client", async () => {
+    // s482-value-no-write: the seed no longer writes (a writing seed is refused, A1); it is still held
     const src = `<program db="./app.db">
 ${LOG}
 \${
     const API_KEY: string = "zz-sk-live-123";
     server function keyed(s: string) -> string { return s + API_KEY; }
 }
-let <c:int=(note("c"))/>
-<p id="r">\${log}</p>
+\${ function one(s: string) -> int { return 1; } }
+let <c:int=(one("c"))/>
+<p id="r">\${@c}</p>
 </program>
 `;
     const res = await compile(src);
     expect(res.client.js).not.toContain("zz-sk-live-123");
     expect(res.client.js).toContain("rt.hold(");
-    expect(await texts(src, ["r"])).toEqual(["c"]);
+    expect(await texts(src, ["r"])).toEqual(["1"]);
   }, 120000);
 
   test("a literal seed is not held (nothing can observe where it runs): no hold / seed printed", async () => {

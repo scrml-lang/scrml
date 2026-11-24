@@ -67,49 +67,73 @@ describe("1 — an initializer in `<textarea>` / `<title>` runs just before the 
 `, ["o", "title"])).toEqual(["5", "5"]);
   }, 120000);
 
-  test("an acting initializer first in the element runs in its place (before the element's text)", async () => {
+  // s482 (lane s482-value-no-write; ruling:user-voice-scrml.md-S482-runorder-model-c A1): an initializer in an
+  // element whose content holds no place is a value position, and so is every display / attribute value there:
+  // none may write a file-scope `let`. ~~The refusal of an acting initializer after code in the element~~
+  // (INTERIM g-boot-rcdata-init-after-code-s482) is lifted: a call of a function that writes nothing is legal
+  // anywhere in the element, and a writer is refused where it writes (E-VALUE-WRITES-STATE).
+  test("a calling initializer first in the element runs before the element's text", async () => {
     expect(await values(`<program>
 \${ let n: int = 1; }
-\${ function bump() -> int { n = n + 1; return 7; } }
+\${ function inc(x: int) -> int { return x + 2; } }
 \${ n = 5; }
-<textarea id="o2">\${ const k: int = bump(); }\${k} \${n}</textarea>
+<textarea id="o2">\${ const k: int = inc(n); }\${k} \${n}</textarea>
 <p id="o">\${n}</p>
 </program>
-`, ["o", "o2"])).toEqual(["6", "7 6"]);
+`, ["o", "o2"])).toEqual(["5", "7 5"]);
   }, 120000);
 
-  test("refused: a display inside the element before the initializer writes what it reads", async () => {
+  test("refused at the writer: a writing initializer in the element (~~ran in its place~~)", async () => {
+    const d = await errors(`<program>
+\${ let n: int = 1; }
+\${ function bump() -> int { n = n + 1; return 7; } }
+<textarea id="o2">\${ const k: int = bump(); }\${k}</textarea>
+</program>
+`);
+    expect(d.map((x) => x.code)).toEqual(["E-VALUE-WRITES-STATE"]);
+    expect(d[0].message).toContain("the initializer of `const k`, written inside `<textarea>`");
+  }, 120000);
+
+  test("refused at the writer: a display inside the element writes what the initializer reads", async () => {
     const d = await errors(`<program>
 \${ let n: int = 1; }
 \${ function bump() -> int { n = 5; return 0; } }
 <textarea id="o2">\${bump()}\${ const k: int = n + 0; }\${k}</textarea>
 </program>
 `);
-    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
-    expect(d[0].message).toContain("the initializer of `const k` reads `n`, which the program body writes inside `<textarea>`, before it");
-    expect(d[0].message).toContain("runs just before that element");
+    expect(d.map((x) => x.code)).toEqual(["E-VALUE-WRITES-STATE"]);
+    expect(d[0].message).toContain("the interpolation calls `bump()`, which writes `n`");
   }, 120000);
 
-  test("refused: an acting initializer after a display in the element", async () => {
+  test("legal (INTERIM lifted): a calling initializer after a display in the element", async () => {
+    expect(await values(`<program>
+\${ let n: int = 1; }
+\${ function inc(x: int) -> int { return x + 2; } }
+\${ n = 5; }
+<title>\${n}\${ const k: int = inc(n); }</title>
+<p id="o">\${k}</p>
+</program>
+`, ["o", "title"])).toEqual(["7", "5"]);
+  }, 120000);
+
+  test("legal (INTERIM lifted): a calling initializer after an attribute value of the element", async () => {
+    expect(await values(`<program>
+\${ let n: int = 1; }
+\${ function inc(x: int) -> int { return x + 2; } }
+\${ n = 5; }
+<textarea id="o2" rows=(n + 2)>\${ const k: int = inc(n); }\${k}</textarea>
+</program>
+`, ["o2"])).toEqual(["7"]);
+  }, 120000);
+
+  test("refused at the writer: an attribute value of the element that writes", async () => {
     const d = await errors(`<program>
 \${ let n: int = 1; }
 \${ function bump() -> int { n = n + 1; return 0; } }
-<title>\${n}\${ const k: int = bump(); }</title>
-<p>\${k}</p>
+<textarea rows=(bump() + 2)>\${ const k: int = n + 0; }\${k}</textarea>
 </program>
 `);
-    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
-    expect(d[0].message).toContain("the initializer of `const k` calls `bump`, and it is written inside `<title>` after code there");
-  }, 120000);
-
-  test("refused: an acting initializer after an attribute value of the element", async () => {
-    const d = await errors(`<program>
-\${ let n: int = 1; }
-\${ function bump() -> int { n = n + 1; return 0; } }
-<textarea rows=(n + 2)>\${ const k: int = bump(); }\${k}</textarea>
-</program>
-`);
-    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(d.map((x) => x.code)).toEqual(["E-VALUE-WRITES-STATE"]);
   }, 120000);
 
   test("legal: a display before a non-acting initializer that does not write what it reads", async () => {
@@ -124,14 +148,16 @@ describe("1 — an initializer in `<textarea>` / `<title>` runs just before the 
   test("unchanged: an initializer in a plain element still runs in its place, among its children", async () => {
     expect(await values(`<program>
 \${ let n: int = 1; }
-\${ function bump() -> int { n = 5; return 0; } }
-<div><b id="o2">\${bump()}</b>\${ const k: int = n + 0; }<p id="o">\${k}</p></div>
+\${ function inc(x: int) -> int { return x + 2; } }
+\${ n = 5; }
+<div><b id="o2">\${n}</b>\${ const k: int = inc(n); }<p id="o">\${k}</p></div>
 </program>
-`, ["o2", "o"])).toEqual(["0", "5"]);
+`, ["o2", "o"])).toEqual(["5", "7"]);
   }, 120000);
 
-  // #2082 review HIGH-1 — the `bind:` reads `@s` at the mount, before the initializer: its seed runs there
-  test("refused: a `bind:` of the element names a later cell whose seed writes what the initializer reads (head r0: k = 1; base: 5)", async () => {
+  // #2082 review HIGH-1 — the `bind:` reads `@s` at the mount, before the initializer: its seed runs there.
+  // s482-value-no-write: the seed that writes is refused where it writes.
+  test("refused at the writer: a `bind:` of the element names a later cell whose seed writes", async () => {
     const d = await errors(`<program>
 \${ let n: int = 1; }
 \${ function bumps() -> string { n = 5; return "s"; } }
@@ -139,18 +165,18 @@ describe("1 — an initializer in `<textarea>` / `<title>` runs just before the 
 let <s:string=(bumps())/>
 </program>
 `);
-    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
-    expect(d[0].message).toContain("the initializer of `const k` reads `n`, which the program body writes inside `<textarea>`, before it");
+    expect(d.map((x) => x.code)).toEqual(["E-VALUE-WRITES-STATE"]);
+    expect(d[0].message).toContain("the initializer of `@s` calls `bumps()`");
   }, 120000);
 
-  // #2082 review LOW-1 — a literal attribute value is no code: `rows=3` does not refuse an acting initializer
-  test("legal: an acting initializer after a literal attribute (rows=3) — source order (head r0: refused)", async () => {
+  // #2082 review LOW-1 — a literal attribute value is no code
+  test("legal: a calling initializer after a literal attribute (rows=3) — source order", async () => {
     expect(await values(`<program>
 \${ let n: int = 1; }
-\${ function bump() -> int { n = 5; return 0; } }
-<textarea id="o2" rows=3 hidden=false>\${ const k: int = bump(); }\${n}</textarea>
+\${ function inc(x: int) -> int { return x + 2; } }
+<textarea id="o2" rows=3 hidden=false>\${ const k: int = inc(n); }\${n}</textarea>
 <p id="o">\${k}</p>
 </program>
-`, ["o", "o2"])).toEqual(["0", "5"]);
+`, ["o", "o2"])).toEqual(["3", "1"]);
   }, 120000);
 });

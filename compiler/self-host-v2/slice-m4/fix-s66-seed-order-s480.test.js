@@ -316,8 +316,11 @@ describe("r4 — a moved initializer that writes: the seed must commute with the
     const r = await migrateAndRun(src);
     expect(r.blockers.join("\n")).not.toMatch(SEED_NOTE);
     expect(r.output).toContain("let <d:int=(bump())/>");
-    expect(r.clean).toBe(true);
-    expect(r.text).toBe("5 10");
+    // s482 (lane s482-value-no-write; ruling:user-voice-scrml.md-S482-runorder-model-c A1): a seed that writes a
+    // file-scope `let` is a value position that writes state — the bootstrap refuses the migrated output
+    // (E-VALUE-WRITES-STATE); the migrator (impl#1 tooling, frozen S471) still moves it.
+    // ~~expect(r.clean).toBe(true); expect(r.text).toBe("5 10");~~
+    expect(r.clean).toBe(false);
   }, 120000);
 
   test("a pure-literal moved declaration with a later provably-free binding still moves (and renders impl#1's value)", async () => {

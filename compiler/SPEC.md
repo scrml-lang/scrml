@@ -8186,12 +8186,35 @@ Named here; each §34 row is **Nominal / spec-ahead — not yet emitted; lands w
 > §6.8.4 had to guard case by case (below). **Direction of change (pa-base §8): newly-rejecting.** Measured impl#1
 > corpus impact (a filing aid, not a migration): see `g-impl1-value-writes-state-s449`.
 
+> **Widened (S482): computing a value never writes state.** ruling:user-voice-scrml.md-S482-runorder-model-c —
+> *"yes, adopt (c) with the riders"* — adopting the S482 run-order study's recs: **A1 (PERMANENT)** *"widen §6.15
+> from "reactive cell" to "reactive cell or file-scope `let`" (incl. a part/position of one and a tape edit,
+> directly or through calls, §6.7.4 rules 1–6); a file-scope initializer with no single place (inside
+> `if=`/`else`/slot/`<match>` content, a component body, an RCDATA element) is a value position. Diagnostic
+> E-VALUE-WRITES-STATE naming the position, the `let`, the chain and the fix."* · **A2 (PERMANENT)** *"body-top
+> statements and file-scope initializers at their place on the spine, and load-phase code, remain setup and may
+> write (S481 P1–P3, S479 `tick()`, S480 stand)."* · **A3 (PERMANENT)** *"a derived formula may not read a
+> file-scope `let` that anything other than its own initializer writes — E-DERIVED-READS-UNTRACKED (code name
+> ratified)."* · riders: **(Q5)** *"a runtime `^{}` block inside a construct is a value position and may not
+> write an enclosing `let`; at a spine place and on re-runs it may"*; **(Q13)** *"partial supersession: a
+> locked-field initializer that WRITES is E-VALUE-WRITES-STATE; the derived-iff-reads-a-cell half stands."*
+> **Supersedes in part:** S482-locked-field-derived (the writing case), S482-meta-let-write (inside a construct).
+> **Direction of change: newly-rejecting** (a value position that writes a file-scope `let`; a derived formula
+> over a written `let`) **and newly-accepting** (§7.6 R3: a file-scope initializer inside a construct that calls a
+> function which writes nothing is no longer E-FILE-SCOPE-INIT-IN-CONSTRUCT). Built in the bootstrap by lane
+> s482-value-no-write; impl#1 not changed (S471).
+
 **This is the one home of the rule.** §6.6 (derived cells), §66.9 (initializers), §6.8 (reset values), §7.4.2 and
 §4.18.4 (interpolation) cross-reference it; none restates it.
 
-**The rule.** Evaluating a **value position** SHALL NOT write any reactive cell, directly or through a called
-function. A write found by the analysis below is **E-VALUE-WRITES-STATE**; a value position the analysis cannot
-prove write-free is **E-VALUE-WRITE-UNPROVEN**. Both are compile errors.
+**The rule.** Evaluating a **value position** SHALL NOT write any reactive cell **or any file-scope `let` — the
+binding, a part or a position of it, or a tape edit of it (S482, A1)** — directly or through a called function. A
+write found by the analysis below is **E-VALUE-WRITES-STATE**; a value position the analysis cannot prove
+write-free is **E-VALUE-WRITE-UNPROVEN**. Both are compile errors. *(A plain file-scope `let` is not a reactive
+cell, so before S482 a value position could write one; every S482 run-order review round — #2041, #2053, #2063,
+#2071, #2076, #2079, #2082, #2088 — patched one more such writer case by case, the pattern this section exists
+to end. A value position may run zero, one or many times, early on demand, or again on a reset; a write made there
+has no single moment in the run.)*
 
 **Value positions** — code evaluated to produce a value, not to perform an action:
 
@@ -8208,6 +8231,18 @@ prove write-free is **E-VALUE-WRITE-UNPROVEN**. Both are compile errors.
    `${ for … lift … }` block (§17.4); a `${ … }` inside a display-text literal (§4.18.4); a `renders` body
    (§66.5); and a markup attribute value expression (`class=${…}`, `if=(…)`, `show=`, `value=${…}`, `<each in=…
    key=…>`, `<match on=…>`, …).
+4. **Code with no single place in the body's run (S482, A1 and the Q5 rider)** — a file-scope `let` / `const`
+   initializer written inside the content of an `if=` / `else-if=` / `else` element, a component's slot content, a
+   `<match>` arm, a component's body, or an element whose content holds no place (an RCDATA `<textarea>` /
+   `<title>`, an `<each>` row); and a runtime `^{ }` block (§22.5) written there, or in a component's `renders` or a
+   state-child body. Such code runs zero, one or many times, or out of source order (§7.6 R3), so it computes; it
+   does not set up. *(At its place on the spine a file-scope initializer and a runtime `^{ }` are setup, below.)*
+
+**The Q13 rider (S482).** A locked field's initializer that **writes** — a file-scope `let` or a cell, directly or
+through a call — is E-VALUE-WRITES-STATE: it is an initializer (item 1), whatever §66.9 classifies it as. The
+classification half of S482 Q13 stands: a locked field is derived exactly when its initializer reads a cell, and
+otherwise a constant computed at its place. *(Supersedes in part ruling:user-voice-scrml.md S482-locked-field-
+derived — the writing case, whose motivating `<v:int=(bump())/>` with `bump` writing a `let` is now refused.)*
 
 **Not value positions** (they are action positions, governed elsewhere): an event-handler attribute value
 (`onclick=…`, any `on*=`) and a `bind:` binding; a function body (it is judged where it is CALLED from); the body
@@ -8215,7 +8250,21 @@ of a lifecycle element — `<request>` (whose body assigns its cell by design, �
 `<onMount>` (§6.7.1a), `<timer>` / `<poll>` / `<timeout>`; engine `effect=` and `<onTransition>` (§51.0.H); and a
 statement list at a `<program>` / `<page>` / `<channel>` body top (§40.8 — a `${ … }` written there is
 **evaluated, not rendered**). Whether a `${ … }` is a render expression is decided by the body it sits in: in a
-markup (free-text) body it is one; at a default-logic / code-default body top it is a statement list.
+markup (free-text) body it is one; at a default-logic / code-default body top it is a statement list. **The body
+spine is setup (S482, A2, PERMANENT).** A `<program>` body-top statement, a file-scope `let` / `const` initializer
+at its place on the spine (§7.6 R1 — not inside a construct, item 4), a runtime `^{ }` at a spine place and on its
+re-runs (Q5 rider), and load-phase code (an imported file, code outside `<program>`, §7.6 Load) are not value
+positions: they run once, in order, and MAY write a file-scope `let` — `const unused = bump();` runs (S481 P1), and
+the S479 `tick()` counter stays legal.
+
+**A derived formula does not read untracked state (S482, A3, PERMANENT) — E-DERIVED-READS-UNTRACKED.** A derived
+formula (item 2) SHALL NOT read a file-scope `let` that any code writes, other than that `let`'s own initializer —
+directly, or through a function it calls or hands on as a value, at any depth. A derived value is cached and
+recomputed only when a cell it reads changes (§6.6); a write of a plain `let` marks nothing dirty, so such a
+formula would show a stale value by construction. The message names the formula, the `let` and the chain, and the
+fix: *"make `n` a cell, or compute this value in the handler that writes `n`"*. A `let` that nothing writes is a
+constant in effect, and a formula may read it. *(A display that reads such a `let` — W-DISPLAY-UNTRACKED, the
+study's A5 — is not ruled: INTERIM/optional, to be decided after A1.)*
 
 **What counts as a write, and the analysis — §6.7.4's, unchanged.** The write list (assignment, sequence edit,
 `reset(@x)`, engine write / `.advance`, `<#id>.refetch()`) and the write summary (per function, transitive over the
@@ -8245,7 +8294,19 @@ of `@pageNo`"*, *"the formula of derived `@total`"*, *"the interpolation at line
 - in a derived formula: *"a derived value is computed from other cells and may not change them; derive the other
   value too (§6.6), or move the write into the handler that writes the formula's inputs"*;
 - in a render expression: *"rendering shows state and may not change it; move the write into a handler, or derive
-  the displayed value (§6.6)"*.
+  the displayed value (§6.6)"*;
+- for a file-scope `let` (S482, A1), in any position: *"computing a value never writes state … move the write to a
+  body-top statement or to the handler that should cause it, or make `n` a cell"*.
+
+```scrml
+${ let n: int = 0; }
+${ function tick() -> int { n = n + 1; return n; } }
+${ const first: int = tick(); }        // legal: a spine initializer is setup (A2)
+let <id:int=(tick())/>                 // E-VALUE-WRITES-STATE — the initializer of `@id` writes `n` (tick() → n)
+<div if=(@open)>${ const k: int = tick(); }</div>   // E-VALUE-WRITES-STATE — no single place (item 4)
+<p>${tick()}</p>                       // E-VALUE-WRITES-STATE — the interpolation writes `n`
+<button onclick=tick()>+</button>      // legal: a handler is an action position
+```
 
 ```scrml
 let <count:int=0/>
@@ -28593,9 +28654,13 @@ lexical bindings that are in scope at the `^{}` breakout point.
   block inside a construct is a value position and SHALL NOT write an enclosing `let`
   (ruling:user-voice-scrml.md-S482-runorder-model-c, rider Q5 — *"a runtime `^{}` block inside a
   construct is a value position and may not write an enclosing `let`; at a spine place and on re-runs
-  it may (S482-meta-let-write otherwise stands)"*). ⚑ **INTERIM — not yet built:** the bootstrap does
-  not yet refuse the write inside a construct, and performs it (lane s482-value-no-write, A1, pending;
-  gap g-boot-meta-let-write-in-construct-s482). `meta.bindings` stays the snapshot taken when the run started: its entry for
+  it may (S482-meta-let-write otherwise stands)"*). The write is **E-VALUE-WRITES-STATE** (§6.15 item 4),
+  directly or through a function the block calls; "inside a construct" is §6.15 item 4's list — `if=` /
+  `else-if=` / `else` content, slot content, a `<match>` arm, an element whose content holds no place, a
+  component's `renders` or a state-child body. ~~⚑ **INTERIM — not yet built:** the bootstrap does not yet
+  refuse the write inside a construct, and performs it (lane s482-value-no-write, A1, pending; gap
+  g-boot-meta-let-write-in-construct-s482).~~ *(built S482, lane s482-value-no-write; the gap is resolved.)*
+  `meta.bindings` stays the snapshot taken when the run started: its entry for
   that binding keeps the run's starting value. An enclosing `const` stays unwritable (E-ASSIGN-004,
   §50.9); an `@cell` write follows the cell rules (§22.5.1 `meta.set`).
 

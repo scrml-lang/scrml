@@ -166,8 +166,15 @@ let <c:int=(start)/>
 <p id="c">\${@dd}</p>
 </program>
 `;
-    expect(await texts(e02, ["c"])).toEqual(["101"]);
-    expect(await texts(e03, ["a", "c"])).toEqual(["101", "101"]);
+    // s482 (lane s482-value-no-write; ruling:user-voice-scrml.md-S482-runorder-model-c A3): a derived formula
+    // over a file-scope `let` that code writes is refused — the formula would cache a stale value
+    // ~~expect(await texts(e02, ["c"])).toEqual(["101"]); expect(await texts(e03, ["a", "c"])).toEqual(["101", "101"]);~~
+    for (const src of [e02, e03]) {
+      const file = join(dir, `a3-${n++}.scrml`);
+      writeFileSync(file, src);
+      const res = await compileSource(file);
+      expect(res.diagnostics.filter((d) => d.severity === "error").map((d) => d.code)).toEqual(["E-DERIVED-READS-UNTRACKED"]);
+    }
   }, 120000);
 });
 
@@ -484,7 +491,7 @@ let <flag:boolean=false/>
 <div id="w"><p id="a" if=(@flag)>\${ const a: int = note("a"); }yes</p><p id="y">y\${log}</p></div>
 </program>
 `;
-    expect(await codesOf(src)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(await codesOf(src)).toEqual(["E-VALUE-WRITES-STATE"]);   // s482-value-no-write: a value position (§6.15 item 4) that writes `log`
   }, 120000);
 
   test("inside a component's slot content an acting initializer is refused (S482, was INTERIM: ran after the instance)", async () => {
@@ -495,7 +502,7 @@ ${LOG}
 <div id="w"><card><p id="in">in\${log}</p>\${ const a: int = note("a"); }</card><p id="y">y\${log}</p></div>
 </program>
 `;
-    expect(await codesOf(src)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(await codesOf(src)).toEqual(["E-VALUE-WRITES-STATE"]);   // s482-value-no-write: a value position (§6.15 item 4) that writes `log`
   }, 120000);
 
   test("inside an `if=` element one that does not act runs just after the element (unobservable)", async () => {
