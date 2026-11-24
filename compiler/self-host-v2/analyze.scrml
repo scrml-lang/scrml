@@ -22282,18 +22282,55 @@ ${
         return false;
     }
 
+    // s482 #2098 r1 (review LOW-3): the failure's enum as it is written here. A declared enum (a
+    // `!` callee's failure type) is named by its spelling in this file (`AuthErr`, an alias `A`,
+    // `m.AuthErr`) and where it is declared; a minted set or a built-in by its hint. `bound`: that
+    // spelling denotes the failure's enum in this file (a qualifier can be written with it).
+    type FSpell:struct = { text: string, shown: string, bound: boolean, declared: boolean }
+
+    fn failSpellHere(env: Env, err: Sym) -> FSpell {
+        const sp: TSpell = typeSpellHere(env, err);
+        const b: Sym | not = typeNamedHere(env, sp.shown);
+        let bound = false;
+        if (b is given) bound = b.id == err.id;
+        return { text: "`" + sp.shown + "`" + sp.where, shown: sp.shown, bound: bound, declared: sp.where != "" };
+    }
+
+    // A qualifier that names no enum declaring the variant (`Q.V`, §18.13), on a failable subject.
+    fn notDeclaresMsg(env: Env, pn: PatName, err: Sym) -> string {
+        const fs: FSpell = failSpellHere(env, err);
+        const qs: Sym | not = typeNamedHere(env, pn.qual);
+        if (qs is not) return "`" + pn.qual + "." + pn.name + "` names `" + pn.qual + "`, but no type `" + pn.qual + "` is in scope here — the failure here is " + fs.text + ": " + failQualAdvice(fs, pn.name) + " (§18.13)";
+        return "`" + pn.qual + "." + pn.name + "` — `" + pn.qual + "` is not an enum that declares `" + pn.name + "` (the failure here is " + fs.text + "; " + failQualAdvice(fs, pn.name) + ", §18.13)";
+    }
+
+    fn failQualAdvice(fs: FSpell, v: string) -> string {
+        if (fs.bound) return "qualify with `" + fs.shown + "` (`" + fs.shown + "." + v + "`), or write `." + v + "`";
+        return "write `." + v + "`; no name in scope here denotes that enum";
+    }
+
     fn foreignQualMsg(env: Env, pn: PatName, err: Sym, own: Sym | not) -> string {
-        const head: string = "`" + pn.qual + "." + pn.name + "` names `" + pn.qual + "`, but the failure here is ";
+        const qs: Sym | not = typeNamedHere(env, pn.qual);
+        let qw: string = "";
+        if (qs is given && qs.hint == err.hint) qw = typeSpellHere(env, qs).where;   // two enums of one name: say where each is
+        const head: string = "`" + pn.qual + "." + pn.name + "` names `" + pn.qual + "`" + qw + ", but the failure here is ";
+        const fs: FSpell = failSpellHere(env, err);
+        // a declared failure type (a `!` callee's): named as it is written here — never the wire's
+        // `Transport`, which only a minted client set carries
+        if (fs.declared || fs.bound) {
+            let two: string = "";
+            if (qs is given && qs.hint == err.hint) two = " — two different enums named `" + err.hint + "`";
+            if (two == "") two = " —";
+            else two = two + ":";
+            return head + fs.text + two + " " + failQualAdvice(fs, pn.name) + " (§18.13)";
+        }
         // a minted client set has no name a program can write
-        const named: Sym | not = typeNamedHere(env, err.hint);
-        let minted = true;
-        if (named is given) minted = named.id != err.id;
-        if (!minted) return head + "`" + err.hint + "` — write `" + err.hint + "." + pn.name + "` or `." + pn.name + "` (§18.13)";
         const noName: string = ", and no declared enum names `Transport` there — write `.Transport(_)` (or `.Transport(t)` to read the failure; §18.13, §19.9.10)";
         if (own is given) {
-            const set: string = "`" + own.hint + "` plus the wire's `Transport`";
+            const os: FSpell = failSpellHere(env, own);
+            const set: string = os.text + " plus the wire's `Transport`";
             if (pn.name == "Transport") return head + set + noName;
-            return head + set + " — write `" + own.hint + "." + pn.name + "` or `." + pn.name + "` (§18.13, §19.9.10)";
+            return head + set + " — " + failQualAdvice(os, pn.name) + " (§18.13, §19.9.10)";
         }
         return head + "the wire's `Transport` (the callee is not declared `!`)" + noName;
     }
@@ -22411,6 +22448,38 @@ ${
 
     fn rparm(idx: int, key: string, env: Env, st: AS) -> RPArm { return { idx: idx, key: key, env: env, st: st, alts: [], keys: [] }; }
 
+    // s482-rulings-records-fu (#2092 r1 review LOW-1 / LOW-2): how the type `sym` is written in
+    // `env.file` (`shown`: its own name, an import alias `Q`, or `m.T` through a namespace import —
+    // the first scope entry that binds it) and where it is declared (`where`: " (declared in this
+    // file at line N)" / " (declared in `file`)", "" for a built-in; `decl` the same without the
+    // declared name an alias hides). For a message only.
+    type TSpell:struct = { shown: string, where: string, decl: string }
+
+    fn typeSpellHere(env: Env, sym: Sym) -> TSpell {
+        for (const s of env.g.te.stubs) {
+            if (s.sym.id == sym.id) {
+                if (s.file == builtinFile()) return { shown: s.name, where: "", decl: "" };
+                if (s.file == env.file) {
+                    const here: string = " (declared in this file at line " + lineOf(env.g, s.file, s.src.span.start) + ")";
+                    return { shown: s.name, where: here, decl: here };
+                }
+                let shown: string = "";
+                for (const fs of env.g.te.link.scopes) {
+                    if (fs.file == env.file) {
+                        for (const n of fs.names) {
+                            if (shown == "" && n.kind == NameKind.KType && n.from == s.file && n.orig == s.name) shown = n.name;
+                        }
+                    }
+                }
+                if (shown == "") shown = s.name;
+                let named: string = "";
+                if (shown != s.name && !shown.endsWith("." + s.name)) named = "`" + s.name + "` ";
+                return { shown: shown, where: " (" + named + "declared in `" + s.file + "`)", decl: " (declared in `" + s.file + "`)" };
+            }
+        }
+        return { shown: sym.hint, where: "", decl: "" };
+    }
+
     // One arm's pattern: its FArm index, its literal key, the env its body is
     // resolved in (payload binders bound, §18.7).
     fn plainArm(env: Env, a: AArm, sk: PSubj, vs: VariantDef[], st0: AS) -> RPArm {
@@ -22435,10 +22504,27 @@ ${
                 // s482 r1 (#2092 review LOW-3): a qualifier that names no type here (an import
                 // alias renamed it: `import { T as Q }`, then `T.V`) says so, rather than "names
                 // `T`, but the subject is `T`".
+                // s482-rulings-records-fu (#2092 r1 review LOW-1 / LOW-2): when the qualifier and the
+                // subject are two DIFFERENT enums that share a name (a local `T` and `m.T`, or `Q` and
+                // a local `T`), each is named as it is written here and where it is declared, and the
+                // subject's spelling here (`m.T` through a namespace import, `Q` through an alias) is
+                // the one to qualify with. The rejection is unchanged — only the message.
                 if (!same) {
                     if (qs is not) {
-                        const alias: string = es.hint == pn.qual ? " — the subject's enum `" + es.hint + "` is in scope under another name (an import alias): qualify with that name, or write `." + pn.name + "`" : "; the subject is `" + es.hint + "`";
+                        let alias: string = "; the subject is `" + es.hint + "`";
+                        if (es.hint == pn.qual) {
+                            const sp: TSpell = typeSpellHere(env, es);
+                            if (sp.shown != pn.qual) {
+                                alias = " — the subject's enum `" + es.hint + "`" + sp.decl + " is in scope here as `" + sp.shown + "`: qualify with that name (`" + sp.shown + "." + pn.name + "`), or write `." + pn.name + "`";
+                            } else {
+                                alias = " — the subject's enum `" + es.hint + "` is in scope under another name: qualify with that name, or write `." + pn.name + "`";
+                            }
+                        }
                         st = addDiag(st, env.file, a.span, "E-TYPE-VARIANT", "`" + pn.qual + "." + pn.name + "` names `" + pn.qual + "`, but no type `" + pn.qual + "` is in scope here" + alias + " (§18.13)");
+                    } else if (qs.hint == es.hint) {
+                        const qsp: TSpell = typeSpellHere(env, qs);
+                        const esp: TSpell = typeSpellHere(env, es);
+                        st = addDiag(st, env.file, a.span, "E-TYPE-VARIANT", "`" + pn.qual + "." + pn.name + "` names `" + pn.qual + "`" + qsp.where + ", but the subject's type is `" + esp.shown + "`" + esp.where + " — two different enums named `" + es.hint + "`: qualify with `" + esp.shown + "`, or write `." + pn.name + "` (§18.13)");
                     } else {
                         st = addDiag(st, env.file, a.span, "E-TYPE-VARIANT", "`" + pn.qual + "." + pn.name + "` names `" + pn.qual + "`, but the subject is `" + es.hint + "` (§18.13)");
                     }
@@ -23290,7 +23376,7 @@ ${
             const i: int = variantIndex(env.g.types, err, pn.name);
             // s469 — a qualified `E.V` (§18.13): `E` must name an enum that declares `V`
             if (pn.qual != "" && i >= 0 && !qualNames(env, pn.qual, pn.name)) {
-                st = addDiag(st, env.file, a.span, "E-TYPE-VARIANT", "`" + pn.qual + "." + pn.name + "` — `" + pn.qual + "` is not an enum that declares `" + pn.name + "` (the failure here is `" + err.hint + "`, §18.13)");
+                st = addDiag(st, env.file, a.span, "E-TYPE-VARIANT", notDeclaresMsg(env, pn, err));
             } else if (pn.qual != "" && i >= 0 && !qualIsFailure(env, pn.qual, err, own)) {
                 st = addDiag(st, env.file, a.span, "E-TYPE-VARIANT", foreignQualMsg(env, pn, err, own));
             }
@@ -23370,7 +23456,7 @@ ${
         }
         const i: int = variantIndex(env.g.types, err, pn.name);
         if (pn.qual != "" && i >= 0 && !qualNames(env, pn.qual, pn.name)) {
-            st = addDiag(st, env.file, a.span, "E-TYPE-VARIANT", "`" + pn.qual + "." + pn.name + "` — `" + pn.qual + "` is not an enum that declares `" + pn.name + "` (the failure here is `" + err.hint + "`, §18.13)");
+            st = addDiag(st, env.file, a.span, "E-TYPE-VARIANT", notDeclaresMsg(env, pn, err));
         } else if (pn.qual != "" && i >= 0 && !qualIsFailure(env, pn.qual, err, own)) {
             st = addDiag(st, env.file, a.span, "E-TYPE-VARIANT", foreignQualMsg(env, pn, err, own));
         }

@@ -266,7 +266,9 @@ describe("`x is T.V` — accepted when `T` is the left operand's enum (ruling S4
     expect(res.ok).toBe(false);
     const es = res.diagnostics.filter((d) => d.severity === "error");
     expect(es.map((d) => d.code)).toEqual(["E-TYPE-VARIANT"]);
-    expect(es[0].message).toContain("no type `T` is in scope here — the subject's enum `T` is in scope under another name (an import alias)");
+    // s482-rulings-records-fu (#2092 r1 review LOW-2): the message names the spelling to qualify with
+    expect(es[0].message).toContain("no type `T` is in scope here — the subject's enum `T` (declared in `");
+    expect(es[0].message).toContain("is in scope here as `Q`: qualify with that name (`Q.Str`), or write `.Str` (§18.13)");
   }, 180000);
   test("the values run: the qualified test answers as the bare one does", async () => {
     const src = `<program>
@@ -283,6 +285,101 @@ describe("`x is T.V` — accepted when `T` is the left operand's enum (ruling S4
 `;
     expect(await run(src, ["a", "b", "c", "d"])).toEqual(["true", "false", "true", "false"]);
   }, 180000);
+});
+
+// s482-rulings-records-fu (#2092 r1 review LOW-1 / LOW-2 / LOW-3): messages only — every program below
+// was refused before and is refused now with the same code. Red on base f58e2a503: LOW-1 read "`T.Str`
+// names `T`, but the subject is `T` (§18.13)"; LOW-2 "… under another name (an import alias) …" for a
+// namespace import; LOW-3 gave the `for`-operand hint to `return of./2;`, where there is no loop.
+describe("qualifier messages name each enum's spelling and declaration (#2092 r1 review LOW-1/2/3)", () => {
+  const M = "${\n    export type T:enum = { Str, Num }\n    export type U:enum = { Str, Num }\n}\n";
+  const N = "${\n    export type T:enum = { Str, Num }\n}\n";
+  const two = (decls) => frontEnd(mods, [{ path: "m.scrml", src: M }, { path: "n.scrml", src: N }, { path: "s.scrml", src: prog(decls) }]).diags
+    .filter((d) => d.severity === "Error").map((d) => d.code + ": " + d.message);
+  const only = (decls, short = false) => {
+    const es = two(decls);
+    expect(es.length).toBe(1);
+    expect(es[0]).toStartWith("E-TYPE-VARIANT: ");
+    if (!short) expect(es[0]).not.toContain("but the subject is `T`");
+    return es[0];
+  };
+  test("LOW-1: a local `T` and `m.T` — both directions, an `is` test and a match arm", () => {
+    const local = "    type T:enum = { Str, Num }\n";
+    let e = only(`    import * as m from "./m.scrml";\n` + local + `    fn a(t: m.T) -> boolean { return t is T.Str; }`);
+    expect(e).toContain("`T.Str` names `T` (declared in this file at line 4), but the subject's type is `m.T` (declared in `m.scrml`) — two different enums named `T`: qualify with `m.T`, or write `.Str` (§18.13)");
+    e = only(`    import * as m from "./m.scrml";\n` + local + `    fn a(t: T) -> boolean { return t is m.T.Str; }`);
+    expect(e).toContain("`m.T.Str` names `m.T` (declared in `m.scrml`), but the subject's type is `T` (declared in this file at line 4) — two different enums named `T`");
+    e = only(`    import * as m from "./m.scrml";\n` + local + `    fn a(t: m.T) -> string { return match t { T.Str :> "s", else :> "n" }; }`);
+    expect(e).toContain("but the subject's type is `m.T` (declared in `m.scrml`) — two different enums named `T`: qualify with `m.T`");
+  });
+  test("LOW-1: an import alias `Q` and a local `T`; two modules' `T`", () => {
+    let e = only(`    import { T as Q } from "./m.scrml";\n    type T:enum = { Str, Num }\n    fn a(t: Q) -> boolean { return t is T.Str; }`);
+    expect(e).toContain("but the subject's type is `Q` (`T` declared in `m.scrml`) — two different enums named `T`: qualify with `Q`, or write `.Str` (§18.13)");
+    e = only(`    import * as m from "./m.scrml";\n    import * as n from "./n.scrml";\n    fn a(t: m.T) -> boolean { return t is n.T.Str; }`);
+    expect(e).toContain("`n.T.Str` names `n.T` (declared in `n.scrml`), but the subject's type is `m.T` (declared in `m.scrml`)");
+  });
+  test("LOW-1: enums of different names keep the short message", () => {
+    const e = only(`    import * as m from "./m.scrml";\n    type T:enum = { Str, Num }\n    fn a(t: T) -> boolean { return t is m.U.Str; }`, true);
+    expect(e).toContain("`m.U.Str` names `m.U`, but the subject is `T` (§18.13)");
+  });
+  test("LOW-2: under a namespace import the message names `m.T`, not an import alias", () => {
+    const e = only(`    import * as m from "./m.scrml";\n    fn a(t: m.T) -> boolean { return t is T.Str; }`);
+    expect(e).toContain("no type `T` is in scope here — the subject's enum `T` (declared in `m.scrml`) is in scope here as `m.T`: qualify with that name (`m.T.Str`), or write `.Str` (§18.13)");
+    expect(e).not.toContain("import alias");
+  });
+  test("LOW-3: the `of` hint only in a `for` head", () => {
+    const outside = errorsOf(prog(`    fn f(x: number) -> number { const of: number = x; return of./2; }`));
+    expect(outside.some((e) => e.startsWith("E-PARSE-EXPR: "))).toBe(true);
+    expect(outside.some((e) => e.includes("touching `of`"))).toBe(false);
+    const inHead = errorsOf(prog(`    fn f(o: int[]) -> int { for (const x of.items) { } return 1; }`));
+    expect(inHead.some((e) => e.startsWith("E-PARSE-EXPR: ") && e.includes("touching `of` reads the name `of`"))).toBe(true);
+  });
+});
+
+// s482 #2098 r1 (review LOW-3 / INFO-1): on a failable subject, a qualifier that is not the failure's
+// enum names the failure's DECLARED enum as it is written here (`m.AuthErr`, an alias `A`, or no name)
+// and where it is declared — never "the wire's `Transport`" (only a minted client set carries that),
+// never "`AuthErr` is not an enum … (the failure here is `AuthErr`)". The rejection is unchanged.
+// Red on 9fc78dc90: f1/f4/f5 said "the failure here is the wire's `Transport` (the callee is not
+// declared `!`)"; f2 "`AuthErr` is not an enum that declares `Denied` (the failure here is `AuthErr`)";
+// the counted head r6 got the `of` loop-operand hint.
+describe("failable qualifier messages name the declared failure enum (#2098 r1 review LOW-3)", () => {
+  const FM = "${\n    export type AuthErr:enum = { Denied, Locked }\n    export function check(p: string)! AuthErr {\n        if (p == \"locked\") fail AuthErr.Locked;\n        if (p != \"secret\") fail AuthErr.Denied;\n        return true;\n    }\n}\n";
+  const one = (decls) => {
+    const es = frontEnd(mods, [{ path: "fm.scrml", src: FM }, { path: "s.scrml", src: prog(decls) }]).diags
+      .filter((d) => d.severity === "Error").map((d) => d.code + ": " + d.message);
+    expect(es.length).toBe(1);
+    expect(es[0]).toStartWith("E-TYPE-VARIANT: ");
+    expect(es[0]).not.toContain("Transport");
+    return es[0];
+  };
+  const login = (call, arm) => `    function login() -> string { return match ${call}("wrong") { ${arm} :> "d", .Locked :> "l", else :> "in" }; }`;
+  test("f5: a named import of `check` only, a local `Other` — the failure's enum is in scope by no name", () => {
+    const e = one(`    import { check } from "./fm.scrml";\n    type Other:enum = { Denied }\n` + login("check", "Other.Denied"));
+    expect(e).toContain("`Other.Denied` names `Other`, but the failure here is `AuthErr` (declared in `fm.scrml`) — write `.Denied`; no name in scope here denotes that enum (§18.13)");
+  });
+  test("f1: `import * as m` and a local `AuthErr` — qualify with `m.AuthErr`", () => {
+    const e = one(`    import * as m from "./fm.scrml";\n    type AuthErr:enum = { Denied, Locked }\n` + login("m.check", "AuthErr.Denied"));
+    expect(e).toContain("`AuthErr.Denied` names `AuthErr` (declared in this file at line 4), but the failure here is `m.AuthErr` (declared in `fm.scrml`) — two different enums named `AuthErr`: qualify with `m.AuthErr` (`m.AuthErr.Denied`), or write `.Denied` (§18.13)");
+  });
+  test("f4: an import alias `A` and a local `AuthErr` — qualify with `A`", () => {
+    const e = one(`    import { check, AuthErr as A } from "./fm.scrml";\n    type AuthErr:enum = { Denied, Locked }\n` + login("check", "AuthErr.Denied"));
+    expect(e).toContain("but the failure here is `A` (`AuthErr` declared in `fm.scrml`) — two different enums named `AuthErr`: qualify with `A` (`A.Denied`), or write `.Denied` (§18.13)");
+  });
+  test("f2: `import * as m`, `AuthErr.Denied` with no local `AuthErr` — not self-contradictory", () => {
+    const e = one(`    import * as m from "./fm.scrml";\n` + login("m.check", "AuthErr.Denied"));
+    expect(e).toContain("`AuthErr.Denied` names `AuthErr`, but no type `AuthErr` is in scope here — the failure here is `m.AuthErr` (declared in `fm.scrml`): qualify with `m.AuthErr` (`m.AuthErr.Denied`), or write `.Denied` (§18.13)");
+    expect(e).not.toContain("(the failure here is `AuthErr`");
+  });
+  test("f3: the namespace spelling is accepted", () => {
+    expect(frontEnd(mods, [{ path: "fm.scrml", src: FM }, { path: "s.scrml", src: prog(`    import * as m from "./fm.scrml";\n` + login("m.check", "m.AuthErr.Denied")) }]).diags
+      .filter((d) => d.severity === "Error")).toEqual([]);
+  });
+  test("INFO-1 (r6): no `of` operand hint in a counted head", () => {
+    const es = errorsOf(prog(`    fn f() -> int { const of: number = 1; for (let i = of.; i < 2; i = i + 1) { } return 1; }`));
+    expect(es.some((e) => e.startsWith("E-PARSE-EXPR: "))).toBe(true);
+    expect(es.some((e) => e.includes("touching `of`"))).toBe(false);
+  });
 });
 
 describe("every self-host file parses to its end", () => {
