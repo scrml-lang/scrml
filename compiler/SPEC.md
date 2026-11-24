@@ -28312,9 +28312,9 @@ Given a call `reflect(expr)` inside a `^{}` block:
    (e.g., `reflect("User")`), the compiler SHALL resolve it at compile time and inline the
    type entry. This is the compile-time path.
 2. If `expr` is a variable reference (a `let`, `const`, `lin`, or `@var` binding), the
-   compiler SHALL emit `meta.types.reflect(expr)` in the compiled output and include all
-   types that are in scope at the breakout point in the runtime type registry. This is the
-   runtime path.
+   compiler SHALL emit `meta.types.reflect(expr)` in the compiled output and include in the
+   runtime type registry the types in scope at the breakout point that the CLIENT side uses
+   (S482, below), and the primitive type names. This is the runtime path.
 3. If `expr` is any other expression (property access, function call, ternary, template
    literal, etc.), the compiler SHALL treat it as a runtime path expression (strategy 2).
 4. A `reflect(expr)` call that appears outside any `^{}` block SHALL be a compile error
@@ -28353,6 +28353,49 @@ Given a call `reflect(expr)` inside a `^{}` block:
   compile error (E-META-003: reflect() called on unknown type).
 - `reflect(variable)` where `variable` could hold an unknown type name at runtime SHALL
   return `not` (the scrml absence value, §42) at runtime. The runtime path SHALL NOT throw.
+- **The registry holds only client-used types (S482).** The runtime type registry of a strategy-2 /
+  strategy-3 lookup SHALL hold only the types the client side of the program uses, and the primitive
+  type names. A type is client-used when client code names it: a value of it is built or matched
+  there, a field of it is read or written there, it is the type of a cell or field, of a client
+  function's parameter, return type or error enum, or the written type of a local in client code
+  (`let xs: T[] = …`), it is in the signature (parameters, return type, error enum) of a server
+  function the client calls, or a type-literal `reflect(T)` / `meta.types.reflect("T")` in a
+  runtime block names it — and, transitively, a type reached through the struct fields and enum
+  payloads of a client-used type. Client use is decided per TYPE, not per name: two files that each
+  declare a type of one name declare two types. A registry entry is the type its name means in the
+  file of the breakout point: that file's own declaration of the name, else the declaration its
+  `import` of the name binds — the file the import names (re-exports followed) and the name that
+  file exports, never another file's type of the same name. The entry's name is the name in scope
+  in that file: under `import { Config as C } from "./lib.scrml"` the entry is named `C`, a computed
+  `reflect` of `"C"` finds it, and a computed `reflect` of `"Config"` there returns `not` (unless that
+  file also has a `Config` of its own). A name that is neither declared nor imported as a type in
+  that file has no entry. The entry is in the registry only when that one type is client-used — a
+  server-only `Config` in one file is left out even when another file's `Config` is client-used, and
+  a type-literal `reflect(Config)` makes client-used only the type `Config` means where it is
+  written. A type reached only from
+  server code (a server function, a function only server code reaches, a server-only binding), only
+  from `<db>` / `?{}` queries, or from no code at all, SHALL NOT be in the registry: its name, field
+  names and field types are not in the client bundle, and a computed `reflect` of its name returns
+  `not`. Client code is the code the client artifact runs (§12.2: a function nothing reaches is not
+  client code, Trigger 6). A struct field of a client-used type that names a type otherwise used only
+  by server code keeps that type in the registry: the client already holds values of it.
+
+  > **Provenance:** ruling:user-voice-scrml.md-S482-registry-client-types (S482 "⭐ RULED — the runtime
+  > type registry holds only client-used types": *"yes, client-used types only"*; the rec as presented:
+  > *"amend §22.4.2 so that the strategy-2 registry holds only the types the client side uses. A type
+  > reached only from server code, or only from `<db>` / `?{}` queries, is left out"* — a computed reflect
+  > of such a name gives `not`). Raised by the #2080 review MED-1 (gap g-boot-meta-reflect-registry-scope-s482):
+  > `type Secret:struct = { passwordHash, apiKey }` used only by a `server fn` shipped both field names
+  > in the client JS. **Direction of change:** newly-returning-`not` for a computed lookup of a type
+  > the client does not use (before: the registry held every type in scope); no program is newly
+  > rejected. **impl#1 status:** impl#1 puts every in-scope type into every runtime block's registry;
+  > it is frozen (S471) — a carried divergence. The bootstrap builds this rule (s482-registry-client:
+  > print.scrml `clientRegistryIds`, over the client half #2061's reach decides; r1, #2093 review
+  > HIGH-1 / LOW-1: by type identity, lower.scrml `reflectIds`, and client return types and local
+  > annotations count; r2, #2093 r1 re-review HIGH-1 / MED-1 / LOW-1: an imported name is resolved
+  > through its own import, alias-aware — analyze.scrml `typeScopes`, the resolver every type use
+  > goes through, read by meta.scrml `envOf` and lower.scrml `entryTypeIds` — so each entry is
+  > exactly one type; g-boot-meta-reflect-import-identity-s482 resolved).
 - `meta.types.reflect()` remains available as a lower-level escape hatch for programmers
   who need to explicitly force runtime dispatch. It is not the canonical form.
 
@@ -28526,8 +28569,8 @@ always pass all four arguments.
 > **Bootstrap status (S482, s482-meta-phase3).** `reflect(…)` and `meta.types.reflect(…)` in a runtime block
 > are built (§22.4.2 / §22.5.4; ruling:user-voice-scrml.md-S481-meta-four items 1 and 3). A type literal
 > (a type name, or a string naming a type) is looked up in a registry of that type alone. Any other argument
-> is looked up in a registry of every type in scope at the block, the five primitive names included, as
-> compile-time `reflect` resolves them. A literal lookup is typed `TypeInfo`. Any other lookup is typed
+> is looked up in a registry of the types in scope at the block that the client uses (§22.4.2, S482), the
+> five primitive names included, as compile-time `reflect` resolves them. A literal lookup is typed `TypeInfo`. Any other lookup is typed
 > `TypeInfo | not`, so its members are read after a presence test. `meta.subscribe("x", f)` is built with a
 > literal cell name (ruling item 2). `f` takes no parameter or one, the cell's new value, typed as the cell.
 > The runtime calls it, in a batch, on each change of the cell after the subscription. The subscription
@@ -28554,10 +28597,10 @@ always pass all four arguments.
 > (`globalThis.__scrml_max_meta_runs` overrides). Past that limit it logs the cycle and skips the run. A
 > re-run of a block first delivers each change still queued for its subscriptions, then ends them. So
 > whether a `meta.get` comes before or after a `meta.subscribe` of the same cell does not decide whether
-> the callback runs. The strategy-2 registry holds every type in scope at the block. That includes types
-> that only server code uses, so their names and field names ship in the client bundle (impl#1 ships
-> more). This is INTERIM under an open owner question; the rec is that the registry holds only the types
-> the client half uses (g-boot-meta-reflect-registry-scope-s482).
+> the callback runs. ~~The strategy-2 registry holds every type in scope at the block … INTERIM under an
+> open owner question~~ *(resolved S482 — ruling:user-voice-scrml.md-S482-registry-client-types; the
+> registry holds only the types the client uses, §22.4.2 "The registry holds only client-used types";
+> g-boot-meta-reflect-registry-scope-s482 resolved by s482-registry-client.)*
 >
 > ⚑ **INTERIM — bootstrap status (S482, s482-effect-host).** The bootstrap refuses a runtime block whose BODY
 > (not a callback; those are judged above) reaches an unproven host-backed function (§21.3.1) — directly,
@@ -28738,7 +28781,10 @@ A `lin` variable (§35) is consumed exactly once. Capturing a `lin` variable in 
 #### 22.5.4 Runtime Type Registry
 
 The compiler SHALL emit type registry data as the fourth argument to `_scrml_meta_effect` for
-all types that are in scope at any runtime `^{}` breakout point.
+the types in scope at a runtime `^{}` breakout point that the client side uses, and the primitive
+type names (§22.4.2 "The registry holds only client-used types", S482 —
+ruling:user-voice-scrml.md-S482-registry-client-types; before S482: all types in scope). A name the
+registry does not hold SHALL return `not`, as an unknown name does.
 
 **Emitted JavaScript shape of `typeRegistry`:**
 

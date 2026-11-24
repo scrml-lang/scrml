@@ -412,6 +412,7 @@ ${
             tool: not,
             endpoints: [],
             channels: [],
+            typed: [],
         };
     }
 

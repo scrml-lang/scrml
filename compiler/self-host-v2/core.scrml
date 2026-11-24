@@ -1226,7 +1226,15 @@ ${
         endpoints: CoreEndpoint[],
         // s478 (s478-boot-channel) — §38: the program's `<channel>`s (CoreChannel).
         channels: CoreChannel[],
+        // s482 r1 (s482-registry-client; #2093 review LOW-1) — the WRITTEN types the body of
+        // Core does not carry: a local's annotation (`let xs: Item[] = …`, by the local's Sym)
+        // and a function's declared return type (`-> T`, by the function's Sym). Read only by
+        // print.scrml clientRegistryIds (§22.4.2: a type the client names is client-used).
+        typed: TypeNote[],
     }
+
+    // s482 r1 — one written type (CoreProgram.typed)
+    export type TypeNote:struct = { sym: Sym, ty: Type }
 
     // s478 (s478-boot-channel) — one §38 `<channel>`: `name` (§38.3: "Sets WS URL:
     // `/_scrml_ws/<name>`"), its static `topic` (§38.3: "Defaults to `name`"), the
