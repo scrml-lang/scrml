@@ -336,6 +336,52 @@ describe("qualifier messages name each enum's spelling and declaration (#2092 r1
   });
 });
 
+// s482 #2098 r1 (review LOW-3 / INFO-1): on a failable subject, a qualifier that is not the failure's
+// enum names the failure's DECLARED enum as it is written here (`m.AuthErr`, an alias `A`, or no name)
+// and where it is declared — never "the wire's `Transport`" (only a minted client set carries that),
+// never "`AuthErr` is not an enum … (the failure here is `AuthErr`)". The rejection is unchanged.
+// Red on 9fc78dc90: f1/f4/f5 said "the failure here is the wire's `Transport` (the callee is not
+// declared `!`)"; f2 "`AuthErr` is not an enum that declares `Denied` (the failure here is `AuthErr`)";
+// the counted head r6 got the `of` loop-operand hint.
+describe("failable qualifier messages name the declared failure enum (#2098 r1 review LOW-3)", () => {
+  const FM = "${\n    export type AuthErr:enum = { Denied, Locked }\n    export function check(p: string)! AuthErr {\n        if (p == \"locked\") fail AuthErr.Locked;\n        if (p != \"secret\") fail AuthErr.Denied;\n        return true;\n    }\n}\n";
+  const one = (decls) => {
+    const es = frontEnd(mods, [{ path: "fm.scrml", src: FM }, { path: "s.scrml", src: prog(decls) }]).diags
+      .filter((d) => d.severity === "Error").map((d) => d.code + ": " + d.message);
+    expect(es.length).toBe(1);
+    expect(es[0]).toStartWith("E-TYPE-VARIANT: ");
+    expect(es[0]).not.toContain("Transport");
+    return es[0];
+  };
+  const login = (call, arm) => `    function login() -> string { return match ${call}("wrong") { ${arm} :> "d", .Locked :> "l", else :> "in" }; }`;
+  test("f5: a named import of `check` only, a local `Other` — the failure's enum is in scope by no name", () => {
+    const e = one(`    import { check } from "./fm.scrml";\n    type Other:enum = { Denied }\n` + login("check", "Other.Denied"));
+    expect(e).toContain("`Other.Denied` names `Other`, but the failure here is `AuthErr` (declared in `fm.scrml`) — write `.Denied`; no name in scope here denotes that enum (§18.13)");
+  });
+  test("f1: `import * as m` and a local `AuthErr` — qualify with `m.AuthErr`", () => {
+    const e = one(`    import * as m from "./fm.scrml";\n    type AuthErr:enum = { Denied, Locked }\n` + login("m.check", "AuthErr.Denied"));
+    expect(e).toContain("`AuthErr.Denied` names `AuthErr` (declared in this file at line 4), but the failure here is `m.AuthErr` (declared in `fm.scrml`) — two different enums named `AuthErr`: qualify with `m.AuthErr` (`m.AuthErr.Denied`), or write `.Denied` (§18.13)");
+  });
+  test("f4: an import alias `A` and a local `AuthErr` — qualify with `A`", () => {
+    const e = one(`    import { check, AuthErr as A } from "./fm.scrml";\n    type AuthErr:enum = { Denied, Locked }\n` + login("check", "AuthErr.Denied"));
+    expect(e).toContain("but the failure here is `A` (`AuthErr` declared in `fm.scrml`) — two different enums named `AuthErr`: qualify with `A` (`A.Denied`), or write `.Denied` (§18.13)");
+  });
+  test("f2: `import * as m`, `AuthErr.Denied` with no local `AuthErr` — not self-contradictory", () => {
+    const e = one(`    import * as m from "./fm.scrml";\n` + login("m.check", "AuthErr.Denied"));
+    expect(e).toContain("`AuthErr.Denied` names `AuthErr`, but no type `AuthErr` is in scope here — the failure here is `m.AuthErr` (declared in `fm.scrml`): qualify with `m.AuthErr` (`m.AuthErr.Denied`), or write `.Denied` (§18.13)");
+    expect(e).not.toContain("(the failure here is `AuthErr`");
+  });
+  test("f3: the namespace spelling is accepted", () => {
+    expect(frontEnd(mods, [{ path: "fm.scrml", src: FM }, { path: "s.scrml", src: prog(`    import * as m from "./fm.scrml";\n` + login("m.check", "m.AuthErr.Denied")) }]).diags
+      .filter((d) => d.severity === "Error")).toEqual([]);
+  });
+  test("INFO-1 (r6): no `of` operand hint in a counted head", () => {
+    const es = errorsOf(prog(`    fn f() -> int { const of: number = 1; for (let i = of.; i < 2; i = i + 1) { } return 1; }`));
+    expect(es.some((e) => e.startsWith("E-PARSE-EXPR: "))).toBe(true);
+    expect(es.some((e) => e.includes("touching `of`"))).toBe(false);
+  });
+});
+
 describe("every self-host file parses to its end", () => {
   test("no parse-level code but the named payload-binder / alternation refusals", () => {
     const files = readdirSync(SELF).filter((f) => f.endsWith(".scrml")).sort();

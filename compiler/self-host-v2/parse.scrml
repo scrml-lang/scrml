@@ -405,7 +405,7 @@ ${
 
     // s482-rulings-records-fu (#2092 r1 review LOW-3): does token `at` stand in a `for ( … )`
     // head — is the `(` that encloses it (brackets balanced, no `;` or unmatched `[` / `{` on
-    // the way back) the one right after a `for`? A message gate only.
+    // the way back) the one right after a `for`, with no top-level `;` before its `)` (a counted head has no `of` operand, #2098 r1 INFO-1)? A message gate only.
     fn inForHead(tp: TP, at: int) -> boolean {
         let depth: int = 0;
         let j: int = at - 1;
@@ -417,12 +417,32 @@ ${
                 if (depth == 0) return false;
                 depth = depth - 1;
             } else if (tk(x, "(")) {
-                if (depth == 0) return j > 0 && isNameTok(tp.toks[j - 1]) && tp.toks[j - 1].v == "for";
+                if (depth == 0) return j > 0 && isNameTok(tp.toks[j - 1]) && tp.toks[j - 1].v == "for" && !semiBeforeClose(tp, at);
                 depth = depth - 1;
             } else if (depth == 0 && tk(x, ";")) {
                 return false;
             }
             j = j - 1;
+        }
+        return false;
+    }
+
+    // s482 #2098 r1 (review INFO-1): a top-level `;` between token `at` and the `)` that closes its
+    // enclosing bracket — a counted head (`for (init; cond; step)`), which has no `of` operand.
+    fn semiBeforeClose(tp: TP, at: int) -> boolean {
+        let depth: int = 0;
+        let j: int = at + 1;
+        for (; j < tp.toks.length; ) {
+            const x: PTok = tp.toks[j];
+            if (tk(x, "(") || tk(x, "[") || tk(x, "{")) {
+                depth = depth + 1;
+            } else if (tk(x, ")") || tk(x, "]") || tk(x, "}")) {
+                if (depth == 0) return false;
+                depth = depth - 1;
+            } else if (depth == 0 && tk(x, ";")) {
+                return true;
+            }
+            j = j + 1;
         }
         return false;
     }
