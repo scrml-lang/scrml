@@ -522,6 +522,25 @@ let <ms:int=100/>
 <p id="out">\${@log}</p>`));
     expect(text(r, "#out")).toBe("run1;meta1;run2;meta2;");
   }, 120000);
+
+  // s482-rulings-records — owner ruling S482 (user-voice-scrml.md "RULED — a runtime `^{}` body's write to
+  // an enclosing `let` writes that binding", ruling:user-voice-scrml.md-S482-meta-let-write; SPEC §22.5.2):
+  // the write reaches the binding (impl#1 writes a per-run capture copy, and the write is lost there);
+  // a `const` stays unwritable.
+  test("S482-meta-let-write: a runtime body's write to an enclosing `let` writes that binding", async () => {
+    const r = await ship(P(`let <out:int=0/>
+\${ let n: int = 1; }
+<div>^{ n = n + 4; }</div>
+\${ @out = n; }
+<p id="out">\${@out}</p>`));
+    expect(text(r, "#out")).toBe("5");
+  }, 120000);
+});
+
+describe("S482-meta-let-write — a `const` stays unwritable from a runtime body", () => {
+  test("an assignment to an enclosing `const` is E-ASSIGN-004", () => {
+    expect(errs(run(P(`\${ const k: int = 1; }\n<div>^{ k = 2; }</div>\n<p>\${k}</p>`)))).toEqual(["E-ASSIGN-004"]);
+  });
 });
 
 // ---------------------------------------------------------------------------

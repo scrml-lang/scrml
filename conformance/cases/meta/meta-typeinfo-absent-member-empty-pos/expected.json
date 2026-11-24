@@ -1,0 +1,25 @@
+{
+  "id": "meta-typeinfo-absent-member-empty-pos",
+  "description": "§22.5.4 (S482) — a `reflect()` entry carries all four `TypeInfo` members; the one its kind does not carry is the empty list. `reflect(Color).fields` on an enum is `[]`, so `.fields.length` is 0 and the compile-time block compiles clean (never a TypeError on an absent member).",
+  "language-version": "1.0",
+  "spec": "§22.5.4, §22.4.2",
+  "source-test": "compiler/self-host-v2/slice-m4/meta-phase3-s482.test.js",
+  "provenance": "lane:s482-rulings-records (ruling:user-voice-scrml.md-S482-typeinfo-empty-list; g-impl1-typeinfo-absent-member-s482)",
+  "rationale": "§22.5.4 (S482): \"Every entry SHALL carry all four `TypeInfo` members: `fields` of an entry whose kind is not \\\"struct\\\", and `variants` of an entry whose kind is not \\\"enum\\\", SHALL be the empty list — never absent.\" ruling:user-voice-scrml.md-S482-typeinfo-empty-list — \"an empty list. It keeps the `TypeInfo` type honest … `kind` still says which list is meaningful\".",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-META-"]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-typeinfo-absent-member-s482",
+      "fails": {
+        "codes": [
+          "emitted:E-META-EVAL-001=1",
+          "prefix:E-META-EVAL-001 (matches forbidden E-META-*)"
+        ]
+      }
+    }
+  }
+}
