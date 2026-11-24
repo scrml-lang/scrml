@@ -765,7 +765,7 @@ ${
                 // s480 (s480-boot-cheap-wins): `expr is .V` — the single-variant test (§18.17)
                 r = variantTest(r, start);
             } else if (isQualVariantTest(r.tp)) {
-                // s482-selfhost-parse-residue: `expr is T.V` — refused by name, read as `is .V`
+                // s482-rulings-records: `expr is T.V` — the qualified test (§18.17, S482 ruling)
                 r = qualVariantTest(r, start);
             } else if (isPresenceTest(r.tp)) {
                 // s460: `expr is given` / `expr is not` — a postfix presence
@@ -1152,17 +1152,26 @@ ${
         return peekAt(tp, 1).cls == TC.Variant;
     }
 
-    // s482-selfhost-parse-residue — `expr is T.V`, a QUALIFIED variant after `is`. §18.17's grammar is
-    // `is-expression ::= expression 'is' '.' VariantName` ("The `.VariantName` form is always shorthand
-    // (no type prefix required); the type is inferred from the left-hand operand") — a qualified
-    // `T.V` is not in it (impl#1 accepts it; whether the SPEC should is an owner question,
-    // g-boot-is-qualified-variant-s482). Before this the bootstrap read `x is` as a name `is` and
-    // stopped there: inside an object literal (`{ k: x is T.V }`) the parser then swallowed the rest
-    // of the file. Now it is refused at the `T.V` by name, with the fix-it, and read as the test of
-    // `.V` — so nothing after it cascades.
+    // s482-selfhost-parse-residue — `expr is T.V`, a QUALIFIED variant after `is`. Before that lane the
+    // bootstrap read `x is` as a name `is` and stopped there (inside an object literal, `{ k: x is T.V }`,
+    // the parser then swallowed the rest of the file); that lane refused it by name.
+    // s482-rulings-records — ACCEPTED (owner ruling S482, user-voice-scrml.md "RULED — `x is T.V`
+    // accepted when `T` is the left operand's enum", ruling:user-voice-scrml.md-S482-is-qualified-variant;
+    // SPEC §18.17 `'is' (TypeName)? '.' VariantName`): the test of `.V` with the qualifier kept on the
+    // arm's pattern (`APat.PName(…, qual)`), so analyze judges it as it judges a qualified match arm
+    // (§18.13) — a `T` that is not the left operand's enum is E-TYPE-VARIANT.
+    // s482 r1 (#2092 review LOW-3): `x is m.T.V` — `T` through a namespace import `m`, read as a
+    // qualified match arm reads `m.T.V` (nsHeadAt; the qualifier is `m.T`).
     fn isQualVariantTest(tp: TP) -> boolean {
         if (!isWord(tp, "is")) return false;
         if (tp.i == 0) return false;
+        if (nsHeadAt(tp, 1).n > 0) {
+            const nd: PTok = peekAt(tp, 4);
+            const nv: PTok = peekAt(tp, 5);
+            if (nd.cls != TC.Punct || !tk(nd, ".")) return false;
+            if (nv.cls != TC.Ident && nv.cls != TC.Keyword) return false;
+            return touching(peekAt(tp, 3), nd) && touching(nd, nv);
+        }
         const a: PTok = peekAt(tp, 1);
         const b: PTok = peekAt(tp, 2);
         const c: PTok = peekAt(tp, 3);
@@ -1172,18 +1181,20 @@ ${
     }
 
     fn qualVariantTest(r: RExpr, start: int) -> RExpr {
+        const nh: NsHead = nsHeadAt(r.tp, 1);
+        if (nh.n > 0) return variantTestAt(r, start, peekAt(r.tp, 5), nh.name, adv(adv(adv(adv(adv(adv(r.tp)))))));
         const q: PTok = peekAt(r.tp, 1);
         const vt: PTok = peekAt(r.tp, 3);
-        const d: TP = diagAt(r.tp, "E-PARSE-EXPECTED", "`is` takes a bare variant — write `is ." + vt.v + "`, not `is " + q.v + "." + vt.v + "`: the variant is resolved against the left operand's enum (§18.17: `is-expression ::= expression 'is' '.' VariantName`; \"The `.VariantName` form is always shorthand (no type prefix required); the type is inferred from the left-hand operand\")", q);
-        return variantTestAt(r, start, vt, adv(adv(adv(adv(d)))));
+        return variantTestAt(r, start, vt, q.v, adv(adv(adv(adv(r.tp)))));
     }
 
     fn variantTest(r: RExpr, start: int) -> RExpr {
-        return variantTestAt(r, start, peekAt(r.tp, 1), adv(adv(r.tp)));
+        return variantTestAt(r, start, peekAt(r.tp, 1), "", adv(adv(r.tp)));
     }
 
-    // The test of the variant `vt`, read on from `past` (the token after it).
-    fn variantTestAt(r: RExpr, start: int, vt: PTok, past: TP) -> RExpr {
+    // The test of the variant `vt` (qualified by the type `qual`, "" bare), read on from `past` (the
+    // token after it).
+    fn variantTestAt(r: RExpr, start: int, vt: PTok, qual: string, past: TP) -> RExpr {
         let t: TP = past;
         // s480 r1 (#2028 F4): `x is .V(…)` — §18.17: "The `is` operator SHALL NOT bind or expose
         // payload fields. For payload access, use `match`." The grammar is `expression 'is' '.'
@@ -1198,7 +1209,7 @@ ${
         t = bumpId(t);
         const no: AExpr = { nid: t.nid, span: vspan, k: AExprK.Bool(false) };
         t = bumpId(t);
-        const armV: AArm = { nid: t.nid, span: vspan, pat: APat.PName(vt.v, [], false, ""), body: AArmBody.ArmExpr(yes), legacy: false, lifted: false, bare: false, test: true };
+        const armV: AArm = { nid: t.nid, span: vspan, pat: APat.PName(vt.v, [], false, qual), body: AArmBody.ArmExpr(yes), legacy: false, lifted: false, bare: false, test: true };
         t = bumpId(t);
         const armE: AArm = { nid: t.nid, span: vspan, pat: APat.PWild, body: AArmBody.ArmExpr(no), legacy: false, lifted: false, bare: false, test: true };
         t = bumpId(t);
@@ -2888,7 +2899,15 @@ ${
         if (t.cls == TC.Markup) return parseMarkupValue(tp, false);  // s478: markup as a value (§1.4, §7.4.1)
         if (hashRefAhead(tp)) return mkE(adv(adv(adv(adv(tp)))), start, AExprK.HashRef(peekAt(tp, 2).v));   // s475 (S3b)
         if (isP(tp, "^") && tk(peekAt(tp, 1), "{")) return parseMetaExpr(adv(tp), start, false);   // s481: `^{ … }` (§22.2)
-        const bad: TP = diagAt(tp, "E-PARSE-EXPR", "expected an expression, found `" + t.text + "`", t);
+        // s482 r1 (#2092 review LOW-1): `for (x of.items)` / `for (x of/re/…)` — a `.` or `/`
+        // touching `of` reads the name `of` (§49.2.4, S482-of-adjacency), so the loop operand is
+        // missing; say how to write it.
+        let ofHint = "";
+        if (t.cls == TC.Punct && (tk(t, ".") || tk(t, "/")) && tp.i > 0) {
+            const pv: PTok = peekAt(tp, -1);
+            if (isNameTok(pv) && pv.v == "of" && touching(pv, t)) ofHint = " — a `" + t.text + "` touching `of` reads the name `of` (§49.2.4); for the loop operand, write `of " + t.text + "…` with a space";
+        }
+        const bad: TP = diagAt(tp, "E-PARSE-EXPR", "expected an expression, found `" + t.text + "`" + ofHint, t);
         return mkE(adv(bad), start, AExprK.Recovered);
     }
 
@@ -7249,8 +7268,9 @@ ${
     // and no SPEC sentence reserves it (§7.2). Its keyword reading stands only AFTER a for-binder, so
     // a binding site (`let of = …`, a parameter, `for (const of of xs)` — binderThen reads the binder
     // first) cannot be confused with it. Only the BINDING is admitted: the lexer still reads `of` as
-    // the operator keyword it is in a for-head (a value follows it), so a touching `of.x` / `of/2`
-    // lexes as a bare variant / a regular expression (g-boot-of-name-member-read-s482, an owner question).
+    // the operator keyword it is in a for-head (a value follows it). s482-rulings-records: a touching
+    // `of.x` / `of/2` reads the name by adjacency (lex.scrml dotLastKind; ruling S482-of-adjacency,
+    // g-boot-of-name-member-read-s482 resolved).
     fn isContextualName(w: string) -> boolean {
         return ["from", "server", "as", "pure", "render", "some", "lin", "of"].indexOf(w) >= 0;
     }

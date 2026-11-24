@@ -1,0 +1,7 @@
+<program>
+${ type Color:enum = { Red, Green } }
+^{
+  const info = reflect(Color);
+  emit("<p>" + info.name + (info.fields.length == 0 ? " empty" : " some") + "</p>");
+}
+</program>
