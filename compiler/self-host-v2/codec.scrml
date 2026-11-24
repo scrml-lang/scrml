@@ -121,7 +121,7 @@ ${
     }
 
     // s482 (s482-registry-client) — the named types `t` reaches through struct fields and enum
-    // payloads (the wire closure below), added to `acc`: what print.scrml clientRegistryNames
+    // payloads (the wire closure below), added to `acc`: what print.scrml clientRegistryIds
     // closes the client's types over (§22.4.2 strategy 2, the client-used registry)
     export fn typesReached(p: CoreProgram, t: Type, acc: Sym[]) -> Sym[] { return reach(p, t, acc); }
 

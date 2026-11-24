@@ -45113,7 +45113,7 @@ ${
     fn typesProgram(g: Globals) -> CoreProgram {
         let defs: TypeDef[] = [];
         for (const t of g.types) { defs = defs.concat([t.def]); }
-        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [], loads: [], envelopes: [], head: plainHead(), tool: not, endpoints: [], channels: [] };
+        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [], loads: [], envelopes: [], head: plainHead(), tool: not, endpoints: [], channels: [], typed: [] };
     }
 
     fn storeOf(v: AAttrValue) -> PersistStore | not {

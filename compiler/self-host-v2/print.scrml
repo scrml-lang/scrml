@@ -3943,10 +3943,11 @@ ${
     // whole program per declared field (O(fields × program)). `constructed`: the
     // field of every attribute some View.Instance gives (constructsField);
     // `reinits`: the field of every InitOf (isInitOf). Keys are fieldKey's.
-    // s482 (s482-registry-client): `reg` — the type names the CLIENT half uses
-    // (clientRegistryNames), set by printProgramExposing (withReg); the only types a runtime
-    // `reflect` registry prints (regArgs). Empty elsewhere: no other context prints one.
-    type PrintIx:struct = { constructed: string[], reinits: string[], reg: string[] }
+    // s482 (s482-registry-client): `reg` — the Sym ids of the types the CLIENT half uses
+    // (clientRegistryIds; r1: by identity, never by name), set by printProgramExposing (withReg);
+    // the only types a runtime `reflect` registry prints (regArgs). Empty elsewhere: no other
+    // context prints one.
+    type PrintIx:struct = { constructed: string[], reinits: string[], reg: int[] }
 
     fn fieldKey(d: Sym, idx: int) -> string {
         return d.id + ":" + idx;
@@ -5759,7 +5760,7 @@ ${
         }
         return { program: p.program, decls: ds, types: p.types, fns: p.fns, server: p.server, dbs: p.dbs, reset: p.reset, sqlError: p.sqlError,
                  serverCallError: p.serverCallError, css: p.css, consts: p.consts, loads: p.loads, envelopes: p.envelopes, head: p.head,
-                 tool: p.tool, endpoints: p.endpoints, channels: p.channels };
+                 tool: p.tool, endpoints: p.endpoints, channels: p.channels, typed: p.typed };
     }
 
     // The file-scope bindings code under `roots` reaches when it runs: read directly, read
@@ -6477,10 +6478,10 @@ ${
         for (const f0 of p.fns) { if (!hasInt(serverOnly0, f0.sym.id) && hasInt(liveFns, f0.sym.id)) clientRoots = clientRoots.concat([Node.NFn(f0)]); }
         const cconsts: CoreConst[] = clientConsts(p, clientRoots, serverOnly0, si);
         // s482 (s482-registry-client): the runtime `reflect` registries print only the types this
-        // client code uses (clientRegistryNames, §22.4.2 strategy 2)
+        // client code uses (clientRegistryIds, §22.4.2 strategy 2)
         let regRoots: Node[] = clientRoots;
         for (const k0 of cconsts) { regRoots = regRoots.concat([Node.NExpr(k0.init)]); }
-        const ctx: Ctx = withReg(ctx0, clientRegistryNames(p, regRoots, calledServerFnsWith(p, keep, si)));
+        const ctx: Ctx = withReg(ctx0, clientRegistryIds(p, regRoots, calledServerFnsWith(p, keep, si)));
         body = body.concat(seqConstStmts(ctx, cconsts, plan.seq));
         body = body.concat(requestSlotStmts(ctx, p));          // s475 (S3b)
         const uses: DeclNs[] = declNsUses(p);
@@ -6841,19 +6842,29 @@ ${
     // `reflect` with a type LITERAL (`reflect(T)`, `meta.types.reflect("T")` — client code naming
     // T). Closed transitively through struct fields and enum payloads (codec.scrml
     // typesReached): a client type's field of a server-only type keeps that type (fail-safe — the
-    // client already holds values of it). The five primitive entries are always kept. Matched
-    // by name (a registry entry carries its type's name, the TypeDef's Sym hint).
+    // client already holds values of it). The five primitive entries are always kept.
+    // s482 r1 (#2093 review): matched by the type's IDENTITY, not its name — lower.scrml
+    // reflectIds gives each registry entry the Sym id(s) of the type its name denotes in the
+    // block's file, and an entry is kept only when every one of them is client-used (HIGH-1: a
+    // server-only `Config` in one file no longer ships because another file's `Config` is
+    // client-used). Also USED (LOW-1): a client function's declared return type and a client
+    // local's written annotation (CoreProgram.typed), as a called server function's are.
     // =========================================================================
-    fn clientRegistryNames(p: CoreProgram, roots: Node[], called: ServerFn[]) -> string[] {
+    fn clientRegistryIds(p: CoreProgram, roots: Node[], called: ServerFn[]) -> int[] {
         let seeds: Type[] = [];
-        let lits: string[] = [];
+        let lits: int[] = [];
         let skip: int[] = [];
+        let declared: int[] = [];
         for (const r of roots) {
             for (const n of allNodes(r)) {
                 seeds = seeds.concat(nodeTypes(n));
                 lits = lits.concat(nodeReflectLit(n));
                 skip = skip.concat(nodeEntrySyms(n));
+                declared = declared.concat(nodeDeclared(n));
             }
+        }
+        for (const tn of p.typed) {
+            if (hasInt(declared, tn.sym.id)) seeds = seeds.concat([tn.ty]);
         }
         for (const sf of called) {
             for (const pr of sf.params) { seeds = seeds.concat([pr.ty]); }
@@ -6863,17 +6874,37 @@ ${
         }
         for (const td of p.types) {
             const ts: Sym = typeDefSym(td);
-            if (lits.indexOf(ts.hint) >= 0 && !hasInt(skip, ts.id)) seeds = seeds.concat([Type.Named(ts)]);
+            if (hasInt(lits, ts.id) && !hasInt(skip, ts.id)) seeds = seeds.concat([Type.Named(ts)]);
         }
         let acc: Sym[] = [];
         for (const t of seeds) { acc = typesReachedFn(p, t, acc, skip); }
-        let out: string[] = [];
+        let out: int[] = [];
         for (const s of acc) {
             if (hasInt(skip, s.id)) continue;
             const td: TypeDef | not = findTypeDef(p, s);
-            if (td is given && out.indexOf(s.hint) < 0) out = out.concat([s.hint]);
+            if (td is given && !hasInt(out, s.id)) out = out.concat([s.id]);
         }
         return out;
+    }
+
+    // s482 r1 (#2093 review LOW-1) — the Syms whose WRITTEN type (CoreProgram.typed) one client
+    // node declares: a client function (its return type), a local it binds (its annotation)
+    fn nodeDeclared(n: Node) -> int[] {
+        return match n {
+            .NFn(f: f) :> [f.sym.id],
+            .NStmt(s: s) :> stmtDeclared(s),
+            // no-default-arm: only a function and a binding statement declare a written type
+            _ :> []
+        };
+    }
+
+    fn stmtDeclared(s: Stmt) -> int[] {
+        return match s {
+            .Let(sym: x) :> [x.id],
+            .Suspend(bind: b) :> [b.id],
+            // no-default-arm: one question of a statement — the local it binds
+            _ :> []
+        };
     }
 
     // typesReached, with a function type's parts followed (a client parameter of a function type)
@@ -6920,7 +6951,7 @@ ${
         };
     }
 
-    // the types one client node names (clientRegistryNames)
+    // the types one client node names (clientRegistryIds)
     fn nodeTypes(n: Node) -> Type[] {
         return match n {
             .NExpr(e: e) :> exprTypes(e),
@@ -7000,22 +7031,48 @@ ${
         };
     }
 
-    // a runtime `reflect` with a type LITERAL — `Prim(MetaReflect, [Lit(Str(T)), [the entry of T]])`
-    // (meta.scrml rtReflect) — names T
-    fn nodeReflectLit(n: Node) -> string[] {
+    // a runtime `reflect` with a type LITERAL — `Prim(MetaReflect, [Lit(Str(T)), [the entry of T],
+    // [[T's Sym id]]])` (meta.scrml rtReflect; lower.scrml reflectIds) — names T: the Sym ids of
+    // the type T denotes in the block's file
+    fn nodeReflectLit(n: Node) -> int[] {
         const a: Expr[] = reflectArgs(n);
-        if (a.length != 2) return [];
+        if (a.length != 3) return [];
         const nm: string = strLitExpr(a[0]);
         if (nm == "") return [];
         if (arrayElemsOf(a[1]).length != 1) return [];
-        return [nm];
+        return entryIds(a[2], 0);
+    }
+
+    // entry `i`'s Sym ids, from a runtime `reflect`'s third argument (lower.scrml reflectIds)
+    fn entryIds(ids: Expr, i: int) -> int[] {
+        const per: Expr[] = arrayElemsOf(ids);
+        if (i >= per.length) return [];
+        let out: int[] = [];
+        for (const x of arrayElemsOf(per[i])) { out = out.concat(intLitExpr(x)); }
+        return out;
+    }
+
+    fn intLitExpr(e: Expr) -> int[] {
+        return match e {
+            .Lit(lit: l) :> intOfLit(l),
+            // no-default-arm: one question of an expression — the int literal it is
+            _ :> []
+        };
+    }
+
+    fn intOfLit(l: Literal) -> int[] {
+        return match l {
+            .Int(v: v) :> [v],
+            // no-default-arm: one question of a literal — the int it is
+            _ :> []
+        };
     }
 
     // the registry's own record types (`TypeInfo` for an entry, `FieldInfo` for a field), never a
     // type the client uses
     fn nodeEntrySyms(n: Node) -> int[] {
         const a: Expr[] = reflectArgs(n);
-        if (a.length != 2) return [];
+        if (a.length < 2) return [];
         let out: int[] = [];
         for (const en of arrayElemsOf(a[1])) {
             out = out.concat(structSym(en));
@@ -7084,19 +7141,25 @@ ${
     }
 
     // a runtime `reflect`'s arguments as the client prints them: its registry holds the entries
-    // of the primitive names and of the types the client uses (`ctx.pix.reg`), no other
+    // of the primitive names and of the types the client uses (`ctx.pix.reg`), no other. The
+    // third argument (lower.scrml reflectIds, each entry's type identity) is never printed.
     fn regArgs(ctx: Ctx, op: PrimOp, args: Expr[]) -> Expr[] {
-        if (op != PrimOp.MetaReflect || args.length != 2) return args;
+        if (op != PrimOp.MetaReflect || args.length < 2) return args;
+        let ids: Expr = Expr.ArrayOf([]);
+        if (args.length > 2) ids = args[2];
         let kept: Expr[] = [];
+        let i: int = 0;
         for (const en of arrayElemsOf(args[1])) {
-            if (entryKept(ctx, en)) kept = kept.concat([en]);
+            if (entryKept(ctx, en, entryIds(ids, i))) kept = kept.concat([en]);
+            i = i + 1;
         }
         return [args[0], Expr.ArrayOf(kept)];
     }
 
-    // an entry (meta.scrml entryExpr: a `TypeInfo` StructOf) is kept when it is a primitive's
-    // or its name is one the client uses
-    fn entryKept(ctx: Ctx, en: Expr) -> boolean {
+    // an entry (meta.scrml entryExpr: a `TypeInfo` StructOf) is kept when it is a primitive's,
+    // or when the type(s) its name denotes in the block's file (`ids`, lower.scrml reflectIds)
+    // are all ones the client uses — none given, or one not client-used, drops it (fail closed)
+    fn entryKept(ctx: Ctx, en: Expr, ids: int[]) -> boolean {
         const ty: int[] = structSym(en);
         if (ty.length != 1) return false;
         let kind: string = "";
@@ -7110,10 +7173,12 @@ ${
             i = i + 1;
         }
         if (kind == "primitive") return true;
-        return name != "" && ctx.pix.reg.indexOf(name) >= 0;
+        if (name == "" || ids.length == 0) return false;
+        for (const id of ids) { if (!hasInt(ctx.pix.reg, id)) return false; }
+        return true;
     }
 
-    fn withReg(ctx: Ctx, reg: string[]) -> Ctx {
+    fn withReg(ctx: Ctx, reg: int[]) -> Ctx {
         const ix: PrintIx = { constructed: ctx.pix.constructed, reinits: ctx.pix.reinits, reg: reg };
         return { p: ctx.p, pix: ix, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
                  rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles, ns: ctx.ns, owned: ctx.owned };
@@ -7157,7 +7222,7 @@ ${
     fn withDeclsFns(p: CoreProgram, ds: Decl[], fs: Fn[], lds: DbLoad[]) -> CoreProgram {
         return { program: p.program, decls: ds, types: p.types, fns: fs, server: p.server, dbs: p.dbs, reset: p.reset, sqlError: p.sqlError,
                  serverCallError: p.serverCallError, css: p.css, consts: p.consts, loads: lds, envelopes: p.envelopes, head: p.head,
-                 tool: p.tool, endpoints: p.endpoints, channels: p.channels };
+                 tool: p.tool, endpoints: p.endpoints, channels: p.channels, typed: p.typed };
     }
 
     // The declarations live code can construct, a fixed point from the program and every

@@ -28219,10 +28219,17 @@ Given a call `reflect(expr)` inside a `^{}` block:
   strategy-3 lookup SHALL hold only the types the client side of the program uses, and the primitive
   type names. A type is client-used when client code names it: a value of it is built or matched
   there, a field of it is read or written there, it is the type of a cell or field, of a client
-  function's parameter, or of a client function's error enum, it is in the signature (parameters,
-  return type, error enum) of a server function the client calls, or a type-literal `reflect(T)` /
-  `meta.types.reflect("T")` in a runtime block names it — and, transitively, a type reached
-  through the struct fields and enum payloads of a client-used type. A type reached only from
+  function's parameter, return type or error enum, or the written type of a local in client code
+  (`let xs: T[] = …`), it is in the signature (parameters, return type, error enum) of a server
+  function the client calls, or a type-literal `reflect(T)` / `meta.types.reflect("T")` in a
+  runtime block names it — and, transitively, a type reached through the struct fields and enum
+  payloads of a client-used type. Client use is decided per TYPE, not per name: two files that each
+  declare a type of one name declare two types. A registry entry is the type its name denotes in the
+  file of the breakout point (that file's own declaration, else the type it imports), and it is in
+  the registry only when that type is client-used — a server-only `Config` in one file is left out
+  even when another file's `Config` is client-used. When an imported name is exported by more than
+  one other file of the program, every one of those types SHALL be client-used for the entry to be
+  kept (otherwise it is left out, and a computed `reflect` of the name returns `not`). A type reached only from
   server code (a server function, a function only server code reaches, a server-only binding), only
   from `<db>` / `?{}` queries, or from no code at all, SHALL NOT be in the registry: its name, field
   names and field types are not in the client bundle, and a computed `reflect` of its name returns
@@ -28240,7 +28247,10 @@ Given a call `reflect(expr)` inside a `^{}` block:
   > the client does not use (before: the registry held every type in scope); no program is newly
   > rejected. **impl#1 status:** impl#1 puts every in-scope type into every runtime block's registry;
   > it is frozen (S471) — a carried divergence. The bootstrap builds this rule (s482-registry-client:
-  > print.scrml `clientRegistryNames`, over the client half #2061's reach decides).
+  > print.scrml `clientRegistryIds`, over the client half #2061's reach decides; r1, #2093 review
+  > HIGH-1 / LOW-1: by type identity, lower.scrml `reflectIds`, and client return types and local
+  > annotations count). The several-exporters clause is INTERIM (g-boot-meta-reflect-import-identity-s482:
+  > the capable alternative resolves an imported name through the import's own source file).
 - `meta.types.reflect()` remains available as a lower-level escape hatch for programmers
   who need to explicitly force runtime dispatch. It is not the canonical form.
 

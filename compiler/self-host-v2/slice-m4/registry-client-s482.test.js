@@ -18,6 +18,12 @@
 //      signature types of a server function the client calls are present; a primitive always is.
 //   3. Chromium (SCRML_BROWSER_TESTS=1; SCRML_CHROMIUM names the binary): the same pins in a real
 //      browser, from printProgram's output.
+//   4. r1 (#2093 review): HIGH-1 — decided by the type's IDENTITY, not its name (lower.scrml
+//      reflectIds): a server-only `Config` in main does not ship because lib's `Config` is
+//      client-used (probe L9, red before r1); two same-named types both client-used → present; a
+//      client-used `Config` in main with a server-only one in lib → main's present, lib's fields
+//      absent. LOW-1 — a client function's return type (probe F5) and a client local's written
+//      annotation (probe F2a) are client use (red before r1).
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -58,6 +64,30 @@ const CASES = {
   payload: P(`    type Inner:struct = { innerField: string }\n    type Sh:enum = { A(i: Inner), B }\n    let <s:Sh=.B/>`, SHOW("Inner") + `<p>\${@s == .B}</p>`),
   literal: P(SECRET, `<div id="o">^{ const i = reflect(Secret); meta.emit("<p>" + i.name + "</p>"); }</div>` + CALL),
   primitive: P("", SHOW("string")),
+  // r1 LOW-1
+  retOnly: P(`    type Pt:struct = { x: int, y: int }
+    fn origin() -> Pt | not { return not; }`, SHOW("Pt") + `<p>\${origin() is not}</p>`),
+  localAnnot: P(`    type Item:struct = { label: string }
+    fn cnt() -> int { let xs: Item[] = []; return xs.length; }`, SHOW("Item") + `<p>\${cnt()}</p>`),
+};
+
+// r1 HIGH-1 — two files that each declare `type Config` (main imports lib's function, not its type)
+const LIB_CLIENT = (n) => `\${\n    type Config:struct = { mode: string }\n    export fn libLabel${n}() -> string { const c: Config = { mode: "x" }; return c.mode; }\n}\n`;
+const LIB_SERVER = (n) => `\${\n    type Config:struct = { libSecretZZ: string }\n    server fn libCheck${n}(u: string) -> boolean { const c: Config = { libSecretZZ: "s" }; return c.libSecretZZ == u; }\n    export fn libLabel${n}() -> string { return "y"; }\n}\n`;
+const COLLIDE = {
+  // L9: main's Config is server-only, lib's is client-used
+  serverMain: (n) => P(`    import { libLabel${n} } from "./lib${n}.scrml";
+    type Config:struct = { dbPasswordZZ: string, adminTokenZZ: string }
+    server fn cfg(u: string) -> boolean { const c: Config = { dbPasswordZZ: "p", adminTokenZZ: "t" }; return c.dbPasswordZZ == u; }`,
+    SHOW("Config") + `<p>\${libLabel${n}()}</p><button onclick=\${() => { const ok = cfg("x") !{ .Transport(_) :> false }; }}>b</button>`),
+  // both client-used
+  bothClient: (n) => P(`    import { libLabel${n} } from "./lib${n}.scrml";
+    type Config:struct = { mainMode: string }
+    let <cc:Config=({ mainMode: "m" })/>`, SHOW("Config") + `<p>\${libLabel${n}()}</p><p>\${@cc.mainMode}</p>`),
+  // main's client-used, lib's server-only
+  clientMain: (n) => P(`    import { libLabel${n} } from "./lib${n}.scrml";
+    type Config:struct = { mainMode: string }
+    let <cc:Config=({ mainMode: "m" })/>`, SHOW("Config") + `<p>\${libLabel${n}()}</p><p>\${@cc.mainMode}</p>`),
 };
 
 // ---------------------------------------------------------------------------
@@ -76,6 +106,19 @@ async function compile(src) {
   const res = await compileSource(file);
   if (!res.ok) throw new Error("did not compile: " + res.diagnostics.filter((d) => d.severity === "error").map((d) => d.code + " " + d.message).join("; "));
   return res;
+}
+
+// a main file plus one library file beside it (the library named lib<n>.scrml)
+async function compileWith(main, lib) {
+  const n = seq++;
+  writeFileSync(join(shipDir, `lib${n}.scrml`), lib(n));
+  return compile(main(n));
+}
+
+async function shownRes(res) {
+  const { runBootstrapArtifact } = await import("../../../scripts/bootstrap-conformance.ts");
+  const r = await runBootstrapArtifact(res.client.html, res.client.js, [], {}, [], undefined);
+  return String(r.body.querySelector("#o p")?.textContent ?? "<none>").trim();
 }
 
 async function shown(src) {
@@ -150,6 +193,38 @@ describe("s482-registry-client — computed reflect at run time (happy-dom)", ()
 
   test("a primitive name is always in the registry", async () => {
     expect(await shown(CASES.primitive)).toBe("string:");
+  }, 120000);
+});
+
+describe("s482-registry-client r1 — by type identity, not name (#2093 review HIGH-1)", () => {
+  test("L9: main's server-only Config does not ship because lib's Config is client-used", async () => {
+    const res = await compileWith(COLLIDE.serverMain, LIB_CLIENT);
+    const client = res.client.js + res.client.html;
+    expect(client).not.toContain("dbPasswordZZ");
+    expect(client).not.toContain("adminTokenZZ");
+    expect(await shownRes(res)).toBe("none");
+    expect(String(res.serverJs ?? "")).toContain("dbPasswordZZ");
+  }, 120000);
+
+  test("positive twin: two same-named types, both client-used — the block's file's own is present", async () => {
+    const res = await compileWith(COLLIDE.bothClient, LIB_CLIENT);
+    expect(await shownRes(res)).toBe("Config:mainMode=string;");
+  }, 120000);
+
+  test("main's client-used Config is present although lib's same-named Config is server-only; lib's fields are not", async () => {
+    const res = await compileWith(COLLIDE.clientMain, LIB_SERVER);
+    expect(res.client.js).not.toContain("libSecretZZ");
+    expect(await shownRes(res)).toBe("Config:mainMode=string;");
+  }, 120000);
+});
+
+describe("s482-registry-client r1 — written types count (#2093 review LOW-1)", () => {
+  test("F5: a client function's declared return type is client use", async () => {
+    expect(await shown(CASES.retOnly)).toBe("Pt:x=int;y=int;");
+  }, 120000);
+
+  test("F2a: a client local's written annotation is client use", async () => {
+    expect(await shown(CASES.localAnnot)).toBe("Item:label=string;");
   }, 120000);
 });
 
