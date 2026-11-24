@@ -260,7 +260,14 @@ ${
         // the gated `meta.emit` (§22.12). MetaCleanup(f): a cleanup for this run.
         // MetaInterval / MetaTimeout(ms, f): a timer bound to the block, its id a
         // `string`. MetaClearInterval / MetaClearTimeout(id).
+        // s482 (s482-meta-phase3) — MetaReflect(name, entries): the §22.5.4 runtime type registry
+        // lookup (`reflect(T)` / `meta.types.reflect(…)` in a runtime block, §22.4.2): `entries` an
+        // ArrayOf of `TypeInfo` StructOfs, the types the call can name; the value is the entry whose
+        // `name` is `name`, else `not`. MetaSubscribe(read, f): `meta.subscribe("x", f)` — `read` the
+        // cell read (a thunk, never a dependency), `f` called with the cell's new value on each change
+        // until the run ends (a re-run, the block's teardown); its value the unsubscribe function.
         MetaGet, MetaEmit, MetaCleanup, MetaInterval, MetaTimeout, MetaClearInterval, MetaClearTimeout,
+        MetaReflect, MetaSubscribe,
     }
 
     export type Pattern:enum = {
