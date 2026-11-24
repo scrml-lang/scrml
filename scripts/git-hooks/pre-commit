@@ -139,5 +139,15 @@ if [ -f scripts/spec-coverage-check.ts ] && git diff --cached --name-only --no-r
   # END spec-coverage
 fi
 
+# S482 (s482-retired-lint) — the retired-forms gate, the same command CI `checks` runs (~1s over the whole
+# corpus, so it always runs). A HARD retired form outside labelled negatives / allow markers / the dated
+# `pending` debt, or a SOFT / pending count rising, blocks. Ruling: user-voice-scrml.md S482 "every
+# retirement / deprecation PR adds a retired-forms ledger row and migrates". Guarded: a branch cut before
+# the gate landed has no script and must not be blocked.
+if [ -f scripts/retired-forms-lint.ts ] && ! bun scripts/retired-forms-lint.ts --quiet 2>&1; then
+  echo "✗ retired-forms gate failed (compiler/retired-forms.json; list a row's hits: bun scripts/retired-forms-lint.ts --list <row-id>)." >&2
+  exit 1
+fi
+
 echo "✓ Pre-commit checks passed."
 exit 0

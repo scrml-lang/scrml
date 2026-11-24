@@ -249,9 +249,9 @@ ${
         <div class="confirm-dialog">
             ${
                 match (@confirmAction) {
-                    .ResetPassword(userId) :> { lift <p>Reset password for user #${userId}?/ }
-                    .DeleteUser(userId)    :> { lift <p>Delete user #${userId}? This cannot be undone./ }
-                    .RevokeKey(keyId)      :> { lift <p>Revoke API key #${keyId}?/ }
+                    .ResetPassword(userId) :> { lift <p>Reset password for user #${userId}?</> }
+                    .DeleteUser(userId)    :> { lift <p>Delete user #${userId}? This cannot be undone.</> }
+                    .RevokeKey(keyId)      :> { lift <p>Revoke API key #${keyId}?</> }
                 }
             }
             <div class="confirm-actions">

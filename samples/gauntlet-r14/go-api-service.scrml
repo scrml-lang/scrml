@@ -42,10 +42,10 @@
             ${
                 for (let entry of @entries) {
                     lift <tr>
-                        <td>${entry.title}/
-                        <td>${entry.body}/
+                        <td>${entry.title}</>
+                        <td>${entry.body}</>
                         <td>
-                            <button onclick=deleteEntry(entry.id)>Delete/
+                            <button onclick=deleteEntry(entry.id)>Delete</>
                         </td>
                     </tr>
                 }

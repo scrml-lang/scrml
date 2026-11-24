@@ -2176,14 +2176,16 @@ ${
     // retired-forms ledger row and migrates", which confirmed: "`<x>` in an expression is not a read
     // form — §4 table: "`@x` reads"; the parser gives one targeted error with a fix-it to `@x`").
     // The end of `<name>` at `pos` when it stands as a LEGACY CELL READ in an operand slot, else -1:
-    // a bare `<name>` (no attributes, an identifier, not a void element) followed — past spaces /
+    // a bare `<name>` (no attributes, an identifier starting lowercase or `_`, not a void element) followed — past spaces /
     // tabs — by `;` `)` `,` `]` `}` (no element is followed by those), or by an operator or a `.`
     // when the element never closes as markup (a closer naming another element, or none: the
     // attribute-value reading, markupAttrValueExtentAt — `<li> - item</li>` closes, so it is markup).
     export fn angleCellReadEnd(src: string, pos: int) -> int {
         if (src.charCodeAt(pos) != 60) return -1;
         let k: int = pos + 1;
-        if (k >= src.length || !isIdentStart(src.charCodeAt(k)) || src.charCodeAt(k) == 36) return -1;
+        // a cell name starts lowercase or `_` (a capitalised `<Point>` is a type / component name)
+        const c0: int = k < src.length ? src.charCodeAt(k) : 0;
+        if (!((c0 >= 97 && c0 <= 122) || c0 == 95)) return -1;
         for (; k < src.length && isIdentCont(src.charCodeAt(k)); ) { k = k + 1; }
         if (k >= src.length || src.charCodeAt(k) != 62) return -1;
         if (isVoidName(src.substring(pos + 1, k).toLowerCase())) return -1;

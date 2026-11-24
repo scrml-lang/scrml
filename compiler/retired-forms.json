@@ -78,10 +78,10 @@
       "retired": "S469",
       "detector": {
         "kind": "regex",
-        "pattern": "(?<![.\\w])while\\s*\\(",
+        "pattern": "(?<![.\\w])(?<!\\}\\s*)while\\s*\\(",
         "flags": ""
       },
-      "note": "A `} while (…)` do-while tail counts here too (the do-while row counts the head)."
+      "note": "A `} while (…)` do-while tail is the do-while-loop row's (its head `do {` is what that row counts)."
     },
     {
       "id": "do-while-loop",
@@ -216,9 +216,10 @@
       "retired": "S430",
       "detector": {
         "kind": "regex",
-        "pattern": "(?<![.\\w])(?:async\\s+(?:fn|function)\\b|async\\s*\\(|await\\s)",
+        "pattern": "(?<![.\\w])(?:async\\s+(?:fn|function)\\b|async\\s*\\(|(?<!for\\s+)await\\s)",
         "flags": ""
-      }
+      },
+      "note": "`for await` is the for-await row's."
     },
     {
       "id": "for-await",

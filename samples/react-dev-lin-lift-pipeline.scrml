@@ -35,13 +35,13 @@ ${
     // The compiler proves authToken is not touched before this lift.
     // It is not touched after. This is exactly the prop-drilling problem solved.
     lift <div class="auth-context" data-token=authToken>
-        <h2>Your Orders/
+        <h2>Your Orders</>
         <ul>${
             for (let order of orders) {
                 lift <li class="order-item">
-                    <span>${order.id}/
-                    <span class="total">${order.total}/
-                    <span class="status">${order.status}/
+                    <span>${order.id}</>
+                    <span class="total">${order.total}</>
+                    <span class="status">${order.status}</>
                 </li>
             }
         }</>

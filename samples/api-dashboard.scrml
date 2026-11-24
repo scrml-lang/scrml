@@ -428,7 +428,7 @@ ${
     }
 }
 
-/   // closes <program>
+</>   // closes <program>
 
 // =============================================================================
 // FRICTION LOG (inline, for analysis)

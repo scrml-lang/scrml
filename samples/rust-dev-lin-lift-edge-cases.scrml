@@ -47,9 +47,9 @@ ${
 }
 
 <div class="edge-case-1">
-    <h2>Edge Case 1: lin in if/else with lift/
-    <button onclick=processWithBranch()>Process/
-    <p>Result: ${@routeResult}/
+    <h2>Edge Case 1: lin in if/else with lift</>
+    <button onclick=processWithBranch()>Process</>
+    <p>Result: ${@routeResult}</>
 </div>
 
 // ============================================================
@@ -91,11 +91,11 @@ ${
 }
 
 <div class="edge-case-2">
-    <h2>Edge Case 2: lin consumed before loop, not inside/
-    <button onclick=processBatch()>Process Batch/
+    <h2>Edge Case 2: lin consumed before loop, not inside</>
+    <button onclick=processBatch()>Process Batch</>
     <ul>${
         for (let result of @batchResult) {
-            lift <li>${result}/
+            lift <li>${result}</>
         }
     }
 </div>
@@ -142,10 +142,10 @@ ${
 }
 
 <div class="edge-case-3">
-    <h2>Edge Case 3: lin consumed at render boundary/
-    <button onclick=renderSecureWidget()>Render Widget/
+    <h2>Edge Case 3: lin consumed at render boundary</>
+    <button onclick=renderSecureWidget()>Render Widget</>
     <div class="widget-container">
-        <p>Widget: ${@widgetHtml}/
+        <p>Widget: ${@widgetHtml}</>
     </div>
 </div>
 

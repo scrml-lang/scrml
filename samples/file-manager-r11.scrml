@@ -128,7 +128,7 @@ ${ initLoad(); }
         ${
             for (let i = 0; i < @breadcrumbs.length; i++) {
                 let crumb = @breadcrumbs[i]
-                lift <span class="crumb">${crumb}/
+                lift <span class="crumb">${crumb}</>
             }
         }
     </nav>
@@ -177,13 +177,13 @@ ${ initLoad(); }
                     let sel = @selectedIds.includes(file.id)
                     lift <tr class="file-row" onclick=toggleSelect(file.id)>
                         <td>
-                            <span class="icon">${fileIcon(file.type)}/
+                            <span class="icon">${fileIcon(file.type)}</>
                             ${file.name}
                         </td>
-                        <td>${formatSize(file.size)}/
-                        <td>${file.type}/
-                        <td>${file.modified}/
-                        <td>${sel ? "X" : "O"}/
+                        <td>${formatSize(file.size)}</>
+                        <td>${file.type}</>
+                        <td>${file.modified}</>
+                        <td>${sel ? "X" : "O"}</>
                     </tr>
                 }
             }

@@ -54,3 +54,29 @@ source + flags tuples are identical to the old list).
 
 Tests: `compiler/self-host-v2/slice-m4/retired-lint-s482.test.js` (+ closer-cleanup-s482, parser-lows-fu-s482):
 81 pass / 0 fail.
+
+## Commit 2 — the gate, the baseline, the sample migration, R4, SPEC + gap text
+
+- `scripts/retired-forms-lint.ts` (the gate) + `scripts/retired-forms-baseline.json` + tests
+  `compiler/tests/unit/retired-forms-lint-s482.test.js` (16 pass). Wired into CI `checks` and the pre-commit hook
+  (`--quiet`). Runtime ~0.5–0.7 s over the whole corpus (5432 hits scanned).
+- R3 narrowed: a cell name starts lowercase or `_` (`let p = <Point>;` is a §48.2.1 struct instance, not a read) —
+  bootstrap `angleCellReadEnd` and the lint agree.
+- H1 MIGRATED: the 177 retired closer lines in 52 sample files (the 145 the bootstrap names, the 24 of the gap's §5b,
+  and 8 more the gate found — admin-panel 252–254 and five `/   // closes …` lines) rewritten `/` → `</>` by
+  `~/.cache/scrml/review/s482-retired-lint/gen/migrate_h1.py` (log: `h1-migration.log`). Verified by recompiling
+  every sample: bootstrap — 0 verdicts worse, 0 better (all 52 were and stay rejected for other reasons), every
+  E-SYNTAX-050 gone, error counts mostly drop (kanban-r11 299→149) — four files show codes their newly-read
+  remainder carries (E-STYLE-001 ×2 files, quiz-app E-CTRL-001 / E-PARAM-TYPE-REQUIRED, rust-dev-lin-lift-edge-cases
+  E-PARSE-CLOSER/UNCLOSED); impl#1 — 52/52 same exit code (13 accepted, 39 rejected, before and after).
+- Every other HARD row with hits is `pending` (dated 2026-11-24, reason per row) — chosen because the ruled R1
+  sequencing is "after the `/}` cleanup and the gate, chapter group by chapter group", and most remaining sites are
+  in stdlib / conformance positives that impl#1 compiles (it refuses the ruled spellings: g-selfhost-while-migration-
+  blocked-s481). SOFT rows: starting counts per file.
+- R4: SPEC §6.6.1 text, the W-CONST-AT-DEPRECATED and E-CONST-AT-DEPRECATED §34 rows now name `<name=(expr)/>`
+  (the bootstrap's refusal already did — refusals.scrml). claim-gate.js header: `->` arms are deprecated, not invalid
+  (quoted W-MATCH-ARROW-LEGACY: "All three forms parse").
+- SPEC: §63 "The retired-forms ledger (S482)" normative paragraph; Appendix E cross-reference; :14 banner rewritten to
+  be exactly true after item 0; E-SYNTAX-050 row; O35 notes `<x>` read RULED.
+- Gap g-boot-retired-closer-unread-s482: LOW-3 recorded as INTERIM shape (2) with the capable form (re-balancing
+  reading); NIT-1 cause note corrected; the 8 newly found unread lines added; notes the samples are migrated.

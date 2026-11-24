@@ -7,7 +7,7 @@
             lift <li>${ match s {
                 .Ok => "good"
                 .Err => "bad"
-            } }/
+            } }</>
         } }
     </>
 </>

@@ -38,9 +38,9 @@
         ${
             for (let item of @items) {
                 lift <li>
-                    <span>${item.name}/
-                    <button onclick=toggleItem(item.id, item.done)>Toggle/
-                    <button onclick=removeItem(item.id)>Remove/
+                    <span>${item.name}</>
+                    <button onclick=toggleItem(item.id, item.done)>Toggle</>
+                    <button onclick=removeItem(item.id)>Remove</>
                 </li>
             }
         }

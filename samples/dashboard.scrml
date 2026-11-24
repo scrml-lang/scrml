@@ -214,7 +214,7 @@ const ItemCard = <article class="item-card">
         }
     }
 
-/   // closes < db>
+</>   // closes < db>
 
 <style></>
     .dashboard {

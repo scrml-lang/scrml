@@ -8,7 +8,7 @@
             } else {
                 lift "No items"
             }
-            lift <p class="label">${label}/
+            lift <p class="label">${label}</>
         }
     </>
 </>

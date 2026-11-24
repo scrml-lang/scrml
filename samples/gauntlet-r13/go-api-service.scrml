@@ -31,9 +31,9 @@
             ${
                 for (let entry of @entries) {
                     lift <tr>
-                        <td>${entry.title}/
+                        <td>${entry.title}</>
                         <td>
-                            <button onclick=deleteEntry(entry.id)>Delete/
+                            <button onclick=deleteEntry(entry.id)>Delete</>
                         </td>
                     </tr>
                 }

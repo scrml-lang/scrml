@@ -26,7 +26,7 @@
             for (let item of @items) {
                 lift <li>
                     ${item.name}
-                    <button onclick=remove(item.id)>x/
+                    <button onclick=remove(item.id)>x</>
                 </li>
             }
         }

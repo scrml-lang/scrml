@@ -57,7 +57,7 @@
         <ul>
             ${
                 for (let val of @history) {
-                    lift <li>${val}/
+                    lift <li>${val}</>
                 }
             }
         </ul>

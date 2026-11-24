@@ -45,13 +45,13 @@ ${
     // No prop drilling. No store. No closure. Just lin.
 
     lift <div class="auth-context" data-token=authToken>
-        <h2>Your Orders/
+        <h2>Your Orders</>
         <ul>${
             for (let order of orders) {
                 lift <li class="order-item">
-                    <span>${order.id}/
-                    <span class="total">${order.total}/
-                    <span class="status">${order.status}/
+                    <span>${order.id}</>
+                    <span class="total">${order.total}</>
+                    <span class="status">${order.status}</>
                 </li>
             }
         }</>

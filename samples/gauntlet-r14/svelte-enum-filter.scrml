@@ -49,7 +49,7 @@
     <ul>
         ${
             for (let item of visibleItems()) {
-                lift <li>${item.text}/
+                lift <li>${item.text}</>
             }
         }
     </ul>

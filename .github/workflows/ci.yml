@@ -278,6 +278,15 @@ jobs:
       - name: Conflict-marker gate (no unresolved merge markers on the trunk)
         if: ${{ !cancelled() }}
         run: bun scripts/conflict-marker-gate.ts
+      # S482 — the retired-forms gate (s482-retired-lint). A retired form survived in the SPEC's own examples
+      # for seven months after Appendix E retired it and was re-adopted downstream; no gate read SPEC fences.
+      # Ledger compiler/retired-forms.json; baseline scripts/retired-forms-baseline.json. BLOCKING: a HARD
+      # row's hit outside labelled negatives / allow markers / the dated `pending` debt, or any count rising.
+      # Ruling: user-voice-scrml.md S482 "every retirement / deprecation PR adds a retired-forms ledger row
+      # and migrates". Tested by compiler/tests/unit/retired-forms-lint-s482.test.js.
+      - name: Retired-forms gate (no retired form outside labelled negatives; soft counts may not rise)
+        if: ${{ !cancelled() }}
+        run: bun scripts/retired-forms-lint.ts
       # S409 — checks every Sections row's range/size AND asserts the scan reached all sections (a
       # stray line ends the table scan, and a zero over a partial scan is not a pass).
       # S474 — stale totals / row Lines-Size cells (exit 4) WARN: generated-regen.yml regenerates them.

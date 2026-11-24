@@ -193,7 +193,7 @@ ${
         <p class="history-empty" if=historyEmpty()>No transitions yet.</>
         <ul class="history-list" if=hasHistory()> ${
             for (let entry of @history) {
-                lift <li class="history-entry">${entry.label}/
+                lift <li class="history-entry">${entry.label}</>
             }
         }
         </ul>

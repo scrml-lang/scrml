@@ -247,15 +247,15 @@ ${
 // ============================================================
 
 <div class="build-config-tool">
-    <h1>Zig Build Configuration Manager/
-    <p>Defined targets: ${@targetCount}/
+    <h1>Zig Build Configuration Manager</>
+    <p>Defined targets: ${@targetCount}</>
 
     // ---- Add Target Form ----
     <section class="add-target-form">
-        <h2>New Build Target/
+        <h2>New Build Target</>
 
         <div class="form-row">
-            <label>Target Name/
+            <label>Target Name</>
             // bind:value is the idiomatic scrml form. Using it here.
             // In Zig there is no equivalent -- you wire inputs manually.
             // From a "Zig mental model" perspective, bind:value is fine because
@@ -266,7 +266,7 @@ ${
         </div>
 
         <div class="form-row">
-            <label>Platform/
+            <label>Platform</>
             // FRICTION NOTE: I want to render these options from Platform.variants
             // (§14.4.2). The spec marks §14.4.2 as TODO -- the section content was
             // lost in truncation. Enum iteration is not yet fully specified.
@@ -274,54 +274,54 @@ ${
             // Platform enum values I cannot compare with @newPlatform without toEnum().
             // Manual select options are the only reliable working pattern.
             <select oninput=${(e) => updateNewPlatform(e.target.value)}>
-                <option value="Linux">Linux x64/
-                <option value="MacOS">macOS ARM64/
-                <option value="Windows">Windows x64/
-                <option value="WASM">WASM freestanding/
+                <option value="Linux">Linux x64</>
+                <option value="MacOS">macOS ARM64</>
+                <option value="Windows">Windows x64</>
+                <option value="WASM">WASM freestanding</>
             </select>
         </div>
 
         <div class="form-row">
-            <label>Optimization/
+            <label>Optimization</>
             <select oninput=${(e) => updateNewOptimization(e.target.value)}>
-                <option value="Debug">Debug/
-                <option value="ReleaseSafe">ReleaseSafe/
-                <option value="ReleaseFast">ReleaseFast/
-                <option value="ReleaseSmall">ReleaseSmall/
+                <option value="Debug">Debug</>
+                <option value="ReleaseSafe">ReleaseSafe</>
+                <option value="ReleaseFast">ReleaseFast</>
+                <option value="ReleaseSmall">ReleaseSmall</>
             </select>
         </div>
 
         <div class="form-row">
-            <label>Extra Flags/
+            <label>Extra Flags</>
             <input type="text" bind:value=@newFlags placeholder="e.g. -Dgpu=true -Dgl=true"/>
         </div>
 
-        <button onclick=addTarget()>Add Target/
+        <button onclick=addTarget()>Add Target</>
     </section>
 
     // ---- Target List ----
     <section class="target-list">
-        <h2>Build Targets/
+        <h2>Build Targets</>
 
         // Show empty state message when no targets exist
-        <p if=@targetCount class="targets-count">${@targetCount} target(s) configured/
-        <p if=@targetCount class="empty-hint">Use the form above to add your first target./
+        <p if=@targetCount class="targets-count">${@targetCount} target(s) configured</>
+        <p if=@targetCount class="empty-hint">Use the form above to add your first target.</>
 
         <div class="targets">${
             for (let t of @targets) {
                 lift <div class="target-card">
                     <div class="target-header">
-                        <strong>${t.name}/
-                        <span>${t.platform}/
-                        <span>${t.optimization}/
-                        <button onclick=removeTarget(t.id)>Remove/
+                        <strong>${t.name}</>
+                        <span>${t.platform}</>
+                        <span>${t.optimization}</>
+                        <button onclick=removeTarget(t.id)>Remove</>
                     </div>
                     <div class="target-command">
-                        <code>${buildCommand(t)}/
+                        <code>${buildCommand(t)}</>
                     </div>
                     <div class="target-flags">
-                        <span>Flags: ${t.flags.length > 0 ? t.flags : "(none)"}/
-                        <button onclick=startEditFlags(t.id, t.flags)>Edit Flags/
+                        <span>Flags: ${t.flags.length > 0 ? t.flags : "(none)"}</>
+                        <button onclick=startEditFlags(t.id, t.flags)>Edit Flags</>
                     </div>
                 </div>
             }
@@ -334,11 +334,11 @@ ${
     // when editingTargetId is non-null. Direct mapping from Zig's optional type
     // semantics (treat null as "not present"). No friction here.
     <section class="flag-editor" if=@editingTargetId>
-        <h2>Edit Flags/
+        <h2>Edit Flags</>
         <input type="text" bind:value=@editFlagInput placeholder="space-separated flags"/>
         <div class="flag-actions">
-            <button onclick=saveFlags()>Save Flags/
-            <button onclick=cancelEditFlags()>Cancel/
+            <button onclick=saveFlags()>Save Flags</>
+            <button onclick=cancelEditFlags()>Cancel</>
         </div>
     </section>
 
@@ -359,8 +359,8 @@ ${
     // close this gap. Until then, enum types and reactive state are in different
     // worlds and match cannot provide exhaustiveness over @reactive enum state.
     <section class="platform-info">
-        <h2>Platform Details/
-        <p>${platformDescription(@newPlatform)}/
+        <h2>Platform Details</>
+        <p>${platformDescription(@newPlatform)}</>
         ${
             let details = match @newPlatform {
                 "Linux" :> "Link flags: -lc. Output: ELF64. ABI: GNU."
@@ -369,14 +369,14 @@ ${
                 "WASM" :> "No libc. No OS. Export functions with 'export'. Import via @import."
                 else :> "Select a platform to see details."
             }
-            lift <p class="platform-detail">${details}/
+            lift <p class="platform-detail">${details}</>
         }
     </section>
 
     // ---- Optimization Info via match ----
     <section class="optimization-info">
-        <h2>Optimization Details/
-        <p>${optimizationDescription(@newOptimization)}/
+        <h2>Optimization Details</>
+        <p>${optimizationDescription(@newOptimization)}</>
         ${
             let optDetails = match @newOptimization {
                 "Debug" :> "Zig default. Bounds checking, overflow detection, all assertions."
@@ -385,13 +385,13 @@ ${
                 "ReleaseSmall" :> "Smallest binary. Optimizes for size over speed. Good for WASM targets."
                 else :> "Select an optimization level to see details."
             }
-            lift <p class="opt-detail">${optDetails}/
+            lift <p class="opt-detail">${optDetails}</>
         }
     </section>
 
     // ---- Export Section ----
     <section class="export-section">
-        <h2>Export Configuration/
+        <h2>Export Configuration</>
 
         // if/else-if/else chain for export status display
         // POSITIVE SIGNAL: the if=/else-if=/else chain is clean and readable.
@@ -403,14 +403,14 @@ ${
         // ExportStatus.Idle is an enum variant. They are disconnected.
         // So I use string comparison via if= attributes.
         <div class="export-status">
-            <p if=@exportStatus class="status-text">Status: ${@exportStatus}/
+            <p if=@exportStatus class="status-text">Status: ${@exportStatus}</>
         </div>
 
-        <button onclick=handleExport()>Export as JSON/
+        <button onclick=handleExport()>Export as JSON</>
 
         <div class="export-result" if=@exportedJson>
-            <h3>Generated JSON/
-            <pre class="json-output">${@exportedJson}/
+            <h3>Generated JSON</>
+            <pre class="json-output">${@exportedJson}</>
         </div>
     </section>
 
@@ -427,7 +427,7 @@ ${
     // In Zig this never arises: comptime is comptime. One mechanism, one set of rules,
     // one mental model. The single-mechanism design is cleaner.
     <footer class="app-footer">
-        <p>scrml ${ bun.eval("'0.5.1-draft'") } / Build Config Tool v1.0/
+        <p>scrml ${ bun.eval("'0.5.1-draft'") } / Build Config Tool v1.0</>
     </footer>
 
 </div>
