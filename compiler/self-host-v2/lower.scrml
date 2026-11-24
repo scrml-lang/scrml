@@ -33,7 +33,7 @@ ${
              GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, HostFn, CoreProgram, Validator, SurfaceProp, ValidityOf, Persist, Timing,
              ServerFn, SqlMode, Db, SqlQuery, SqlKind, SqlTables, SqlColumns, Failable, OkArm, ErrArm, VariantDef,
              LoopHead, EachHead, RangeHead, HostCall, CssUnit, CssDecl, CoreCss, CssVar, Gather, Lifted, GatherRow, PathStep,
-             CoreConst, CoreHead, CoreMeta, HeadTitle, ForeignSlice, block, litStr, mkSym, typeDefSym, readField, mountedInstances, declScopeKey } from "./core.scrml";
+             CoreConst, CoreHead, CoreMeta, HeadTitle, ForeignSlice, TypeNote, block, litStr, mkSym, typeDefSym, readField, mountedInstances, declScopeKey } from "./core.scrml";
     import { partsText } from "./css.scrml";
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, IfForm, AEffect, ARequest, AType, AParam, AFn,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, AConst, FileAst, Diag, ASql, ASqlMode,
@@ -610,7 +610,13 @@ ${
     fn methodExpr(c: LC, o: PrimOp, cal: AExpr, args: AExpr[]) -> Expr {
         // s482 (§22.5.1): a runtime `^{}` block's `meta` call — its receiver is the reserved `^`
         // (meta.scrml), no value: the printer names the block's per-run `meta` object
-        if (isMetaOp(o)) return Expr.Prim(o, lowerExprs(c, args));
+        if (isMetaOp(o)) {
+            // s482 r1 (#2093 review HIGH-1): a runtime `reflect` carries, per registry entry, the
+            // type(s) its name denotes in this file (reflectIds) — print.scrml keeps an entry by
+            // the type's identity, never by its name alone
+            if (o == PrimOp.MetaReflect && args.length == 2) return Expr.Prim(o, lowerExprs(c, args).concat([reflectIds(c, args[1])]));
+            return Expr.Prim(o, lowerExprs(c, args));
+        }
         if (o == PrimOp.ParseInt || o == PrimOp.ParseNum || o == PrimOp.ParseBool) {
             if (args.length != 1) return missing();
             return Expr.Prim(o, lowerExprs(c, args));
@@ -618,6 +624,86 @@ ${
         const obj: AExpr | not = calleeObj(cal);
         if (obj is not) return missing();
         return Expr.Prim(o, [lowerExpr(c, obj)].concat(lowerExprs(c, args)));
+    }
+
+    // s482 r1 (s482-registry-client; #2093 review HIGH-1) — §22.4.2 strategy 2: a runtime
+    // `reflect`'s registry (meta.scrml rtReflect: one `TypeInfo` record per type in scope at the
+    // block, `name` its type's name) is printed with only the client-used types (print.scrml
+    // regArgs). Two files may each declare a type of one name, so the name alone does not say
+    // WHICH type an entry describes. The third argument says it: per entry, the Sym id of the
+    // type the name denotes in this file. The printer strips the argument; it is never printed.
+    // s482 r2 (#2093 r1 review HIGH-1 / MED-1 / LOW-1): that type is read from the file's scope
+    // (Tables.tscope, analyze.scrml typeScopes) — the one meta.scrml envOf built the entry from:
+    // this file's own declaration, else the declaration its import names (alias-aware, re-exports
+    // followed). Exactly one id, or none (fail closed: the entry is dropped).
+    fn reflectIds(c: LC, entries: AExpr) -> Expr {
+        let out: Expr[] = [];
+        for (const en of aArrayElems(entries)) {
+            out = out.concat([Expr.ArrayOf(entryTypeIds(c, aEntryName(en)))]);
+        }
+        return Expr.ArrayOf(out);
+    }
+
+    fn entryTypeIds(c: LC, name: string) -> Expr[] {
+        if (name == "") return [];
+        for (const sc of c.t.tscope) {
+            if (sc.file == c.file && sc.local == name) {
+                let ids: Expr[] = [];
+                for (const ti of c.t.types) {
+                    if (ti.file == sc.from && ti.name == sc.orig && ti.file != builtinFile()) ids = ids.concat([Expr.Lit(Literal.Int(typeDefSym(ti.def).id))]);
+                }
+                if (ids.length == 1) return ids;
+                return [];
+            }
+        }
+        return [];
+    }
+
+    fn aArrayElems(e: AExpr) -> AExpr[] {
+        const k: AExprK = e.k;
+        return match k {
+            .ArrayLit(elems: es) :> es,
+            // no-default-arm: one question of an expression — a list literal's elements
+            _ :> []
+        };
+    }
+
+    // a registry entry's `name` (meta.scrml entryExpr: a record whose `name` is a string literal)
+    fn aEntryName(e: AExpr) -> string {
+        const k: AExprK = e.k;
+        return match k {
+            .ObjectLit(props: ps) :> aNameProp(ps),
+            // no-default-arm: one question of an expression — a record's `name`
+            _ :> ""
+        };
+    }
+
+    fn aNameProp(ps: AProp[]) -> string {
+        for (const pr of ps) {
+            if (pr.name == "name") return aStrOf(pr.value);
+        }
+        return "";
+    }
+
+    fn aStrOf(e: AExpr) -> string {
+        const k: AExprK = e.k;
+        return match k {
+            .Str(v: sv) :> sv,
+            // no-default-arm: one question of an expression — the string literal it is
+            _ :> ""
+        };
+    }
+
+    // s482 r1 (#2093 review LOW-1) — CoreProgram.typed: every local's written annotation and
+    // every function's declared return type, by Sym (print.scrml clientRegistryIds)
+    fn typedNotes(t: Tables) -> TypeNote[] {
+        let out: TypeNote[] = [];
+        for (const a of t.annots) { out = out.concat([{ sym: a.sym, ty: a.ty }]); }
+        for (const fi of t.fns) {
+            const r: Type | not = fi.ret;
+            if (r is given) out = out.concat([{ sym: fi.sym, ty: r }]);
+        }
+        return out;
     }
 
     fn isMetaOp(o: PrimOp) -> boolean {
@@ -5061,7 +5147,7 @@ ${
     fn serverView(t: Tables, plan: SuspendPlan, inherited: int[]) -> Tables {
         const f: ServerFacts = t.server;
         const sf: ServerFacts = { servers: f.servers, sqls: f.sqls, dbs: f.dbs, places: f.places, inherited: inherited, plan: plan, loads: f.loads, envelopes: f.envelopes, txs: f.txs, reqReads: f.reqReads, tool: f.tool, endpoints: f.endpoints, channels: f.channels, copies: f.copies, onServer: true };
-        return { program: t.program, types: t.types, decls: t.decls, fns: t.fns, handles: t.handles, names: t.names, values: t.values, effects: t.effects, binds: t.binds, elems: t.elems, attrs: t.attrs, fails: t.fails, annots: t.annots, unresolved: t.unresolved, typing: t.typing, novalidate: t.novalidate, resets: t.resets, gated: t.gated, persists: t.persists, timings: t.timings, server: sf, css: t.css, consts: t.consts, requests: t.requests, taliases: t.taliases, waits: t.waits, rows: t.rows };
+        return { program: t.program, types: t.types, decls: t.decls, fns: t.fns, handles: t.handles, names: t.names, values: t.values, effects: t.effects, binds: t.binds, elems: t.elems, attrs: t.attrs, fails: t.fails, annots: t.annots, unresolved: t.unresolved, typing: t.typing, novalidate: t.novalidate, resets: t.resets, gated: t.gated, persists: t.persists, timings: t.timings, server: sf, css: t.css, consts: t.consts, requests: t.requests, taliases: t.taliases, tscope: t.tscope, waits: t.waits, rows: t.rows };
     }
 
     export fn lower(tp: TypedProgram) -> Lowered {
@@ -5145,8 +5231,8 @@ ${
         const consts: CoreConst[] = coreConsts(t);
         const top: AProgram | not = topProgramOf(tp.files, t);
         const head: CoreHead = headOf(top);
-        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, envelopes: t.server.envelopes, head: head, tool: t.server.tool, endpoints: t.server.endpoints, channels: t.server.channels };
-        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, envelopes: t.server.envelopes, head: head, tool: t.server.tool, endpoints: t.server.endpoints, channels: t.server.channels };
+        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, envelopes: t.server.envelopes, head: head, tool: t.server.tool, endpoints: t.server.endpoints, channels: t.server.channels, typed: typedNotes(t) };
+        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, envelopes: t.server.envelopes, head: head, tool: t.server.tool, endpoints: t.server.endpoints, channels: t.server.channels, typed: typedNotes(t) };
         return { core: core, diags: tp.diags };
     }
 

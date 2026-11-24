@@ -46,6 +46,9 @@ const js = (body) => {
 };
 const USER = `{ kind: "struct", name: "User", fields: [{ name: "name", type: "string" }, { name: "age", type: "number" }], variants: [] }`;
 const COLOR = `{ kind: "enum", name: "Color", fields: [], variants: ["Red", "Green"] }`;
+// s482-registry-client (ruling:user-voice-scrml.md-S482-registry-client-types): a computed lookup's
+// registry holds only the types the client half uses — these cells make User and Color client-used
+const USED = `let <u:User=({ name: "a", age: 1 })/>\nlet <c:Color=.Red/>\n`;
 
 // ---------------------------------------------------------------------------
 // 1. the compile
@@ -62,12 +65,17 @@ describe("s482 phase 3 — the runtime type registry compiles (§22.4.2 / §22.5
     expect(js(`<div>^{ const i = meta.types.reflect("Color"); meta.emit(i.variants.join(",")); }</div>`)).toContain(`meta$.types.reflect("Color", [${COLOR}])`);
   });
 
-  test("§22.4.2 strategy 2: a non-literal argument may name every type in scope — the registry holds them all", () => {
-    const out = js(`<div>^{ const j = reflect(meta.get("sel")); if (j is not) { meta.emit("none"); } else { meta.emit(j.name); } }</div>`);
+  test("§22.4.2 strategy 2: a non-literal argument may name every client-used type in scope — the registry holds them", () => {
+    const out = js(`${USED}<div>^{ const j = reflect(meta.get("sel")); if (j is not) { meta.emit("none"); } else { meta.emit(j.name); } }</div>`);
     expect(out).toContain(`const j = meta$.types.reflect(meta$.get(() => inst$.fields[0 /* sel */].get()), [`);
     expect(out).toContain(USER);
     expect(out).toContain(COLOR);
     expect(out).toContain(`{ kind: "primitive", name: "string", fields: [], variants: [] }`);
+    // s482-registry-client: a type no client code names is not in it (the primitives always are)
+    const bare = js(`<div>^{ const j = reflect(meta.get("sel")); if (j is not) { meta.emit("none"); } else { meta.emit(j.name); } }</div>`);
+    expect(bare).not.toContain(`name: "User"`);
+    expect(bare).not.toContain(`name: "Color"`);
+    expect(bare).toContain(`{ kind: "primitive", name: "string", fields: [], variants: [] }`);
   });
 
   test("a PascalCase LOCAL is a value, not a type literal (the compile-time classifier's rule)", () => {
@@ -559,7 +567,7 @@ const text = (r, sel) => String(r.body.querySelector(sel)?.textContent ?? "<none
 
 describe("s482 phase 3 — the shipping path", () => {
   test("reflect renders a literal type's entry and a cell-named one; a name that is no type is not", async () => {
-    const r = await ship(P(`<div id="a">^{ const i = reflect(User); meta.emit(\`<p>\${i.kind}:\${i.name}:\${i.fields.length}:\${i.variants.length}</p>\`); }</div>
+    const r = await ship(P(`${USED}<div id="a">^{ const i = reflect(User); meta.emit(\`<p>\${i.kind}:\${i.name}:\${i.fields.length}:\${i.variants.length}</p>\`); }</div>
 <div id="b">^{
   const j = reflect(meta.get("sel"));
   if (j is not) {
@@ -703,7 +711,7 @@ document.body.dataset.ready = "1";
   }, 60000);
 
   test("reflect of a cell-named type re-renders when the cell names another type", async () => {
-    const { page } = await openChromium(P(`<div id="h">^{ const j = reflect(meta.get("sel")); if (j is not) { meta.emit("<p>none</p>"); } else { meta.emit("<p>" + j.kind + ":" + j.name + "</p>"); } }</div>
+    const { page } = await openChromium(P(`${USED}<div id="h">^{ const j = reflect(meta.get("sel")); if (j is not) { meta.emit("<p>none</p>"); } else { meta.emit("<p>" + j.kind + ":" + j.name + "</p>"); } }</div>
 <button id="b" onclick=\${() => { @sel = "Color"; }}>b</button>`));
     expect(await page.evaluate(() => document.querySelector("#h p")?.textContent)).toBe("struct:User");
     await page.click("#b");
