@@ -33,7 +33,7 @@ compiler with a diagnostic pointing to §4.4. The diagnostic SHALL include a hin
 - parse.scrml retiredCloserIn (end of parseKids): when an element is left UNCLOSED (end of input, or a closer naming
   another element), its first own text run with a `/` standing where a closer would (end of line, before `;`, or the
   run's end before a tag / end of input) gets E-SYNTAX-050 + hint; the reader's E-PARSE-* stays. A `/` in text is
-  otherwise text (a/b, and/or, URLs, `/</>`, `a/<b>`): never refused — tested.
+  otherwise text (a/b, and/or, URLs, `/</>`, `a/<b>`): never refused — tested. **Replaced in r1 (below).**
 - severity.scrml regenerated (E-SYNTAX-050 → Error; answer-neutral with the fail-closed default).
 
 ## 4 — #2087 review items
@@ -69,29 +69,55 @@ compiler with a diagnostic pointing to §4.4. The diagnostic SHALL include a hin
   --check PASS; s34-census --check-new PASS (1 changed row); gen-bootstrap-severity --check current;
   e2e-render-map 259/0; conformance-corpus (impl#1) terse-neg XFAIL as recorded.
 
-## 5 — Samples NOT migrated (lint lane ratchets them): 161 lines by this lane's scan (audit said 164)
+## r1 — #2095 review fixes (brief ~/.cache/scrml/review/s482-briefs/fix-2095-r1.md)
+Scratch: ~/.cache/scrml/review/s482-2095-r1/ (cases-r1.mjs, p-{base,prev,cur}.txt, corpus-*.json, cmp.txt).
+Merged origin/main 29462990f first (clean).
+- MED-1: retiredCloserIn → RETIRED CLOSERS (parse.scrml). parseKids keeps each of its own text runs' candidate `/`s
+  on a new MP field `slash` (dropped when the element was closed by its OWN name — no retired reading spent that
+  closer elsewhere); when an element is left unclosed (parseKids, and the `<program>` items loop), every candidate
+  inside its body is a hit, however nested (a child's text, a `lift` row in a `${ for }`, a closed sibling). A raw
+  body (`<code>`) a retired closer left unclosed names its retired closers too. Pins: `<div>⏎<p>hello/⏎</>`,
+  `<div>⏎<p>one/⏎<p>two</>⏎</>`, `<div if=true>⏎<p>yes/⏎</>`, `lift <li>${item}/` (no `;`) — each one 050.
+- MED-2: SPEC :14 banner narrowed to what holds; §34 row says where the code fires; the escapes are
+  g-boot-retired-closer-unread-s482 (LOW, open, INTERIM — 24 lines in 9 files, listed in §5b below).
+- LOW-1: a `/` ending a URL / path word (a word with another `/` or a `:`) is never a candidate; the `${ }` skip uses
+  the lexer's balanced reader (lexFrom), so a `}` in a string does not end it. fp-outer-unclosed-url is clean again.
+- LOW-2: markupAttrValue tries the CLOSED-element reading first: `header={<p>a/}b</p>}` / `…https://x.com/}</p>}`
+  are legal values (a `}` in prose is text, §4.17) — one by-name refusal, no 050, no cascade. `err/⏎}` (space before
+  the `}`) and an inner `{<div><b>x/}</div>}` are each one 050 (the closers after the `/}` up to the value's `}` are
+  consumed). `lift <li>x/;` keeps its pre-existing statement cascade beside the 050 (not chased).
+- LOW-3 (b17 `header={<p>see //x}</p>}`): NOT restored — the value reader shares parseKids' §27.1 reading (a ` //`
+  in markup text is a comment to the line end, closers included), so the element never closes and the value is not
+  markup; base's single refusal came from the retired terse walker. Plain `<p>see //x</p>` is unclosed the same way.
+- LOW-4: §5 regenerated from the bootstrap's E-SYNTAX-050 lines (corpus run), not a regex.
+- LOW-5: conformance block-grammar/block-050-value-slash-brace-neg — bootstrap PASS; impl#1 XFAIL
+  (g-impl1-terse-closer-accepted-s482, `missing:E-SYNTAX-050`). A nested `<p>hello/` twin was not added: its
+  bootstrap codes (E-PARSE-CLOSER / E-PARSE-UNCLOSED) and impl#1's (E-CTX-001/003) differ, so one case cannot grade
+  both; the slice test pins it.
+- NIT-2: hits are emitted after the file is read, sorted by offset (source order).
+- Note: impl#1 miscompiled the bundle (E-CG-006 "server-only pattern") on a `for (; s.substring(k, k + 2) == "</"; )`
+  condition; written with charCodeAt instead.
+
+## 5 — Retired closers in samples/ (lint lane ratchets them) — regenerated r1 FROM THE BOOTSTRAP'S DIAGNOSTICS
+145 lines in 41 files: every E-SYNTAX-050 the bootstrap reports on samples/ (corpus run on 088c91356). Includes the
+7 lines the first scan missed (multi-line openers — kanban-r11 188/220/224/255, contact-directory 254/258 — and
+zig-buildconfig 323) and phase2-match-in-for-lift-098:10.
 - samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-keyed-reconcile-051.scrml:7: lift <div class="card">${card.title}/
-- samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-lift-else-empty-049.scrml:10: lift <li class="empty">No items./
 - samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-lift-else-empty-049.scrml:8: lift <li>${item}/
+- samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-lift-else-empty-049.scrml:10: lift <li class="empty">No items./
 - samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-lift-markup-048.scrml:6: lift <li>${item}/
 - samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-lift-outside-logic-109.scrml:5: lift <li>${x}/
 - samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-lift-without-key-primitive-100.scrml:6: lift <li>${n}/
 - samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-object-iteration-052.scrml:7: lift <div>${card.title}/
 - samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-in-markup-interp-105.scrml:11: lift <p class="label">${label}/
+- samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-match-in-for-lift-098.scrml:10: } }/
 - samples/contact-directory.scrml:234: <p>No contacts found./
 - samples/contact-directory.scrml:243: <span class="contact-name">${contact.name}/
 - samples/contact-directory.scrml:244: <span class="contact-tag">${contact.category}/
 - samples/contact-directory.scrml:247: <span>${contact.email}/
 - samples/contact-directory.scrml:248: <span>${contact.phone}/
-- samples/debate-lin-lift-edge-cases.scrml:34: lift <p class="token-display">Authenticated: ${token}/
-- samples/debate-lin-lift-edge-cases.scrml:64: <span>${item.id}/
-- samples/debate-lin-lift-edge-cases.scrml:65: <span>${item.name}/
-- samples/debate-lin-lift-edge-cases.scrml:95: <h3>Secure Content/
-- samples/debate-lin-lift-edge-cases.scrml:96: <p>Session established./
-- samples/debate-lin-lift-pipeline.scrml:48: <h2>Your Orders/
-- samples/debate-lin-lift-pipeline.scrml:52: <span>${order.id}/
-- samples/debate-lin-lift-pipeline.scrml:53: <span class="total">${order.total}/
-- samples/debate-lin-lift-pipeline.scrml:54: <span class="status">${order.status}/
+- samples/contact-directory.scrml:254: >Edit/
+- samples/contact-directory.scrml:258: >Delete/
 - samples/file-manager-r11.scrml:131: lift <span class="crumb">${crumb}/
 - samples/file-manager-r11.scrml:180: <span class="icon">${fileIcon(file.type)}/
 - samples/file-manager-r11.scrml:183: <td>${formatSize(file.size)}/
@@ -134,16 +160,15 @@ compiler with a diagnostic pointing to §4.4. The diagnostic SHALL include a hin
 - samples/gauntlet-r11-zig-buildconfig.scrml:316: <span>${t.optimization}/
 - samples/gauntlet-r11-zig-buildconfig.scrml:317: <button onclick=removeTarget(t.id)>Remove/
 - samples/gauntlet-r11-zig-buildconfig.scrml:320: <code>${buildCommand(t)}/
+- samples/gauntlet-r11-zig-buildconfig.scrml:323: <span>Flags: ${t.flags.length > 0 ? t.flags : "(none)"}/
 - samples/gauntlet-r11-zig-buildconfig.scrml:324: <button onclick=startEditFlags(t.id, t.flags)>Edit Flags/
 - samples/gauntlet-r11-zig-buildconfig.scrml:337: <h2>Edit Flags/
 - samples/gauntlet-r11-zig-buildconfig.scrml:340: <button onclick=saveFlags()>Save Flags/
 - samples/gauntlet-r11-zig-buildconfig.scrml:341: <button onclick=cancelEditFlags()>Cancel/
 - samples/gauntlet-r11-zig-buildconfig.scrml:362: <h2>Platform Details/
 - samples/gauntlet-r11-zig-buildconfig.scrml:363: <p>${platformDescription(@newPlatform)}/
-- samples/gauntlet-r11-zig-buildconfig.scrml:372: lift <p class="platform-detail">${details}/
 - samples/gauntlet-r11-zig-buildconfig.scrml:378: <h2>Optimization Details/
 - samples/gauntlet-r11-zig-buildconfig.scrml:379: <p>${optimizationDescription(@newOptimization)}/
-- samples/gauntlet-r11-zig-buildconfig.scrml:388: lift <p class="opt-detail">${optDetails}/
 - samples/gauntlet-r11-zig-buildconfig.scrml:394: <h2>Export Configuration/
 - samples/gauntlet-r11-zig-buildconfig.scrml:406: <p if=@exportStatus class="status-text">Status: ${@exportStatus}/
 - samples/gauntlet-r11-zig-buildconfig.scrml:409: <button onclick=handleExport()>Export as JSON/
@@ -201,14 +226,44 @@ compiler with a diagnostic pointing to §4.4. The diagnostic SHALL include a hin
 - samples/gauntlet-r15/stress-db-markup-onclick.scrml:42: <button onclick=toggleItem(item.id, item.done)>Toggle/
 - samples/gauntlet-r15/stress-db-markup-onclick.scrml:43: <button onclick=removeItem(item.id)>Remove/
 - samples/gauntlet-r18/svelte-dev.scrml:72: lift <li>${entry}/
+- samples/kanban-r11.scrml:183: <p class="card-text">${card.text}/
+- samples/kanban-r11.scrml:188: >Move to In Progress/
+- samples/kanban-r11.scrml:215: <p class="card-text">${card.text}/
+- samples/kanban-r11.scrml:220: >Back to Todo/
+- samples/kanban-r11.scrml:224: >Move to Done/
+- samples/kanban-r11.scrml:250: <p class="card-text">${card.text}/
+- samples/kanban-r11.scrml:255: >Back to In Progress/
+- samples/quiz-app.scrml:122: <span class="option-letter">${String.fromCharCode(65 + i)}./
+- samples/quiz-app.scrml:123: <span class="option-text">${option}/
+- samples/rust-dev-lin-lift-edge-cases.scrml:50: <h2>Edge Case 1: lin in if/else with lift/
+- samples/rust-dev-lin-lift-edge-cases.scrml:51: <button onclick=processWithBranch()>Process/
+- samples/rust-dev-lin-lift-edge-cases.scrml:52: <p>Result: ${@routeResult}/
+- samples/rust-dev-lin-lift-edge-cases.scrml:94: <h2>Edge Case 2: lin consumed before loop, not inside/
+- samples/rust-dev-lin-lift-edge-cases.scrml:95: <button onclick=processBatch()>Process Batch/
+- samples/rust-dev-lin-lift-edge-cases.scrml:98: lift <li>${result}/
+- samples/rust-dev-lin-lift-edge-cases.scrml:146: <button onclick=renderSecureWidget()>Render Widget/
+- samples/rust-dev-lin-lift-edge-cases.scrml:148: <p>Widget: ${@widgetHtml}/
+- samples/rust-dev-lin-lift-pipeline.scrml:75: <h1>Order Processing Pipeline/
+- samples/rust-dev-lin-lift-pipeline.scrml:76: <p>Order ID: ${@orderId}/
+- samples/rust-dev-lin-lift-pipeline.scrml:78: <button onclick=runPipeline()>Process Order/
+- samples/rust-dev-lin-lift-pipeline.scrml:80: <p>${@pipelineResult}/
+
+## 5b — Retired closers the bootstrap does NOT name (g-boot-retired-closer-unread-s482, INTERIM): 24 lines, 9 files
+From the first scan; each is in a region the bootstrap never reads as markup text (see the gap).
+- samples/debate-lin-lift-edge-cases.scrml:34: lift <p class="token-display">Authenticated: ${token}/
+- samples/debate-lin-lift-edge-cases.scrml:64: <span>${item.id}/
+- samples/debate-lin-lift-edge-cases.scrml:65: <span>${item.name}/
+- samples/debate-lin-lift-edge-cases.scrml:95: <h3>Secure Content/
+- samples/debate-lin-lift-edge-cases.scrml:96: <p>Session established./
+- samples/debate-lin-lift-pipeline.scrml:48: <h2>Your Orders/
+- samples/debate-lin-lift-pipeline.scrml:52: <span>${order.id}/
+- samples/debate-lin-lift-pipeline.scrml:53: <span class="total">${order.total}/
+- samples/debate-lin-lift-pipeline.scrml:54: <span class="status">${order.status}/
+- samples/gauntlet-r11-zig-buildconfig.scrml:372: lift <p class="platform-detail">${details}/
+- samples/gauntlet-r11-zig-buildconfig.scrml:388: lift <p class="opt-detail">${optDetails}/
 - samples/gauntlet-s19-phase4/nested-comments.scrml:108: lift <p class="muted" if=(depth == 0)>No replies yet./
 - samples/gauntlet-s19-phase4/nested-comments.scrml:143: lift <p class="empty">Be the first to comment./
 - samples/gauntlet-s19-phase4/nested-comments.scrml:90: ${render footer() ?? <span class="muted">no actions/}
-- samples/kanban-r11.scrml:183: <p class="card-text">${card.text}/
-- samples/kanban-r11.scrml:215: <p class="card-text">${card.text}/
-- samples/kanban-r11.scrml:250: <p class="card-text">${card.text}/
-- samples/quiz-app.scrml:122: <span class="option-letter">${String.fromCharCode(65 + i)}./
-- samples/quiz-app.scrml:123: <span class="option-text">${option}/
 - samples/react-dev-lin-lift-edge-cases.scrml:107: <h3>Secure Content/
 - samples/react-dev-lin-lift-edge-cases.scrml:108: <p>Session established./
 - samples/react-dev-lin-lift-edge-cases.scrml:40: lift <p class="token-display">Authenticated: ${token}/
@@ -219,15 +274,3 @@ compiler with a diagnostic pointing to §4.4. The diagnostic SHALL include a hin
 - samples/react-dev-lin-lift-pipeline.scrml:43: <span class="total">${order.total}/
 - samples/react-dev-lin-lift-pipeline.scrml:44: <span class="status">${order.status}/
 - samples/rust-dev-lin-lift-edge-cases.scrml:145: <h2>Edge Case 3: lin consumed at render boundary/
-- samples/rust-dev-lin-lift-edge-cases.scrml:146: <button onclick=renderSecureWidget()>Render Widget/
-- samples/rust-dev-lin-lift-edge-cases.scrml:148: <p>Widget: ${@widgetHtml}/
-- samples/rust-dev-lin-lift-edge-cases.scrml:50: <h2>Edge Case 1: lin in if/else with lift/
-- samples/rust-dev-lin-lift-edge-cases.scrml:51: <button onclick=processWithBranch()>Process/
-- samples/rust-dev-lin-lift-edge-cases.scrml:52: <p>Result: ${@routeResult}/
-- samples/rust-dev-lin-lift-edge-cases.scrml:94: <h2>Edge Case 2: lin consumed before loop, not inside/
-- samples/rust-dev-lin-lift-edge-cases.scrml:95: <button onclick=processBatch()>Process Batch/
-- samples/rust-dev-lin-lift-edge-cases.scrml:98: lift <li>${result}/
-- samples/rust-dev-lin-lift-pipeline.scrml:75: <h1>Order Processing Pipeline/
-- samples/rust-dev-lin-lift-pipeline.scrml:76: <p>Order ID: ${@orderId}/
-- samples/rust-dev-lin-lift-pipeline.scrml:78: <button onclick=runPipeline()>Process Order/
-- samples/rust-dev-lin-lift-pipeline.scrml:80: <p>${@pipelineResult}/

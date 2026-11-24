@@ -10199,8 +10199,9 @@ ${
         return { v: AAttrValue.Bare(r3.e), mp: backToMarkup(mp, t4) };
     }
 
-    // s482-closer-cleanup — a `{ … }` value whose element ends at a trailing `/` right before the
-    // value's `}` (`fallback={<div>Something went wrong/}`) uses the RETIRED trailing-slash closer:
+    // s482-closer-cleanup — a `{ … }` value whose element ends at a trailing `/` before the value's
+    // `}` (`fallback={<div>Something went wrong/}`; space between, or a nested element's `/}`, #2095
+    // r1 LOW-2 — asked only when the value does not read as a closed element) uses the RETIRED trailing-slash closer:
     // "Any source file using bare `/` or trailing content`/` closers SHALL be rejected by the
     // compiler with a diagnostic pointing to §4.4. The diagnostic SHALL include a hint: "Did you
     // mean `</>`?"" (Appendix E). One E-SYNTAX-050 at the `/`; the value (through its `}`) is
