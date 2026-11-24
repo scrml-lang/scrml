@@ -11944,7 +11944,7 @@ ${
                         if (where != "") {
                             let kw: string = "const";
                             if (c.mutable) kw = "let";
-                            out = out.concat([{ what: "the initializer of `" + kw + " " + c.name + "`, written inside " + where + " (it has no single place in the body's run, so it computes a value, §7.6 R3),", vk: ValueKind.InitKind, v: AAttrValue.Bare(c.init), span: c.span, file: f.path, pending: false, cellInit: false, pendWhy: "", pendCall: "", pendSelf: "" }]);
+                            out = out.concat([{ what: "the initializer of `" + kw + " " + c.name + "`, written inside " + where + " (it has no single place in the body's run, so it computes a value, §7.6 R3),", vk: ValueKind.InitKind, v: AAttrValue.Bare(c.init), span: c.span, file: f.path, pending: false, cellInit: false, pendWhy: "", pendCall: "", pendSelf: "", plainLocked: false }]);
                         }
                     }
                 }
@@ -11994,7 +11994,7 @@ ${
         const b: ABlock | not = runOfNode(m);
         let bl: ABlock = { nid: -1, span: m.span, stmts: [] };
         if (b is given) bl = b;
-        return { what: "the runtime `^{ }` block " + where + " (it has no single place in the body's run, so it is a value position — the Q5 rider, §22.5),", vk: ValueKind.RenderKind, v: AAttrValue.Braced(bl, ""), span: m.span, file: file, pending: false, cellInit: false, pendWhy: "", pendCall: "", pendSelf: "" };
+        return { what: "the runtime `^{ }` block " + where + " (it has no single place in the body's run, so it is a value position — the Q5 rider, §22.5),", vk: ValueKind.RenderKind, v: AAttrValue.Braced(bl, ""), span: m.span, file: file, pending: false, cellInit: false, pendWhy: "", pendCall: "", pendSelf: "", plainLocked: false };
     }
 
     // The runtime `^{ }` blocks (a `Run` node with a meta marker) in `n`, at any depth.
@@ -12050,7 +12050,9 @@ ${
         const six: SymIx = nodeSymIx(sum.nodes);
         let out: Diag[] = [];
         for (const p of valuePositions(g, t, [])) {
-            if (p.vk == ValueKind.FormulaKind) {
+            // s482 r2 (#2096 review MED-1): A3 governs a DERIVED formula only — a locked initializer /
+            // prop default that reads no cell, directly or through calls, is not derived (Q13).
+            if (p.vk == ValueKind.FormulaKind && !p.plainLocked) {
                 let done: boolean = false;
                 for (const b of seedBlocks(p.v)) {
                     for (const ne of nameExprsIn(b)) {
@@ -12651,6 +12653,46 @@ ${
     // analysis cannot resolve fails closed when the requests there write anything.
     type ReadCx:struct = { sum: Summary, six: SymIx, reads: FxAtom[][], usesR: FxAtom[][] }
 
+    // s482 r2 (#2096 review LOW-1): the first function value (`x => …`, a block lambda) or `match` /
+    // handling form in `e` — what initReadWritten's read scan does not follow — else `not`.
+    fn readScanOpaqueIn(e: AExpr) -> AExpr | not {
+        const k: AExprK = e.k;
+        const own: boolean = match k {
+            .Lambda(params: x) :> true,
+            .BlockLambda(params: x) :> true,
+            .Handled(h: x) :> true,
+            .At(name: n) :> false,
+            .AtItem :> false,
+            .Assign(target: t) :> false,
+            .Name(name: n) :> false,
+            .Num(raw: r) :> false,
+            .Str(v: v) :> false,
+            .Bool(v: v) :> false,
+            .NotLit :> false,
+            .Recovered :> false,
+            .Variant(name: n) :> false,
+            .Member(obj: o) :> false,
+            .Unary(op: o) :> false,
+            .Binary(op: o) :> false,
+            .Ternary(test: t) :> false,
+            .Template(quasis: q) :> false,
+            .HashRef(id: hr0) :> false,
+            .Foreign(f: fb0) :> false,
+            .Call(callee: c) :> false,
+            .ArrayLit(elems: x) :> false,
+            .ObjectLit(props: x) :> false,
+            .Spread(e: x) :> false,
+            .Index(obj: o) :> false,
+            .Sql(q: x) :> false
+        };
+        if (own) return e;
+        for (const x of exprKids(e)) {
+            const r: AExpr | not = readScanOpaqueIn(x);
+            if (r is given) return r;
+        }
+        return not;
+    }
+
     fn initReadWritten(t: Tables, rx: ReadCx, file: string, inits: AExpr[], bw: BodyW, prog: int, pfields: FieldInfo[], cells: BodyCell[], lo: int, seen: int[]) -> string {
         let more: AExpr[] = [];
         let seen2: int[] = seen;
@@ -12662,6 +12704,13 @@ ${
                 if (id >= 0 && bw.lets.indexOf(id) >= 0) return "`" + letNameOf(t, id) + "`";
             }
             if (bwAny) {
+                // s482 r2 (#2096 review LOW-1): the scan below does not look inside a function value or a
+                // `match` / handling form written in the initializer (`xs.map(x => x + rd())`, `match (1) {
+                // 1 => rd(), … }`) — fail closed on one. Today g-boot-file-scope-init-residue-s479 refuses
+                // these too (E-BOOTSTRAP-UNSUPPORTED); lifting it depends on this refusal (or on scanning
+                // into those bodies with the same closure), or such a read would compile to a wrong value.
+                const ov: AExpr | not = readScanOpaqueIn(init);
+                if (ov is given) return "what " + blockerWhat(ov) + " in it reads (the bootstrap does not follow the reads inside one here, so it fails closed)";
                 const sc: BodyScan = scanValue({ t: t, file: file }, AAttrValue.Bare(init), emptyScan());
                 if (sc.unproven.length > 0) return "what a call the analysis cannot follow returns (" + sc.unproven[0].what + " — §6.7.4 rule 4: it may read anything, so the bootstrap fails closed)";
                 for (const r of sc.refs) {
@@ -44164,7 +44213,11 @@ ${
     // (§13.7 "It is offered only for a cell initializer, the one value position §13.9 opens").
     // `pendWhy` (s475 S4 r1): "" — or, for a pending initializer the bootstrap does not desugar,
     // why (each INTERIM, waitDiag reports it by name with E-BOOTSTRAP-UNSUPPORTED).
-    type ValuePos:struct = { what: string, vk: ValueKind, v: AAttrValue, span: ASpan, file: string, pending: boolean, cellInit: boolean, pendWhy: string, pendCall: string, pendSelf: string }
+    // `plainLocked` (s482 r2, #2096 review MED-1): a locked initializer or attribute (prop) default that
+    // is a FormulaKind position only because it CALLS something (valueReads counts a call) while neither
+    // it nor any function it calls reads a cell (lockedDerived) — not derived (Q13: "the
+    // derived-iff-reads-a-cell half stands"), so A3 (derivedUntrackedDiags) does not apply to it.
+    type ValuePos:struct = { what: string, vk: ValueKind, v: AAttrValue, span: ASpan, file: string, pending: boolean, cellInit: boolean, pendWhy: string, pendCall: string, pendSelf: string, plainLocked: boolean }
 
     // `ps`: the placement, when known (valueServerDiags) — it tells a server call from any
     // other call in a `(not to T)` cell's initializer (initPos); [] where it is not known
@@ -44203,14 +44256,19 @@ ${
         return out;
     }
 
-    fn lockedWhat(g: Globals, t: Tables, ps: PlaceFact[], v: AAttrValue, path: string, attr: boolean) -> string {
-        const derivedW: string = "the formula of derived `" + path + "`";
-        if (cellReads(v)) return derivedW;
+    // Q13 (derived iff it reads a cell): the locked initializer `v` reads a cell, directly or through
+    // a function it calls, transitively (callReach) — or a call the walk cannot follow, which keeps it
+    // derived (fail closed toward A3).
+    fn lockedDerived(g: Globals, t: Tables, ps: PlaceFact[], v: AAttrValue) -> boolean {
+        if (cellReads(v)) return true;
         const e: AExpr | not = pendingInit(v);
-        if (e is not) return derivedW;
-        // its calls, transitively: a program-cell read (or a call the walk cannot follow) keeps it derived
+        if (e is not) return true;
         const rc: CellReach = callReach(g, t.names, e, ps);
-        if (rc.reads || rc.open != "") return derivedW;
+        return rc.reads || rc.open != "";
+    }
+
+    fn lockedWhat(g: Globals, t: Tables, ps: PlaceFact[], v: AAttrValue, path: string, attr: boolean) -> string {
+        if (lockedDerived(g, t, ps, v)) return "the formula of derived `" + path + "`";
         if (attr) return "the default of prop `" + path + "`";
         if (path.indexOf(".") >= 0) return "the initializer of locked field `" + path + "`";
         return "the initializer of locked cell `" + path + "`";
@@ -44252,7 +44310,7 @@ ${
     fn initPos(g: Globals, t: Tables, ps: PlaceFact[], isLet: boolean, v: AAttrValue, path: string, span: ASpan, file: string, life: boolean, cell: boolean, outside: boolean, attr: boolean) -> ValuePos {
         const rc: CellReach = lifeReach(g, t, v, ps, life);
         const derived: boolean = life ? lifeDerived(t, file, v, ps, rc) : valueReads(v).length > 0;
-        if (!isLet && derived) return { what: lockedWhat(g, t, ps, v, path, attr), vk: ValueKind.FormulaKind, v: v, span: span, file: file, pending: false, cellInit: false, pendWhy: "", pendCall: "", pendSelf: "" };
+        if (!isLet && derived) return { what: lockedWhat(g, t, ps, v, path, attr), vk: ValueKind.FormulaKind, v: v, span: span, file: file, pending: false, cellInit: false, pendWhy: "", pendCall: "", pendSelf: "", plainLocked: !lockedDerived(g, t, ps, v) };
         let why: string = "";
         let oc: string = "";
         let self: string = "";
@@ -44266,7 +44324,7 @@ ${
             // r3 (cosmetic): the waiting call may BE the opaque one (a client `!` carrier, `pick(@id)`)
             self = pendOpaqueWhy(path, "it calls `" + oc + "`", rc.open);
         }
-        return { what: "the initializer of `" + path + "`", vk: ValueKind.InitKind, v: v, span: span, file: file, pending: life, cellInit: cell, pendWhy: why, pendCall: oc, pendSelf: self };
+        return { what: "the initializer of `" + path + "`", vk: ValueKind.InitKind, v: v, span: span, file: file, pending: life, cellInit: cell, pendWhy: why, pendCall: oc, pendSelf: self, plainLocked: false };
     }
 
     // s475 S4 r1 (F1) — a `(not to T)` cell's initializer is derived when locked and it reads a
@@ -44622,13 +44680,13 @@ ${
         const loop: ABlock = { nid: -1, span: f.span, stmts: [forAsStmt(f)] };
         let what: string = "the `" + "$" + "{ for … }` loop";
         if (isTier0If(f)) what = "the `" + "$" + "{ if … }`";
-        let out: ValuePos[] = [{ what: what, vk: ValueKind.RenderKind, v: AAttrValue.Braced(loop, ""), span: span, file: file, pending: false, cellInit: false, pendWhy: "", pendCall: "", pendSelf: "" }];
+        let out: ValuePos[] = [{ what: what, vk: ValueKind.RenderKind, v: AAttrValue.Braced(loop, ""), span: span, file: file, pending: false, cellInit: false, pendWhy: "", pendCall: "", pendSelf: "", plainLocked: false }];
         for (const r of gatherRows(f)) { out = out.concat(nodePositions(t, r, file)); }
         return out;
     }
 
     fn interpPos(x: AExpr, span: ASpan, file: string) -> ValuePos {
-        return { what: "the interpolation", vk: ValueKind.RenderKind, v: AAttrValue.Bare(x), span: span, file: file, pending: false, cellInit: false, pendWhy: "", pendCall: "", pendSelf: "" };
+        return { what: "the interpolation", vk: ValueKind.RenderKind, v: AAttrValue.Bare(x), span: span, file: file, pending: false, cellInit: false, pendWhy: "", pendCall: "", pendSelf: "", plainLocked: false };
     }
 
     fn elemPositions(t: Tables, e: AElem, file: string) -> ValuePos[] {
@@ -44671,7 +44729,7 @@ ${
         // field (§6.15 list item 1, §66.9 rule 8)
         let vk: ValueKind = ValueKind.RenderKind;
         if (isConstructAttr(k)) vk = ValueKind.InitKind;
-        return { what: what, vk: vk, v: a.value, span: a.span, file: file, pending: false, cellInit: false, pendWhy: "", pendCall: "", pendSelf: "" };
+        return { what: what, vk: vk, v: a.value, span: a.span, file: file, pending: false, cellInit: false, pendWhy: "", pendCall: "", pendSelf: "", plainLocked: false };
     }
 
     fn isConstructAttr(k: AttrKind | not) -> boolean {

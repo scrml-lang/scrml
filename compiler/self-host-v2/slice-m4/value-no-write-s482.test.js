@@ -310,6 +310,25 @@ describe("INTERIM (g-boot-construct-request-write-s482): a `<request>` there run
 `, ["o"])).toEqual(["3"]);
   }, 120000);
 
+  // s482 r2 (#2096 r1 review LOW-1): the read scan does not follow a function value or a `match` written in
+  // the initializer, so it fails closed on one (h31 / h06). g-boot-file-scope-init-residue-s479 refuses these
+  // too today (E-BOOTSTRAP-UNSUPPORTED); this refusal is what keeps them closed when that INTERIM lifts.
+  const opaque = [
+    ["h31 (a lambda: `xs.map(x => x + rd())`)", `    \${ const xs: int[] = [1]; }
+    <div if=(true)><request id="rq" deps=[]>\${ @r = bump(); }</request>\${ const k: string = xs.map(x => x + rd()).join(","); }<p id="o">\${k}</p></div>
+`, "a function value"],
+    ["h06 (`match` arms)", `    \${ function z() -> int { return 0; } }
+    <div if=(true)><request id="rq" deps=[]>\${ @r = bump(); }</request>\${ const k: int = match (1) { 1 => rd(), _ => z() }; }<p id="o">\${k}</p></div>
+`, "a `match` or a handling form"],
+  ];
+  for (const [name, body, what] of opaque) {
+    test("LOW-1 " + name + ": fails closed with E-FILE-SCOPE-INIT-IN-CONSTRUCT", async () => {
+      const d = await errors(PRE + "<program>\n" + RQ + body + "</program>\n");
+      const c = d.find((x) => x.code === "E-FILE-SCOPE-INIT-IN-CONSTRUCT");
+      expect(c?.message).toContain("the initializer of `const k` reads what " + what + " in it reads (the bootstrap does not follow the reads inside one here, so it fails closed)");
+    }, 120000);
+  }
+
   test("r01 / r02 (the request reads a later cell whose seed writes): refused at the seed", async () => {
     expect(await codes(PRE + `<program>
     let <r:string=""/>
@@ -409,6 +428,52 @@ describe("A3 — E-DERIVED-READS-UNTRACKED", () => {
 `);
     expect(d.map((x) => x.code)).toEqual(["E-DERIVED-READS-UNTRACKED"]);
     expect(d[0].message).toContain("calls `getn()`, which reads `n`");
+  }, 120000);
+
+  // s482 r2 (#2096 r1 review MED-1): A3 governs a DERIVED formula only. A prop default / locked field
+  // initializer that reads no cell, directly or through the functions it calls, is not derived (Q13: "the
+  // derived-iff-reads-a-cell half stands"), so reading a written `let` through a call is legal there, as the
+  // direct form `(n + 1)` already was. Probes h08 / l01 (base: compiles, `#o` = 5 in Chromium).
+  test("MED-1 h08: a prop default reading a written `let` through a call compiles — 5 (the request ran first)", async () => {
+    expect(await texts(`<program>
+\${ let n: int = 1; }
+\${ function bump() -> int { n = 5; return 0; } }
+\${ function rd() -> int { return n; } }
+let <r:int=0/>
+<cp v:int=(rd())>
+</> renders <p id="o">\${v}</p>
+<request id="rq" deps=[]>\${ @r = bump(); }</request><cp/>
+</program>
+`, ["o"])).toEqual(["5"]);
+  }, 120000);
+
+  test("MED-1 l01: a locked field initializer reading a written `let` through a call compiles — 2", async () => {
+    expect(await texts(`\${ let n: int = 1; }
+\${ function bump() -> int { n = 5; return 0; } }
+\${ function rd() -> int { return n; } }
+<card t:string="x">
+    <v:int=(rd() + 1)/>
+</> renders <b id="o">\${v}</b>
+<program>
+<card/>
+<button id="b" onclick={ bump(); }>b</button>
+</program>
+`, ["o"])).toEqual(["2"]);
+  }, 120000);
+
+  test("MED-1 twin: a prop default whose call reaches a cell IS derived — still E-DERIVED-READS-UNTRACKED", async () => {
+    const d = await errors(`<program>
+\${ let n: int = 1; }
+<x:int=1/>
+\${ function rx() -> int { return @x + n; } }
+<cp v:int=(rx())>
+</> renders <p id="o">\${v}</p>
+<cp/>
+<button onclick={ n = n + 1; }>+</button>
+</program>
+`);
+    expect(d.map((x) => x.code)).toEqual(["E-DERIVED-READS-UNTRACKED"]);
+    expect(d[0].message).toContain("the formula of derived `@cp.v` calls `rx()`, which reads `n`");
   }, 120000);
 
   test("legal: a `let` nothing writes (a constant in effect), and a seed (not derived) reading a written `let`", async () => {
