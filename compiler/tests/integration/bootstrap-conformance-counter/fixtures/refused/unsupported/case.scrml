@@ -2,6 +2,6 @@
     let <count:int=0/>
     <main>
         <p>${@count}</p>
-        ^{ meta.subscribe("count", () => { meta.emit("<b>x</b>"); }); }
+        ^{ ^{ meta.emit("<b>x</b>"); } }
     </main>
 </program>

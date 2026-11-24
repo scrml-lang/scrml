@@ -29,7 +29,8 @@ const fence = (...body) => [`${F}scrml`, ...body, F];
 const GOOD = ["<program>", "    let <count:int=0/>", "    function inc() {", "        @count = @count + 1;", "    }", "    <main><button onclick=inc()>+</button><p>${@count}</p></main>", "</program>"];
 // s481-boot-meta: a RUNTIME `^{}` (compile-time `^{}` is built; runtime meta is not yet)
 // s482-meta-runtime: runtime `^{}` is built; `meta.subscribe` in one is not (refused by name, INTERIM)
-const AHEAD = ["<program>", "    <main>", "        <p>hi</p>", "        ^{ meta.subscribe(\"x\", () => { meta.emit(\"<b>x</b>\"); }); }", "    </main>", "</program>"];
+// s482-meta-phase3: `meta.subscribe` is built; a `^{}` nested in a runtime block is not (refused by name, INTERIM)
+const AHEAD = ["<program>", "    <main>", "        <p>hi</p>", "        ^{ ^{ meta.emit(\"<b>x</b>\"); } }", "    </main>", "</program>"];
 const LEGACY = ["<program>", "    <count> = 0", "    <p>${@count}</p>", "</program>"];
 
 describe("parseDocMarkers — dialect opt-in", () => {

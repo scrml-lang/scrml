@@ -1189,7 +1189,57 @@ ${
                                 isEnum: false, members: [], src: td }]);
             k = k + 1;
         }
+        // s482 (s482-meta-phase3) — SPEC §22.5.4: "The compiler-known type `TypeInfo` names an
+        // entry for a compiler that types `reflect()` results: `TypeInfo:struct = { kind: string,
+        // name: string, fields: FieldInfo[], variants: string[] }` with `FieldInfo:struct = { name:
+        // string, type: string }`" (ruling:user-voice-scrml.md-S481-meta-four item 3). Built-in
+        // structs, in scope everywhere and shadowed by a user type of the same name, as the
+        // built-in enums are. Their Syms (and their members') are FIXED (metaInfoSym, negative
+        // ids), not minted, so they shift no other Sym of any program; lower ships them only when
+        // the Core names them (a runtime `reflect`).
+        for (const md of metaInfoDecls()) {
+            let ms: Sym[] = [];
+            for (const n of typeMemberNames(md.body)) { ms = ms.concat([metaInfoSym(md.name, n)]); }
+            out = out.concat([{ nid: -1, name: md.name, file: builtinFile(), exported: false, sym: metaInfoSym(md.name, ""),
+                                isEnum: false, members: ms, src: md }]);
+        }
         return { stubs: out, st: st };
+    }
+
+    export fn typeInfoName() -> string { return "TypeInfo"; }
+    export fn fieldInfoName() -> string { return "FieldInfo"; }
+
+    fn metaInfoDecls() -> ATypeDecl[] {
+        return [
+            builtinStruct(fieldInfoName(), [builtinField("name", "string", false), builtinField("type", "string", false)]),
+            builtinStruct(typeInfoName(), [builtinField("kind", "string", false), builtinField("name", "string", false),
+                                           builtinField("fields", fieldInfoName(), true), builtinField("variants", "string", true)]),
+        ];
+    }
+
+    // The fixed Sym of a `TypeInfo` / `FieldInfo` part ("" — the type itself): -3000.. (the
+    // Appendix H interfaces hold -2000..-2299).
+    export fn metaInfoSym(ty: string, member: string) -> Sym {
+        const names: string[] = ["", "kind", "name", "fields", "variants"];
+        if (ty == fieldInfoName()) {
+            if (member == "") return mkSym(-3010, ty);
+            if (member == "name") return mkSym(-3011, member);
+            return mkSym(-3012, member);
+        }
+        const i: int = names.indexOf(member);
+        if (member == "") return mkSym(-3000, ty);
+        return mkSym(-3000 - i, member);
+    }
+
+    fn builtinStruct(name: string, fs: ATypeField[]) -> ATypeDecl {
+        return { nid: -1, span: mkSpan(0, 0), exported: false, name: name, body: ATypeBody.StructBody(fs) };
+    }
+
+    // A built-in struct field of the named type (`tape` — a tape of it).
+    fn builtinField(name: string, ty: string, tape: boolean) -> ATypeField {
+        let at: AType = { nid: -1, span: mkSpan(0, 0), k: ATypeK.TName(ty) };
+        if (tape) at = { nid: -1, span: mkSpan(0, 0), k: ATypeK.TSeq(at, []) };
+        return { nid: -1, span: mkSpan(0, 0), isLet: false, name: name, ty: at, vals: [] };
     }
 
     // s451 (Ue) — the built-in error enums, written as the SPEC writes them:
@@ -1828,6 +1878,14 @@ ${
                             out = out.concat([{ file: fs.file, local: n.name, sym: typeDefSym(ti.def), orig: n.orig, from: n.from }]);
                         }
                     }
+                }
+                // s482 r1 (review of #2080, LOW-2) — a user type named `TypeInfo` / `FieldInfo` in scope
+                // here shadows the compiler-known one (§22.5.4; as a user `Error` shadows the built-in
+                // enum), yet a `reflect` still gives the built-in: a message naming both read "expects
+                // `TypeInfo`, and this value is `TypeInfo`". The built-in is noted where it is named
+                // (aliasNote), so the two stay apart.
+                if (n.kind == NameKind.KType && (n.name == typeInfoName() || n.name == fieldInfoName())) {
+                    out = out.concat([{ file: fs.file, local: n.name, sym: metaInfoSym(n.name, ""), orig: n.name, from: builtinFile() }]);
                 }
             }
         }
@@ -9934,6 +9992,13 @@ ${
     //                           §22.5.1 "opaque intervalId", a `string` here: INTERIM, the
     //                           bootstrap has no opaque type; the runtime keys it per block)
     //   clearInterval / clearTimeout(id: string)  no value
+    // s482 (s482-meta-phase3):
+    //   reflect(name: string, entries: TypeInfo[]) -> TypeInfo (a string-literal name: the
+    //                           type's literal, which names a type) / TypeInfo | not (any
+    //                           other name, §22.5.4 "Unknown names SHALL return `not`") —
+    //                           meta.scrml builds `entries` (the runtime type registry)
+    //   subscribe(@x, f: (v: T) => void) -> () => void   (§22.5.1 "Returns an unsubscribe
+    //                           function"; T the cell's type)
     fn metaOpCallee(callee: AExpr) -> string {
         const m: MethodCall | not = memberCall(callee);
         if (m is not) return "";
@@ -9949,15 +10014,61 @@ ${
         if (op == "timeout") return PrimOp.MetaTimeout;
         if (op == "clearInterval") return PrimOp.MetaClearInterval;
         if (op == "clearTimeout") return PrimOp.MetaClearTimeout;
+        if (op == "reflect") return PrimOp.MetaReflect;
+        if (op == "subscribe") return PrimOp.MetaSubscribe;
         return not;
     }
 
     fn metaArity(op: string) -> int {
-        if (op == "interval" || op == "timeout") return 2;
+        if (op == "interval" || op == "timeout" || op == "reflect" || op == "subscribe") return 2;
         return 1;
     }
 
     fn voidFnType() -> Type { return Type.Fn([], not, false, not); }
+
+    // s482 (s482-meta-phase3) — the compiler-known `TypeInfo` (§22.5.4), and a tape of it
+    export fn typeInfoType() -> Type { return Type.Named(metaInfoSym(typeInfoName(), "")); }
+    fn typeInfoTape() -> Type { return Type.Seq(typeInfoType(), fixedSeq()); }
+
+    // `^.reflect(name, entries)`: `TypeInfo` when the name is a string literal that one of the
+    // entries carries as its `name` (the lookup cannot miss); `TypeInfo | not` otherwise — a
+    // computed name, or a literal naming no type (`meta.types.reflect("Nope")`, §22.5.4 "Unknown
+    // names SHALL return `not`")
+    fn metaReflectType(name: AExpr, entries: AExpr) -> Type {
+        const lit: string | not = strLitOf(name);
+        if (lit is given) {
+            for (const en of arrayElems(entries)) {
+                if (entryName(en) == lit) return typeInfoType();
+            }
+        }
+        return Type.Maybe(typeInfoType());
+    }
+
+    fn strLitOf(e: AExpr) -> string | not {
+        const k: AExprK = e.k;
+        return match k {
+            .Str(v: x) :> x,
+            // no-default-arm: one question of an expression — is it a string literal
+            _ :> not
+        };
+    }
+
+    // a registry entry's `name` (meta.scrml entryExpr: an object literal), "" when it has none
+    fn entryName(e: AExpr) -> string {
+        const k: AExprK = e.k;
+        const ps: AProp[] = match k {
+            .ObjectLit(props: xs) :> xs,
+            // no-default-arm: one question of an entry — its props
+            _ :> []
+        };
+        for (const p of ps) {
+            if (p.name == "name") {
+                const v: string | not = strLitOf(p.value);
+                if (v is given) return v;
+            }
+        }
+        return "";
+    }
 
     fn resolveMetaCall(env: Env, e: AExpr, op: string, args: AExpr[], st0: AS) -> RX {
         const po: PrimOp | not = metaPrimOp(op);
@@ -9972,13 +10083,25 @@ ${
             return plain(not, addValue(re.st, e.nid, ValueFact.VMethod(po)));
         }
         if (op == "cleanup") {
-            const sc: AS = resolveMetaCallback(env, args[0], op, st0);
+            const sc: AS = resolveMetaCallback(env, args[0], op, not, st0);
             return plain(not, addValue(sc, e.nid, ValueFact.VMethod(po)));
         }
         if (op == "interval" || op == "timeout") {
             const rm: RX = resolveExpr(env, args[0], Type.Num, st0);
-            const sf: AS = resolveMetaCallback(env, args[1], op, rm.st);
+            const sf: AS = resolveMetaCallback(env, args[1], op, not, rm.st);
             return plain(Type.Str, addValue(sf, e.nid, ValueFact.VMethod(po)));
+        }
+        if (op == "reflect") {
+            const rn: RX = resolveExpr(env, args[0], Type.Str, st0);
+            const rl: RX = resolveExpr(env, args[1], typeInfoTape(), rn.st);
+            return plain(metaReflectType(args[0], args[1]), addValue(rl.st, e.nid, ValueFact.VMethod(po)));
+        }
+        if (op == "subscribe") {
+            const rs: RX = resolveExpr(env, args[0], not, st0);
+            let cty: Type | not = rs.x.ty;
+            if (cty is not) cty = Type.Str;      // (unreached: meta.scrml names a cell, whose type is known)
+            const sb: AS = resolveMetaCallback(env, args[1], op, cty, rs.st);
+            return plain(voidFnType(), addValue(sb, e.nid, ValueFact.VMethod(po)));
         }
         const ri: RX = resolveExpr(env, args[0], Type.Str, st0);
         return plain(not, addValue(ri.st, e.nid, ValueFact.VMethod(po)));
@@ -9992,11 +10115,40 @@ ${
     // `let` locals, `if` / `else`, and calls of the block's `meta` — isMetaCallExpr); anything
     // else in it, and a named function as the callback, are refused by name (INTERIM,
     // g-boot-meta-runtime-residue-s482).
-    fn resolveMetaCallback(env: Env, lam: AExpr, op: string, st0: AS) -> AS {
+    // s482 (s482-meta-phase3): `meta.subscribe`'s callback takes the cell's new value — `pty` the
+    // cell's type, its one parameter (written bare, or `: T` naming that type); the others take none.
+    fn resolveMetaCallback(env: Env, lam: AExpr, op: string, pty: Type | not, st0: AS) -> AS {
         if (!isLambda(lam)) return addDiag(st0, env.file, lam.span, "E-BOOTSTRAP-UNSUPPORTED", "the callback of `meta." + op + "(…)` is built only as an arrow written in place (`() => { … }`) — a named function or another function value is not in the bootstrap yet (INTERIM, g-boot-meta-runtime-residue-s482)");
-        if (lambdaParams(lam).length != 0) return addDiag(st0, env.file, lam.span, "E-BOOTSTRAP-UNSUPPORTED", "the callback of `meta." + op + "(…)` takes no parameters (§22.5.1: the runtime calls it with none) — write `() => { … }`");
+        if (pty is not && lambdaParams(lam).length != 0) return addDiag(st0, env.file, lam.span, "E-BOOTSTRAP-UNSUPPORTED", "the callback of `meta." + op + "(…)` takes no parameters (§22.5.1: the runtime calls it with none) — write `() => { … }`");
+        if (pty is given && lambdaParams(lam).length > 1) return addDiag(st0, env.file, lam.span, "E-BOOTSTRAP-UNSUPPORTED", "the callback of `meta." + op + "(…)` takes at most one parameter, the cell's new value (§22.5.1) — write `(v) => { … }`");
         let st: AS = st0;
-        const env2: Env = noNarrows(sealEvent(env));
+        let env2: Env = noNarrows(sealEvent(env));
+        let psyms: Sym[] = [];
+        let pts: Type[] = [];
+        if (pty is given) {
+            pts = [pty];
+            const aps: AParam[] = lambdaAParams(lam).concat(lambdaTypedParams(lam));
+            for (const pn of lambdaParams(lam)) {
+                const rs: RSym = mint(reservedName(st, env.file, lam.span, pn), pn);
+                st = rs.st;
+                psyms = psyms.concat([rs.s]);
+                for (const p of aps) {
+                    if (p.name == pn) {
+                        if (p.lin) st = addDiag(st, env.file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "a `lin` parameter on a `meta." + op + "` callback is not in the bootstrap (INTERIM) — drop `lin`");
+                        const at: AType | not = p.ty;
+                        if (at is given && !hasErrIn(fileErrs(env.g.files, env.file), at.span)) {
+                            const rt: RType = resolveTypeFn(teAt(env.g.te, env.file), at, st);
+                            st = rt.st;
+                            if (!rt.unresolved && !sameType(rt.t, pty)) {
+                                st = addDiag(st, env.file, at.span, "E-TYPE-031", "the parameter `" + pn + "` is declared `" + typeName(rt.t) + "`, and `meta." + op + "` passes it the cell's new value, which is `" + typeName(pty) + "` (§22.5.1)");
+                            }
+                        }
+                    }
+                }
+                st = addAnnot(st, rs.s, pty);
+                env2 = withLocal(env2, { name: pn, s: rs.s, ty: pty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "" });
+            }
+        }
         const blk: ABlock | not = lambdaBlock(lam);
         if (blk is given) {
             st = lamBodyCheck(env, blk, [], st);
@@ -10009,9 +10161,63 @@ ${
                 st = resolveExpr(withFx(env2, noFailCtx()), b, not, st).st;
             }
         }
-        const ft: Type = voidFnType();
-        st = addValue(st, lam.nid, ValueFact.VLambda([], ft));
+        // s482 r1 (s482-meta-phase3, HIGH-1 / LOW-3): no nested registration of the block's
+        // `meta` in a callback, and no call that may write a cell (decided on the summary)
+        st = metaNestedRegs(env, lam, op, st);
+        const ft: Type = Type.Fn(pts, not, false, not);
+        st = addValue(st, lam.nid, ValueFact.VLambda(psyms, ft));
+        st = addPending(st, PendRule.MetaCb(lam, env.file, op));
         return addPending(st, PendRule.FnValue(-1, env.fx.fnSym, env.file, lam.span, ""));
+    }
+
+    // s482 r1 (LOW-3) — a `meta.subscribe` / `meta.interval` / `meta.timeout` / `meta.cleanup`
+    // INSIDE a callback registers again on every call of the callback: a subscription callback
+    // run on each change, or an interval's tick, would add one more subscription / timer /
+    // cleanup per call, each living until the block's run ends (§22.5.1 gives a registration
+    // the run's lifetime; it says nothing of one made by a callback). Refused by name — a
+    // registration stands in the block's own body, where it is made once per run. INTERIM
+    // (g-boot-meta-runtime-residue-s482): the capable form owns a callback's registrations by
+    // that callback's invocation.
+    fn metaNestedRegs(env: Env, lam: AExpr, op: string, st0: AS) -> AS {
+        let st: AS = st0;
+        let es: AExpr[] = [];
+        const b: AExpr | not = lambdaBody(lam);
+        if (b is given) es = [b];
+        const blk: ABlock | not = lambdaBlock(lam);
+        if (blk is given) es = blockExprsDeep(blk);
+        for (const x of es) {
+            for (const r of metaRegsIn(x)) {
+                st = addDiag(st, env.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", "`meta." + metaOpCallee(calleeOrSelf(r)) + "(…)` inside the callback of `meta." + op + "(…)` would register again on every call of the callback, each registration living until the block's run ends — a registration stands in the block's own body, where it is made once per run (§22.5.1; INTERIM, g-boot-meta-runtime-residue-s482: a registration owned by the callback's call is not built). Move it out of the callback");
+            }
+        }
+        return st;
+    }
+
+    fn isMetaRegOp(op: string) -> boolean {
+        return op == "subscribe" || op == "interval" || op == "timeout" || op == "cleanup";
+    }
+
+    // the outermost `meta` registration calls in `e` (a nested one's own callback is judged
+    // when it is resolved)
+    fn metaRegsIn(e: AExpr) -> AExpr[] {
+        const c: AExpr | not = calleeOf(e.k);
+        if (c is given && isMetaRegOp(metaOpCallee(c))) return [e];
+        let out: AExpr[] = [];
+        for (const x of exprKids(e)) { out = out.concat(metaRegsIn(x)); }
+        for (const bb of exprBlocksIn(e)) {
+            for (const y of blockExprsDeep(bb)) { out = out.concat(metaRegsIn(y)); }
+        }
+        return out;
+    }
+
+    // every statement expression of a block, its nested statement blocks included
+    fn blockExprsDeep(b: ABlock) -> AExpr[] {
+        let out: AExpr[] = [];
+        for (const s of b.stmts) {
+            out = out.concat(stmtExprs(s));
+            for (const kb of stmtKidBlocks(s)) { out = out.concat(blockExprsDeep(kb)); }
+        }
+        return out;
     }
 
     // s478 (g-boot-s20-builtins-unbuilt-s473, g-bootstrap-twin-log-unknown-s451) — the built-in
@@ -11597,7 +11803,7 @@ ${
     // error naming the construct; refusing means nobody is surprised"*), prov=pa-ruled.
     // ~~One that READS a file-scope `let` or a program cell that body code writes — anywhere~~
     // s482 (lane s482-construct-init-fu, #2076 review MED-1 / LOW-1) — the initializer's place is now
-    // just BEFORE the construct (lower.scrml lowerPlaced / placeBefore). Put after it, the construct's
+    // just BEFORE the construct (lower.scrml lowerPlaced). Put after it, the construct's
     // content read the binding before its place, so the printer ran it at module initialization,
     // before the whole body, with every binding its initializer reads (`${ n = 5; } ${ const m = n; }
     // <div if=(m > 0)>${ const k = m + 0; }…` showed m = 1 and k = 1). Placed before, it sees every
@@ -11639,7 +11845,7 @@ ${
                         // no-default-arm: one question of an item — is it a file-scope binding
                         _ :> false
                     };
-                    if (isConst && constructAt(t, tops, ci.span.start) != "") cands = cands.concat([ci]);
+                    if (isConst && (constructAt(t, tops, ci.span.start) != "" || placeHostAt(t, tops, ci.span.start) != "")) cands = cands.concat([ci]);
                 }
                 const cells: BodyCell[] = bodyCells(g, ps);
                 for (const ci of cands) {
@@ -11653,9 +11859,24 @@ ${
                         .FnItem(f: x) :> not,
                         .MarkupItem(n: x) :> not
                     };
+                    // s482 (lane s482-place-fu, #2079 review PRE-2) — an initializer inside an element
+                    // whose content holds no place (`<textarea>`, `<title>`, …: placeHostAt) is put just
+                    // before that element too. It is not a construct: it renders once, in place, so one
+                    // that acts is legal — unless code inside the element runs before it (an attribute
+                    // value, an earlier display): source order runs that code first, the place before
+                    // the element does not, and either may observe the other.
+                    const host: string = placeHostAt(t, tops, ci.span.start);
+                    if (c is given && constructAt(t, tops, ci.span.start) == "" && host != "" && initActWhat(c.init) != "") {
+                        const lo0: int = constructStart(t, tops, ci.span.start);
+                        if (regionHasCode(t, ps, lo0, ci.span.start)) {
+                            let kw0: string = "const";
+                            if (c.mutable) kw0 = "let";
+                            out = out.concat([newDiag("E-FILE-SCOPE-INIT-IN-CONSTRUCT", "the initializer of `" + kw0 + " " + c.name + "` " + initActWhat(c.init) + ", and it is written inside " + host + " after code there (an attribute value or a display) — the content of " + host + " is text and holds no place, so the initializer runs just before that element (§7.6 rule (b)), before that code, not after it as written. Declare `" + c.name + "` before that element, or before the code in it", f.path, c.span)]);
+                        }
+                    }
                     if (c is given) {
                         const where: string = constructAt(t, tops, ci.span.start);
-                        if (where != "" && initActWhat(c.init) == "") {
+                        if ((where != "" || host != "") && initActWhat(c.init) == "") {
                             const lo: int = constructStart(t, tops, ci.span.start);
                             const bw: BodyW = constructWrites(g, t, sum, writes, sites, lets, f.path, ps, pfields, lo, ci.span.start);
                             const r: string = initReadWritten(t, [c.init], bw, g.program.id, pfields, cells, lo, []);
@@ -11664,7 +11885,9 @@ ${
                                 if (c.mutable) kw = "let";
                                 let before: string = " inside that construct, before it";
                                 if (lo < 0) before = "";
-                                out = out.concat([newDiag("E-FILE-SCOPE-INIT-IN-CONSTRUCT", "the initializer of `" + kw + " " + c.name + "` reads " + r + ", which the program body writes" + before + ", and it is written inside " + where + " — a file-scope initializer runs once, in the program body's one run (§7.6 rule (b)), not when, or each time, that content renders, so whether it sees that write depends on where it runs: it has no place here. Declare `" + c.name + "` before that element, or compute the value where the content needs it", f.path, c.span)]);
+                                if (where == "") {
+                                    out = out.concat([newDiag("E-FILE-SCOPE-INIT-IN-CONSTRUCT", "the initializer of `" + kw + " " + c.name + "` reads " + r + ", which the program body writes inside " + host + ", before it — the content of " + host + " is text and holds no place, so the initializer runs just before that element (§7.6 rule (b)), before that write, not after it as written. Declare `" + c.name + "` before that element, or before the write", f.path, c.span)]);
+                                } else out = out.concat([newDiag("E-FILE-SCOPE-INIT-IN-CONSTRUCT", "the initializer of `" + kw + " " + c.name + "` reads " + r + ", which the program body writes" + before + ", and it is written inside " + where + " — a file-scope initializer runs once, in the program body's one run (§7.6 rule (b)), not when, or each time, that content renders, so whether it sees that write depends on where it runs: it has no place here. Declare `" + c.name + "` before that element, or compute the value where the content needs it", f.path, c.span)]);
                             }
                         }
                     }
@@ -11679,11 +11902,14 @@ ${
     type BodyW:struct = { lets: int[], cells: int[], cellNames: string[] }
 
     // s482 (lane s482-construct-init-fu) — the start of the construct a place at `pos` is put just
-    // before (lower.scrml lowerPlaced / placeBefore): the outermost `if=` / `else-if=` / `else`
+    // before (lower.scrml lowerPlaced): the outermost `if=` / `else-if=` / `else`
     // element (an if-chain's first member), component use or `<match>` on the path from the body's
     // top nodes, descending only through what renders once, in place (an HTML element that holds no
-    // raw or parser-text content, a `<db>` block). -1 when the place is put elsewhere (after some
-    // other element): then every body write counts, as in #2076 (fail closed).
+    // raw or parser-text content, a `<db>` block). ~~-1 when the place is put elsewhere (after some
+    // other element): then every body write counts, as in #2076 (fail closed).~~ s482 (lane
+    // s482-place-fu, #2079 review PRE-2): any other element the descent stops at — one whose
+    // content holds no place (`<textarea>`, `<title>`, raw content, `<each>`, …) — is the start
+    // too: lowerPlaced puts the place just before it. -1 when `pos` is in no element.
     fn constructStart(t: Tables, ns: ANode[], pos: int) -> int {
         let i: int = 0;
         for (; i < ns.length; ) {
@@ -11697,16 +11923,90 @@ ${
                     .MMatch(m: m) :> 1,
                     .MHtml :> 2,
                     .MDb :> 3,
-                    // no-default-arm: any other element keeps the place after it (lowerPlaced)
+                    // no-default-arm: any other element gets the place just before it (lowerPlaced)
                     _ :> 0
                 };
                 if (kind == 1) return e.span.start;
                 if (kind == 3 || (kind == 2 && !parserTextElem(e))) return constructStart(t, e.kids, pos);
-                return -1;
+                return e.span.start;
             }
             i = i + 1;
         }
         return -1;
+    }
+
+    // s482 (lane s482-place-fu, #2079 review PRE-2) — the element, named for a message, whose
+    // content holds no place and in which a place at `pos` stands, when no construct does: the
+    // element the constructStart descent stops at that is not a construct (`<textarea>`, `<title>`
+    // — the RCDATA elements; raw `<pre>` / `<code>` content and `<script>` / `<style>` hold no
+    // declaration). lowerPlaced puts the place just before it. "" when there is none.
+    fn placeHostAt(t: Tables, ns: ANode[], pos: int) -> string {
+        for (const n of ns) {
+            const e: AElem | not = elemOfNodeK(n.k);
+            if (e is given && e.span.start <= pos && pos < e.span.end) {
+                if (attrNamed(e.attrs, "if") is given || attrNamed(e.attrs, "else-if") is given || attrNamed(e.attrs, "else") is given) return "";
+                const fct: ElemFact | not = elemFact(t.elems, e.nid);
+                const kind: int = match fct {
+                    .MUse(decl: d) :> 1,
+                    .MMatch(m: m) :> 1,
+                    .MHtml :> 2,
+                    .MDb :> 3,
+                    // no-default-arm: any other element holds no place
+                    _ :> 0
+                };
+                if (kind == 1) return "";
+                if (kind == 3 || (kind == 2 && !parserTextElem(e))) return placeHostAt(t, e.kids, pos);
+                let tag: string = e.tag;
+                if (e.star) tag = "*" + e.tag;
+                return "`<" + tag + ">`";
+            }
+        }
+        return "";
+    }
+
+    // s482 (lane s482-place-fu) — whether code runs between `lo` and `hi` in the body's markup:
+    // an attribute value or a display there (not an event handler or an `<effect>`; s482 r3: a
+    // `<request>` is), or a component used there (a `<*x/>` of a shared instance included).
+    fn regionHasCode(t: Tables, items: AItem[], lo: int, hi: int) -> boolean {
+        if (lo < 0) return true;
+        for (const it of items) {
+            const n: ANode | not = markupOfItem(it);
+            if (n is given && (codeBlocksOf(regionBlocks(n, lo, hi)).length > 0 || regionUses(t, n, lo, hi).length > 0)) return true;
+            // s482 r2 — a `<*x/>` view there runs its markup's code; anything opaque fails closed
+            if (n is given) {
+                const sc: RegionScan = regionScan(t, n, lo, hi);
+                if (sc.opaque || sc.views.length > 0) return true;
+            }
+        }
+        return false;
+    }
+
+    // s482 r1 (#2082 review LOW-1) — `bs` without the blocks that are only a literal value (an
+    // attribute's `rows=3`, `hidden=true`): a literal neither observes nor writes anything.
+    fn codeBlocksOf(bs: ABlock[]) -> ABlock[] {
+        let out: ABlock[] = [];
+        for (const b of bs) { if (!literalBlock(b)) out = out.concat([b]); }
+        return out;
+    }
+
+    fn literalBlock(b: ABlock) -> boolean {
+        if (b.stmts.length != 1) return false;
+        const sk: AStmtK = b.stmts[0].k;
+        const x: AExpr | not = match sk {
+            .Eval(e: y) :> y,
+            // no-default-arm: only an expression block (exprBlock) is a literal value
+            _ :> not
+        };
+        if (x is not) return false;
+        const k: AExprK = x.k;
+        return match k {
+            .Num(raw: r) :> true,
+            .Str(v: v) :> true,
+            .Bool(v: v) :> true,
+            .NotLit :> true,
+            // no-default-arm: any other expression may be code
+            _ :> false
+        };
     }
 
     // The first member of the if-chain whose `else-if=` / `else` member is ns[i] (lower.scrml
@@ -11749,14 +12049,28 @@ ${
 
     // What the code that runs between `lo` (constructStart) and `hi` (the initializer's position)
     // writes: the attribute values and content of the nodes there (not an event handler, an
-    // `<effect>`, a `<request>`), the file-scope initializers there, and — run where they are used —
-    // the code of each component used there (its renders and its cells' seeds, transitively); and
-    // the seeds of the program cells whose place is at or after `lo` (one read there runs then).
+    // `<effect>`; s482 r3: a `<request>` IS — §6.7.7.3, it runs at the mount), the file-scope
+    // initializers there, and — run where they are used — the code of each component used there
+    // (its renders and its cells' seeds, transitively; s482 r3, #2082 r2 review MED-2: a `<*x/>`
+    // of a declaration's shared instance too — the mount runs that instance's seeds); and the
+    // seeds of the program cells whose place is at or after `lo` (one read there runs then).
+    // ~~s482 (lane s482-place-fu, #2079 review LOW-1) the seed of a program cell whose place is
+    // between `lo` and `hi`, or whose place is later but which that code uses~~ *(struck s482 r3,
+    // pa-ruled: three review rounds each found a seed the bounded `used` set missed — #2082 HIGH-1,
+    // r2 HIGH-3, MED-2 — so every seed placed at or after `lo` counts again, as on base; the
+    // after-construct `let <z=(bump())/>` is refused again: INTERIM, gap
+    // g-boot-construct-seed-bound-s482.)* s482 r2 (#2082 r1 review HIGH-2, MED-1): the walk is
+    // default-deny (regionScan) — the state-child bodies a `<*field/>` there renders are walked like
+    // a component's renders (the viewed field's own seed is a program cell's: counted below when
+    // its place is at or after `lo`), and anything there the walk does not positively understand
+    // fails closed (s482 r3): every write of the program body counts (bodyWritesOf, #2076).
     // `lo` < 0: all of the program body's code (bodyWritesOf, #2076).
     fn constructWrites(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[], file: string, items: AItem[], pfields: FieldInfo[], lo: int, hi: int) -> BodyW {
         if (lo < 0) return bodyWritesOf(g, t, sum, writes, sites, lets, file, items, pfields);
         let blocks: ABlock[] = [];
         let uses: int[] = [];
+        let views: ViewW[] = [];
+        let opaque: boolean = false;
         for (const it of items) {
             const k: AItemK = it.k;
             const c: AConst | not = match k {
@@ -11773,15 +12087,23 @@ ${
             if (n is given) {
                 blocks = blocks.concat(regionBlocks(n, lo, hi));
                 uses = unionIds(uses, regionUses(t, n, lo, hi));
+                const sc: RegionScan = regionScan(t, n, lo, hi);
+                views = views.concat(placeViews(g, sc.views, file));
+                if (sc.opaque) opaque = true;
             }
         }
+        // every program cell's seed placed at or after `lo` (base's rule — fail closed)
         for (const fi of pfields) {
             if (fi.span.start >= lo) blocks = blocks.concat(seedBlocks(fi.init));
         }
         let bw: BodyW = blocksWrites(g, t, sum, writes, sites, lets, file, blocks, pfields);
+        // s482 r2 (#2082 r1 review HIGH-2, MED-1) — the markup a `<*x/>` there renders (regionScan)
+        const va: ViewAcc = viewsWrites(g, t, sum, writes, sites, lets, pfields, views);
+        bw = mergeBodyW(bw, va.bw);
+        if (va.opaque) opaque = true;
         // the components used there, and those they use, each once
         let seen: int[] = [];
-        let todo: int[] = uses;
+        let todo: int[] = unionIds(uses, va.uses);
         for (; todo.length > 0; ) {
             let next: int[] = [];
             for (const d of todo) {
@@ -11797,6 +12119,12 @@ ${
                                 const rn: ANode = { nid: -1, span: r.span, k: ANodeK.Elem(r) };
                                 cb = cb.concat(bodyCodeBlocks(rn));
                                 next = unionIds(next, regionUses(t, rn, -1, 2147483647));
+                                const rs: RegionScan = regionScan(t, rn, -1, 2147483647);
+                                if (rs.opaque) opaque = true;
+                                const rv: ViewAcc = viewsWrites(g, t, sum, writes, sites, lets, pfields, placeViews(g, rs.views, ds.file));
+                                bw = mergeBodyW(bw, rv.bw);
+                                next = unionIds(next, rv.uses);
+                                if (rv.opaque) opaque = true;
                             }
                             bw = mergeBodyW(bw, blocksWrites(g, t, sum, writes, sites, lets, ds.file, cb, pfields));
                         }
@@ -11805,6 +12133,9 @@ ${
             }
             todo = next;
         }
+        // default-deny: something there the walk does not positively understand — every write of
+        // the program body counts (#2076's rule)
+        if (opaque) bw = mergeBodyW(bw, bodyWritesOf(g, t, sum, writes, sites, lets, file, items, pfields));
         return bw;
     }
 
@@ -11879,6 +12210,9 @@ ${
                 const fct: ElemFact | not = elemFact(t.elems, e.nid);
                 const d: int = match fct {
                     .MUse(decl: d) :> d.id,
+                    // s482 r3 (#2082 r2 review MED-2) — `<*x/>` of a declaration's shared instance:
+                    // its mount runs that instance's seeds and its renders, as a use does
+                    .MStar(decl: d) :> d.id,
                     // no-default-arm: only a use runs a component's code
                     _ :> -1
                 };
@@ -11895,6 +12229,178 @@ ${
             for (const r of gatherRows(gf)) { out = unionIds(out, regionUses(t, r, lo, hi)); }
         }
         return out;
+    }
+
+    // s482 r2 (#2082 r1 review HIGH-2, MED-1) — the walk of the WRITES is DEFAULT-DENY. regionBlocks /
+    // regionUses read the code an element runs at mount from its attributes and its kids; that is
+    // the whole story only for the node kinds listed here. regionScan names, for the part of `n`
+    // between `lo` and `hi`, (a) the markup a `<*x/>` there renders that is NOT its kids — every
+    // state-child body of a `rule=` graph field (MStateView, all states: any may be the one held at
+    // mount), the inlined renders of a child field (MInline) — which the caller walks as it walks a
+    // component's renders; and (b) `opaque`: something there the walk does not positively
+    // understand, on which the caller fails closed (s482 r3: every write of the program body,
+    // bodyWritesOf). Understood, by ANodeK: Text, Interp, Run (code: bodyCodeBlocks); Css (a `#{}`
+    // bridge read is no code — it runs the bridge's seed, which is a program cell's and counted
+    // as one; its values are not evaluated as code); Effect (it does not run at mount); Request
+    // (s482 r3: it runs at mount — its body and attribute values are code, bodyCodeBlocks; it holds
+    // no markup); Gather (its rows); Elem — by its ElemFact: MHtml, MUse (its renders:
+    // constructWrites' component loop; its slot content: its kids), MStar (s482 r3, #2082 r2
+    // review MED-2: a declaration's shared instance — regionUses gives it to the component loop,
+    // which counts its seeds and its renders), MEach (its `in=` / `key=` values, its row template:
+    // its kids), MSlot, MDb, MSchema (kids), MMatch (its `on=` value; every arm's body), MStateView
+    // / MInline (the views above; a state view's field is a program cell, or a field of the
+    // instance a use constructs — its seed counted with those). Opaque: DeclNode (a declaration
+    // where markup stands), MErrors, an element with no fact, and an attribute whose value is code
+    // the walk does not read (a `{ }` block that is not an event handler, a quoted value or a
+    // duration holding an interpolation).
+    type ViewW:struct = { nodes: ANode[], decl: int, key: int, file: string }
+    type RegionScan:struct = { views: ViewW[], opaque: boolean }
+
+    fn noScan() -> RegionScan {
+        return { views: [], opaque: false };
+    }
+
+    fn opaqueScan() -> RegionScan {
+        return { views: [], opaque: true };
+    }
+
+    fn joinScan(a: RegionScan, b: RegionScan) -> RegionScan {
+        return { views: a.views.concat(b.views), opaque: a.opaque || b.opaque };
+    }
+
+    fn regionScan(t: Tables, n: ANode, lo: int, hi: int) -> RegionScan {
+        if (n.span.end <= lo || n.span.start >= hi) return noScan();
+        const k: ANodeK = n.k;
+        return match k {
+            .Elem(e: e) :> scanElem(t, e, lo, hi),
+            .Gather(f: gf) :> scanNodes(t, gatherRows(gf), lo, hi),
+            .Text(text: x) :> noScan(),
+            .Interp(e: x) :> noScan(),
+            .Run(b: rb) :> noScan(),
+            .Css(c: x) :> noScan(),
+            .Effect(w: x) :> noScan(),
+            // s482 r3 — its body and attribute values are code (bodyCodeBlocks); it holds no markup
+            .Request(r: x) :> noScan(),
+            .DeclNode(d: x) :> (n.span.start >= lo ? opaqueScan() : noScan())
+        };
+    }
+
+    fn scanNodes(t: Tables, ns: ANode[], lo: int, hi: int) -> RegionScan {
+        let out: RegionScan = noScan();
+        for (const n of ns) { out = joinScan(out, regionScan(t, n, lo, hi)); }
+        return out;
+    }
+
+    fn scanElem(t: Tables, e: AElem, lo: int, hi: int) -> RegionScan {
+        // an element that holds `lo` (an HTML element or a `<db>` the place descends through,
+        // constructStart): only what is inside it is there
+        if (e.span.start < lo) return scanNodes(t, e.kids, lo, hi);
+        for (const a of e.attrs) { if (opaqueAttr(a)) return opaqueScan(); }
+        const fct: ElemFact | not = elemFact(t.elems, e.nid);
+        if (fct is not) return opaqueScan();
+        return scanFact(t, e, fct, lo, hi);
+    }
+
+    fn scanFact(t: Tables, e: AElem, fct: ElemFact, lo: int, hi: int) -> RegionScan {
+        const kids: RegionScan = scanNodes(t, e.kids, lo, hi);
+        return match fct {
+            .MHtml :> kids,
+            .MUse(decl: d) :> kids,
+            .MEach(bind: b) :> kids,
+            .MSlot :> kids,
+            .MDb :> kids,
+            .MSchema :> kids,
+            .MMatch(m: m) :> scanArms(t, e, m, lo, hi),
+            .MStateView(v: v) :> joinScan(kids, stateViewScan(e, v)),
+            .MInline(v: v) :> joinScan(kids, { views: [{ nodes: v.nodes, decl: -1, key: e.nid, file: "" }], opaque: false }),
+            .MStar(decl: d) :> kids,
+            .MErrors(of: o) :> opaqueScan()
+        };
+    }
+
+    // A `<match>`: its arms are its kids (the arm element carries no ElemFact); each arm's body.
+    fn scanArms(t: Tables, e: AElem, m: MatchBlock, lo: int, hi: int) -> RegionScan {
+        let out: RegionScan = noScan();
+        for (const kid of e.kids) {
+            const ae: AElem | not = elemOfNodeK(kid.k);
+            let arm: boolean = false;
+            if (ae is given) {
+                for (const ma of m.arms) { if (ma.elem.nid == ae.nid) arm = true; }
+            }
+            if (ae is given && arm) {
+                for (const a of ae.attrs) { if (opaqueAttr(a)) out = joinScan(out, opaqueScan()); }
+                out = joinScan(out, scanNodes(t, ae.kids, lo, hi));
+            } else out = joinScan(out, regionScan(t, kid, lo, hi));
+        }
+        return out;
+    }
+
+    fn stateViewScan(e: AElem, v: StateView) -> RegionScan {
+        let vs: ViewW[] = [];
+        let i: int = 0;
+        for (const arm of v.arms) {
+            // key: the `<*x/>` element and the arm — each state body walked once
+            vs = vs.concat([{ nodes: arm.body, decl: v.decl.id, key: e.nid * 64 + i, file: "" }]);
+            i = i + 1;
+        }
+        return { views: vs, opaque: false };
+    }
+
+    // An attribute value that is code the walk (bodyElemBlocks) does not read.
+    fn opaqueAttr(a: AAttr) -> boolean {
+        const av: AAttrValue = a.value;
+        return match av {
+            .NoValue :> false,
+            .Quoted(v: s, sq: q) :> s.indexOf("$" + "{") >= 0,
+            .Bare(e: x) :> false,
+            .Paren(e: x) :> false,
+            .Braced(b: b, ev: ev) :> eventName(a.name) == "",
+            .Dur(text: x) :> x.indexOf("$" + "{") >= 0
+        };
+    }
+
+    // The file a view's markup is code of: the declaring declaration's (a state body), else `file`.
+    fn placeViews(g: Globals, vs: ViewW[], file: string) -> ViewW[] {
+        let out: ViewW[] = [];
+        for (const v of vs) {
+            let f: string = file;
+            if (v.decl >= 0) {
+                for (const ds of g.decls) { if (ds.info.sym.id == v.decl) f = ds.file; }
+            }
+            out = out.concat([{ nodes: v.nodes, decl: v.decl, key: v.key, file: f }]);
+        }
+        return out;
+    }
+
+    // What the views (and the views they hold) run: their writes, the components they use (a
+    // `<*x/>` of a shared instance included), and whether any holds something opaque.
+    type ViewAcc:struct = { bw: BodyW, uses: int[], opaque: boolean }
+
+    fn viewsWrites(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[], pfields: FieldInfo[], vs0: ViewW[]) -> ViewAcc {
+        let bw: BodyW = { lets: [], cells: [], cellNames: [] };
+        let uses: int[] = [];
+        let opaque: boolean = false;
+        let seen: int[] = [];
+        let todo: ViewW[] = vs0;
+        for (; todo.length > 0; ) {
+            let next: ViewW[] = [];
+            for (const v of todo) {
+                if (seen.indexOf(v.key) < 0) {
+                    seen = seen.concat([v.key]);
+                    let cb: ABlock[] = [];
+                    for (const vn of v.nodes) {
+                        cb = cb.concat(bodyCodeBlocks(vn));
+                        uses = unionIds(uses, regionUses(t, vn, -1, 2147483647));
+                        const s: RegionScan = regionScan(t, vn, -1, 2147483647);
+                        if (s.opaque) opaque = true;
+                        next = next.concat(placeViews(g, s.views, v.file));
+                    }
+                    bw = mergeBodyW(bw, blocksWrites(g, t, sum, writes, sites, lets, v.file, cb, pfields));
+                }
+            }
+            todo = next;
+        }
+        return { bw: bw, uses: uses, opaque: opaque };
     }
 
     fn bodyWritesOf(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[], file: string, items: AItem[], pfields: FieldInfo[]) -> BodyW {
@@ -11952,7 +12458,12 @@ ${
     }
 
     // The code of a body node that runs in the body: its `${}` statements, its displays and attribute
-    // values, a gather's loop — never an event handler, an `<effect>` or a `<request>`.
+    // values, a gather's loop — never an event handler or an `<effect>` (E-EFFECT-NO-DEPS: it does
+    // not run on mount). ~~or a `<request>`~~ s482 r3 (#2082 r2 review HIGH-4, MED-3, pa-ruled): a
+    // `<request>` that does not provably write runs at the mount (§6.7.7.1 "Scope", §6.7.7.3 rule 1;
+    // `deps=[]` is mount-only), synchronously, in mount order — its body and its attribute values
+    // (a server function's argument included: it is evaluated here) are code that runs there. One
+    // that provably writes does not run on mount; counting it anyway is merely conservative.
     fn bodyCodeBlocks(n: ANode) -> ABlock[] {
         const k: ANodeK = n.k;
         return match k {
@@ -11963,9 +12474,26 @@ ${
             .Text(text: x) :> [],
             .DeclNode(d: x) :> [],
             .Effect(w: x) :> [],
-            .Request(r: x) :> [],
+            .Request(r: r) :> requestBlocks(r),
             .Css(c: x) :> []
         };
+    }
+
+    fn requestBlocks(r: ARequest) -> ABlock[] {
+        let out: ABlock[] = [r.body];
+        for (const a of r.attrs) {
+            if (eventName(a.name) == "") {
+                const v: AAttrValue = a.value;
+                const x: AExpr | not = match v {
+                    .Bare(e: x) :> x,
+                    .Paren(e: x) :> x,
+                    // no-default-arm: only an expression value is code
+                    _ :> not
+                };
+                if (x is given) out = out.concat([exprBlock(x)]);
+            }
+        }
+        return out;
     }
 
     fn gatherCodeBlocks(f: AFor) -> ABlock[] {
@@ -12542,17 +13070,25 @@ ${
     // carries no read fact, no write effect), so the cell is taken from that fact; a use before
     // the cell's place computes its seed there (§7.6 rule (b) S482).
     fn bodyBindReach(cx: BodyCx, a: AAttr) -> Diag[] {
-        const k: AttrKind | not = attrFact(cx.t.attrs, a.nid);
-        if (k is not) return [];
-        const ix: int = programFieldBound(cx.g.program, k);
-        if (ix < 0 || ix >= cx.pfields.length) return [];
-        const c: BodyCell | not = cellOfSym(cx.cells, cx.pfields[ix].sym.id);
+        const c: BodyCell | not = cellOfSym(cx.cells, bindCellOf(cx.t, cx.g.program, cx.pfields, a));
         if (c is not) return [];
         const pos: int = a.span.start;
         if (!cellRunsAt(c, pos)) return [];
         const inner: SeedReach | not = cellReach(cx, c, pos, [c.sym]);
         if (inner is given) return [laterPlaceDiagHow(inner.bp, "this `" + a.name + "=`", cellHop(c, inner), cx.file, a.span)];
         return [];
+    }
+
+    // The program cell (its Sym id) a `bind:` attribute names, else -1: the resolver records the
+    // target on the attribute (AttrKind.ABind), not on the `@c` node. Shared by the seed-reach
+    // judgment (bodyBindReach) and the construct-writes bound (regionBindCells, #2082 HIGH-1).
+    fn bindCellOf(t: Tables, prog: Sym, pfields: FieldInfo[], a: AAttr) -> int {
+        if (a.name.substring(0, 5) != "bind:") return -1;
+        const k: AttrKind | not = attrFact(t.attrs, a.nid);
+        if (k is not) return -1;
+        const ix: int = programFieldBound(prog, k);
+        if (ix < 0 || ix >= pfields.length) return -1;
+        return pfields[ix].sym.id;
     }
 
     // One display: a bare name of a later binding (direct), a read of a cell that runs its seed
@@ -21964,6 +22500,13 @@ ${
         let lits: string[] = [];
         let wild = false;
         let notSeen = false;
+        // s482 (lane s482-place-fu, #2078 review LOW-1) — a `not` NAMED by some arm, a wildcard
+        // alternation's alternate included (`.A :> …, not | _ :> …`): only the E-TYPE-044 fact
+        // (FPlain notArm, "a `not` arm on a subject whose type does not include `| not`") reads it.
+        // `notSeen` keeps a wildcard alternation's `not` out (as its other alternates are kept out
+        // of `covered`): it feeds `maybe`, `absentDone` and W-MATCH-001, and on a subject that is
+        // not `| not` it would turn `maybe` true.
+        let notNamed = false;
         let want: Type | not = expected;
         let result: Type | not = not;
         let parms: PlainArm[] = [];
@@ -22017,6 +22560,7 @@ ${
                 notSeen = dNot;
                 lits = dLits;
             }
+            if (dNot) notNamed = true;
             if (dup && !wild && isAlt) st = addDiag(st, env.file, a.span, "E-TYPE-023", "an alternate of this arm names a case that an earlier arm, or an earlier alternate of this arm, already takes, so that alternate is unreachable — drop it (§18.14.2 E-TYPE-023: duplicate match arm; §18.2 alternation)");
             if (dup && !wild && !isAlt) st = addDiag(st, env.file, a.span, "E-TYPE-023", "a second arm for the same case — the first arm already takes it, so this one is unreachable (§18.14.2 E-TYPE-023: duplicate match arm)");
             if (idx == -1) wild = true;
@@ -22077,7 +22621,7 @@ ${
         // `sk.code`) refuses the match's coverage too: it was never judged, so the typer does
         // not widen the value by `not` (typePlain coverageRefused — one report per construct;
         // before, `return match p { … }` over a struct `p` was also E-TYPE-031 `string | not`).
-        st = addFail(r2.st, e.nid, FailFact.FPlain({ es: sk.es, kind: sk.kind, maybe: maybe, known: sk.known, wild: wild, exhaustive: exh, notArm: notSeen, refused: covRefused || sk.code != "",
+        st = addFail(r2.st, e.nid, FailFact.FPlain({ es: sk.es, kind: sk.kind, maybe: maybe, known: sk.known, wild: wild, exhaustive: exh, notArm: notNamed, refused: covRefused || sk.code != "",
                                                       stmt: stmt, scrut: r1.s, pick: r2.s, arms: parms }));
         if (!exh && result is given) result = Type.Maybe(unMaybe(result));
         return plain(result, st);
@@ -35824,6 +36368,7 @@ ${
         const s: Sym | not = innerNamed(ty);
         if (s is not) return "";
         for (const a of al) {
+            if (a.file == file && a.sym.id == s.id && a.from == builtinFile()) return " (the compiler's built-in `" + a.orig + "` of §22.5.4, which this file's own `" + a.local + "` type shadows by name)";
             if (a.file == file && a.sym.id == s.id) return " (`" + a.local + "` is `" + a.orig + "`, declared in `" + a.from + "`)";
         }
         return "";
@@ -35838,6 +36383,14 @@ ${
     fn shownStruct(env: Env, s: Sym) -> string {
         const ti: TypeInfo | not = typeInfoOf(env.g.types, s);
         if (ti is not) return "`" + s.hint + "`";
+        // s482 r1 (LOW-2): the compiler-known `TypeInfo` / `FieldInfo` where a user type of that name shadows it
+        if (ti.file == builtinFile()) {
+            for (const u of env.g.types) {
+                if (u.file != builtinFile() && u.name == ti.name && inScope(env.g.te.link, env.file, NameKind.KType, u.name, u.file)) {
+                    return "`" + s.hint + "` (the compiler's built-in `" + ti.name + "` of §22.5.4, which this file's own `" + ti.name + "` type shadows by name)";
+                }
+            }
+        }
         const als: string[] = boundAs(env.g.te.link, env.file, NameKind.KType, ti.name, ti.file);
         if (als.length == 0 || als.indexOf(ti.name) >= 0) return "`" + s.hint + "`";
         return "`" + als[0] + "` (`" + ti.name + "`, declared in `" + ti.file + "`)";
@@ -37714,7 +38267,9 @@ ${
             .MetaInterval :> ts,
             .MetaTimeout :> ts,
             .MetaClearInterval :> ts,
-            .MetaClearTimeout :> ts
+            .MetaClearTimeout :> ts,
+            .MetaReflect :> ts,
+            .MetaSubscribe :> ts
         };
     }
 
@@ -38507,7 +39062,9 @@ ${
             .MetaInterval :> VType.Unknown,
             .MetaTimeout :> VType.Unknown,
             .MetaClearInterval :> VType.Unknown,
-            .MetaClearTimeout :> VType.Unknown
+            .MetaClearTimeout :> VType.Unknown,
+            .MetaReflect :> VType.Unknown,
+            .MetaSubscribe :> VType.Unknown
         };
     }
 
@@ -38889,6 +39446,12 @@ ${
             return rvt(known(Type.Str), ts);
         }
         if (op == "clearInterval" || op == "clearTimeout") return rvt(VType.Unknown, checkValue(env, exprType0(ts, args[0].nid), Type.Str, args[0].span, "the timer id of `meta." + op + "` (§22.5.1)", ts));
+        // s482 (s482-meta-phase3) — the registry lookup and the subscription (resolveMetaCall)
+        if (op == "reflect") {
+            ts = checkValue(env, exprType0(ts, args[0].nid), Type.Str, args[0].span, "the type name of `reflect` (§22.4.2)", ts);
+            return rvt(known(metaReflectType(args[0], args[1])), ts);
+        }
+        if (op == "subscribe") return rvt(known(voidFnType()), ts);
         return rvt(VType.Unknown, ts);
     }
 
@@ -50417,17 +50980,21 @@ ${
         // (-1: no function — a handler, markup, an initializer): refused where the summary
         // shows what the bootstrap's function types cannot carry (fnValueDiags).
         FnValue(target: int, caller: int, file: string, span: ASpan, name: string),
+        // s482 r1 (s482-meta-phase3, HIGH-1) — a runtime `^{}` block's callback (`op`: subscribe /
+        // interval / timeout / cleanup): refused where its body reaches a cell write through a
+        // call, or a call the analysis cannot resolve (metaCbDiags)
+        MetaCb(lam: AExpr, file: string, op: string),
     }
     type Pending:struct = { at: int, rule: PendRule }
 
-    fn rulesPass(s: Summary, st: AS) -> AS {
+    fn rulesPass(s: Summary, t: Tables, st: AS) -> AS {
         if (st.pend.length == 0) return st;
         let out: Diag[] = [];
         let k: int = 0;
         let i: int = 0;
         for (; i <= st.diags.length; ) {
             for (; k < st.pend.length && st.pend[k].at == i; ) {
-                out = out.concat(decide(s, st.pend[k].rule));
+                out = out.concat(decide(s, t, st.pend[k].rule));
                 k = k + 1;
             }
             if (i < st.diags.length) out = out.concat([st.diags[i]]);
@@ -50436,14 +51003,154 @@ ${
         return { facts: st.facts, diags: out, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: [], lifts: st.lifts, nsAt: st.nsAt, tport: st.tport, reqs: st.reqs, rets: st.rets, locs: st.locs };
     }
 
-    fn decide(s: Summary, r: PendRule) -> Diag[] {
+    fn decide(s: Summary, t: Tables, r: PendRule) -> Diag[] {
         return match r {
             .IfNoValue(fnSym: f, diag: d) :> onlyIf(yieldsNoValue(s, f), d),
             .RemoteOr(caller: c, remote: r, local: l) :> remoteOr(s, c, r, l),
             .IfClock(fnSym: f, diag: d) :> onlyIf(readsClock(s, f), d),
             .PureCall(fnSym: f, bare: a, clocked: b) :> either(readsClock(s, f), b, a),
-            .FnValue(target: t, caller: c, file: f, span: sp, name: n) :> fnValueDiags(s, t, c, f, sp, n)
+            .FnValue(target: tg, caller: c, file: f, span: sp, name: n) :> fnValueDiags(s, tg, c, f, sp, n),
+            .MetaCb(lam: l, file: f, op: o) :> metaCbDiags(s, t, l, f, o)
         };
+    }
+
+    // s482 r1 (s482-meta-phase3, HIGH-1) — a runtime `^{}` callback writes no reactive cell,
+    // directly or THROUGH A CALL. A subscription callback runs inside the runtime's flush of the
+    // change that fired it: a cell write there marks the subscription (or another) stale again in
+    // the same flush — `meta.subscribe("n", v => { const z = bump(); })` with `bump` writing `@n`
+    // re-ran forever and hung the page. A timer / cleanup callback is held to the same body rule
+    // (s482-meta-runtime: its direct writes were already refused). The judgement is the no-write
+    // rule's (§6.7.4), read from the same effect summary: the callback's body is scanned as an
+    // `<effect>` body is (scanExpr — calls of scrml functions, `function` and `fn` alike, and
+    // functions handed on as values, closed transitively by the summary), and a call the analysis
+    // cannot resolve (through a local, a parameter, a field — a function value) fails closed
+    // (§6.7.4 rule 4). s482 r2: so does a call reaching a `<host src>`-backed function (§21.3.1)
+    // — directly, through a wrapper at any depth, or as a value (hostChain): host code has no
+    // write summary. A direct write is the binder's (lamBodyCheck), reported once there.
+    // INTERIM (g-boot-meta-runtime-residue-s482): §22.5.1 does not rule whether a callback may
+    // write state; the capable form is a callback whose writes are batched after the flush.
+    fn metaCbDiags(s: Summary, t: Tables, lam: AExpr, file: string, op: string) -> Diag[] {
+        const scan: BodyScan = scanExpr({ t: t, file: file }, lam, emptyScan());
+        const who: string = "the callback of `meta." + op + "(…)`";
+        const why: string = "a runtime `^{}` callback writes no reactive cell, directly or through a called function — a write made while the runtime delivers a change re-runs the subscriptions it reaches in that same pass (INTERIM, g-boot-meta-runtime-residue-s482). Make the write in an event handler, or derive the value";
+        let out: Diag[] = [];
+        for (const r of scan.refs) {
+            const i: int = nodeIdx(s.nodes, r.sym);
+            if (i < 0) {
+                out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", who + " reaches `" + r.name + "`, which has no write summary — the compiler cannot prove it writes no reactive cell, and the rule fails closed (§6.7.4 rule 4): " + why, r.file, r.span)]);
+            } else {
+                const sw: Witness | not = writeWitness(s, i);
+                const su: UWitness | not = openWitness(s, i);
+                if (sw is given) {
+                    let how: string = " writes `" + sw.site.cell + "` through a call: `" + chainText(sw.chain) + " → " + sw.site.cell + "`";
+                    if (r.asValue) how = " hands `" + r.name.replace("()", "") + "` on as a function value, and it writes `" + sw.site.cell + "`: `" + chainText(sw.chain) + " → " + sw.site.cell + "`";
+                    out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", who + how + " — " + why, r.file, r.span)]);
+                } else if (su is given) {
+                    out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", who + " reaches a call the compiler cannot resolve, through `" + chainText(su.chain) + "`: " + su.site.what + " — it cannot prove the callback writes no reactive cell, and the rule fails closed (§6.7.4 rule 4): " + why, r.file, r.span)]);
+                } else {
+                    // s482 r2 (#2080 r1 review HIGH-1r) — a `<host src>`-backed function (§21.3.1) has
+                    // no scrml body: the summary holds it with no write, yet its JS can write a cell
+                    // (it can fire a DOM event whose handler writes one — probe p-5wwuPb looped 100
+                    // times a click). Unproven, so refused: directly, through a scrml wrapper at any
+                    // depth, or handed on as a value (INTERIM, g-boot-meta-runtime-residue-s482).
+                    // s482 r3 (#2080 r2 review MED-1): a stdlib `import:host` wrapper of an
+                    // allow-listed module (pureHostFile) is proven and not refused.
+                    const hr: HostReach = hostChain(s, t, r.sym);
+                    const hc: string[] = hr.chain;
+                    // a `<host>`-backed function itself named as a value is the binder's refusal
+                    // (fnNameRef: "a host-backed function … used as a value is not in the bootstrap")
+                    if (hc.length > 0 && !(r.asValue && hc.length == 1)) {
+                        let how: string = " calls `" + hc[hc.length - 1] + "`, " + hr.what + ", through `" + chainText(hc) + "`";
+                        if (hc.length == 1) how = " calls `" + hc[0] + "`, " + hr.what;
+                        if (r.asValue) how = " hands `" + r.name.replace("()", "") + "` on as a function value, and it reaches `" + hc[hc.length - 1] + "`, " + hr.what + ", through `" + chainText(hc) + "`";
+                        out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", who + how + " — host code is outside the analysis (it can write a cell, e.g. by firing a DOM event whose handler writes one), so the compiler cannot prove the callback writes no reactive cell, and the rule fails closed (§6.7.4 rule 4): " + why, r.file, r.span)]);
+                    }
+                }
+            }
+        }
+        for (const u of scan.unproven) {
+            out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", u.what + " — the compiler cannot prove " + who + " writes no reactive cell, and the rule fails closed (§6.7.4 rule 4): " + why + ". Call a declared scrml function by its name", u.file, u.span)]);
+        }
+        return out;
+    }
+
+    // s482 r2 (#2080 r1 review HIGH-1r) — the chain of display labels (`ck()` … `clickB()`) from
+    // callable `from` down to the first UNPROVEN host-backed function it reaches through the
+    // references its body makes (calls and function values), transitively; chain [] — none.
+    // `what` names that function's kind for the diagnostic. A query on the summary alone, for
+    // any rule that must treat host code as unproven: the `<effect>` no-write rule takes it
+    // next, allow-list and all (ruling:user-voice-scrml.md-S482-effect-host-call,
+    // g-boot-effect-host-call-hang-s482).
+    //
+    // s482 r3 (#2080 r2 review MED-1) — WHICH host code is unproven:
+    //   - a `<host>` binding of a user file (`<host src>` or a targeted `<host>`; HostFn.bind
+    //     given) — ALWAYS unproven: its JS is the author's, and can do anything (fire a DOM
+    //     event whose handler writes a cell);
+    //   - a stdlib `import:host` wrapper (§21.3.1.1; HostFn.bind `not`, `module`/`file` the
+    //     stdlib host file it calls) — unproven UNLESS that file is on PURE_HOST_FILES below;
+    //     the diagnostic names the stdlib module (`scrml:<module>`), never a `<host>` the
+    //     author did not write.
+    // PURE_HOST_FILES (pureHostFile) — the stdlib host files whose JS provably cannot call
+    // back into page code or dispatch a DOM event: each export takes only `number` / `string` /
+    // `int` values (no function, no object the page made), touches no DOM / global but `Math` /
+    // `Number` / a module-local RegExp, imports nothing, and returns a value:
+    //   - `math/host.js` (scrml:math): floor/ceil/trunc/round*/abs/min/max/isNaN over `Math` /
+    //     `Number`; parseInt/parseFloat/toNumber read a string by code unit / a local RegExp;
+    //     the only side effect is a thrown E-INT-CONVERSION-RT trap (no cell write);
+    //   - `random/host.js` (scrml:random): random/randomInt over `Math.random()` only.
+    // A new entry needs the same reading of its file's JS (the effect lane reuses this list).
+    // Every other stdlib host module (e.g. the scrml:compiler wrappers) stays fail-closed.
+    type HostReach:struct = { chain: string[], what: string }
+
+    fn pureHostFile(module: string, file: string) -> boolean {
+        return file == "host.js" && (module == "math" || module == "random");
+    }
+
+    // "" — `sym` is not an unproven host-backed function; else how the diagnostic names it.
+    fn unprovenHostWhat(t: Tables, sym: int) -> string {
+        for (const f of t.fns) {
+            if (f.sym.id == sym) {
+                const h: HostFn | not = f.host;
+                if (h is not) return "";
+                if (h.bind is given) return "a `<host>`-backed function (§21.3.1)";
+                if (h.module != "" && pureHostFile(h.module, h.file)) return "";
+                if (h.module != "") return "a host-backed function of the stdlib module `scrml:" + h.module + "` (its `import:host` file `" + h.file + "`, §21.3.1.1), which is not on the compiler's list of stdlib host files proven to call back into no page code";
+                return "a host-backed function (§21.3.1)";
+            }
+        }
+        return "";
+    }
+
+    fn hostChain(s: Summary, t: Tables, from: int) -> HostReach {
+        let seen: int[] = [];
+        let todo: int[] = [from];
+        let via: int[] = [-1];
+        let at: int = 0;
+        for (; at < todo.length; ) {
+            const id: int = todo[at];
+            if (seen.indexOf(id) < 0) {
+                seen = seen.concat([id]);
+                const i: int = nodeIdx(s.nodes, id);
+                if (i >= 0) {
+                    const what: string = unprovenHostWhat(t, id);
+                    if (what != "") {
+                        let out: string[] = [];
+                        let k: int = at;
+                        for (; k >= 0; ) {
+                            out = [s.nodes[nodeIdx(s.nodes, todo[k])].label].concat(out);
+                            k = via[k];
+                        }
+                        return { chain: out, what: what };
+                    }
+                    for (const r of s.nodes[i].f.scan.refs) {
+                        todo = todo.concat([r.sym]);
+                        via = via.concat([at]);
+                    }
+                }
+            }
+            at = at + 1;
+        }
+        return { chain: [], what: "" };
     }
 
     // s478 (s478-boot-fn-type) — what a function value's type cannot carry in the bootstrap,
@@ -55022,22 +55729,29 @@ ${
     // diagnostics lead the program's.
     export fn analyzeSources(files00: FileAst[], srcs: Source[], entry: string, keyBase: string, routeBase: string, nextId0: int) -> TypedProgram {
         const mr: MetaRun = metaFiles(files00, nextId0);
-        const tp: TypedProgram = analyzeExpanded(mr.files, srcs, entry, keyBase, routeBase, mr.next);
+        const tp: TypedProgram = analyzeExpanded(mr.files, srcs, entry, keyBase, routeBase, mr.next, mr.diags);
         if (mr.diags.length == 0) return tp;
         return { files: tp.files, tables: tp.tables, diags: mr.diags.concat(tp.diags), infos: tp.infos };
     }
 
-    fn analyzeExpanded(files0: FileAst[], srcs: Source[], entry: string, keyBase: string, routeBase: string, nextId0: int) -> TypedProgram {
+    // `metaDs0`: the first meta pass's diagnostics (analyzeSources reports them) — a re-read
+    // file's meta pass reports only what that pass did not (s482 r2, nsMetaNotes).
+    fn analyzeExpanded(files0: FileAst[], srcs: Source[], entry: string, keyBase: string, routeBase: string, nextId0: int, metaDs0: Diag[]) -> TypedProgram {
         let nextId: int = nextId0;
         const r0: ARun = analyzeRun(files0, entry, keyBase, routeBase, nextId >= 0, []);
         let files: FileAst[] = files0;
         let r1: ARun = r0;
+        let nsNotes: Diag[] = [];
         if (r0.nsAt.length > 0) {
             const rr: NsReread = nsReread(files0, srcs, r0.nsAt);
             if (rr.changed) {
                 // s481: a re-read file is parsed from its source again, its `^{}` blocks
                 // with it — replaced again (their diagnostics were reported by the first pass)
                 const mr2: MetaRun = metaFiles(rr.files, nextId);
+                // s482 r2 (#2080 r1 review MED): a refusal ONLY the re-read finds — a `^{}` body
+                // naming a namespace member, `m.x` one name now — is reported; it was dropped with
+                // its block, silently (no effect, an empty element)
+                nsNotes = nsMetaNotes(metaDs0, mr2.diags);
                 files = mr2.files;
                 nextId = mr2.next;
                 r1 = analyzeRun(files, entry, keyBase, routeBase, nextId >= 0, []);
@@ -55077,7 +55791,17 @@ ${
         // the composed program will run
         // s475-boot-literal-carriers: only when some carrier's failure set is not its declared enum (ARun.retype)
         if (r1.retype) r1 = analyzeRun(files, entry, keyBase, routeBase, nextId >= 0, r1.carriers);
-        if (r1.plans.length == 0 || hasErrorDiag(r1.tp.diags)) return withNotes(withNotes(r1.tp, epNotes), r1.unused);
+        // s482 r3 (#2080 r2 review LOW-1): the re-read's notes join every other list — never an
+        // early return that drops `epNotes`, the lint or the plan composition. The lint
+        // (W-UNUSED-BINDING) is judged only over a compile with no Error, so an Error among the
+        // notes withholds it, as an Error in the run does (analyzeRun); a non-Error note leaves
+        // the composition to run and joins its diagnostics.
+        const tp1: TypedProgram = withNotes(r1.tp, nsNotes);
+        if (r1.plans.length == 0 || hasErrorDiag(tp1.diags)) {
+            let un1: Diag[] = r1.unused;
+            if (hasErrorDiag(nsNotes)) un1 = [];
+            return withNotes(withNotes(tp1, epNotes), un1);
+        }
         const r2: ARun = analyzeRun(composeFiles(files, r1.plans, next), entry, keyBase, routeBase, false, r1.carriers);
         // the plans' warnings join the composed program's diagnostics, and no diagnostic names the
         // synthesized batch (`#F`, `F#batch` — review L2): it is "F (its composed server batch)"
@@ -55085,10 +55809,24 @@ ${
         for (const p of r1.plans) { notes = notes.concat(p.notes); }
         let ds: Diag[] = [];
         for (const d of r2.tp.diags.concat(notes)) { ds = ds.concat([newDiag(d.code, batchNamesOut(r1.plans, d.message), d.file, d.span)]); }
+        ds = ds.concat(nsNotes);
         // s480: the lint of the files as written (r1), only when the composed program has no Error
         let un: Diag[] = [];
         if (!hasErrorDiag(ds)) un = r1.unused;
         return withNotes(withNotes({ files: r2.tp.files, tables: r2.tp.tables, diags: ds, infos: r2.tp.infos }, epNotes), un);
+    }
+
+    // The re-read meta pass's diagnostics the first pass did not report (by code, file and span).
+    fn nsMetaNotes(first: Diag[], again: Diag[]) -> Diag[] {
+        let out: Diag[] = [];
+        for (const d of again) {
+            let seen = false;
+            for (const f of first) {
+                if (f.code == d.code && f.file == d.file && f.span.start == d.span.start && f.span.end == d.span.end) seen = true;
+            }
+            if (!seen) out = out.concat([d]);
+        }
+        return out;
     }
 
     fn withNotes(tp: TypedProgram, notes: Diag[]) -> TypedProgram {
@@ -55404,7 +56142,7 @@ ${
         // s452 (dpa-066): THE EFFECT SUMMARY — once, over the bound tables —
         // and the binder's decisions that read it (rulesPass, M3)
         const sum: Summary = summarize(ra.g, bound);
-        st = rulesPass(sum, st);
+        st = rulesPass(sum, bound, st);
         // s449: the no-write rule over every accepted effect (§6.7.4)
         const effectDiags: Diag[] = effectPass(ra.g, bound, st.effects, sum).concat(requestPass(bound, sum)).concat(requestWarnPass(ra.g, bound));
         // s444 Phase B: dead validators (RULED S442 (5)) and the forms that take `novalidate` (RULED S442 (3))

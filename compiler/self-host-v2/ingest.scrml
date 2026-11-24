@@ -1435,7 +1435,9 @@ ${
             .MetaInterval :> "MetaInterval",
             .MetaTimeout :> "MetaTimeout",
             .MetaClearInterval :> "MetaClearInterval",
-            .MetaClearTimeout :> "MetaClearTimeout"
+            .MetaClearTimeout :> "MetaClearTimeout",
+            .MetaReflect :> "MetaReflect",
+            .MetaSubscribe :> "MetaSubscribe"
         };
     }
 }

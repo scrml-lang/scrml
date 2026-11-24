@@ -841,7 +841,10 @@ ${
             .MetaInterval :> jmcall(jid(metaVar()), "interval", a),
             .MetaTimeout :> jmcall(jid(metaVar()), "timeout", a),
             .MetaClearInterval :> jmcall(jid(metaVar()), "clearInterval", a),
-            .MetaClearTimeout :> jmcall(jid(metaVar()), "clearTimeout", a)
+            .MetaClearTimeout :> jmcall(jid(metaVar()), "clearTimeout", a),
+            // s482 (s482-meta-phase3) — the §22.5.4 registry lookup; a subscription (its cell read a thunk)
+            .MetaReflect :> jmcall(jmember(jid(metaVar()), "types"), "reflect", a),
+            .MetaSubscribe :> jmcall(jid(metaVar()), "subscribe", [jthunk(a[0]), a[1]])
         };
     }
 
