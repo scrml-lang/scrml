@@ -51126,8 +51126,9 @@ ${
     // 2, the block 1). Refused fail-closed, naming the chain, whether or not the block reads a cell
     // (whether a run reads one is decided at run time, through any call). The callbacks of the
     // block's `meta.subscribe` / `interval` / `timeout` / `cleanup` are judged by metaCbDiags and
-    // left out here. INTERIM (g-boot-effect-host-call-hang-s482): the capable alternative is a
-    // re-run that observes a write its own run made through host code.
+    // left out here. INTERIM bootstrap limit, not a language rule (the S482 ruling covers
+    // `<effect>` bodies only; #2089 r1 MED-3) — g-boot-meta-runtime-residue-s482: the capable
+    // alternative is a re-run that observes a write its own run made through host code.
     fn metaBlockHostDiags(s: Summary, t: Tables, b: ABlock, file: string) -> Diag[] {
         const scan: BodyScan = scanBlock({ t: t, file: file }, b, emptyScan());
         let cbs: ASpan[] = [];
@@ -51150,7 +51151,7 @@ ${
                     let how: string = " calls `" + hc[hc.length - 1] + "`, " + hr.what + ", through `" + chainText(hc) + "`";
                     if (hc.length == 1) how = " calls `" + hc[0] + "`, " + hr.what;
                     if (r.asValue) how = " hands `" + r.name.replace("()", "") + "` on as a function value, and it reaches `" + hc[hc.length - 1] + "`, " + hr.what + ", through `" + chainText(hc) + "`";
-                    out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "this runtime `^{}` block" + how + " — host code is outside the analysis: it can write a reactive cell (e.g. by firing a DOM event whose handler writes one), and a write made during the block's run never re-runs it, so the block would show a stale value; the compiler cannot prove the body writes no cell, and fails closed (§6.7.4 rule 4; INTERIM, g-boot-effect-host-call-hang-s482). Call the host function from an event handler, or compute the value in scrml", r.file, r.span)]);
+                    out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "this runtime `^{}` block" + how + " — host code is outside the analysis: it can write a reactive cell (e.g. by firing a DOM event whose handler writes one), and a write made during the block's run never re-runs it, so the block would show a stale value; the compiler cannot prove the body writes no cell, and fails closed (a bootstrap limit, INTERIM, g-boot-meta-runtime-residue-s482). Call the host function from an event handler, or compute the value in scrml", r.file, r.span)]);
                 }
             }
         }

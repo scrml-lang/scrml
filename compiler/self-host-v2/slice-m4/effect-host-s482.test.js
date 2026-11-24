@@ -123,6 +123,12 @@ describe("s482 effect-host — a runtime `^{}` block body reaching a `<host>`-ba
     refused("E-BOOTSTRAP-UNSUPPORTED", P("function ck() -> int { return clickB(); }", BLK("const z0 = ck();")), "through `ck() → clickB()`");
   });
 
+  test("#2089 r1 MED-3: the block refusal is a bootstrap INTERIM limit, not the §6.7.4 effect rule (the ruling covers `<effect>` only)", () => {
+    const m = errMsgs(run(P("", BLK("const z0 = clickB();"))))[0];
+    expect(m).toContain("INTERIM, g-boot-meta-runtime-residue-s482");
+    expect(m).not.toContain("§6.7.4");
+  });
+
   test("a host call in the block's callback is reported once (the callback rule), not again by the block rule", () => {
     const r = run(P("", `<div id="o">^{ meta.subscribe("n", (v) => { const z = clickB(); meta.emit(\`<p>\${v}</p>\`); }); }</div>`));
     expect(errs(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
