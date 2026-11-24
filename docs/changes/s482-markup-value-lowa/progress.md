@@ -18,3 +18,14 @@ Bootstrap only (compiler/self-host-v2/lex.scrml, parse.scrml). All on input that
 ## Log
 - probes: ~/.cache/scrml/review/s482-lowa/ (p/, l/, out-*.txt)
 - tests: slice-m4/parser-lows-fu-s482.test.js — head all pass; base 3 red (LOW-A ×2, NIT-1).
+- d1b90488c committed (pre-commit hook PASS, 58091 pass / 0 fail, SCRML_HOOK_SHARDS=6 after
+  two 12-shard runs died on host memory contention).
+
+## Gates (head d1b90488c, base effd1e6dc)
+- pretest: exit 0
+- bootstrap-conformance --json: base and head identical (PASS 845, FAIL 4, CRASH 0); only `ms` differs
+- corpus differential (2972 files): 0 newly rejected, 0 newly accepted, 0 byte diffs, 0 code diffs
+- s34-census --check-new --base effd1e6dc: PASS
+- types-gate --check: OK (182 / 115 unchanged)
+- corpus-compile-floor --check: PASS
+- e2e-render-map: 259 pass, 0 fail
