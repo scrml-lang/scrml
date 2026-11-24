@@ -80,3 +80,21 @@ Tests: `compiler/self-host-v2/slice-m4/retired-lint-s482.test.js` (+ closer-clea
   be exactly true after item 0; E-SYNTAX-050 row; O35 notes `<x>` read RULED.
 - Gap g-boot-retired-closer-unread-s482: LOW-3 recorded as INTERIM shape (2) with the capable form (re-balancing
   reading); NIT-1 cause note corrected; the 8 newly found unread lines added; notes the samples are migrated.
+
+## Gates (head 4eba4013e vs base 84e602f40; artefacts in ~/.cache/scrml/review/s482-retired-lint/)
+
+| gate | result |
+|---|---|
+| pre-commit (both commits) | PASS — 58,299 / 58,315 pass, 0 fail (8 shards, ~6–8 min wall) |
+| pretest | exit 0 (13 samples + todomvc compiled) |
+| bootstrap-conformance --json base → head | identical: PASS 849, FAIL 3, NOT-TWINNED 628, UNSUPPORTED 491, CRASH 0; 0 bucket moves, 0 emitted-code changes, 0 record diffs |
+| corpus differential (2975 files) | head compiler on base files: 0 newly rejected / 0 accepted / 0 byte / 0 code diffs. Head compiler + migrated head files vs base: 0 newly rejected, 0 newly accepted, 0 byte diffs; 43 code diffs, all in migrated samples (every one rejected before and after) |
+| impl#1 on the 52 migrated samples | 52/52 same exit code |
+| s34-census --check-new --base origin/main | PASS (4 new/changed rows) |
+| snippet-gate | 120 pass / 0 fail / 9 spec-ahead |
+| claim-gate | 26 pass / 0 fail (72 skip, 36 snippet, 16 spec-ahead) |
+| types-gate --check | OK — 182 (115 distinct), unchanged |
+| e2e-render-map | 259 pass / 0 fail |
+| retired-forms gate on head | OK (exit 0) — 5432 hits scanned, pending HARD debt 820 |
+| retired-forms gate on main (head ledger + baseline) | FAIL (exit 1) — the 177 retired closer lines in 52 sample files |
+| gate runtime | ~0.55 s (`--quiet`, warm) |
