@@ -24220,7 +24220,7 @@ ${
         if (!inProgramCtx(env) || env.own != "") {
             return addDiag(st0, env.file, b.span, "E-BOOTSTRAP-UNSUPPORTED", "a runtime `^{}` block (§22.5) outside the `<program>` markup (a declaration's renders) is not in the bootstrap — every instance would share one `meta.emit` place, and §22.10 makes the block's scope id unique in the document (INTERIM, g-boot-meta-runtime-residue-s482). Move the block into the `<program>` markup");
         }
-        return resolveRunEnv(env, b, st0).st;
+        return addPending(resolveRunEnv(env, b, st0).st, PendRule.MetaBlock(b, env.file));   // s482 (s482-effect-host)
     }
 
     fn resolveRun(env: Env, b: ABlock, st0: AS) -> AS {
@@ -27734,6 +27734,7 @@ ${
             if (rb is given && runShares(env)) {
                 const r: RB = resolveRunEnv(nenv, rb, st);
                 st = r.st;
+                if (runMetaOf(n) != "") st = addPending(st, PendRule.MetaBlock(rb, env.file));   // s482 (s482-effect-host)
                 let added: LocalB[] = [];
                 let i = 0;
                 for (const l of r.env.locals) {
@@ -27764,6 +27765,22 @@ ${
     type RunLocals:struct = { locals: LocalB[], page: int }
 
     fn runShares(env: Env) -> boolean { return inProgramCtx(env) && env.own == ""; }
+
+    // s482 (s482-effect-host) — a runtime `^{}` block's meta id ("" — not one)
+    fn runMetaOf(n: ANode) -> string {
+        const k: ANodeK = n.k;
+        return match k {
+            .Run(b: b, meta: mt) :> mt,
+            .Elem(e: x) :> "",
+            .Text(text: x) :> "",
+            .Interp(e: x) :> "",
+            .DeclNode(d: x) :> "",
+            .Css(c: x) :> "",
+            .Effect(w: x) :> "",
+            .Request(r: x) :> "",
+            .Gather(f: x) :> ""
+        };
+    }
 
     fn runOfNode(n: ANode) -> ABlock | not {
         const k: ANodeK = n.k;
@@ -43352,7 +43369,7 @@ ${
         for (const es of effects) {
             const scan: BodyScan = scanBlock({ t: t, file: es.file }, es.w.body, emptyScan());
             for (const w of scan.writes) { out = out.concat([writesDirect(es.w, w)]); }
-            for (const r of scan.refs) { out = out.concat(refDiags(es.w, r, sum, quiet)); }
+            for (const r of scan.refs) { out = out.concat(refDiags(t, es.w, r, sum, quiet)); }
             for (const u of scan.unproven) { out = out.concat([unprovenDirect(u)]); }
         }
         return out;
@@ -43372,7 +43389,7 @@ ${
         return l.indexOf("formula of ") == 0 || l.indexOf("construction of ") == 0;
     }
 
-    fn refDiags(w: AEffect, r: FnRef, s: Summary, quiet: boolean) -> Diag[] {
+    fn refDiags(t: Tables, w: AEffect, r: FnRef, s: Summary, quiet: boolean) -> Diag[] {
         // fix round (LOW a): a reference with no summary is unresolved — fail closed
         const i: int = nodeIdx(s.nodes, r.sym);
         if (i < 0) return [newDiag("E-EFFECT-WRITE-UNPROVEN", "this effect reaches `" + r.name + "`, which has no write summary — the compiler cannot prove it writes no reactive cell, and the rule fails closed (§6.7.4 rule 4)", r.file, r.span)];
@@ -43386,7 +43403,29 @@ ${
             if (quiet && throughValue(r, su.chain)) return [];
             return [unprovenThrough(r, su)];
         }
-        return [];
+        return hostDiags(t, w, r, s);
+    }
+
+    // s482 (s482-effect-host; RULED S482, ruling:user-voice-scrml.md-S482-effect-host-call:
+    // "treat host calls as unproven under the §6.7.4 no-write rule") — a `<host>`-backed
+    // function (§21.3.1) has no scrml body: the summary holds it with no write, yet its JS can
+    // write a cell (glue that fires a DOM event whose handler writes the effect's dep — probe
+    // p-MeC2ee re-queued the effect forever and hung the page). So a body reaching an UNPROVEN
+    // host-backed function — directly, through a scrml wrapper at any depth, or handed on as a
+    // value — is E-EFFECT-WRITE-UNPROVEN (§6.7.4 rule 4), naming the chain. Which host code is
+    // unproven is `hostChain`'s (the metaCbDiags query, as-is): every user `<host>` binding, and
+    // a stdlib `import:host` wrapper whose host file is not on `pureHostFile` (`scrml:math` /
+    // `scrml:random` stay proven). A `<host>` function itself named as a value is the binder's
+    // refusal (fnNameRef), not reported again here.
+    fn hostDiags(t: Tables, w: AEffect, r: FnRef, s: Summary) -> Diag[] {
+        const hr: HostReach = hostChain(s, t, r.sym);
+        const hc: string[] = hr.chain;
+        if (hc.length == 0 || (r.asValue && hc.length == 1)) return [];
+        let how: string = " calls `" + hc[hc.length - 1] + "`, " + hr.what + ", through `" + chainText(hc) + "`";
+        if (hc.length == 1) how = " calls `" + hc[0] + "`, " + hr.what;
+        if (r.asValue) how = " hands `" + r.name.replace("()", "") + "` on as a function value, and it reaches `" + hc[hc.length - 1] + "`, " + hr.what + ", through `" + chainText(hc) + "`";
+        const msg: string = effectWord(w) + how + " — host code is outside the analysis (it can write a reactive cell, e.g. by firing a DOM event whose handler writes one, which would run the effect again), so the compiler cannot prove the effect writes no reactive cell, and the rule fails closed (§6.7.4 rule 4). Call the host function from an event handler, or compute the value in scrml";
+        return [newDiag("E-EFFECT-WRITE-UNPROVEN", msg, r.file, r.span)];
     }
 
     fn effectWord(w: AEffect) -> string {
@@ -50984,6 +51023,9 @@ ${
         // interval / timeout / cleanup): refused where its body reaches a cell write through a
         // call, or a call the analysis cannot resolve (metaCbDiags)
         MetaCb(lam: AExpr, file: string, op: string),
+        // s482 (s482-effect-host) — a runtime `^{}` block's BODY: refused where it reaches an
+        // unproven host-backed function (metaBlockHostDiags)
+        MetaBlock(b: ABlock, file: string),
     }
     type Pending:struct = { at: int, rule: PendRule }
 
@@ -51010,7 +51052,8 @@ ${
             .IfClock(fnSym: f, diag: d) :> onlyIf(readsClock(s, f), d),
             .PureCall(fnSym: f, bare: a, clocked: b) :> either(readsClock(s, f), b, a),
             .FnValue(target: tg, caller: c, file: f, span: sp, name: n) :> fnValueDiags(s, tg, c, f, sp, n),
-            .MetaCb(lam: l, file: f, op: o) :> metaCbDiags(s, t, l, f, o)
+            .MetaCb(lam: l, file: f, op: o) :> metaCbDiags(s, t, l, f, o),
+            .MetaBlock(b: b, file: f) :> metaBlockHostDiags(s, t, b, f)
         };
     }
 
@@ -51070,6 +51113,46 @@ ${
         }
         for (const u of scan.unproven) {
             out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", u.what + " — the compiler cannot prove " + who + " writes no reactive cell, and the rule fails closed (§6.7.4 rule 4): " + why + ". Call a declared scrml function by its name", u.file, u.span)]);
+        }
+        return out;
+    }
+
+    // s482 (s482-effect-host; item 3 of g-boot-effect-host-call-hang-s482, the block-body twin of
+    // the RULED effect refusal) — a runtime `^{}` block's body that reaches an UNPROVEN host-backed
+    // function (hostChain, allow-list and all). The block re-runs when a cell its run read changes,
+    // but a write made DURING its run never re-runs it (MetaEffect.markStale: `running`), so host
+    // glue that writes the cell the block reads (a click whose handler writes `@n`) leaves the
+    // block showing a STALE value, with no error (#2080 r2 re-review, probe hcases3 B11b: the cell
+    // 2, the block 1). Refused fail-closed, naming the chain, whether or not the block reads a cell
+    // (whether a run reads one is decided at run time, through any call). The callbacks of the
+    // block's `meta.subscribe` / `interval` / `timeout` / `cleanup` are judged by metaCbDiags and
+    // left out here. INTERIM (g-boot-effect-host-call-hang-s482): the capable alternative is a
+    // re-run that observes a write its own run made through host code.
+    fn metaBlockHostDiags(s: Summary, t: Tables, b: ABlock, file: string) -> Diag[] {
+        const scan: BodyScan = scanBlock({ t: t, file: file }, b, emptyScan());
+        let cbs: ASpan[] = [];
+        for (const x of blockExprsDeep(b)) {
+            for (const r of metaRegsIn(x)) {
+                const ks: AExpr[] = exprKids(r);
+                if (ks.length > 1) cbs = cbs.concat([ks[ks.length - 1].span]);
+            }
+        }
+        let out: Diag[] = [];
+        for (const r of scan.refs) {
+            let inCb: boolean = false;
+            for (const c of cbs) {
+                if (r.span.start >= c.start && r.span.end <= c.end) inCb = true;
+            }
+            if (!inCb) {
+                const hr: HostReach = hostChain(s, t, r.sym);
+                const hc: string[] = hr.chain;
+                if (hc.length > 0 && !(r.asValue && hc.length == 1)) {
+                    let how: string = " calls `" + hc[hc.length - 1] + "`, " + hr.what + ", through `" + chainText(hc) + "`";
+                    if (hc.length == 1) how = " calls `" + hc[0] + "`, " + hr.what;
+                    if (r.asValue) how = " hands `" + r.name.replace("()", "") + "` on as a function value, and it reaches `" + hc[hc.length - 1] + "`, " + hr.what + ", through `" + chainText(hc) + "`";
+                    out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "this runtime `^{}` block" + how + " — host code is outside the analysis: it can write a reactive cell (e.g. by firing a DOM event whose handler writes one), and a write made during the block's run never re-runs it, so the block would show a stale value; the compiler cannot prove the body writes no cell, and fails closed (§6.7.4 rule 4; INTERIM, g-boot-effect-host-call-hang-s482). Call the host function from an event handler, or compute the value in scrml", r.file, r.span)]);
+                }
+            }
         }
         return out;
     }
