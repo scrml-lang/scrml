@@ -39,3 +39,19 @@ Bootstrap-only; compiler/src/ frozen.
 - [x] INFO-2: §6.15 + §34 W-DISPLAY-UNTRACKED row + analyze comment: `meta.subscribe` exemption labelled PA reading
       (prov=pa-ruled); the §22.5 quote names timer and cleanup callbacks only.
 - [x] mutation: shapeGrant → always replace / strEscaped branch off → the 2 new tests RED.
+
+## Gates (head 508e395c2 + this record)
+
+- pre-commit: PASS ×2 (58390 / 58392 pass, 0 fail).
+- pretest: exit 0 (samples + benchmarks built).
+- bootstrap-conformance --json, base (origin/main 01a1883b0 sources) vs head: 0 cases changed; PASS 851 / FAIL 3 /
+  NOT-TWINNED 628 / UNSUPPORTED 491 / CRASH 0 on both.
+- corpus differential + byte-compare (scrml-boot compileSource, 3046 files under examples/ samples/ benchmarks/
+  conformance/cases/ stdlib/ docs/tutorial-snippets, 338 compile on each side): 0 newly rejected, 0 newly accepted,
+  0 output byte diffs, 0 warning diffs, 0 W-DISPLAY-UNTRACKED message diffs; 1 error-code change in a file refused
+  on both sides (components/prop-substitution-string-escapes: +2 E-PARSE-001 for `data-pat="^\d+$"`; its
+  conformance verdict is NOT-TWINNED either way).
+- s34-census --check-new --base origin/main: PASS (2 changed rows, well-formed).
+- snippet-gate: 120 pass / 0 fail / 9 spec-ahead. claim-gate: 26 pass / 0 fail; C2 0 uncited.
+- e2e-render-map: 259 / 0. Chromium: opener-escapes 1/1, display-untracked 3/3 (SCRML_BROWSER_TESTS=1).
+- types-gate: not run (no `typescript` in this worktree; compiler/src untouched). retired-forms gate: none on main.
