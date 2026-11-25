@@ -357,3 +357,40 @@ describe("HIGH-A — a use-site value reading a row item or an arm payload is de
     expect(res.client.js).toContain("givenSeed(() => rn() + 1)");
   }, 180000);
 });
+
+// r3 (#2105 r2 review):
+// MED-B — an outer seed reading an outer DERIVED cell runs its formula at the seed's place: a formula
+//   reaching a program cell is E-SCOPE-001 there (directly, after `</program>`, read by nothing, through
+//   a function). Red on 6049c6944: the page died at load (`Cannot access 'decl_program' before
+//   initialization`); main rendered 10 / 5 / 4 / 10.
+// LOW-1 — a lambda's own parameters (names bound inside the expression) read no cell (Q13): v14 is a
+//   constant seed again (V3; 6049c6944 V12), v13 compiles (6049c6944 refused it).
+describe("MED-B — an outer seed reaching a program cell through an outer DERIVED cell is E-SCOPE-001", () => {
+  const scope = async (src, says) => {
+    const es = await errors({ "main.scrml": src });
+    expect(es.map((d) => d.code)).toEqual(["E-SCOPE-001"]);
+    expect(es[0].message).toContain("`@n` is declared in the program body");
+    expect(es[0].message).toContain(says);
+  };
+  const D = "<d:int=(@n + 1)/>\n";
+  test("m01 / m06 / m09: before `<program>`, after `</program>`, and read by nothing", async () => {
+    const says = "reads `@d`, a derived value computed when it is read, and its formula reads `@n`";
+    await scope(D + "let <a:int=(@d * 2)/>\n<program>\nlet <n:int=4/>\n<p id=\"o\">\${@a}</p>\n</program>\n", says);
+    await scope("<program>\nlet <n:int=4/>\n<p id=\"o\">\${@a}</p>\n</program>\n" + D + "let <a:int=(@d * 2)/>\n", says);
+    await scope(D + "let <a:int=(@d * 2)/>\n<program>\nlet <n:int=4/>\n<p id=\"o\">\${@n}</p>\n</program>\n", says);
+  }, 180000);
+  test("m10: through a function that reads the derived cell", async () => {
+    await scope("\${ function rd() -> int { return @d; } }\n" + D + "let <a:int=(rd() * 2)/>\n<program>\nlet <n:int=4/>\n<p id=\"o\">\${@a}</p>\n</program>\n", "calls `rd()`, which reads `@d`");
+  }, 180000);
+});
+
+describe("LOW-1 — a lambda's own parameters are not cell reads (Q13)", () => {
+  test("v14: a locked field whose initializer maps a lambda over a const tape is a constant seed (V3, not V12)", async () => {
+    const src = "<program>\n\${ let n: int = 1; }\n\${ function rn() -> int { return n; } }\n\${ const xs: int[] = [1, 2]; }\nlet <show:boolean=false/>\n<cz t:string=\"x\">\n<v:int=(xs.map(x => x + rn()).length + rn())/>\n</> renders <p if=(@show)>V\${v}</p>\n<p id=\"o\"><cz/></p>\n<button id=\"b\" onclick={ n = 10; @show = true; }>b</button>\n</program>\n";
+    expect(await texts({ "main.scrml": src }, ["o"], [{ click: "#b" }])).toEqual(["V3"]);
+  }, 180000);
+  test("v13: an unread server-only outer cell whose seed maps a lambda compiles, and no client file holds the secret", async () => {
+    const r = await build({ "main.scrml": HDR.replace("function tag", "const XS: int[] = [1, 2];\n    function tag") + "\nlet <keyN:int=(API_KEY.length + XS.map(x => x + 1).length)/>\n" + PROG() }, "keyN");
+    expect(leaked(r.client, ["zz-sk-live-123"])).toEqual([]);
+  }, 180000);
+});

@@ -6394,8 +6394,9 @@ ${
     // reaches — a `Local` that is not a file-scope binding (findConst / a `<db>` load's value misses)
     // counts as a cell read, FAIL CLOSED. At a use site such a Local is a markup binding: an `<each>`
     // row item (`as it`), a `<match>` arm payload, a for-lift variable — a reactive projection of a
-    // cell's element — and it is never a constant; a lambda parameter or a block-lambda local written
-    // in the value fails closed the same way (derived, as before s482). A function body's own
+    // cell's element — and it is never a constant. A name bound INSIDE the root (a lambda parameter,
+    // a block-lambda local, an expression `match` binder) is not free and is not counted (r3, #2105
+    // r2 review LOW-1: Q13 — derived only when it reads a cell). A function body's own
     // parameters and locals are not judged so: they are bound by the function, from arguments the
     // walk already judges at the call.
     fn readsCellReach(p: CoreProgram, e: Expr) -> boolean {
@@ -6406,8 +6407,14 @@ ${
             let next: Node[] = [];
             for (const r of todo) {
                 const exprRoot: boolean = !isCoreFnNode(r);
+                // s482 r3 (#2105 r2 review LOW-1) — names bound INSIDE the root (a lambda's or block
+                // lambda's parameters, its own locals, an expression `match` arm's binders) are not
+                // free: they read no cell by themselves, and whatever feeds them a cell's value is a
+                // read the walk already judges at its source (`@xs.map(x => …)` reads `@xs`)
+                let inner: int[] = [];
+                if (exprRoot) { for (const bs of boundSyms(r)) { inner = inner.concat([bs.id]); } }
                 for (const n of allNodes(r)) {
-                    if (exprRoot && freeLocalRead(p, n)) return true;
+                    if (exprRoot && freeLocalRead(p, n) && !hasInt(inner, localReadOf(n))) return true;
                     if (cellReadOf(n) is given || nodeReadsState(n)) return true;
                     const fid: int = namedFnOf(n);
                     if (fid >= 0 && !hasInt(seenFn, fid)) {
