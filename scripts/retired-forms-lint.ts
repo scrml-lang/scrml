@@ -17,12 +17,15 @@
  *     deprecated demonstrations" (R1).
  *
  * WHAT THE GATE CHECKS — exactly this, and SPEC §63's ledger paragraph says the same (keep them equal):
- *   1. READS every ledger row with a detector (compiler/retired-forms.json) over:
- *        - .scrml files under SCRML_ROOTS, minus EXCLUDED / SKIP_DIRS;
- *        - every .md file of the tree minus EXCLUDED (each with its reason) and SKIP_DIRS / dot-directories:
- *          every fence whose info string is empty or STARTS `scrml` (`scrml{.example}`, `scrml,ignore`),
- *          blockquoted fences included (`> ```scrml`: the `>` markers are stripped, lines kept). Fences
- *          tagged another language, indented code blocks, HTML `<pre>` blocks and prose are not read.
+ *   1. READS every ledger row with a detector (compiler/retired-forms.json) over the ledger's `corpus` (#2101
+ *      r3 F5: the file set is ledger data, so --base-ref checks it like the rows):
+ *        - .scrml files under `corpus.scrmlRoots`, minus `corpus.excluded` / `corpus.skipDirs`;
+ *        - every .md file of the tree minus `corpus.excluded` (each with its reason) and `corpus.skipDirs` /
+ *          dot-directories: every fenced code block as CommonMark (GFM) reads it — `marked`'s lexer (#2101 r3
+ *          F1/F3), never a hand parser — whose info string is empty, STARTS `scrml` (`scrml{.example}`,
+ *          `scrml,ignore`) or is an attribute block with the class `.scrml` (`{.scrml}`); fences in
+ *          blockquotes and list items included, each ending where CommonMark ends it. Fences tagged another
+ *          language, indented code blocks, HTML `<pre>` blocks and prose are not read.
  *      Source is read by one source-order walker (scripts/retired-forms-walk.ts, a port of the bootstrap's
  *      readers): comments, strings, raw bodies (`<pre>` `<code>` `<script>` `<style>`; an unclosed one only
  *      to the next closing tag), foreign / SQL / CSS bodies (string-aware brace count) and the free text of
@@ -35,9 +38,11 @@
  *          that code's budget is not spent: one hit per expected occurrence (`codeCounts[code]`, else 1),
  *          shared by the rows that share the code;
  *        - a markdown fence is marked as a negative by `<!-- retired-neg: <row-id> — <reason> -->` on the
- *          line(s) directly above its opener (one marker per row; consecutive marker lines stack);
+ *          line(s) directly above its opener, at the opener's blockquote depth (one marker per row;
+ *          consecutive marker lines stack);
  *        - the fence lies in a SPEC migration region (the ledger's `migrationRegions`): opened ONLY by a
- *          heading line exactly equal to a listed one (which must stand exactly once), holding only its own
+ *          top-level heading line exactly equal to a listed one (which must stand exactly once, between its
+ *          `after` / `before` neighbours and followed by its `firstChild` — r3 F4), holding only its own
  *          sub-headings (`children`), closed by any other heading;
  *        - `retired-ok: <row-id> — <reason>` stands in a COMMENT (`//`, `/* *\/`, `<!-- -->`) on the hit's
  *          line or the line before it (exact id, a non-empty reason).
@@ -46,21 +51,23 @@
  *        - a HARD hit with no `pending` entry fails; a count above the baseline fails;
  *        - a count BELOW the baseline also fails until the baseline is lowered (`--update`), so slack is
  *          never left for a later PR to spend;
- *        - a migration-region heading missing or repeated fails.
+ *        - a migration-region heading missing, repeated or moved fails.
  *   4. With `--base-ref <rev>` (CI: the PR's base; the pre-commit hook: the merge-base with origin/main; an
  *      unresolvable rev exits 2) the baseline and ledger themselves are checked against that revision's:
  *        - no (row, file) count above the base's, no (row, file) key the base lacks — except a SOFT row the
  *          base ledger lacks (a new deprecation records its starting count); a new HARD row brings no debt;
  *        - no ledger row removed, none downgraded HARD -> SOFT, no detector set to null;
- *        - the BASE ledger's rules (each base row's detector / codes / caseIdPattern, the base regions) run
- *          over this tree find no (row, file) count above the base baseline (#2101 r2 MED-3): a widened
- *          `codes` / `caseIdPattern`, a narrowed or never-matching detector, a new region cannot hide a hit.
+ *        - the BASE ledger's rules (each base row's detector / codes / caseIdPattern, the base regions, the
+ *          base corpus) run over this tree find no (row, file) count above the base baseline (#2101 r2 MED-3,
+ *          r3 F5): a widened `codes` / `caseIdPattern`, a narrowed or never-matching detector, a new region, a
+ *          newly excluded path cannot hide a hit.
  *
  * KNOWN LIMITS (also in SPEC §63):
  *   - counts are per (row, file): removing one hit and adding another of the same row in the same file
  *     passes (a swap); in a negative case, which hit its budget allows is not tied to a diagnostic's line;
- *   - the walker and builtin detectors are this tree's script: narrowing them is a reviewed code diff the
- *     base rules do not catch; a base ledger older than `migrationRegions` is read with this tree's regions;
+ *   - the source walker, the markdown reader and the builtin detectors are this tree's script: narrowing them
+ *     is a reviewed code diff the base rules do not catch; a base ledger older than `migrationRegions` /
+ *     `corpus` is read with this tree's;
  *   - text cannot tell a tape from a host array (tape-js-method) or a cell from an element (render-by-tag,
  *     detector null); rows with `enforcedBy: "lint-only"` have no compiler refusal, the lint alone holds
  *     them; tape-js-method sees no computed member (`xs["push"](1)`) and a discarded `.sort()` only after
@@ -81,17 +88,18 @@
  *   bun scripts/retired-forms-lint.ts --root <dir>       scan another tree;  --ledger / --baseline <path>
  */
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve, posix as posixPath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { analyze, view, K_COMMENT, type Analysis } from "./retired-forms-walk.ts";
+import { Lexer } from "marked";
+import { analyze, view, K_CODE, K_COMMENT, type Analysis } from "./retired-forms-walk.ts";
 
 export type Detector = { kind: "regex"; pattern: string; flags: string } | { kind: "builtin"; name: string } | null;
 export type Row = {
   id: string; tier: "HARD" | "SOFT"; old: string; new: string; codes: string[]; spec: string; ruling: string;
   detector: Detector; keepStrings?: boolean; caseIdPattern?: string; enforcedBy?: string; note?: string;
 };
-export type Ledger = { rows: Row[]; migrationRegions?: Region[] };
+export type Ledger = { rows: Row[]; migrationRegions?: Region[]; corpus?: Corpus };
 export type Hit = { row: string; file: string; line: number; text: string };
 export type Baseline = {
   $comment?: string;
@@ -103,55 +111,28 @@ const SCRIPT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const LEDGER_PATH = "compiler/retired-forms.json";
 export const BASELINE_PATH = "scripts/retired-forms-baseline.json";
 
-export const SCRML_ROOTS = ["conformance/cases", "compiler/self-host-v2/acceptance", "samples", "examples", "stdlib",
-  "docs/tutorial-snippets", "docs/readme-snippets", "docs/website"];
-export const SPEC_PATH = "compiler/SPEC.md";
 /**
- * Paths NOT read, each with its reason (#2101 r2 LOW-5: every `.md` file in the tree is read — its `scrml`
- * and untagged fences — except these; `.scrml` files are read under SCRML_ROOTS, minus these). A path is
- * excluded when it equals an entry or lies under one. SKIP_DIRS below are skipped at any depth.
+ * What the gate reads (#2101 r3 F5): the ledger's `corpus` — `scrmlRoots` (the `.scrml` roots), `excluded`
+ * (paths not read, each with its reason; a path equal to an entry or under it) and `skipDirs` (directory names
+ * skipped at any depth; every dot-directory — `.git`, `.github`, `.claude`, … — is skipped too). It lives in
+ * the ledger, not in this script, so `--base-ref` runs the BASE's file set over the changed tree: a newly
+ * excluded path that hides a hit fails.
  */
-export const EXCLUDED: Record<string, string> = {
-  "handOffs": "PA hand-off notes (session records)",
-  "spa-lists": "sPA task lists and their progress notes (working records)",
-  "pa.md": "PA working instructions", "cpa.md": "cPA working instructions", "spa.md": "sPA working instructions",
-  "vpa.md": "vPA working instructions", "hand-off.md": "the PA hand-off (a session record)",
-  "master-list.md": "the PA's master work list", "gaunt.md": "gauntlet working notes", "scrmlFormula.md": "PA working notes",
-  "compiler/native-parser": "dated scoping and divergence notes of the native-parser milestones (a record)",
-  "compiler/self-host-v2/progress.md": "bootstrap progress notes (a record)",
-  "compiler/self-host-v2/slice-m1/progress.md": "bootstrap slice progress notes (a record)",
-  "compiler/self-host-v2/slice-m2/progress.md": "bootstrap slice progress notes (a record)",
-  "compiler/SPEC-INDEX.md": "generated from the SPEC (scripts/regen-spec-index.ts)",
-  "compiler/PIPELINE.md": "impl#1's stage contracts: no scrml fence; its untagged fences are TypeScript type listings",
-  "scripts/flograph-fixture": "a test fixture",
-  "tryit": "untracked local playground (gitignored)",
-  "docs/changes": "per-change progress notes and hand-offs (the record of a change, quoting the code it changed)",
-  "docs/changelog.md": "the changelog (history)",
-  "docs/generated": "bot-generated blocks",
-  "docs/FACTS.md": "bot-generated facts",
-  "docs/known-gaps.md": "the gap ledger (generated counts; entries quote the defect they track)",
-  "docs/bootstrap-conformance.md": "generated by scripts/bootstrap-conformance.ts --write",
-  "docs/pr-reviews.md": "the review ledger (a record of past PRs)",
-  "docs/heads-up": "dated hand-off notes",
-  "docs/audits": "dated point-in-time audits (they quote the code they audited)",
-  "docs/curation": "a dated disposition record",
-  "docs/articles/archive": "archived drafts (S469 \"Archive old drafts\")",
-  "compiler/tests": "test fixtures' READMEs",
-  "compiler/src": "impl#1 (frozen) internals",
-  "benchmarks": "other frameworks' benchmark apps",
-  "node_modules": "dependencies",
-};
-/** Directory names skipped at any depth, with the reason (#2101 r2 LOW-5: `archive` is no longer one —
- *  the one archive the tree holds, docs/articles/archive, is listed in EXCLUDED). Every dot-directory
- *  (`.git`, `.github`, `.claude`, …: tool state and CI configuration) is skipped too. */
-export const SKIP_DIRS: Record<string, string> = {
-  "node_modules": "dependencies",
-  "dist": "build output (gitignored everywhere)",
-};
+export type Corpus = { scrmlRoots: string[]; excluded: Record<string, string>; skipDirs: Record<string, string> };
+export const SPEC_PATH = "compiler/SPEC.md";
+
+/** The ledger's corpus, or an error (a ledger without one cannot say what it reads). */
+export function corpusOf(ledger: Ledger): Corpus {
+  const c = ledger.corpus;
+  if (!c || !Array.isArray(c.scrmlRoots) || typeof c.excluded !== "object" || typeof c.skipDirs !== "object") {
+    throw new Error("retired-forms-lint: the ledger has no `corpus` (scrmlRoots / excluded / skipDirs)");
+  }
+  return c;
+}
 
 /** A repo-relative path, always `/`-separated (#2101 r1 HIGH-4: keys and prefixes are posix on every OS). */
 export const posix = (p: string) => p.replace(/\\/g, "/");
-const excluded = (rel: string) => Object.keys(EXCLUDED).some((e) => rel === e || rel.startsWith(e + "/"));
+export const isExcluded = (corpus: Corpus, rel: string) => Object.keys(corpus.excluded).some((e) => rel === e || rel.startsWith(e + "/"));
 
 // --------------------------------------------------------------------------------------------------
 // detection
@@ -309,36 +290,67 @@ export function markerAllows(src: string, line: number, id: string, root: string
 // the corpus
 // --------------------------------------------------------------------------------------------------
 
-function walk(root: string, rel: string, test: (rel: string) => boolean, out: string[]) {
+function walk(root: string, corpus: Corpus, rel: string, test: (rel: string) => boolean, out: string[]) {
   rel = posix(rel);
-  if (excluded(rel)) return;
+  if (isExcluded(corpus, rel)) return;
   const abs = join(root, rel);
   if (!existsSync(abs)) return;
   if (statSync(abs).isFile()) { if (test(rel)) out.push(rel); return; }
   for (const e of readdirSync(abs).sort()) {
-    if (Object.hasOwn(SKIP_DIRS, e) || e.startsWith(".")) continue;
-    walk(root, rel === "" ? e : `${rel}/${e}`, test, out);
+    if (Object.hasOwn(corpus.skipDirs, e) || e.startsWith(".")) continue;
+    walk(root, corpus, rel === "" ? e : `${rel}/${e}`, test, out);
   }
 }
 
-export function scrmlFiles(root: string): string[] {
+export function scrmlFiles(root: string, corpus: Corpus): string[] {
   const out: string[] = [];
-  for (const r of SCRML_ROOTS) walk(root, r, (f) => f.endsWith(".scrml"), out);
+  for (const r of corpus.scrmlRoots) walk(root, corpus, r, (f) => f.endsWith(".scrml"), out);
   return [...new Set(out)].sort();
 }
 
-export function mdFiles(root: string): string[] {
+export function mdFiles(root: string, corpus: Corpus): string[] {
   const out: string[] = [];
-  walk(root, "", (f) => f.endsWith(".md"), out);
+  walk(root, corpus, "", (f) => f.endsWith(".md"), out);
   return [...new Set(out)].sort();
 }
 
 /**
  * A conformance / acceptance case: its id, its expected codes, `budget` — how many hits each expected code
  * may allow (#2101 r2 LOW-6: `codeCounts[code]`, else 1 for a code in `codes`; consumed across the case's
- * files, in file then source order) — and the text that names its files (case.scrml + expected.json).
+ * files, in file then source order) — and `files`, its OWN files relative to its directory (#2101 r3 NIT:
+ * exact paths, never a substring): `case.scrml`, every file case.scrml imports (`from '<path>'` /
+ * `import '<path>'` in code — not in a comment, a string or text), and every string value of expected.json that is a `.scrml` path.
  */
-export type Case = { id: string; codes: string[]; dir: string; budget: Map<string, number>; names: string };
+export type Case = { id: string; codes: string[]; dir: string; budget: Map<string, number>; files: Set<string> };
+
+/** `spec` (an import specifier or a path) as a path relative to the case directory, or null when it leaves it. */
+function caseRel(spec: string): string | null {
+  const n = posixPath.normalize(spec.replace(/\\/g, "/"));
+  if (n.startsWith("../") || n === ".." || n.startsWith("/")) return null;
+  return n;
+}
+
+/** The case's own files (relative to its directory): case.scrml, its imports, expected.json's `.scrml` paths. */
+function caseFiles(root: string, dir: string, expected: unknown): Set<string> {
+  const files = new Set<string>(["case.scrml"]);
+  const cs = join(root, dir, "case.scrml");
+  if (existsSync(cs)) {
+    const src = readFileSync(cs, "utf8");
+    const an = read(src, root).an;
+    for (const m of src.matchAll(/(?<![\w$.])(?:from|import)\s*(["'])([^"'\n]+?\.scrml)\1/g)) {
+      if (an.kinds[m.index!] !== K_CODE) continue;     // an import in code, never one named in a comment or text
+      const r = caseRel(m[2]);
+      if (r) files.add(r);
+    }
+  }
+  const strings = (v: unknown) => {
+    if (typeof v === "string") { if (/\.scrml$/.test(v) && !/\s/.test(v)) { const r = caseRel(v); if (r) files.add(r); } }
+    else if (Array.isArray(v)) v.forEach(strings);
+    else if (v && typeof v === "object") Object.values(v).forEach(strings);
+  };
+  strings(expected);
+  return files;
+}
 
 /** The conformance / acceptance case holding `rel`, or null. */
 function caseOf(root: string, rel: string, cache: Map<string, Case | null>): Case | null {
@@ -349,14 +361,12 @@ function caseOf(root: string, rel: string, cache: Map<string, Case | null>): Cas
     if (existsSync(p)) {
       let c: Case | null = null;
       try {
-        const raw = readFileSync(p, "utf8");
-        const ex = JSON.parse(raw);
+        const ex = JSON.parse(readFileSync(p, "utf8"));
         const cc: Record<string, number> = ex?.expect?.codeCounts ?? {};
         const codes: string[] = [...(ex?.expect?.codes ?? []), ...Object.keys(cc)];
         const budget = new Map<string, number>();
         for (const code of codes) budget.set(code, typeof cc[code] === "number" ? cc[code] : 1);
-        const cs = join(root, dir, "case.scrml");
-        c = { id: String(ex?.id ?? dir.split("/").pop()), codes, dir, budget, names: raw + "\n" + (existsSync(cs) ? readFileSync(cs, "utf8") : "") };
+        c = { id: String(ex?.id ?? dir.split("/").pop()), codes, dir, budget, files: caseFiles(root, dir, ex) };
       } catch { c = null; }
       cache.set(dir, c);
       return c;
@@ -365,12 +375,9 @@ function caseOf(root: string, rel: string, cache: Map<string, Case | null>): Cas
   return null;
 }
 
-/** Is `rel` one of the case's own files — its `case.scrml`, or a file the case names (an import of
- *  case.scrml, or a path in expected.json) (#2101 r2 LOW-6)? A helper the case never names is not. */
+/** Is `rel` one of the case's own files (an exact path — #2101 r3 NIT)? A helper the case never imports is not. */
 export function caseOwns(c: Case, rel: string): boolean {
-  const own = rel.slice(c.dir.length + 1);
-  if (own === "case.scrml") return true;
-  return c.names.includes(own);
+  return c.files.has(rel.slice(c.dir.length + 1));
 }
 
 /** The case's codes that may allow a hit of `row` (#2101 r1 HIGH-2): the row's codes the case expects, and
@@ -390,87 +397,162 @@ export function caseIsNegativeFor(row: Row, c: { id: string; codes: string[] } |
 export type Fence = { startLine: number; text: string; negIds: Set<string>; migration: boolean; info: string };
 
 /**
- * A SPEC migration region (#2101 r2 MED-1): opened ONLY by a heading line EXACTLY equal to `heading` (the
- * ledger's `migrationRegions`; the SPEC must hold it exactly once — `regionErrors`), and holding only its own
- * sub-headings — a deeper heading whose text does not match `children` (e.g. a misplaced `19.15` under
- * Appendix E, a `4.1` under §63) ends the region, as does any heading of its level or higher. Heading TEXT
- * alone never opens a region: `#### 63.99 Worked example` inside §4 is an ordinary heading.
+ * A SPEC migration region (#2101 r2 MED-1, r3 F4): opened ONLY by a heading line EXACTLY equal to `heading`
+ * (the ledger's `migrationRegions`; the SPEC must hold it exactly once), and holding only its own sub-headings —
+ * a deeper heading whose text does not match `children` (a `4.1` under §63) ends the region, as does any heading
+ * of its level or higher. Heading TEXT alone never opens a region: `#### 63.99 Worked example` inside §4 is an
+ * ordinary heading. The region is also bound to its POSITION (`regionErrors`, #2101 r3 F4): the nearest heading
+ * of its level or higher before it starts `after`, the nearest after it starts `before`, and (when set) the
+ * heading right after it starts `firstChild` — a moved heading fails the gate.
  */
-export type Region = { heading: string; children: string; why?: string };
+export type Region = { heading: string; children: string; after?: string; before?: string; firstChild?: string; why?: string };
 
-/** A line's blockquote prefix (`> `, `> > `, `>   `) stripped (#2101 r2 MED-2), and how many `>` it held. */
+/** A line's blockquote prefix (`> `, `> > `, `>   `) stripped, and how many `>` it held. */
 function unquote(line: string): { text: string; depth: number } {
   const m = /^(?:[ \t]{0,3}>[ \t]?)+/.exec(line);
   if (!m) return { text: line, depth: 0 };
   return { text: line.slice(m[0].length), depth: (m[0].match(/>/g) ?? []).length };
 }
-/** Strip exactly `depth` blockquote markers (a fence's body lines). */
-function unquoteN(line: string, depth: number): string {
+
+/** A line with its container prefixes — blockquote markers and list markers — removed, and leading space. */
+function containerless(line: string): string {
   let s = line;
-  for (let d = 0; d < depth; d++) {
-    const m = /^[ \t]{0,3}>[ \t]?/.exec(s);
-    if (!m) break;
-    s = s.slice(m[0].length);
+  for (;;) {
+    const t = s.replace(/^[ \t]*>[ \t]?/, "").replace(/^[ \t]*(?:[-+*]|\d{1,9}[.)])(?:[ \t]+|$)/, "");
+    if (t === s) return s.trimStart();
+    s = t;
   }
-  return s;
 }
 
-/** Is an info string read as scrml? Untagged, or its first token starts `scrml` (`scrml`, `scrml{.example}`,
- *  `scrml,ignore` — #2101 r2 MED-2). */
-export const readsInfo = (info: string) => info === "" || info.toLowerCase().startsWith("scrml");
+/** A code line compared across containers: blockquote markers and indentation are not content here. */
+const bodyKey = (l: string) => l.replace(/^[\s>]*/, "").trimEnd();
+
+/** Is an info string read as scrml (#2101 r2 MED-2, r3 F3)? Untagged, its first token starts `scrml`
+ *  (`scrml`, `scrml{.example}`, `scrml,ignore`), or a pandoc attribute block with the class `.scrml`
+ *  (`{.scrml}`, `{.scrml .numberLines}`). */
+export const readsInfo = (info: string) => {
+  const i = info.trim().toLowerCase();
+  return i === "" || i.startsWith("scrml") || /^\{\s*(?:[^}]*\s)?\.scrml(?![\w-])/.test(i);
+};
+
+type MdCode = { open: number; text: string; info: string; depth: number };
+type MdHeading = { line: number; level: number; top: boolean };
 
 /**
- * Every fence of a markdown text that is read: tagged `scrml…` or UNTAGGED (#2101 r1 HIGH-1), including a
- * fence inside a blockquote (`> ```scrml`, #2101 r2 MED-2) — its `>` markers are stripped, line numbers kept.
- * `negIds`: the row ids of `<!-- retired-neg: <id> — reason -->` markers on the lines directly above the
- * opener. `migration`: the fence lies in one of `regions` (only the SPEC is given any).
+ * The fenced code blocks and headings of a markdown text, as CommonMark (GFM) reads them — `marked`'s lexer
+ * (#2101 r3 F1/F3: the gate no longer parses fences by hand; a hand reader missed the end of a blockquoted
+ * fence at its blockquote's end and hid a positive SPEC fence). A fence inside a blockquote, a list item (`- ```scrml`
+ * on the bullet line) or both is read with its container; an indented "closer" inside a fence is content.
+ * Each block is placed back on its source lines (0-based `open`: the opener line) by finding, from the previous
+ * block on, the opener and every body line in order; a block that cannot be placed throws (the gate fails —
+ * it never reads a block at a guessed line).
+ */
+function mdBlocks(md: string): { codes: MdCode[]; headings: MdHeading[] } {
+  const lines = md.split("\n");
+  const codes: MdCode[] = [];
+  const headings: MdHeading[] = [];
+  let cursor = 0;
+  const place = (what: string, ok: (k: number) => boolean): number => {
+    for (let k = cursor; k < lines.length; k++) if (ok(k)) { return k; }
+    throw new Error(`retired-forms-lint: cannot place a markdown ${what} on its source lines (after line ${cursor + 1})`);
+  };
+  const visit = (toks: any[], top: boolean) => {
+    for (const t of toks) {
+      if (t.type === "code" && t.codeBlockStyle !== "indented") {
+        const body = t.text === "" ? [] : String(t.text).split("\n");
+        const k = place(`fence ${JSON.stringify(String(t.raw).split("\n")[0])}`, (k) => {
+          const f = /^(`{3,}|~{3,})/.exec(containerless(lines[k]));
+          if (!f) return false;
+          for (let b = 0; b < body.length; b++) {
+            if (k + 1 + b >= lines.length || bodyKey(lines[k + 1 + b]) !== bodyKey(body[b])) return false;
+          }
+          return true;
+        });
+        codes.push({ open: k, text: String(t.text), info: String(t.lang ?? ""), depth: unquote(lines[k]).depth });
+        cursor = k + 1 + body.length;
+        continue;
+      }
+      if (t.type === "heading") {
+        const first = containerless(String(t.raw).split("\n")[0]).trimEnd();
+        const k = place(`heading ${JSON.stringify(first)}`, (k) => containerless(lines[k]).trimEnd() === first);
+        headings.push({ line: k, level: t.depth, top });
+        cursor = k + 1;
+        continue;
+      }
+      if (t.type === "blockquote" || t.type === "list_item") visit(t.tokens ?? [], false);
+      else if (t.type === "list") visit(t.items ?? [], false);
+    }
+  };
+  visit(Lexer.lex(md, { gfm: true }), true);
+  return { codes, headings };
+}
+
+const NEG_MARKER = /^\s*<!--\s*retired-neg:\s*([\w-]+)(?:\s+(?:—|--|-)|\s*:)\s*[^\s>-][^>]*-->\s*$/;
+
+/**
+ * Every fenced code block of a markdown text that is read (`readsInfo`), as CommonMark reads it (`mdBlocks`).
+ * `startLine`: the 1-based line of its first body line; `text`: its content. `negIds`: the row ids of
+ * `<!-- retired-neg: <id> — reason -->` markers on the line(s) directly above the opener AT THE SAME BLOCKQUOTE
+ * DEPTH (#2101 r3: a `> <!-- … -->` does not mark an unquoted fence). `migration`: the fence lies in one of
+ * `regions` (only the SPEC is given any; a region opens only at a top-level heading).
  */
 export function readFences(md: string, regions: Region[] = []): Fence[] {
   const lines = md.split("\n");
+  const { codes, headings } = mdBlocks(md);
   const out: Fence[] = [];
   let region: { level: number; children: RegExp } | null = null;
-  for (let i = 0; i < lines.length; i++) {
-    const h = /^(#{1,6})\s+(.*)$/.exec(lines[i]);
-    if (h) {
-      const level = h[1].length;
-      if (region && (level <= region.level || !region.children.test(h[2]))) region = null;
+  let h = 0;
+  for (const c of codes) {
+    for (; h < headings.length && headings[h].line < c.open; h++) {
+      const hd = headings[h];
+      if (!hd.top) continue;
+      const text = lines[hd.line].replace(/^#{1,6}\s+/, "");
+      if (region && (hd.level <= region.level || !region.children.test(text))) region = null;
       if (!region) {
-        const r = regions.find((x) => x.heading === lines[i].trimEnd());
-        if (r) region = { level, children: new RegExp(r.children) };
+        const r = regions.find((x) => x.heading === lines[hd.line].trimEnd());
+        if (r) region = { level: hd.level, children: new RegExp(r.children) };
       }
-      continue;
     }
-    const q = unquote(lines[i]);
-    const f = /^(\s*)(```+|~~~+)\s*([^\s`]*)/.exec(q.text);
-    if (!f) continue;
-    const tok = f[2];
-    const info = f[3].toLowerCase();
-    const body = (k: number) => unquoteN(lines[k], q.depth);
-    let j = i + 1;
-    for (; j < lines.length && !(body(j).trimStart().startsWith(tok) && body(j).trim().replace(/[`~]/g, "") === ""); j++) {}
-    if (readsInfo(info)) {
-      const negIds = new Set<string>();
-      for (let k = i - 1; k >= 0; k--) {
-        const m = /^\s*<!--\s*retired-neg:\s*([\w-]+)(?:\s+(?:—|--|-)|\s*:)\s*[^\s>-][^>]*-->\s*$/.exec(unquote(lines[k]).text);
-        if (!m) break;
-        negIds.add(m[1]);
-      }
-      const text: string[] = [];
-      for (let k = i + 1; k < j; k++) text.push(body(k));
-      out.push({ startLine: i + 2, text: text.join("\n"), negIds, migration: region !== null, info });
+    if (!readsInfo(c.info)) continue;
+    const negIds = new Set<string>();
+    for (let k = c.open - 1; k >= 0; k--) {
+      const q = unquote(lines[k]);
+      if (q.depth !== c.depth) break;
+      const m = NEG_MARKER.exec(q.text);
+      if (!m) break;
+      negIds.add(m[1]);
     }
-    i = j;
+    out.push({ startLine: c.open + 2, text: c.text, negIds, migration: region !== null, info: c.info.trim().toLowerCase() });
   }
   return out;
 }
 
-/** The SPEC's migration-region headings must each stand exactly once (#2101 r2 MED-1). */
+/**
+ * The SPEC's migration regions (#2101 r2 MED-1, r3 F4): each heading stands exactly once (any line equal to it,
+ * in a fence or a comment too), as a top-level heading, between its neighbours (`after` / `before`: the nearest
+ * heading of its level or higher on each side starts so), and followed by its first child (`firstChild`).
+ */
 export function regionErrors(md: string, regions: Region[]): string[] {
   const lines = md.split("\n").map((l) => l.trimEnd());
   const errs: string[] = [];
+  let headings: MdHeading[] | null = null;
   for (const r of regions) {
     const n = lines.filter((l) => l === r.heading).length;
-    if (n !== 1) errs.push(`migration region heading ${JSON.stringify(r.heading)} stands ${n} times in ${SPEC_PATH} (must be exactly once)`);
+    const name = JSON.stringify(r.heading);
+    if (n !== 1) { errs.push(`migration region heading ${name} stands ${n} times in ${SPEC_PATH} (must be exactly once)`); continue; }
+    if (!r.after && !r.before && !r.firstChild) continue;
+    headings ??= mdBlocks(md).headings.filter((x) => x.top);
+    const i = headings.findIndex((x) => lines[x.line] === r.heading);
+    if (i < 0) { errs.push(`migration region heading ${name} is not a heading in ${SPEC_PATH}`); continue; }
+    const level = headings[i].level;
+    const text = (x: MdHeading | undefined) => (x ? lines[x.line] : "(none)");
+    let p = i - 1;
+    while (p >= 0 && headings[p].level > level) p--;
+    let q = i + 1;
+    while (q < headings.length && headings[q].level > level) q++;
+    if (r.after && !text(headings[p]).startsWith(r.after)) errs.push(`migration region ${name} must follow a heading starting ${JSON.stringify(r.after)}; it follows ${JSON.stringify(text(headings[p]))}`);
+    if (r.before && !text(headings[q]).startsWith(r.before)) errs.push(`migration region ${name} must precede a heading starting ${JSON.stringify(r.before)}; it precedes ${JSON.stringify(text(headings[q]))}`);
+    if (r.firstChild && !text(headings[i + 1]).startsWith(r.firstChild)) errs.push(`migration region ${name} must be followed by ${JSON.stringify(r.firstChild)}; it is followed by ${JSON.stringify(text(headings[i + 1]))}`);
   }
   return errs;
 }
@@ -479,7 +561,8 @@ export function scan(root: string, ledger: Ledger): Hit[] {
   const rows = ledger.rows.filter((r) => r.detector);
   const hits: Hit[] = [];
   const cache = new Map<string, Case | null>();
-  for (const rel of scrmlFiles(root)) {
+  const corpus = corpusOf(ledger);
+  for (const rel of scrmlFiles(root, corpus)) {
     const raw = readFileSync(join(root, rel), "utf8");
     const rawLines = raw.split("\n");
     const c0 = caseOf(root, rel, cache);
@@ -500,10 +583,13 @@ export function scan(root: string, ledger: Ledger): Hit[] {
       hits.push({ row: row.id, file: rel, line: ln, text: (rawLines[ln - 1] ?? "").trim().slice(0, 160) });
     }
   }
-  for (const rel of mdFiles(root)) {
+  for (const rel of mdFiles(root, corpus)) {
     const md = readFileSync(join(root, rel), "utf8");
     const mdLines = md.split("\n");
-    for (const f of readFences(md, rel === SPEC_PATH ? ledger.migrationRegions ?? [] : [])) {
+    let fences: Fence[];
+    try { fences = readFences(md, rel === SPEC_PATH ? ledger.migrationRegions ?? [] : []); }
+    catch (e) { throw new Error(`${rel}: ${(e as Error).message}`); }
+    for (const f of fences) {
       if (f.migration) continue;
       for (const row of rows) {
         if (f.negIds.has(row.id)) continue;
@@ -613,10 +699,10 @@ export function checkAgainstBase(ledger: Ledger, base: Baseline, baseLedger: Led
  * hide a new hit: the base rule still sees it. Drops are fine here (a migration lowers counts). The readers
  * and builtin detectors are this tree's script (a change to them is a reviewed code diff).
  */
-export function baseRulesOnHead(root: string, baseLedger: Ledger, baseBaseline: Baseline, headRegions: Region[] = []): string[] {
+export function baseRulesOnHead(root: string, baseLedger: Ledger, baseBaseline: Baseline, headRegions: Region[] = [], headCorpus?: Corpus): string[] {
   let hits: Hit[];
-  // a base that predates `migrationRegions` (#2101 before r2) is read with this tree's regions
-  const L: Ledger = baseLedger.migrationRegions ? baseLedger : { ...baseLedger, migrationRegions: headRegions };
+  // a base that predates `migrationRegions` (#2101 before r2) / `corpus` (before r3) is read with this tree's
+  const L: Ledger = { ...baseLedger, migrationRegions: baseLedger.migrationRegions ?? headRegions, corpus: baseLedger.corpus ?? headCorpus };
   try { hits = scan(root, L); }
   catch (e) { return [`the base ledger's rules cannot be run over this tree: ${(e as Error).message}`]; }
   const errs: string[] = [];
@@ -716,7 +802,7 @@ function main() {
     const baseLedger: Ledger | null = bl ? JSON.parse(bl) : null;
     const baseBaseline: Baseline | null = bb ? JSON.parse(bb) : null;
     baseErrs = baseErrs.concat(checkAgainstBase(ledger, base, baseLedger, baseBaseline));
-    if (baseLedger && baseBaseline) baseErrs = baseErrs.concat(baseRulesOnHead(root, baseLedger, baseBaseline, ledger.migrationRegions ?? []));
+    if (baseLedger && baseBaseline) baseErrs = baseErrs.concat(baseRulesOnHead(root, baseLedger, baseBaseline, ledger.migrationRegions ?? [], ledger.corpus));
     if (bb === null && bl === null) baseNote = ` (base ${baseRef} has no gate yet: this change introduces it)`;
   }
   const ok = res.ok && baseErrs.length === 0;
