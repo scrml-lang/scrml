@@ -18,6 +18,15 @@
 //   instance's mount, as the same expression written as the default is (Q13). Red on fc3097098:
 //   `<cp v=(rn() + 1)/>` gave 11 (computed at the first read, after the click), the default 2.
 //
+// r2 (#2105 r1 review):
+// HIGH-A — a use-site value reading an `<each>` row item or a `<match>` arm payload reads a cell (the
+//   item is the cell's element): derived, not a constant seed (Q13 — "derived exactly when its
+//   initializer reads a cell"). Red on c122902d6: `rt.givenSeed(() => it.get())`, w11 `D7L1L10`.
+//   Chromium: compiler/tests/browser/use-site-row-chromium-s482.browser.test.js.
+// MED-A — an outer cell's seed reading a PROGRAM cell (`let <a=(@n + 1)/>`, `<program> let <n/>`) is
+//   E-SCOPE-001 (§7.6 R1 + R2: the program instance is built in the body, after every outside seed).
+//   Red on c122902d6: the page died at load (`Cannot access 'decl_program' before initialization`).
+//
 // Every case runs on the SHIPPING path: the scrml-boot CLI (leak checks: every client file read) and
 // scripts/scrml-boot.ts `compileSource` + the conformance runner's happy-dom `runBootstrapArtifact`.
 
@@ -304,5 +313,47 @@ let <show:boolean=false/>
 <button id="b" onclick={ n = 10; @show = true; }>b</button>
 </program>
 ` }, ["o"], [{ click: "#b" }])).toEqual(["11"]);
+  }, 180000);
+});
+
+describe("MED-A — an outer cell's seed reading a program cell is E-SCOPE-001 (§7.6 R1 + R2)", () => {
+  const scope = async (src, says) => {
+    const es = await errors({ "main.scrml": src });
+    expect(es.map((d) => d.code)).toEqual(["E-SCOPE-001"]);
+    expect(es[0].message).toContain("`@n` is used before it is initialized");
+    expect(es[0].message).toContain("`@n` is declared in the program body");
+    expect(es[0].message).toContain(says);
+  };
+  test("e12 / e12c / e12e: before `<program>`, after `</program>`, and read by nothing (was: the page dead at load)", async () => {
+    await scope("let <a:int=(@n + 1)/>\n<program>\nlet <n:int=4/>\n<p id=\"o\">\${@a}</p>\n</program>\n", "reads `@n`");
+    await scope("<program>\nlet <n:int=4/>\n<p id=\"o\">\${@a}</p>\n</program>\nlet <a:int=(@n + 1)/>\n", "reads `@n`");
+    await scope("let <a:int=(@n + 1)/>\n<program>\nlet <n:int=4/>\n<p id=\"o\">\${@n}</p>\n</program>\n", "reads `@n`");
+  }, 180000);
+  test("e12f: through a function of the body that reads the cell", async () => {
+    await scope("<program>\nlet <n:int=4/>\n\${ function rn() -> int { return @n; } }\n<p id=\"o\">\${@a}</p>\n</program>\nlet <a:int=(rn() + 1)/>\n", "calls `rn()`, which uses `@n`");
+  }, 180000);
+  test("controls: e12b (a function reading no cell: 2 | 4), e12d (a DERIVED outer cell is computed when read: 5)", async () => {
+    expect(await texts({ "main.scrml": "\${ function rn() -> int { return 1; } }\nlet <a:int=(rn() + 1)/>\n<program>\nlet <n:int=4/>\n<p id=\"o\">\${@a}</p>\n<p id=\"o2\">\${@n}</p>\n</program>\n" }, ["o", "o2"])).toEqual(["2", "4"]);
+    expect(await texts({ "main.scrml": "<a:int=(@n + 1)/>\n<program>\nlet <n:int=4/>\n<p id=\"o\">\${@a}</p>\n<button id=\"b\" onclick={ @n = 9; }>b</button>\n</program>\n" }, ["o"], [{ click: "#b" }])).toEqual(["10"]);
+  }, 180000);
+});
+
+describe("HIGH-A — a use-site value reading a row item or an arm payload is derived (Q13)", () => {
+  const LEAF = "<leaf k:int=0>\n</> renders <b>L\${k}</b>\n";
+  test("w11: the row's components follow the row (D7L7L70; r1 D7L1L10) — printed derived, not `rt.givenSeed`", async () => {
+    const src = LEAF + "<program>\n<items:int[replace, write]=([1, 2])/>\n<p id=\"o\"><each in=@items as it><i>D\${it}</i><leaf k=it/><leaf k=(it * 10)/></each></p>\n<button id=\"b\" onclick={ @items[0] = 7; }>b</button>\n</program>\n";
+    expect(await texts({ "main.scrml": src }, ["o"], [{ click: "#b" }])).toEqual(["D7L7L70D2L2L20"]);
+    const res = await compileSource(writeApp({ "main.scrml": src }));
+    expect(res.client.js).not.toContain("givenSeed(() => it");
+  }, 180000);
+  test("w08: a `<match>` arm payload (D9L9; r1 D9L1)", async () => {
+    const src = LEAF + "<program>\ntype Ph:enum = { A(v: int), B }\nlet <ph:Ph=(Ph.A(1))/>\n<p id=\"o\"><match on=@ph>\n  <A(v)><i>D\${v}</i><leaf k=v/></>\n  <B><span>b</span></>\n</match></p>\n<button id=\"b\" onclick={ @ph = Ph.A(9); }>b</button>\n</program>\n";
+    expect(await texts({ "main.scrml": src }, ["o"], [{ click: "#b" }])).toEqual(["D9L9"]);
+  }, 180000);
+  test("w20: a use-site value in a row reading no row item stays a constant seed (`rt.givenSeed`): 2 2 after `n = 10`", async () => {
+    const src = LEAF + "<program>\n\${ let n: int = 1; }\n\${ function rn() -> int { return n; } }\n<items:int[replace, write]=([1, 2])/>\n<p id=\"o\"><each in=@items as it><leaf k=(rn() + 1)/></each></p>\n<button id=\"b\" onclick={ n = 10; @items[0] = 7; }>b</button>\n</program>\n";
+    expect(await texts({ "main.scrml": src }, ["o"], [{ click: "#b" }])).toEqual(["L2L2"]);
+    const res = await compileSource(writeApp({ "main.scrml": src }));
+    expect(res.client.js).toContain("givenSeed(() => rn() + 1)");
   }, 180000);
 });

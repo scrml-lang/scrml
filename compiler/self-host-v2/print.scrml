@@ -6387,6 +6387,17 @@ ${
     // walk cannot follow counts as a read (a call through a function value, a server call, a callee
     // whose body Core does not hold), and so does every read of reactive state that is not a field
     // read (an instance handle, a validity surface, a request refetch, a re-run initializer).
+    //
+    // s482 r2 (#2105 r1 review HIGH-A; ruling:user-voice-scrml.md-S482-locked-field-derived — "derived
+    // exactly when its initializer reads a cell, directly or through any function it calls, at any
+    // depth"): in an EXPRESSION root — the value itself, or a file-scope constant's initializer it
+    // reaches — a `Local` that is not a file-scope binding (findConst / a `<db>` load's value misses)
+    // counts as a cell read, FAIL CLOSED. At a use site such a Local is a markup binding: an `<each>`
+    // row item (`as it`), a `<match>` arm payload, a for-lift variable — a reactive projection of a
+    // cell's element — and it is never a constant; a lambda parameter or a block-lambda local written
+    // in the value fails closed the same way (derived, as before s482). A function body's own
+    // parameters and locals are not judged so: they are bound by the function, from arguments the
+    // walk already judges at the call.
     fn readsCellReach(p: CoreProgram, e: Expr) -> boolean {
         let todo: Node[] = [Node.NExpr(e)];
         let seenFn: int[] = [];
@@ -6394,7 +6405,9 @@ ${
         for (; todo.length > 0; ) {
             let next: Node[] = [];
             for (const r of todo) {
+                const exprRoot: boolean = !isCoreFnNode(r);
                 for (const n of allNodes(r)) {
+                    if (exprRoot && freeLocalRead(p, n)) return true;
                     if (cellReadOf(n) is given || nodeReadsState(n)) return true;
                     const fid: int = namedFnOf(n);
                     if (fid >= 0 && !hasInt(seenFn, fid)) {
@@ -6419,6 +6432,25 @@ ${
             todo = next;
         }
         return false;
+    }
+
+    fn isCoreFnNode(r: Node) -> boolean {
+        return match r {
+            .NFn(f: x) :> true,
+            // no-default-arm: one question — is it a function (its own bindings are its own)
+            _ :> false
+        };
+    }
+
+    // s482 r2 (#2105 r1 review HIGH-A) — a read of a `Local` (a whole local or a path into one)
+    // that is not a file-scope binding: no file-scope constant / `let` (findConst) and no `<db>`
+    // load's module-level value (DbLoad.val).
+    fn freeLocalRead(p: CoreProgram, n: Node) -> boolean {
+        const id: int = localReadOf(n);
+        if (id < 0) return false;
+        if (findConst(p, id) is given) return false;
+        for (const l of p.loads) { if (l.val.id == id) return false; }
+        return true;
     }
 
     // A scrml function an expression node calls or names as a value (its Sym id), else -1.

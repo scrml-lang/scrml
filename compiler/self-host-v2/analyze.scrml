@@ -11700,7 +11700,12 @@ ${
             if (c.ok) binds = binds.concat([c.sym.id]);
             if (c.ok && c.mutable) lets = lets.concat([c.sym.id]);
         }
-        if (binds.length == 0) return out;
+        // s482 r2 (#2105 r1 review MED-A) — a program with no file-scope binding still has its outside
+        // cells' seeds judged (outerSeedReachDiags: a seed reading a program cell, probes e12 / e12f
+        // hold no binding); only that judgment runs then — the rest of this pass judges bindings
+        const out0: Diag[] = out;
+        const noBinds: boolean = binds.length == 0;
+        if (noBinds && !anyOuterCell(g)) return out;
         // each callable's own facts: the file-scope `let`s its body writes (LetW, in order), and
         // every file-scope binding its body reads or writes
         let ownW: FxAtom[][] = [];
@@ -11854,7 +11859,30 @@ ${
         // file-scope bindings it reads or writes, at any depth)
         out = out.concat(valueLetDiags(g, t, sum, writes, sites, lets));
         out = out.concat(derivedUntrackedDiags(g, t, sum, reads, lets));
+        if (noBinds) return out0.concat(outerSeedReachDiags(g, t, sum, usesR, binds));
         return out.concat(bodyReachDiags(g, t, sum, usesR, binds)).concat(outerSeedReachDiags(g, t, sum, usesR, binds));
+    }
+
+    // s482 r2 (MED-A) — does the program declare a cell outside its body (a top-level declaration
+    // item that is one own-value field, as outerSeedReachDiags lists them)?
+    fn anyOuterCell(g: Globals) -> boolean {
+        for (const f of g.files) {
+            for (const it of f.items) {
+                const k: AItemK = it.k;
+                const ad: ADecl | not = match k {
+                    .DeclItem(d: x) :> x,
+                    // no-default-arm: a cell outside the body is a top-level declaration item
+                    _ :> not
+                };
+                if (ad is given) {
+                    for (const gd of g.decls) {
+                        const di: DeclInfo = gd.info;
+                        if (di.nid == ad.nid && di.sym.id != g.program.id && di.fields.length == 1 && di.fields[0].nid == di.nid) return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     // =========================================================================
@@ -12416,6 +12444,14 @@ ${
             }
             i = i + 1;
         }
+        // s482 r2 (#2105 r1 review MED-A) — the program's own cells (`<program> let <n/>`) are bindings
+        // of the program body too: the program instance is built when the body runs, after every
+        // outside seed, so a seed outside the body that reads one (directly, through a function, or
+        // through another outside cell) reads it before it exists — E-SCOPE-001, not a load-time TDZ
+        // on the program declaration (probes e12 / e12c / e12e / e12f). codeReach finds them here.
+        for (const pf of programCells(g)) {
+            places = places.concat([{ sym: pf.sym.id, name: "@" + pf.sym.hint, pos: late }]);
+        }
         // every such cell, with its file (a seed reading one placed later constructs it on demand —
         // its seed runs at the reader's place, so it is judged there too: codeReach / outerCellOf)
         let cells: BodyCell[] = [];
@@ -12663,6 +12699,12 @@ ${
                     const inner: SeedReach | not = cellReach(cx, c, pos, seen.concat([c.sym]));
                     if (inner is given) return { bp: inner.bp, how: cellHop(c, inner), file: cx.file, span: a.span };
                 }
+                // s482 r2 (#2105 r1 review MED-A) — a cell placed as a binding (outerSeedReachDiags
+                // places the program's own cells, after every outside seed)
+                if (c is not && cid >= 0) {
+                    const cp: BodyPlace | not = placeOfBinding(cx.places, cid);
+                    if (cp is given && cp.pos > pos) return { bp: cp, how: " reads `" + cp.name + "`,", file: cx.file, span: a.span };
+                }
             }
         }
         for (const r of refs) {
@@ -12680,6 +12722,11 @@ ${
                         if (c is given && seen.indexOf(c.sym) < 0 && cellRunsAt(c, pos)) {
                             const inner: SeedReach | not = cellReach(cx, c, pos, seen.concat([c.sym]));
                             if (inner is given) return { bp: inner.bp, how: via + " which" + cellHop(c, inner), file: r.file, span: r.span };
+                        }
+                        // s482 r2 (MED-A) — a program cell placed as a binding (outerSeedReachDiags)
+                        if (c is not) {
+                            const cp: BodyPlace | not = placeOfBinding(cx.places, atomBinding(ua.key));
+                            if (cp is given && cp.pos > pos) return { bp: cp, how: via + " which uses `" + cp.name + "`,", file: r.file, span: r.span };
                         }
                     } else {
                         const bp: BodyPlace | not = placeOfBinding(cx.places, atomBinding(ua.key));
