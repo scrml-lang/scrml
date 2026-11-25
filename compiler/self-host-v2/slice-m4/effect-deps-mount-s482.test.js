@@ -87,3 +87,38 @@ let <c:int=0/>
 `, undefined, ["o"])).toEqual(["1"]);
   }, 120000);
 });
+
+// s482 (lane s482-hold-body — the #2088 review LOW-2 follow-up): two more placements of an effect whose `deps=`
+// name an imported cell — a01, the keyword form `when @z changes` (EffectStmt, its own parse path), and a11, an
+// effect in an `<each>` row (regionGatherBlocks). Under model (c) the library seed that writes `n` is refused
+// where it writes (E-VALUE-WRITES-STATE); with a seed that writes nothing, registering the effect where it stands
+// runs no user code — the seed ran before the body (ruling:user-voice-scrml.md-S482-outside-cell-seed-time) — and the
+// effect's body is held until the body ends (ruling:user-voice-scrml.md-S482-hold-until-body-ends), so k = 1.
+describe("#2088 LOW-2 follow-up: a01 (`when @z changes`) and a11 (an `<each>` row)", () => {
+  const A01 = `\${ import { n, z } from "./lib.scrml"; }
+<program>
+<div if=(true)>\${ when @z changes { let q: int = 0; } }\${ const k: int = n + 0; }<p id="o">\${k}</p></div>
+</program>
+`;
+  const A11 = `\${ import { n, z } from "./lib.scrml"; }
+<program>
+<xs:int[]=([1])/>
+<div if=(true)><ul><each in=@xs as it><li><effect deps=[@z]>\${ let q: int = 0; }</>r</li></each></ul>\${ const k: int = n + 0; }<p id="o">\${k}</p></div>
+</program>
+`;
+  const QUIET = `\${ export let n: int = 1; }
+export let <z:string="s"/>
+`;
+  test("a01: a writing library seed is refused where it writes", async () => {
+    expect(await codes(A01, LIB)).toEqual(["E-VALUE-WRITES-STATE", "E-VALUE-WRITES-STATE"]);
+  }, 120000);
+  test("a11: a writing library seed is refused where it writes", async () => {
+    expect(await codes(A11, LIB)).toEqual(["E-VALUE-WRITES-STATE", "E-VALUE-WRITES-STATE"]);
+  }, 120000);
+  test("a01 with a seed that writes nothing: compiles, k = 1", async () => {
+    expect(await texts(A01, QUIET, ["o"])).toEqual(["1"]);
+  }, 120000);
+  test("a11 with a seed that writes nothing: compiles, k = 1", async () => {
+    expect(await texts(A11, QUIET, ["o"])).toEqual(["1"]);
+  }, 120000);
+});

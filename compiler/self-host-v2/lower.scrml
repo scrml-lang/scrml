@@ -3068,8 +3068,9 @@ ${
     // and with it every binding its initializer reads (`${ n = 5; } ${ const m = n; } <div if=(m > 0)>
     // ${ const k = m + 0; }…` showed m = 1 and k = 1, not 5). Before it, every write the body makes
     // before the construct is seen, as in source order, and none after it; what it cannot place is a
-    // write made INSIDE the construct, before the initializer — analyze constructReadDiags refuses
-    // that. (`<pre>` / `<code>` content is raw text.) s482: one inside an element the HTML parser
+    // write made INSIDE the construct, before the initializer — ~~analyze constructReadDiags refuses
+    // that~~ none can be made now: a value position there cannot write (§6.15 A1, model (c)), and a
+    // `<request>`'s load is held until the body ends (s482-hold-body, Q6). (`<pre>` / `<code>` content is raw text.) s482: one inside an element the HTML parser
     // reads as text (`<textarea>`, `<title>`, `<script>`, `<style>` — isTextOnlyElem) is put ~~just
     // after that element~~: an anchor there is text, not a comment (#2041 r2 review LOW-1). ~~Any other
     // element whose content does not render once in place keeps the place after it (not a §7.6
@@ -3081,8 +3082,9 @@ ${
     // with every binding its initializer reads (`${ n = 5; } ${ const m = n; } <p>${m}</p>
     // <textarea>${ const k = m + 0; }${k}</textarea>` showed m = 1 and k = 1, not 5). What the place
     // before cannot keep in source order — code inside the element before the initializer that
-    // writes what it reads, or that runs before an initializer that acts — analyze
-    // constructReadDiags refuses.
+    // writes what it reads, or that runs before an initializer that acts — ~~analyze
+    // constructReadDiags refuses~~ cannot arise: such code is a value position (§6.15 A1) or a held
+    // `<request>` (Q6, s482-hold-body), and an acting initializer there is refused (valueLetDiags).
     fn lowerPlaced(c: LC, n: ANode, ms: ConstMark[]) -> View[] {
         const e: AElem | not = elemOf(n);
         if (e is given) {
