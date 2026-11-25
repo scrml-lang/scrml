@@ -325,7 +325,11 @@ describe("INTERIM (g-boot-construct-request-write-s482): a `<request>` there run
     test("LOW-1 " + name + ": fails closed with E-FILE-SCOPE-INIT-IN-CONSTRUCT", async () => {
       const d = await errors(PRE + "<program>\n" + RQ + body + "</program>\n");
       const c = d.find((x) => x.code === "E-FILE-SCOPE-INIT-IN-CONSTRUCT");
-      expect(c?.message).toContain("the initializer of `const k` reads what " + what + " in it reads (the bootstrap does not follow the reads inside one here, so it fails closed)");
+      // s482 (lane s482-seed-timing; #2096 r2 review LOW-A): the message says it fails closed because a
+      // request there writes state — not that the request writes what the initializer reads
+      expect(c?.message).toContain("the initializer of `const k` holds " + what + " in it, whose reads the bootstrap does not follow here, and a `<request>` inside");
+      expect(c?.message).toContain("writes state before it — so the bootstrap fails closed");
+      expect(c?.message).not.toContain("which a `<request>`");
     }, 120000);
   }
 

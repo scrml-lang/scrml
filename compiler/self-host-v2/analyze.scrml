@@ -12147,7 +12147,14 @@ ${
                             const lo: int = constructStart(t, tops, ci.span.start);
                             const bw: BodyW = constructRequestWrites(g, t, sum, writes, sites, lets, f.path, ps, pfields, lo, ci.span.start);
                             const r: string = initReadWritten(t, rx, f.path, [c.init], bw, g.program.id, pfields, cells, lo, []);
-                            if (r != "") {
+                            if (r.indexOf("fc:") == 0) {
+                                // s482 (lane s482-seed-timing; #2096 r2 review LOW-A): the scan cannot see
+                                // what the initializer reads, and some `<request>` before it in the construct
+                                // writes state — fail closed, and say so (not that the request writes what it reads)
+                                let kw0: string = "const";
+                                if (c.mutable) kw0 = "let";
+                                out = out.concat([newDiag("E-FILE-SCOPE-INIT-IN-CONSTRUCT", "the initializer of `" + kw0 + " " + c.name + "` holds " + r.substring(3) + ", and a `<request>` inside " + where + " writes state before it — so the bootstrap fails closed: it cannot tell whether the initializer reads what that request writes. A request's first load runs where it stands, during the body, and the initializer, which has no single place there, runs just before the construct (§7.6 R3). Not in the bootstrap yet (INTERIM, g-boot-construct-request-write-s482: lifted when requests triggered during the body are held until it ends, §7.6 R5). Declare `" + c.name + "` before that element, or compute the value where the content needs it", f.path, c.span)]);
+                            } else if (r != "") {
                                 let kw: string = "const";
                                 if (c.mutable) kw = "let";
                                 out = out.concat([newDiag("E-FILE-SCOPE-INIT-IN-CONSTRUCT", "the initializer of `" + kw + " " + c.name + "` reads " + r + ", which a `<request>` inside " + where + " writes before it — a request's first load runs where it stands, during the body, and the initializer, which has no single place there, runs just before the construct (§7.6 R3), so it would not see that write. Not in the bootstrap yet (INTERIM, g-boot-construct-request-write-s482: lifted when requests triggered during the body are held until it ends, §7.6 R5). Declare `" + c.name + "` before that element, or compute the value where the content needs it", f.path, c.span)]);
@@ -12710,12 +12717,12 @@ ${
                 // these too (E-BOOTSTRAP-UNSUPPORTED); lifting it depends on this refusal (or on scanning
                 // into those bodies with the same closure), or such a read would compile to a wrong value.
                 const ov: AExpr | not = readScanOpaqueIn(init);
-                if (ov is given) return "what " + blockerWhat(ov) + " in it reads (the bootstrap does not follow the reads inside one here, so it fails closed)";
+                if (ov is given) return "fc:" + blockerWhat(ov) + " in it, whose reads the bootstrap does not follow here";
                 const sc: BodyScan = scanValue({ t: t, file: file }, AAttrValue.Bare(init), emptyScan());
-                if (sc.unproven.length > 0) return "what a call the analysis cannot follow returns (" + sc.unproven[0].what + " — §6.7.4 rule 4: it may read anything, so the bootstrap fails closed)";
+                if (sc.unproven.length > 0) return "fc:a call the analysis cannot follow (" + sc.unproven[0].what + " — §6.7.4 rule 4: it may read anything)";
                 for (const r of sc.refs) {
                     const j: int = ixGet(rx.six, r.sym);
-                    if (j < 0) return "what `" + r.name + "` returns (a call the analysis cannot follow — it may read anything, so the bootstrap fails closed)";
+                    if (j < 0) return "fc:a call of `" + r.name + "` the analysis cannot follow (it may read anything)";
                     for (const a of rx.reads[j]) {
                         const id: int = atomBinding(a.key);
                         if (a.key.indexOf("b:") == 0 && bw.lets.indexOf(id) >= 0) return "`" + letNameOf(t, id) + "` (through `" + r.name + "`, which reads it: `" + chainText(fxChain(rx.sum, rx.reads, j, a)) + " → " + letNameOf(t, id) + "`)";
@@ -45482,7 +45489,7 @@ ${
     fn typesProgram(g: Globals) -> CoreProgram {
         let defs: TypeDef[] = [];
         for (const t of g.types) { defs = defs.concat([t.def]); }
-        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [], loads: [], envelopes: [], head: plainHead(), tool: not, endpoints: [], channels: [], typed: [] };
+        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [], loads: [], envelopes: [], head: plainHead(), tool: not, endpoints: [], channels: [], typed: [], outer: [] };
     }
 
     fn storeOf(v: AAttrValue) -> PersistStore | not {

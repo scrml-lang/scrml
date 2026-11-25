@@ -26,7 +26,7 @@
 // by #1119; Stmt.Write / View.Each are bound in one arm again, S440.)
 // =============================================================================
 ${
-    import { Sym, Type, DeclKind, TypeDef, FieldDef, VariantDef, TransitionGraph, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm,
+    import { OuterCell, Sym, Type, DeclKind, TypeDef, FieldDef, VariantDef, TransitionGraph, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm,
              HostCall, SeqFn, BindKind,
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, RequestState, ReqClass, FieldRole, Field,
              Decl, Fn, HostFn, HostBind, HostSrc, HostArg, HostProp, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator, Persist, PersistStore, Timing, IdleWatch,
@@ -270,6 +270,111 @@ ${
 
     // s481 — `seq`: the bindings whose initializer runs in its PLACE in the program body
     // (§7.6 S481; bodyInits): declared here, assigned where their `${ }` stood.
+    // s482 (lane s482-seed-timing; ruling:user-voice-scrml.md-S482-outside-cell-seed-time: *"before the
+    // body, in link order"* — the same as the library's plain `let` / `const` initializers, even when
+    // nothing reads the cell) — the file-scope section (seqConstStmts) with each cell declared outside
+    // the body (`outs`, outerLive) printed at its place among the constants (OuterCell.at): its
+    // declaration, then `shared_<decl>()`, which constructs its shared instance and runs its seed there.
+    // A cell nothing reads is constructed all the same.
+    // The declarations of the cells declared outside the body (every one, live or not) are printed
+    // AHEAD of the section (a seed may read a cell declared after it in link order — its shared
+    // instance is then constructed on demand, which needs its declaration), except one carrying a
+    // validator, whose arguments may read a file-scope constant: that one is printed at its place.
+    fn constsWithOuter(ctx: Ctx, ks: CoreConst[], seq: int[], outs: OuterCell[], sharedUsed: Sym[], uses: DeclNs[]) -> JsStmt[] {
+        let ahead: JsStmt[] = [];
+        let atPlace: int[] = [];
+        for (const oc0 of ctx.p.outer) {
+            const d0: Decl | not = findDecl(ctx.p, oc0.decl);
+            if (d0 is given) {
+                if (declHasValidators(d0)) {
+                    atPlace = atPlace.concat([d0.sym.id]);
+                } else {
+                    ahead = ahead.concat(declJs(ctx, d0, sharedUsed, uses).stmts);
+                }
+            }
+        }
+        if (outs.length == 0 && atPlace.length == 0) return ahead.concat(seqConstStmts(ctx, ks, seq));
+        let out: JsStmt[] = seqConstStmts(ctx, ks, seq);
+        if (out.length == 0) out = [JsStmt.SBlank, JsStmt.SComment("file-scope bindings (§7.6)")];
+        // out = [blank, comment, one statement per constant of `ks`, in order]
+        let res: JsStmt[] = ahead.concat(out.slice(0, 2));
+        // a validator-carrying outer cell that is not live: its declaration at its place too
+        let places: OuterCell[] = outs;
+        for (const oc3 of ctx.p.outer) {
+            if (hasInt(atPlace, oc3.decl.id) && !outerIn(outs, oc3.decl.id)) places = places.concat([{ decl: oc3.decl, at: oc3.at }]);
+        }
+        let done: int[] = [];
+        let i: int = 0;
+        for (const k of ks) {
+            const j: int = constIndex(ctx.p, k.sym.id);
+            for (const oc of places) {
+                if (oc.at <= j && !hasInt(done, oc.decl.id)) {
+                    done = done.concat([oc.decl.id]);
+                    res = res.concat(outerCellJs(ctx, oc, sharedUsed, uses, hasInt(atPlace, oc.decl.id), outerIn(outs, oc.decl.id)));
+                }
+            }
+            res = res.concat([out[2 + i]]);
+            i = i + 1;
+        }
+        for (const oc2 of places) {
+            if (!hasInt(done, oc2.decl.id)) res = res.concat(outerCellJs(ctx, oc2, sharedUsed, uses, hasInt(atPlace, oc2.decl.id), outerIn(outs, oc2.decl.id)));
+        }
+        return res;
+    }
+
+    fn outerIn(xs: OuterCell[], id: int) -> boolean {
+        for (const x of xs) { if (x.decl.id == id) return true; }
+        return false;
+    }
+
+    fn declHasValidators(d: Decl) -> boolean {
+        for (const f of d.fields) { if (f.vals.length > 0) return true; }
+        return false;
+    }
+
+    fn constIndex(p: CoreProgram, id: int) -> int {
+        let j: int = 0;
+        for (const k of p.consts) {
+            if (k.sym.id == id) return j;
+            j = j + 1;
+        }
+        return -1;
+    }
+
+    fn outerCellJs(ctx: Ctx, oc: OuterCell, sharedUsed: Sym[], uses: DeclNs[], withDecl: boolean, live: boolean) -> JsStmt[] {
+        const d: Decl | not = findDecl(ctx.p, oc.decl);
+        if (d is not) return [];
+        let pre: JsStmt[] = [];
+        if (withDecl) pre = declJs(ctx, d, sharedUsed, uses).stmts;
+        if (!live) return pre;
+        return pre.concat([
+            JsStmt.SComment("a cell declared outside the program body: its seed runs here, before the body, in link order (§7.6 R1 Load, S482)"),
+            sexpr(jcall(jid(nameOf(ctx.names, NameKey.SharedGet(d.sym.id))), [])),
+        ]);
+    }
+
+    // s482 (lane s482-seed-timing, Q12) — the cells declared outside the body (CoreProgram.outer) whose
+    // seed is live (it calls something or reads a binding or a cell, so where it runs can be observed):
+    // a writable cell's seed, or a locked constant's (constSeedField). Any other runs as before, at its
+    // first reference — a literal computes the same value wherever it runs, a derived cell when read.
+    fn outerLive(p: CoreProgram) -> OuterCell[] {
+        let out: OuterCell[] = [];
+        for (const oc of p.outer) {
+            const d: Decl | not = findDecl(p, oc.decl);
+            if (d is given && outerSeeded(p, d)) out = out.concat([oc]);
+        }
+        return out;
+    }
+
+    fn outerSeeded(p: CoreProgram, d: Decl) -> boolean {
+        if (d.renders is given || d.fields.length != 1) return false;
+        const f: Field = d.fields[0];
+        const init: Expr | not = f.init;
+        if (init is not) return false;
+        if (f.wcap is given) return f.persist is not && seedLive(init);
+        return constSeedField(p, f);
+    }
+
     fn seqConstStmts(ctx: Ctx, ks: CoreConst[], seq: int[]) -> JsStmt[] {
         if (ks.length == 0) return [];
         let note: string = "file-scope bindings (§7.6) — evaluated once, at module initialization, in this artifact";
@@ -5776,7 +5881,7 @@ ${
         }
         return { program: p.program, decls: ds, types: p.types, fns: p.fns, server: p.server, dbs: p.dbs, reset: p.reset, sqlError: p.sqlError,
                  serverCallError: p.serverCallError, css: p.css, consts: p.consts, loads: p.loads, envelopes: p.envelopes, head: p.head,
-                 tool: p.tool, endpoints: p.endpoints, channels: p.channels, typed: p.typed };
+                 tool: p.tool, endpoints: p.endpoints, channels: p.channels, typed: p.typed, outer: p.outer };
     }
 
     // The file-scope bindings code under `roots` reaches when it runs: read directly, read
@@ -5923,6 +6028,11 @@ ${
         let pre: Node[] = [];
         for (const f of pd.fields) {
             if ((f.wcap is given || constSeedField(p0, f)) && f.init is given && !hasInt(held, f.sym.id)) pre = pre.concat([Node.NField(f)]);
+        }
+        // s482 (lane s482-seed-timing, Q12): a cell declared outside the body runs its seed before it
+        for (const oc of outerLive(p0)) {
+            const od: Decl | not = findDecl(p0, oc.decl);
+            if (od is given) pre = pre.concat([Node.NField(od.fields[0])]);
         }
         const elsewhere: int[] = constructedElsewhere(p0);
         for (const d1 of p0.decls) { if (hasInt(elsewhere, d1.sym.id)) pre = pre.concat([Node.NDecl(d1)]); }
@@ -6577,7 +6687,15 @@ ${
         const names: NameTable = planNames(p);
         const ctx0: Ctx = baseCtx(p, names);
         const rt: string = rtName(ctx0);
-        const sharedUsed: Sym[] = dedupe(sharedRefs(Node.NProgram(p)).concat([p.program]));
+        // s482 (lane s482-seed-timing, Q12): the cells declared outside the body with a live seed —
+        // each constructed in the file-scope section, at its place in link order (constsWithOuter)
+        const outs: OuterCell[] = outerLive(p);
+        let liveSyms: Sym[] = [];
+        for (const oc of outs) { liveSyms = liveSyms.concat([oc.decl]); }
+        // every outer cell's declaration is printed by constsWithOuter (outerPrinted), not below
+        let outSyms: Sym[] = [];
+        for (const oc1 of p.outer) { if (findDecl(p, oc1.decl) is given) outSyms = outSyms.concat([oc1.decl]); }
+        const sharedUsed: Sym[] = dedupe(sharedRefs(Node.NProgram(p)).concat([p.program]).concat(liveSyms));
         let body: JsStmt[] = [
             JsStmt.SComment(jsFile + " — generated by the scrml bootstrap printer (self-host-v2, slice M1). Do not edit."),
             JsStmt.SImportAll(rt, "./" + runtimeFile),
@@ -6598,13 +6716,15 @@ ${
         let regRoots: Node[] = clientRoots;
         for (const k0 of cconsts) { regRoots = regRoots.concat([Node.NExpr(k0.init)]); }
         const ctx: Ctx = withReg(ctx0, clientRegistryIds(p, regRoots, calledServerFnsWith(p, keep, si)));
-        body = body.concat(seqConstStmts(ctx, cconsts, plan.seq));
-        body = body.concat(requestSlotStmts(ctx, p));          // s475 (S3b)
         const uses: DeclNs[] = declNsUses(p);
+        body = body.concat(constsWithOuter(ctx, cconsts, plan.seq, outs, sharedUsed, uses));
+        body = body.concat(requestSlotStmts(ctx, p));          // s475 (S3b)
         for (const d of p.decls) {
-            const r: Rendered = declJs(ctx, d, sharedUsed, uses);
-            body = body.concat(r.stmts);
-            templates = templates.concat(r.templates);
+            if (!symIn(outSyms, d.sym)) {
+                const r: Rendered = declJs(ctx, d, sharedUsed, uses);
+                body = body.concat(r.stmts);
+                templates = templates.concat(r.templates);
+            }
         }
         // s454 (U1b): the routes of the server functions the client calls
         // s482 r1 (#2061 review M3): those the client CAN call (calledServerFnsWith)
@@ -7340,7 +7460,7 @@ ${
     fn withDeclsFns(p: CoreProgram, ds: Decl[], fs: Fn[], lds: DbLoad[]) -> CoreProgram {
         return { program: p.program, decls: ds, types: p.types, fns: fs, server: p.server, dbs: p.dbs, reset: p.reset, sqlError: p.sqlError,
                  serverCallError: p.serverCallError, css: p.css, consts: p.consts, loads: lds, envelopes: p.envelopes, head: p.head,
-                 tool: p.tool, endpoints: p.endpoints, channels: p.channels, typed: p.typed };
+                 tool: p.tool, endpoints: p.endpoints, channels: p.channels, typed: p.typed, outer: p.outer };
     }
 
     // The declarations live code can construct, a fixed point from the program and every
@@ -7355,6 +7475,9 @@ ${
     // and a component holding a `<db>` cell some load fills is kept.
     fn liveDecls(p: CoreProgram, keep: int[]) -> int[] {
         let live: int[] = [p.program.id];
+        // s482 (lane s482-seed-timing, Q12): a cell declared outside the body with a live seed runs
+        // before the body even when nothing reads it
+        for (const oc of outerLive(p)) { if (!hasInt(live, oc.decl.id)) live = live.concat([oc.decl.id]); }
         for (const d of p.decls) {
             if (d.kind != DeclKind.User && !hasInt(live, d.sym.id)) live = live.concat([d.sym.id]);
         }

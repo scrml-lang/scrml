@@ -1231,7 +1231,18 @@ ${
         // and a function's declared return type (`-> T`, by the function's Sym). Read only by
         // print.scrml clientRegistryIds (§22.4.2: a type the client names is client-used).
         typed: TypeNote[],
+        // s482 (lane s482-seed-timing; ruling:user-voice-scrml.md-S482-outside-cell-seed-time — "before
+        // the body, in link order" — the same as the library's plain `let` / `const` initializers, even
+        // when nothing reads the cell) — the cells declared OUTSIDE the program body (in an imported
+        // file, or in the same file outside `<program>`): each a user declaration whose one field is
+        // its own value. `at`: its place among `consts` — the number of constants before it in link
+        // order, then source order (node ids run in that order). The printer constructs each one with
+        // a live seed there, before the body.
+        outer: OuterCell[],
     }
+
+    // s482 (lane s482-seed-timing) — one cell declared outside the body (CoreProgram.outer)
+    export type OuterCell:struct = { decl: Sym, at: int }
 
     // s482 r1 — one written type (CoreProgram.typed)
     export type TypeNote:struct = { sym: Sym, ty: Type }

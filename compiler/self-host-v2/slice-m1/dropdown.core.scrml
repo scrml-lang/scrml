@@ -413,6 +413,7 @@ ${
             endpoints: [],
             channels: [],
             typed: [],
+            outer: [],
         };
     }
 
