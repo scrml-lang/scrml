@@ -13,6 +13,10 @@
 import { describe, test, expect } from "bun:test";
 import { fixVariantColons, planVariantColons, VARIANT_COLONS_RULE } from "../../src/commands/fix-variant-colons.js";
 import { fixS66, IMPL1_SAFE_RULES, S66_RULES } from "../../src/commands/fix-s66.js";
+import { runFixCommand } from "../../src/commands/fix.js";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 
 const D = "$";
 // A file mixing both spellings: `::` (qualified, shorthand, in an arm, a handler call, an attribute
@@ -139,5 +143,68 @@ describe("variant-colons — wiring", () => {
     const r = fixS66(MIXED, { filePath: "/tmp/fix-variant-colons-h/a.scrml", rules: [VARIANT_COLONS_RULE] });
     expect(r.output).toContain("@c = Color.Red;");
     expect(r.applied.filter((a) => a.rule === VARIANT_COLONS_RULE).length).toBe(6);
+  });
+});
+
+// Review #2103 LOW-1 (S482): the leftover scan fired on `X::Upper` in markup prose and in a `#{}` CSS
+// string — regions impl#1's splitter classified as not code — so `fix --check` exited 2 with blockers no
+// edit could clear. Those regions (and a quoted attribute's literal text) are now passed over.
+describe("variant-colons — `::` in prose / CSS is not a blocker (review #2103 LOW-1)", () => {
+  const io = { out: () => {}, err: () => {} };
+  const PROSE = "<program>\n<p>In Rust you write Vec::New and in C++ std::String.</p>\n</program>\n";
+  const ADVERSARIAL = [
+    "// Color::Red in a line comment",
+    `${D}{`,
+    "    type Color:enum = { Red, Green, Blue }",
+    "    let c: Color = Color.Blue;",
+    "    // match x { ::Red :> 1 }",
+    "    /* E::V */",
+    "    fn name(x: Color) -> string {",
+    "        return match x {",
+    "            ::Red :> \"Color::Red\",",
+    "            .Green :> 'x::Y',",
+    `            .Blue :> \`t::U ${D}{"a"}\``,
+    "        };",
+    "    }",
+    "}",
+    "<program>",
+    "#{ p::before { content: \"Color::Red\"; } a::after { color: red; } }",
+    `<p title="Vec::New">prose std::vector Color::Red and ${D}{name(c)}</p>`,
+    "</>",
+    "",
+  ].join("\n");
+
+  test("prose `Vec::New` / `std::String`: no note; `fix --check` exits 0", () => {
+    expect(planVariantColons("/tmp/fix-variant-colons-j/a.scrml", PROSE).notes).toEqual([]);
+    const dir = mkdtempSync(join(tmpdir(), "scrml-fix-variant-colons-prose-"));
+    try {
+      const f = join(dir, "prose.scrml");
+      writeFileSync(f, PROSE);
+      expect(runFixCommand([f, "--check"], io)).toBe(0);
+      expect(readFileSync(f, "utf8")).toBe(PROSE);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("CSS string, prose and a quoted attribute: no note; only the code arm is a site; then `--check` exits 0", () => {
+    const p = planVariantColons("/tmp/fix-variant-colons-k/a.scrml", ADVERSARIAL);
+    expect(p.notes).toEqual([]);
+    expect(p.sites.map((s) => s.line)).toEqual([9]);
+    const dir = mkdtempSync(join(tmpdir(), "scrml-fix-variant-colons-css-"));
+    try {
+      const f = join(dir, "q06.scrml");
+      writeFileSync(f, ADVERSARIAL);
+      expect(runFixCommand([f, "--check"], io)).toBe(1);
+      expect(runFixCommand([f], io)).toBe(0);
+      const out = readFileSync(f, "utf8");
+      expect(out).toContain("            .Red :> \"Color::Red\",");
+      expect(out).toContain("content: \"Color::Red\"");
+      expect(out).toContain("prose std::vector Color::Red and");
+      expect(out).toContain("title=\"Vec::New\"");
+      expect(runFixCommand([f, "--check"], io)).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

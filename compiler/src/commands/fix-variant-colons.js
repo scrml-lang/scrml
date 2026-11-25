@@ -94,31 +94,41 @@ function interpolations(source, s, e) {
   return out;
 }
 
+/** Markup whose body text impl#1 may read as statements (fix-terminators.js STMT_PARENTS ∪ CODE_BODY_PARENTS). */
+const STMT_BODY_TAGS = new Set(["program", "page", "channel", "effect", "request"]);
+
 /**
- * impl#1's block tree, walked (any depth): every markup / state block, and the spans of the `~{}` test
- * and `^{}` meta blocks (code this rule does not enter).
+ * impl#1's block tree, walked (any depth): every markup / state block, the spans of the `~{}` test
+ * and `^{}` meta blocks (code this rule does not enter), and the spans impl#1's splitter classified
+ * as not scrml code — the text of an ordinary markup element (prose), and a `#{}` CSS / `?{}` SQL
+ * block. A leftover `::` there (`Vec::New` in prose, `content: "Color::Red"` in CSS) is theirs.
  */
 function walkBlocks(filePath, source) {
   let bs;
   try {
     bs = captureTrailingContentWarnings(() => splitBlocks(filePath, source)).result;
   } catch {
-    return { markup: [], unentered: [] };
+    return { markup: [], unentered: [], nonCode: [] };
   }
   const markup = [];
   const unentered = [];
-  const visit = (b) => {
+  const nonCode = [];
+  const visit = (b, parent) => {
     if (!b || typeof b !== "object") return;
     if (b.type === "markup" || b.type === "state") markup.push(b);
     if ((b.type === "test" || b.type === "meta") && b.span) unentered.push({ start: b.span.start, end: b.span.end, what: `a \`${b.type === "test" ? "~" : "^"}{ … }\` block` });
-    for (const c of b.children ?? []) visit(c);
+    if ((b.type === "css" || b.type === "sql") && b.span) { nonCode.push({ start: b.span.start, end: b.span.end }); return; }
+    if (b.type === "text" && b.span && parent?.type === "markup" && !STMT_BODY_TAGS.has(String(parent.name ?? ""))) {
+      nonCode.push({ start: b.span.start, end: b.span.end });
+    }
+    for (const c of b.children ?? []) visit(c, b);
   };
-  for (const b of bs.blocks ?? []) visit(b);
-  return { markup, unentered };
+  for (const b of bs.blocks ?? []) visit(b, null);
+  return { markup, unentered, nonCode };
 }
 
 /** The code regions of one markup / state block's attribute values. */
-function attributeRegions(source, block, notes) {
+function attributeRegions(source, block, notes, nonCode) {
   let toks;
   try {
     toks = tokenizeAttributes(block.raw, block.span.start, block.span.line ?? 1, block.span.col ?? 1, block.type === "state" ? "state" : "markup");
@@ -135,6 +145,8 @@ function attributeRegions(source, block, notes) {
       else out.push({ start: s, end: e, children: [] });
     } else if (v.kind === "ATTR_STRING") {
       for (const r of interpolations(source, s, e)) out.push({ ...r, children: [] });
+      // Its literal text is not code (its `${ … }` interpolations, read above, are checked first).
+      nonCode.push({ start: s, end: e });
     } else if (v.kind !== "ATTR_NAME" && v.kind !== "ATTR_EQ" && !String(v.kind).startsWith("TAG_")) {
       if (COLONS_G.test(source.slice(s, e))) notes.push({ at: s, reason: `a \`::\` in an attribute value impl#1 reads as ${v.kind} — this rule does not read that kind; rewrite it to \`.\` by hand (§14.5)` });
       COLONS_G.lastIndex = 0;
@@ -160,7 +172,7 @@ export function planVariantColons(filePath, source) {
   const queue = regions.map((r) => ({ start: r.start, end: r.end, children: r.children ?? [] }));
   const tree = walkBlocks(filePath, source);
   skipped.push(...tree.unentered);
-  for (const b of tree.markup) queue.push(...attributeRegions(source, b, notes));
+  for (const b of tree.markup) queue.push(...attributeRegions(source, b, notes, tree.nonCode));
   const done = new Set();
   while (queue.length) {
     const r = queue.shift();
@@ -232,10 +244,12 @@ export function planVariantColons(filePath, source) {
     const sk = inside(skipped, off);
     if (sk) { notes.push({ at: off, reason: `a \`::\` inside ${sk.what} — this rule does not enter it; rewrite it to \`.\` by hand if it is variant access (§14.5)` }); continue; }
     if (inside(read, off)) continue;
-    // Outside every region this rule read. Markup text, CSS and SQL are not code — but a region
-    // impl#1's splitter did not hand out (a file it reads differently) would hide a real site here, so
-    // a variant-shaped `::V` (an upper-case name after it; CSS pseudo-elements are lower-case) on a
-    // line that is not a `//` comment is reported rather than passed over in silence.
+    // Markup prose and `#{}` / `?{}` bodies, as impl#1's splitter classified them: not code, never reported.
+    if (inside(tree.nonCode, off)) continue;
+    // Outside every region this rule read and every region the splitter classified as not code: a
+    // region impl#1's splitter did not hand out (a file it reads differently) would hide a real site
+    // here, so a variant-shaped `::V` (an upper-case name after it) on a line that is not a `//`
+    // comment is reported rather than passed over in silence.
     const ls0 = source.lastIndexOf("\n", off - 1) + 1;
     const before = source.slice(ls0, off);
     if (/^[A-Z]/.test(source.slice(off + 2, off + 3)) && !before.includes("//") && !/^\s*\*/.test(before)) {
