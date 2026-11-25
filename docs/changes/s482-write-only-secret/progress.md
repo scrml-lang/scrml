@@ -17,3 +17,13 @@ Probes: o9 (outer cell, p/x/o9-write-only), o9-let (plain let, p/r2/o9-let).
 
 ## Log
 - [start] branch s482-write-only-secret from 153bd0334.
+- [code 1] print.scrml: ConstUse/constUse (reads vs whole-value overwrites), constsOnlyRead, fnClosureThroughReads,
+  clientNoInit, clientHeld; serverInitsRound `cread` = reads only; clientLiveFns closes through reads only;
+  clientConsts gives a written-only binding it does not run a shell (`let x = null;`); bodyInits' clientRead =
+  clientHeld; outerAsConsts(…, shells) keeps a shell declaration (seed `not`) for a moved outer cell code still
+  names; outerRefusal finds a moved cell by its binding (findConst).
+  Probes p/n (21) + o9 + o9-let, base vs head: leaks closed in o9, o9-let, n01 (write via fn), n02 (write in an
+  effect), n04 (write in a fn a request calls), n07 (non-acting init), n09 (server reads, client writes), n10 (init
+  through a fn reading the secret), n21 (outer cell via fn), n32 (body-placed let). Unchanged (client-read — must
+  stay): n03/n23/n33 display, n05/n25 compound write, n26 later read, n27 bind:value. Body cell n31 unchanged
+  (left — see item 3). Chromium values identical on all 21 compiling probes.
