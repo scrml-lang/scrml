@@ -2155,6 +2155,15 @@ ${
         if (k is .Plus || k is .Minus || k is .Star || k is .Slash || k is .Percent) return true;
         if (k is .Equal || k is .StrictEqual || k is .NotEqual || k is .StrictNotEqual) return true;
         if (k is .LessThan || k is .LessEqual || k is .GreaterEqual) return true;
+        // #2101 r2 LOW-2 — `1 > <n>` is the same read (one E-CELL-ANGLE-READ, not the E-PARSE-EXPR
+        // cascade); an arm's `:>` (a `:` touching the `>`) is not a comparison — operandSlotAfter reads it
+        if (k is .GreaterThan) {
+            if (ts.length < 2) return true;
+            const p: Token = ts[ts.length - 2];
+            const pk: TokenKind = p.kind;
+            if (!(pk is .Colon)) return true;
+            return p.span.end != ts[ts.length - 1].span.start;
+        }
         return false;
     }
 

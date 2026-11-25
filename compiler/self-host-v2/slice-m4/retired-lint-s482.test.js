@@ -109,6 +109,9 @@ describe("R3 — `<x>` read as a value is E-CELL-ANGLE-READ, fix-it `@x`", () =>
     ["an argument `f(<n>)` in a file-scope `let`", `let <n:int=1/>\n\${ fn g(a: int) -> int { return a; } let y = g(<n>); }`, "<n>"],
     ["an HTML-named cell `g(<data>)` (the bootstrap rule is authoritative; the lint matches it)", `let <data:int=1/>\n\${ fn g(a: int) -> int { return a; } fn f() -> int { return g(<data>); } }\n<p>\${f()}</p>`, "<data>"],
     ["a braced attribute `if={<n> > 0}`", `let <n:int=1/>\n<p if={<n> > 0}>x</p>`, "<n>"],
+    // #2101 r2 LOW-2: after `>` and `<` too (binaryOpLast), as the lint's walker reads it
+    ["the right operand `1 > <n>`", `let <n:int=1/>\n\${ fn f() -> bool { return 1 > <n>; } }\n<p>\${f()}</p>`, "<n>"],
+    ["the right operand `1 < <n>`", `let <n:int=1/>\n\${ fn f() -> bool { return 1 < <n>; } }\n<p>\${f()}</p>`, "<n>"],
   ];
   for (const [name, body, want] of cases) {
     test(name + ": ONE error, at the `<n>`, naming `@n`", () => {
@@ -133,6 +136,8 @@ describe("R3 — `<x>` read as a value is E-CELL-ANGLE-READ, fix-it `@x`", () =>
     ["the retired declaration `<n> = 5` (not a read; left as it was)", `\${ <n> = 5; }`],
     ["`a <b> 3` comparison chain", `\${ const a = 1; const b = 2; const c = a <b> 3; }`],
     ["a comparison after an operator `a + 1 < b`", `\${ fn g(a: int, b: int) -> bool { return a + 1 < b; } }`],
+    // #2101 r2 LOW-2: `:>` is an arm, not a `>` comparison — a markup value after it stays markup
+    ["a markup value after an arm's `:>`", `type T:enum = { A, B }\nlet <t:T=.A/>\n\${ fn g() { return match @t { .A :> <b>a</b>  .B :> <i>b</i> }; } }`],
   ];
   for (const [name, body] of legal) {
     test("not E-CELL-ANGLE-READ: " + name, () => {
