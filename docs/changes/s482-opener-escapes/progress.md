@@ -24,12 +24,18 @@ Bootstrap-only; compiler/src/ frozen.
 - [x] Corpus (3046 files, examples/samples/benchmarks/conformance/stdlib/tutorial snippets): 0 newly rejected,
       0 newly accepted, 0 byte diffs, 0 warning diffs; 1 code change in an already-refused file
       (prop-substitution-string-escapes: + 2× E-PARSE-001 for `data-pat="^\d+$"`; still UNSUPPORTED).
-- [ ] unit pins + Chromium pin
-- [ ] SPEC §5.2 / §66.2.4 INTERIM text, §34 E-PARSE-001 row, gap update
-- [ ] gates
+- [x] unit pins (slice-m4/opener-escapes-s482.test.js, 15; mutation: old parser → 9 RED) + Chromium pin
+      (compiler/tests/browser/opener-escapes-chromium-s482.browser.test.js)
+- [x] SPEC §5.2 OPEN bullet + INTERIM, §66.2.4 OPEN note, §34 E-PARSE-001 row, §6.15 fix-it parenthetical; gap
+      g-boot-opener-string-escapes-s482 HIGH → LOW (INTERIM, still open — owner question)
+- [x] commit 1 (6e324fe80): pre-commit PASS (58390 pass / 0 fail)
 
 ## Phase 3 — #2107 follow-ups
 
-- [ ] F1 tape fix-it `free` for a resizing whole-value write
-- [ ] INFO-1 strEscaped `\uXXXX` for lone surrogates / U+2028 / U+2029
-- [ ] INFO-2 meta.subscribe exemption labelled prov=pa-ruled
+- [x] F1: EAssignLocal carries `shape` (seqEditShapeKey at the binder); writeGrantsOf / writeGrantOf / stepGrant
+      moved INTO THE TAPE GRANT READER (INFO-3) with shapeGrant: 1 append, 2 prepend, 3 remove, 4 write, 0 replace —
+      so tapeCellText adds `free` for 1/2/3. Pins in display-untracked-s482.test.js (6 shapes, fix-it applied compiles).
+- [x] INFO-1: strEscaped spells U+2028 / U+2029 / a lone surrogate `\uXXXX` (pair kept raw). Pinned.
+- [x] INFO-2: §6.15 + §34 W-DISPLAY-UNTRACKED row + analyze comment: `meta.subscribe` exemption labelled PA reading
+      (prov=pa-ruled); the §22.5 quote names timer and cleanup callbacks only.
+- [x] mutation: shapeGrant → always replace / strEscaped branch off → the 2 new tests RED.

@@ -297,8 +297,12 @@ ${
         EReset(w: WriteFact, decl: Sym, idx: int),        // reset(@x): a replace with x's initializer (L4)
         // a local rebinding (§66.11.5) — `path` empty; s472: `path` non-empty is a
         // write to a PART of the local (`p.f = v`, `xs[i] = v`; Core Assign with a
-        // path), `ty` the type of the part written (the typer checks the value)
-        EAssignLocal(sym: Sym, path: LStep[], ty: Type | not),
+        // path), `ty` the type of the part written (the typer checks the value).
+        // s482-opener-escapes (#2107 r2 F1): `shape` — a whole rebinding's §66.11.2
+        // recognized edit shape (seqEditShapeKey: 1 end-append, 2 front-prepend,
+        // 3 filter, 4 map / sort / reverse; 0 none, and always 0 for a part write),
+        // so THE TAPE GRANT READER can say which grant the write needs (shapeGrant)
+        EAssignLocal(sym: Sym, path: LStep[], ty: Type | not, shape: int),
         EEdits(w: WriteFact, elems: AExpr[], tmps: Sym[], snap: SeqSnap), // s442: `@x = [...@x, a, b]` — one edit per element (§66.11.2); r1: each element evaluated into `tmps[i]` first; r2: reads of `@x` see `snap`
         ERemove(w: WriteFact, taken: SeqSnap | not),                          // s444: `@x.pop()` / `@x.shift()` — a removal of one element (RemoveEnd / RemoveFront)
         EElemAt(cap: Sym, inst: InstRef, index: AExpr, path: FieldRef[], loc: string), // s444: `@xs[i].f = v` — an element-field write (Core ElemAt; dpa-052 Q3); s473: `loc` "file:line" for the trap
@@ -9775,7 +9779,7 @@ ${
         if (l is given && exprName(t) != "") {
             let st1: AS = rp.st;
             if (!l.mutable) st1 = addDiag(st1, env.file, t.span, "E-ASSIGN-CONST", "`" + l.name + "` is not a `let` local");
-            st1 = addEffect(capWrite(env, l, t.span, st1), e.nid, EffectFact.EAssignLocal(l.s, [], not));
+            st1 = addEffect(capWrite(env, l, t.span, st1), e.nid, EffectFact.EAssignLocal(l.s, [], not, seqEditShapeKey(exprName(t), v)));
             return resolveExpr(env, v, l.ty, st1);
         }
         if (rp.place is given) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "a CELL as the target of a condition-head assignment (`((" + placeKey(t) + " = …))`, §50.3.4) is not in the bootstrap yet — write the cell in a statement before the test (`" + placeKey(t) + " = …;` then `if (" + placeKey(t) + " …)`); a `let` local is built (`((x = e))`)", resolveExpr(env, v, not, rp.st).st);
@@ -12268,33 +12272,6 @@ ${
         return not;
     }
 
-    // The grants a tape cell needs for the writes of `let` `sym` (every write the binder recorded): a
-    // whole-value write `replace`, a position write `write`, an edit its own grant (§66.12.3).
-    fn writeGrantsOf(t: Tables, sym: int) -> string[] {
-        let out: string[] = [];
-        for (const f of t.effects.facts) {
-            const gr: string = writeGrantOf(f, sym);
-            if (gr != "" && out.indexOf(gr) < 0) out = out.concat([gr]);
-        }
-        return out;
-    }
-
-    fn writeGrantOf(f: EffectFact, sym: int) -> string {
-        return match f {
-            .EAssignLocal(sym: s, path: pa) :> (s.id != sym ? "" : (pa.length == 0 ? "replace" : stepGrant(pa[0]))),
-            .ELocalEdit(sym: s, op: o, path: pa) :> (s.id != sym || pa.length > 0 ? "" : localEditMethodName(o)),
-            // no-default-arm: one question of a write — does it write the `let`'s own tape
-            _ :> ""
-        };
-    }
-
-    fn stepGrant(s: LStep) -> string {
-        return match s {
-            .LIndex(index: x) :> "write",
-            .LField(ref: x) :> ""
-        };
-    }
-
     // r2 (#2107 F-E) — the first write of `let` `sym` whose cell form this compiler does not build yet
     // ("" — none): `.remove(…)` / `.insert(…)` of a cell tape, an edit of a part (`b.xs.append(v)`,
     // `g[i].pop()`), a write through a position (`m[i][j] = v`, `xs[i].a.b = v`) or a position of a
@@ -12373,12 +12350,39 @@ ${
                 out = out + "\\t";
             } else if (code < 32 || code == 127) {
                 out = out + "\\x" + "0123456789abcdef".charAt(Math.floor(code / 16)) + "0123456789abcdef".charAt(code % 16);
+            } else if (code == 8232 || code == 8233 || loneSurrogateAt(s, i)) {
+                // s482-opener-escapes (#2107 r2 INFO-1): U+2028 / U+2029 and a lone surrogate are
+                // spelled `\uXXXX` — printed raw, a line separator splits the message line and a lone
+                // surrogate reaches the terminal as U+FFFD, so the fix-it would not keep the value
+                out = out + "\\u" + hexUnit4(code);
             } else {
                 out = out + c;
             }
             i = i + 1;
         }
         return out;
+    }
+
+    // Whether the UTF-16 code unit at `i` is a surrogate with no partner (a high one not followed by a low
+    // one, or a low one not preceded by a high one).
+    fn loneSurrogateAt(s: string, i: int) -> boolean {
+        const c: int = s.charCodeAt(i);
+        if (c >= 55296 && c <= 56319) {
+            if (i + 1 >= s.length) return true;
+            const n: int = s.charCodeAt(i + 1);
+            return n < 56320 || n > 57343;
+        }
+        if (c >= 56320 && c <= 57343) {
+            if (i == 0) return true;
+            const p: int = s.charCodeAt(i - 1);
+            return p < 55296 || p > 56319;
+        }
+        return false;
+    }
+
+    fn hexUnit4(code: int) -> string {
+        const d: string = "0123456789ABCDEF";
+        return d.charAt(Math.floor(code / 4096) % 16) + d.charAt(Math.floor(code / 256) % 16) + d.charAt(Math.floor(code / 16) % 16) + d.charAt(code % 16);
     }
 
     // The writers in one markup node, at any depth.
@@ -12453,7 +12457,7 @@ ${
     // in a function the body calls, is not a dependency. … They are dependencies only while the run is in
     // progress. A `meta.get` in a timer or cleanup callback reads the cell and subscribes nothing."
     // meta.scrml respells both `^.get(@x)`. r2 (#2107 F-B): only the function value handed DIRECTLY to
-    // `^.timeout` / `^.interval` / `^.cleanup` (or `^.subscribe`, whose callback runs on a later change)
+    // `^.timeout` / `^.interval` / `^.cleanup` (or `^.subscribe`, whose callback runs on a later change — a PA reading, prov=pa-ruled: the quote names timer and cleanup callbacks only, #2107 r2 INFO-2)
     // is such a callback; any other function value — one the body calls, or hands to a function that
     // calls it — may run while the run is in progress, so its `^.get` counts (failing toward the warning).
     fn rerunsOnDeps(b: ABlock) -> boolean {
@@ -17591,7 +17595,7 @@ ${
             // s469-boot-tape-grants: §50 decides whether the name may be rebound (above);
             // whether the tape write the rebinding performs is granted (§66.12.6 rule 4) is
             // the typer's (typeAssign → localTapeProblems), where an inferred type is known
-            st = addEffect(capWrite(env, l, target.span, st), e.nid, EffectFact.EAssignLocal(l.s, [], not));
+            st = addEffect(capWrite(env, l, target.span, st), e.nid, EffectFact.EAssignLocal(l.s, [], not, seqEditShapeKey(exprName(target), value)));
             // s475 (s475-boot-local-tape-edits): the recognized grow shapes of the local
             // itself, `xs = [...xs, e]` / `xs = [e, ...xs]` (§66.11.2; §66.12.6 rule 4 —
             // the typer classifies the edit and judges it by the local's TYPE grants):
@@ -19669,6 +19673,48 @@ ${
         };
     }
 
+    // The grants a tape cell needs for the writes of `let` `sym` (every write the binder recorded): a
+    // whole-value write `replace`, a position write `write`, an edit its own grant (§66.12.3) — and a
+    // whole-value write of a §66.11.2 recognized shape is that edit (s482-opener-escapes, #2107 r2 F1:
+    // `xs = [...xs, e]` needs `append`, `xs = xs.filter(…)` `remove`, `xs = xs.map(…)` `write`), so
+    // tapeCellText adds `free` for the ones that resize the tape. In the reader since #2107 r2 INFO-3:
+    // the write-to-grant mapping is shape knowledge the reader's judges hold (shapeEdit, localTapeEdit).
+    fn writeGrantsOf(t: Tables, sym: int) -> string[] {
+        let out: string[] = [];
+        for (const f of t.effects.facts) {
+            const gr: string = writeGrantOf(f, sym);
+            if (gr != "" && out.indexOf(gr) < 0) out = out.concat([gr]);
+        }
+        return out;
+    }
+
+    fn writeGrantOf(f: EffectFact, sym: int) -> string {
+        return match f {
+            .EAssignLocal(sym: s, path: pa, shape: sh) :> (s.id != sym ? "" : (pa.length == 0 ? shapeGrant(sh) : stepGrant(pa[0]))),
+            .ELocalEdit(sym: s, op: o, path: pa) :> (s.id != sym || pa.length > 0 ? "" : localEditMethodName(o)),
+            // no-default-arm: one question of a write — does it write the `let`'s own tape
+            _ :> ""
+        };
+    }
+
+    // The grant a whole rebinding needs, by its recognized shape (seqEditShapeKey; shapeEdit's edits):
+    // 0 an unclassified whole-value write `replace`, 1 `append`, 2 `prepend`, 3 `remove` (RULED S442:
+    // `filter` shrinks anywhere), 4 `write` (map / sort / reverse keep the length).
+    fn shapeGrant(shape: int) -> string {
+        if (shape == 1) return "append";
+        if (shape == 2) return "prepend";
+        if (shape == 3) return "remove";
+        if (shape == 4) return "write";
+        return "replace";
+    }
+
+    fn stepGrant(s: LStep) -> string {
+        return match s {
+            .LIndex(index: x) :> "write",
+            .LField(ref: x) :> ""
+        };
+    }
+
     // s482 r2 (#2107 F-C, W-DISPLAY-UNTRACKED's fix-it) — a tape cell's type as source text: the grants
     // written on `at` (none: the element `elem` with an empty bracket), plus the ones `need` (the grants
     // its writes need, writeGrantsOf) adds — and `free` when an edit grows or shrinks the tape and no
@@ -20943,7 +20989,7 @@ ${
                 if (stt.diags.length > st.diags.length) return stt;
             }
         }
-        return addEffect(capWrite(env, l, e.span, st), e.nid, EffectFact.EAssignLocal(l.s, steps, t));
+        return addEffect(capWrite(env, l, e.span, st), e.nid, EffectFact.EAssignLocal(l.s, steps, t, 0));
     }
 
     fn resolveBlock(env: Env, b: ABlock, st0: AS) -> AS {

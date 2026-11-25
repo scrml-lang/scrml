@@ -197,6 +197,43 @@ describe("W-DISPLAY-UNTRACKED — a display of a `let` that a later writer write
     expect(w2[0].message).toContain("with `<ys:int[free, append]=(…)/>`");
   }, 120000);
 
+  // #2107 r2 review F1 (lane s482-opener-escapes): a whole-value write of a §66.11.2 recognized shape is that
+  // edit — `xs = [...xs, e]` an end-append, `xs = xs.filter(…)` a shrink — so it needs the edit's grant and,
+  // as it resizes the tape, `free` (the fix-it used to print `[replace]`, which applied is E-WRITE-INVARIANT)
+  test("a whole-value write of a recognized shape needs that edit's grant, and `free` when it resizes (r2 F1)", async () => {
+    const fixOf = async (decl, write) => {
+      const r = await result(`<program>\n\${ ${decl} }\n<p>\${xs.length}</p>\n<button onclick=\${ ${write} }>+</button>\n</program>\n`);
+      const w = r.diagnostics.filter((d) => d.code === W);
+      expect(w.length).toBeGreaterThan(0);
+      return w[0].message;
+    };
+    const cases = [
+      ["let xs: int[] = [1, 2];", "xs = [...xs, 4];", "<xs:int[free, append]=(…)/>", "@xs = [...@xs, 4];", "<xs:int[free, append]=([1, 2])/>"],
+      ["let xs: int[] = [1, 2];", "xs = [0, ...xs];", "<xs:int[free, prepend]=(…)/>", "@xs = [0, ...@xs];", "<xs:int[free, prepend]=([1, 2])/>"],
+      ["let xs: int[replace] = [1, 2];", "xs = [...xs, 4];", "<xs:int[replace, free, append]=(…)/>", "@xs = [...@xs, 4];", "<xs:int[replace, free, append]=([1, 2])/>"],
+      ["let xs: int[] = [1, 2];", "xs = xs.filter((x) => x > 1);", "<xs:int[free, remove]=(…)/>", "@xs = @xs.filter((x) => x > 1);", "<xs:int[free, remove]=([1, 2])/>"],
+      ["let xs: int[] = [1, 2];", "xs = xs.map((x) => x + 1);", "<xs:int[write]=(…)/>", "@xs = @xs.map((x) => x + 1);", "<xs:int[write]=([1, 2])/>"],
+      ["let xs: int[] = [1, 2];", "xs = [9];", "<xs:int[replace]=(…)/>", "@xs = [9];", "<xs:int[replace]=([1, 2])/>"],
+    ];
+    for (const [decl, write, fix, cellWrite, cell] of cases) {
+      const m = await fixOf(decl, write);
+      expect(m).toContain("with `" + fix + "`");
+      // the fix-it applied compiles, with no warning
+      expect(await warns(`<program>\n${cell}\n<p>\${@xs.length}</p>\n<button onclick=\${ ${cellWrite} }>+</button>\n</program>\n`)).toEqual([]);
+    }
+  }, 240000);
+
+  // #2107 r2 review INFO-1 (lane s482-opener-escapes): a lone surrogate and U+2028 / U+2029 are spelled
+  // `\uXXXX` in the string fix-it (raw, the terminal shows U+FFFD and a line separator splits the line);
+  // a surrogate PAIR (an emoji) stays as written
+  test("a string fix-it spells a lone surrogate and U+2028 / U+2029 as `\\uXXXX` (r2 INFO-1)", async () => {
+    const fix = async (lit) => (await warns(`<program>\n\${ let s: string = ${lit}; }\n<p>\${s}</p>\n<button onclick=\${ s = "z"; }>+</button>\n</program>\n`))[0].message;
+    expect(await fix('"a\\uD800b"')).toContain('with `let <s:string=("a\\uD800b")/>`');
+    expect(await fix('"a\\uDC00"')).toContain('with `let <s:string=("a\\uDC00")/>`');
+    expect(await fix('"a\\u2028b\\u2029"')).toContain('with `let <s:string=("a\\u2028b\\u2029")/>`');
+    expect(await fix('"a\\uD83D\\uDE00b"')).toContain('with `let <s:string=("a\u{1F600}b")/>`');
+  }, 120000);
+
   // r2 of #2107 (F-E): where this compiler refuses the cell form of the edit (E-BOOTSTRAP-UNSUPPORTED,
   // INTERIM — the reviewer's y8, y10, y11), the message says so and prints no cell fix-it that does not compile
   test("no cell fix-it for an edit the cell form does not build yet (r2 F-E)", async () => {
