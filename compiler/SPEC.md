@@ -31796,7 +31796,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-CONTRACT-001 | §53.11 | Inline predicate violation at compile time (statically provable) | Error |
 | E-CONTRACT-001-RT | §53.11 | Inline predicate violation at runtime | Runtime |
 | E-CONTRACT-002 | §53.11 | Named shape not found in registry, or the inline predicate is malformed, or a union with a refined member has a member with no runtime test (S459) (reported where the refinement is declared, every zone; emitted at `compiler/src/type-system.ts` `checkRefinementJudgeable`.) | Error |
-| E-CONTRACT-003 | §53.11 | Predicate references external state. ~~— use `<machine>` instead~~ ⚑ **INTERIM (S482, #2101 r1)** — `<machine>` was REMOVED (S305/S307, §51.0.L, `E-DEPRECATED-001`), so the advice to write one is struck. What E-CONTRACT-003 should advise instead is an OPEN OWNER QUESTION: the §66 field contracts (§66.13) have no value guard over an external cell, and the only stated successor, the keyword swap to `<engine>`, is itself §66.21-soft. Gap `g-spec-contract-003-machine-advice-s482`. (Emitted by the bootstrap at `compiler/self-host-v2/parse.scrml` `refSimple`, and by impl#1 at `compiler/src/type-system.ts` `checkRefinementJudgeable`.) | Error |
+| E-CONTRACT-003 | §53.11 | Predicate references external state. ~~— use `<machine>` instead~~ — a type's rule checks only its own value; to compare against another cell, write a derived check (e.g. `<overBudget=(@spent > @maxMana)/>`) and use it in markup or the handler that changes the value. Provenance: ruling:user-voice-scrml.md-S482-contract-003-derived-check (`<machine>` was removed S305/S307; the message names the derived check). (Emitted by the bootstrap at `compiler/self-host-v2/parse.scrml` `refSimple`, and by impl#1 at `compiler/src/type-system.ts` `checkRefinementJudgeable`.) | Error |
 | E-CONTRACT-004-WARN | §53.11 | `bind:value` HTML attribute conflicts with predicate-generated attribute | Warning |
 | E-BPP-001 | §3.5 | Body pre-parser encountered unparseable logic block | Error |
 | E-BS-000 | §4 | Block splitter encountered malformed block structure | Error |
@@ -47214,7 +47214,9 @@ This is the **route-admission × row-selection** axis of §52.15.4; it stacks wi
 scrml distinguishes two categories of value constraint:
 
 **Contextual constraints** — the validity of a mutation depends on prior state, sibling fields,
-or external reactive references. These are governed by `<machine>` (§51). Examples:
+or external reactive references. These are ~~governed by `<machine>` (§51)~~ not type rules: a type's rule checks
+only its own value, so such a constraint is a derived check (e.g. `<overBudget=(@spent > @maxMana)/>`) used in
+markup or the handler that changes the value (ruling:user-voice-scrml.md-S482-contract-003-derived-check; `<machine>` was removed S305/S307). Examples:
 - Enum transition rules (depends on current variant)
 - Cross-field struct invariants (depends on sibling field values)
 - Constraints referencing reactive variables (`<=@maxMana`)
@@ -47228,7 +47230,7 @@ are governed by **inline type predicates** (this section). Examples:
 
 The semantic distinction is clean and binary. Developers apply the **stateless test** at
 declaration time: "Can I validate this incoming value without knowing what the variable held
-before, or what any sibling field currently holds?" If yes — inline predicate. If no — machine.
+before, or what any sibling field currently holds?" If yes — inline predicate. If no — ~~machine~~ a derived check.
 
 This separation is motivated by two concrete requirements:
 
@@ -47336,7 +47338,7 @@ and reject the program.
 
 ### §53.3.2 The Stateless Test
 
-The canonical decision rule for when to use an inline predicate vs a `<machine>`:
+The canonical decision rule for when to use an inline predicate vs ~~a `<machine>`~~ a derived check (ruling:user-voice-scrml.md-S482-contract-003-derived-check):
 
 > A constraint is **stateless** if its validity can be determined from the incoming value alone,
 > without consulting the variable's prior value, any sibling field, or any reactive reference.
@@ -47346,13 +47348,13 @@ The canonical decision rule for when to use an inline predicate vs a `<machine>`
 | `number(>0 && <10000)` | Stateless | Inline predicate |
 | `string(.length > 7 && .length < 255)` | Stateless | Inline predicate |
 | `string(email)` | Stateless | Inline predicate (named shape) |
-| `start < end` on a struct | Contextual (needs sibling) | ~~`<machine for Struct>`~~ ⚑ INTERIM (S482, #2101 r2): `<machine>` is removed; the mechanism is an OPEN OWNER QUESTION (gap `g-spec-contract-003-machine-advice-s482`) |
-| `.Pending => .Processing` | Contextual (needs prior state) | ~~`<machine>`~~ ⚑ INTERIM (S482, #2101 r2): `<machine>` is removed; the mechanism is an OPEN OWNER QUESTION (gap `g-spec-contract-003-machine-advice-s482`) |
-| `number(>=0 && <=@maxMana)` | Contextual (references reactive var) | ~~`<machine>`~~ ⚑ INTERIM (S482, #2101 r2): `<machine>` is removed; the mechanism is an OPEN OWNER QUESTION (gap `g-spec-contract-003-machine-advice-s482`) |
+| `start < end` on a struct | Contextual (needs sibling) | ~~`<machine for Struct>`~~ a derived check: `<badDates=(@booking.start >= @booking.end)/>`, used in markup or the handler that changes the value (ruling:user-voice-scrml.md-S482-contract-003-derived-check) |
+| `.Pending => .Processing` | Contextual (needs prior state) | ~~`<machine>`~~ a derived check: `<canProcess=(@status is .Pending)/>`, used by the handler that changes the value (ruling:user-voice-scrml.md-S482-contract-003-derived-check) |
+| `number(>=0 && <=@maxMana)` | Contextual (references reactive var) | ~~`<machine>`~~ a derived check: `<overBudget=(@spent > @maxMana)/>`, used in markup or the handler that changes the value (ruling:user-voice-scrml.md-S482-contract-003-derived-check) |
 
 The boundary case `number(>=0 && <=@maxMana)` SHALL be rejected with `E-CONTRACT-003` if
 written as an inline predicate, because `@maxMana` is an external reactive reference. ~~The
-developer SHALL express this constraint as a `<machine>` guard instead.~~ ⚑ **INTERIM (S482, #2101 r1)** — `<machine>` was REMOVED (S305/S307, §51.0.L, `E-DEPRECATED-001`), so the advice to write one is struck. What E-CONTRACT-003 should advise instead is an OPEN OWNER QUESTION: the §66 field contracts (§66.13) have no value guard over an external cell, and the only stated successor, the keyword swap to `<engine>`, is itself §66.21-soft. Gap `g-spec-contract-003-machine-advice-s482`.
+developer SHALL express this constraint as a `<machine>` guard instead.~~ **(S482, RULED — ruling:user-voice-scrml.md-S482-contract-003-derived-check.)** `<machine>` was removed (S305/S307, §51.0.L, `E-DEPRECATED-001`). A type's rule checks only its own value; to compare against another cell, write a derived check (e.g. `<overBudget=(@spent > @maxMana)/>`) and use it in markup or the handler that changes the value. The developer SHALL express such a constraint as a derived check, not in the type.
 
 ### §53.3.3 Assignment Semantics
 
@@ -47811,7 +47813,7 @@ field-level check already rejects the value.
 If a predicate expression contains any reference to a reactive variable (`@name`), sibling field
 reference (`self.field`), or any identifier that resolves outside the incoming-value scope, the
 compiler SHALL emit `E-CONTRACT-003` at compile time. ~~with a message directing the developer to
-use `<machine>` instead.~~ ⚑ **INTERIM (S482, #2101 r1)** — `<machine>` was REMOVED (S305/S307, §51.0.L, `E-DEPRECATED-001`), so the advice to write one is struck. What E-CONTRACT-003 should advise instead is an OPEN OWNER QUESTION: the §66 field contracts (§66.13) have no value guard over an external cell, and the only stated successor, the keyword swap to `<engine>`, is itself §66.21-soft. Gap `g-spec-contract-003-machine-advice-s482`.
+use `<machine>` instead.~~ with a message that says a type's rule checks only its own value and, to compare against another cell, directs the developer to a derived check (e.g. `<overBudget=(@spent > @maxMana)/>`) used in markup or the handler that changes the value (ruling:user-voice-scrml.md-S482-contract-003-derived-check).
 
 ```scrml
 // INVALID — @maxMana is an external reactive reference
@@ -48020,16 +48022,23 @@ E-CONTRACT-003: Inline predicate references external reactive variable '@maxMana
   Inline predicates must be stateless — they may only reference the incoming value
   and its properties. They may not reference reactive variables, sibling fields,
   or any external binding.
+
+  A type's rule checks only its own value. To compare against another cell, write a
+  derived check — <over=(@hp > @maxMana)/> — and use it in markup or in the handler
+  that changes the value.
 ```
 
-⚑ **INTERIM (S482, #2101 r1)** — `<machine>` was REMOVED (S305/S307, §51.0.L, `E-DEPRECATED-001`), so the advice to write one is struck. What E-CONTRACT-003 should advise instead is an OPEN OWNER QUESTION: the §66 field contracts (§66.13) have no value guard over an external cell, and the only stated successor, the keyword swap to `<engine>`, is itself §66.21-soft. Gap `g-spec-contract-003-machine-advice-s482`. *(Struck from the message above: "For constraints that depend on external state, use
-\<machine\>", with a `machine name=HpRange for=number` example.)*
+**(S482, RULED — ruling:user-voice-scrml.md-S482-contract-003-derived-check.)** `<machine>` was removed (S305/S307, §51.0.L, `E-DEPRECATED-001`). A type's rule checks only its own value; to compare against another cell, write a derived check (e.g. `<overBudget=(@spent > @maxMana)/>`) and use it in markup or the handler that changes the value. *(Struck from the message above: "For constraints that depend on external state, use
+\<machine\>", with a `machine name=HpRange for=number` example; the derived-check paragraph replaces it.)*
 
 Normative statements:
 > The compiler SHALL emit E-CONTRACT-003 when a predicate expression contains any reference
 > that resolves outside the incoming-value scope.
 > ~~The compiler SHALL include an example of the equivalent `<machine>` construct in the
-> E-CONTRACT-003 message.~~ ⚑ **INTERIM (S482, #2101 r1)** — `<machine>` was REMOVED (S305/S307, §51.0.L, `E-DEPRECATED-001`), so the advice to write one is struck. What E-CONTRACT-003 should advise instead is an OPEN OWNER QUESTION: the §66 field contracts (§66.13) have no value guard over an external cell, and the only stated successor, the keyword swap to `<engine>`, is itself §66.21-soft. Gap `g-spec-contract-003-machine-advice-s482`.
+> E-CONTRACT-003 message.~~ The compiler SHALL say in the E-CONTRACT-003 message that a type's rule checks
+> only its own value, and SHALL direct the developer to a derived check (e.g.
+> `<overBudget=(@spent > @maxMana)/>`) used in markup or the handler that changes the value
+> (ruling:user-voice-scrml.md-S482-contract-003-derived-check).
 > E-CONTRACT-003 SHALL be emitted at compile time. It is never a runtime error.
 
 ### E-CONTRACT-004-WARN: `bind:value` type attribute conflict
@@ -48175,9 +48184,13 @@ E-CONTRACT-003: Inline predicate references external reactive variable '@maxScor
   Inline predicates must be stateless — they may only reference the incoming value
   and its properties. They may not reference reactive variables, sibling fields,
   or any external binding.
+
+  A type's rule checks only its own value. To compare against another cell, write a
+  derived check — <over=(@playerScore > @maxScore)/> — and use it in markup or in the handler
+  that changes the value.
 ```
 
-⚑ **INTERIM (S482, #2101 r1)** — `<machine>` was REMOVED (S305/S307, §51.0.L, `E-DEPRECATED-001`), so the advice to write one is struck. What E-CONTRACT-003 should advise instead is an OPEN OWNER QUESTION: the §66 field contracts (§66.13) have no value guard over an external cell, and the only stated successor, the keyword swap to `<engine>`, is itself §66.21-soft. Gap `g-spec-contract-003-machine-advice-s482`. *(Struck from this expected output: the `machine name=ScoreRange for=number` suggestion.)*
+**(S482, RULED — ruling:user-voice-scrml.md-S482-contract-003-derived-check.)** `<machine>` was removed (S305/S307, §51.0.L, `E-DEPRECATED-001`). A type's rule checks only its own value; to compare against another cell, write a derived check (e.g. `<overBudget=(@spent > @maxMana)/>`) and use it in markup or the handler that changes the value. *(Struck from this expected output: the `machine name=ScoreRange for=number` suggestion; the derived-check paragraph replaces it.)*
 
 ---
 
