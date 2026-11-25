@@ -109,6 +109,10 @@ the effect / request timing sentences.
   fetch-count tests in slice-m1/hold-body.runtime.test.js (0 fetches; a `not` re-date issues 1). R5 says so.
 - F5: R5 half-sentence — a held run whose construct is torn down later in the same body does not run (§6.7.7 EC-3);
   a04 pinned (`""`, `0`).
-- F2: behaviour unchanged; R5 ⚑ OPEN sentence + gap g-boot-held-runs-after-trap-s482 (owner question).
+- F2: RULED mid-round (ruling:user-voice-scrml.md-S482-drop-held-runs-on-trap) — BUILT: `runBody`'s `finally`
+  drops the runs the body held when it traps (hold released; nothing fetched). Runtime test replaced; Chromium case
+  (no server call, only the trap reported). R5 states it. No gap filed.
+- held-load dating at trigger RULED (ruling:user-voice-scrml.md-S482-held-load-dated-at-trigger): R5's pa-ruled
+  label replaced by the citation.
 - F3: no change; R5 direction note says Q6 widens the plain-`let`-display exposure and W-DISPLAY-UNTRACKED (A5) is
-  not emitted.
+  not emitted yet (ruled S482 to be built, ruling:user-voice-scrml.md-S482-display-untracked-warning, not here).

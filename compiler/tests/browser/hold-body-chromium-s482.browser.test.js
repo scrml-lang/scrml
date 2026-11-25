@@ -201,4 +201,43 @@ let <r:int=0/>`;
     expect(await load(a, ["o"])).toEqual({ errors: [], texts: [["1"]] });
     expect(await load(b, ["o"])).toEqual({ errors: [], texts: [["1"]] });
   }, 120000);
+
+  // RULED S482, ruling:user-voice-scrml.md-S482-drop-held-runs-on-trap — a body that traps drops its held runs:
+  // the held request makes no server call (before this round it ran after the trap and called the server). The held
+  // effect's drop is pinned in slice-m1/hold-body.runtime.test.js (no DOM is inserted after a trap to show it here).
+  test("a body that traps: the held request is dropped — no server call, only the trap reported, nothing inserted", async () => {
+    if (skip()) return;
+    const out = build(`<program>
+\${ let n: int = 1; }
+\${ server function ping() -> int { return 1; } }
+let <a:int=0/>
+let <m:int=0/>
+<effect deps=[@a]>\${ n = 9; }</>
+<request id="rq" deps=[]>\${ @m = ping(); }</request>
+\${ @a = 1; }
+\${ let neg: int = 0 - 1; }
+\${ const s: string = "a".repeat(neg); }
+<p id="o">\${s} \${n}</p>
+</program>
+`);
+    const srv = Bun.serve({ port: 0, fetch(req) {
+      const p = new URL(req.url).pathname;
+      return new Response(Bun.file(join(out, p === "/" ? "index.html" : p)), { headers: { "content-type": p.endsWith(".js") ? "text/javascript" : "text/html" } });
+    } });
+    const page = await browser.newPage();
+    const errors = [], calls = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+    page.on("request", (r) => { if (new URL(r.url()).pathname.startsWith("/_scrml/")) calls.push(r.url()); });
+    try {
+      await page.goto(`http://localhost:${srv.port}/`);
+      await page.waitForTimeout(300);
+      expect(calls).toEqual([]);
+      expect(errors.length).toBe(1);
+      expect(errors[0]).toContain("E-INDEX-OUT-OF-RANGE-RT");
+      expect(await page.evaluate(() => document.getElementById("o"))).toBe(null);
+    } finally {
+      await page.close();
+      srv.stop();
+    }
+  }, 120000);
 });

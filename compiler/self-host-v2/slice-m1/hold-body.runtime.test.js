@@ -83,19 +83,26 @@ describe("§7.6 R5 — effect and request runs triggered during the body are hel
     scope.dispose();
   });
 
-  test("a body that traps still releases the hold: the held runs run, the trap is the one thrown", () => {
-    // mutation RED: no `finally` (the hold stays raised and every later effect is stranded)
+  test("a body that traps: the hold is released, the held runs are dropped, nothing is fetched", async () => {
+    // RULED S482, ruling:user-voice-scrml.md-S482-drop-held-runs-on-trap.
+    // mutation RED: running the held runs in runBody's `finally` on a trap (E / a fetch), or no `finally`
+    // (the hold stays raised and the later write's effect is stranded)
     const scope = rt.root.child();
-    const a = rt.cell(0);
+    const a = rt.cell(0), m = rt.cell(0);
     const log = [];
+    let fetches = 0;
     expect(() => rt.runBody(() => {
       rt.effectOn(scope, [a], () => { log.push("E"); });
+      rt.requestOn(scope, m, [], () => { fetches++; return { on: 7, then: (v) => m.set(v) }; });
       a.set(1);
       throw new Error("trap");
     })).toThrow("trap");
-    expect(log).toEqual(["E"]);
+    await tick();
+    expect(log).toEqual([]);
+    expect(fetches).toBe(0);
+    expect(m.peek()).toBe(0);
     a.set(2);
-    expect(log).toEqual(["E", "E"]);
+    expect(log).toEqual(["E"]);
     scope.dispose();
   });
 

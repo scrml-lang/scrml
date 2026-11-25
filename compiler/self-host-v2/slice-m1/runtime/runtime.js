@@ -180,10 +180,14 @@ let bodyHold = 0;
 
 /**
  * Run the program body `fn` with effect and request runs held until it ends (SPEC §7.6 R5, Q6).
- * The held runs are flushed when the outermost body ends — also when the body traps (the trap is
- * the one rethrown; a held run's own throw is reported, never swallowed).
+ * The held runs are flushed when the outermost body ends. When the body traps they are DROPPED, not
+ * run (RULED S482, ruling:user-voice-scrml.md-S482-drop-held-runs-on-trap): the page failed to boot,
+ * so a held request makes no server call and a held effect does not run; the hold is still released
+ * (a later write runs its effect as usual) and the trap is the one rethrown.
  */
 export function runBody(fn) {
+  // what was queued before the outermost body began is not the body's (not dropped on a trap)
+  const before = bodyHold === 0 ? new Set(effectQueue) : null;
   bodyHold++;
   let ok = false;
   try {
@@ -192,9 +196,19 @@ export function runBody(fn) {
     return r;
   } finally {
     bodyHold--;
-    if (bodyHold === 0 && batchDepth === 0) {
-      if (ok) flush();
-      else { try { flush(); } catch (err) { reportLater(err); } }
+    if (bodyHold === 0) {
+      if (!ok) {
+        // s482 r1 (S482-drop-held-runs-on-trap): drop the runs the body held
+        for (const e of effectQueue) {
+          if (before.has(e)) continue;
+          effectQueue.delete(e);
+          if (e instanceof Request) e.heldStart = 0;
+        }
+      }
+      if (batchDepth === 0) {
+        if (ok) flush();
+        else { try { flush(); } catch (err) { reportLater(err); } }
+      }
     }
   }
 }
