@@ -41,6 +41,13 @@ Probes: o9 (outer cell, p/x/o9-write-only), o9-let (plain let, p/r2/o9-let).
   Shell seed = `not`: SPEC has no unseeded plain `let`, so PA reading (§42's absence value; never observable).
   g-boot-body-unread-cell-server-only-s482 narrowed (write-only half built), stays ruling-gated for BODY cells.
 
+- [gates @5625184f8] pretest 0; bootstrap-conformance --json base/head PASS 851 FAIL 3 NOT-TWINNED 628 UNSUPPORTED 491
+  CRASH 0 on both, 0 per-case verdict diffs over 1973; slices (write-only-secret, client-roots, registry-client,
+  outer-cell-place, seed-reach, body-run-order, value-no-write, handler-reach, logic-block-const) 238 pass / 0 fail /
+  5 skip; Chromium SCRML_BROWSER_TESTS=1 (9 s482 files incl. the new one) 71 pass / 0 fail; s34-census --check-new
+  PASS; types-gate OK (182 unchanged); host-global-scan 1/2 + 2/2 exit 0; e2e-render-map 259 pass; retired-forms-lint
+  OK. Corpus differential: 0/0/0/0/0, 0 files with new client identifiers.
+
 ## Decisions
 - Item 3 body cells: NOT included. §7.6 rule (b)'s classification is of file-scope bindings/initializers; a body cell
   is a field of the program declaration, and whether rule (b) reaches it is the gap's open owner fork (a)/(b)/(c).
