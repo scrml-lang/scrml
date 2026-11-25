@@ -183,6 +183,7 @@ ${
             "E-DEFER-UNSUPPORTED-SITE" :> Severity.Error,
             "E-DERIVED-CIRCULAR-DEP" :> Severity.Error,
             "E-DERIVED-ENGINE-NO-RULES" :> Severity.Error,
+            "E-DERIVED-READS-UNTRACKED" :> Severity.Error,
             "E-DERIVED-VALUE-MUTATE" :> Severity.Error,
             "E-DERIVED-WITH-VALIDATORS" :> Severity.Error,
             "E-DERIVED-WRITE" :> Severity.Error,

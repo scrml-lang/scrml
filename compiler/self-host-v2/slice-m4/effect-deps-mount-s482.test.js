@@ -51,7 +51,7 @@ describe("an <effect>'s deps= are read at the mount (s482-place-fu2, #2082 r3 HI
 <program>
 <div if=(true)><effect deps=[@z]>\${ let q: int = 0; }</>\${ const k: int = n + 0; }<p id="o">\${k}</p></div>
 </program>
-`, LIB)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+`, LIB)).toEqual(["E-VALUE-WRITES-STATE", "E-VALUE-WRITES-STATE"]);   // s482-value-no-write: the seeds of z and zb (in lib) write `n` — refused where they write
   }, 120000);
 
   test("refused: x16 — deps=[@zb], a boolean seed", async () => {
@@ -59,23 +59,23 @@ describe("an <effect>'s deps= are read at the mount (s482-place-fu2, #2082 r3 HI
 <program>
 <div if=(true)><effect deps=[@zb]>\${ let q: int = 0; }</>\${ const k: int = n + 0; }<p id="o">\${k}</p></div>
 </program>
-`, LIB)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+`, LIB)).toEqual(["E-VALUE-WRITES-STATE", "E-VALUE-WRITES-STATE"]);   // s482-value-no-write: the seeds of z and zb (in lib) write `n` — refused where they write
   }, 120000);
 
   test("x15 control (<div>, the source order): the deps read runs z's seed first — 5", async () => {
-    expect(await texts(`\${ import { n, z } from "./lib.scrml"; }
+    expect(await codes(`\${ import { n, z } from "./lib.scrml"; }
 <program>
 <div><effect deps=[@z]>\${ let q: int = 0; }</>\${ const k: int = n + 0; }<p id="o">\${k}</p></div>
 </program>
-`, LIB, ["o"])).toEqual(["5"]);
+`, LIB)).toEqual(["E-VALUE-WRITES-STATE", "E-VALUE-WRITES-STATE"]);   // s482-value-no-write: the seeds of z and zb (in lib) write `n`
   }, 120000);
 
   test("legal: the effect AFTER the initializer — its deps read runs later, k = 1", async () => {
-    expect(await texts(`\${ import { n, z } from "./lib.scrml"; }
+    expect(await codes(`\${ import { n, z } from "./lib.scrml"; }
 <program>
 <div if=(true)>\${ const k: int = n + 0; }<p id="o">\${k}</p><effect deps=[@z]>\${ let q: int = 0; }</></div>
 </program>
-`, LIB, ["o"])).toEqual(["1"]);
+`, LIB)).toEqual(["E-VALUE-WRITES-STATE", "E-VALUE-WRITES-STATE"]);   // s482-value-no-write: the seeds of z and zb (in lib) write `n`
   }, 120000);
 
   test("legal: the effect's BODY still does not count — it writes n, but does not run at the mount", async () => {

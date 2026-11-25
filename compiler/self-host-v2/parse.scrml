@@ -403,6 +403,50 @@ ${
     // Two tokens that touch (no trivia between them): `:>`, `@x`, `->`.
     fn touching(a: PTok, b: PTok) -> boolean { return a.end == b.start; }
 
+    // s482-rulings-records-fu (#2092 r1 review LOW-3): does token `at` stand in a `for ( … )`
+    // head — is the `(` that encloses it (brackets balanced, no `;` or unmatched `[` / `{` on
+    // the way back) the one right after a `for`, with no top-level `;` before its `)` (a counted head has no `of` operand, #2098 r1 INFO-1)? A message gate only.
+    fn inForHead(tp: TP, at: int) -> boolean {
+        let depth: int = 0;
+        let j: int = at - 1;
+        for (; j >= 0; ) {
+            const x: PTok = tp.toks[j];
+            if (tk(x, ")") || tk(x, "]") || tk(x, "}")) {
+                depth = depth + 1;
+            } else if (tk(x, "[") || tk(x, "{")) {
+                if (depth == 0) return false;
+                depth = depth - 1;
+            } else if (tk(x, "(")) {
+                if (depth == 0) return j > 0 && isNameTok(tp.toks[j - 1]) && tp.toks[j - 1].v == "for" && !semiBeforeClose(tp, at);
+                depth = depth - 1;
+            } else if (depth == 0 && tk(x, ";")) {
+                return false;
+            }
+            j = j - 1;
+        }
+        return false;
+    }
+
+    // s482 #2098 r1 (review INFO-1): a top-level `;` between token `at` and the `)` that closes its
+    // enclosing bracket — a counted head (`for (init; cond; step)`), which has no `of` operand.
+    fn semiBeforeClose(tp: TP, at: int) -> boolean {
+        let depth: int = 0;
+        let j: int = at + 1;
+        for (; j < tp.toks.length; ) {
+            const x: PTok = tp.toks[j];
+            if (tk(x, "(") || tk(x, "[") || tk(x, "{")) {
+                depth = depth + 1;
+            } else if (tk(x, ")") || tk(x, "]") || tk(x, "}")) {
+                if (depth == 0) return false;
+                depth = depth - 1;
+            } else if (depth == 0 && tk(x, ";")) {
+                return true;
+            }
+            j = j + 1;
+        }
+        return false;
+    }
+
     // s469 — the line a token ENDS on (a template chunk can span lines; `line`
     // is where it starts). "The line above" a token is its predecessor's end line.
     fn endLine(x: PTok) -> int {
@@ -2902,10 +2946,12 @@ ${
         // s482 r1 (#2092 review LOW-1): `for (x of.items)` / `for (x of/re/…)` — a `.` or `/`
         // touching `of` reads the name `of` (§49.2.4, S482-of-adjacency), so the loop operand is
         // missing; say how to write it.
+        // s482-rulings-records-fu (#2092 r1 review LOW-3): only inside a `for ( … )` head — a
+        // binding named `of` elsewhere (`return of./2;`) has no loop operand to misdirect to.
         let ofHint = "";
         if (t.cls == TC.Punct && (tk(t, ".") || tk(t, "/")) && tp.i > 0) {
             const pv: PTok = peekAt(tp, -1);
-            if (isNameTok(pv) && pv.v == "of" && touching(pv, t)) ofHint = " — a `" + t.text + "` touching `of` reads the name `of` (§49.2.4); for the loop operand, write `of " + t.text + "…` with a space";
+            if (isNameTok(pv) && pv.v == "of" && touching(pv, t) && inForHead(tp, tp.i - 1)) ofHint = " — a `" + t.text + "` touching `of` reads the name `of` (§49.2.4); for the loop operand, write `of " + t.text + "…` with a space";
         }
         const bad: TP = diagAt(tp, "E-PARSE-EXPR", "expected an expression, found `" + t.text + "`" + ofHint, t);
         return mkE(adv(bad), start, AExprK.Recovered);
