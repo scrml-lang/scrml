@@ -12110,9 +12110,11 @@ ${
     // #2096 path):
     //   live — an event handler (`on…=`, any element, a component's markup included); an `<effect>` /
     //     `when … changes` body; a `<request>` body (Q6 holds its first run to after the body — so does
-    //     an effect's); a runtime `^{ }` block (it re-runs when a cell it reads changes, §22.5 — a first run
-    //     at a spine place is setup, a re-run is not, and the bootstrap does not tell them apart: counted
-    //     live, fail toward the warning); a function value in body-top or spine-initializer code (an arrow
+    //     an effect's); a runtime `^{ }` block that may re-run (it re-runs when a cell it reads changes,
+    //     §22.5 — one that uses a cell or calls a scrml function, which may read one; a first run at a spine
+    //     place is setup, a re-run is not, and which writes a re-run makes is not told apart: counted live,
+    //     fail toward the warning — a `^{ }` that does neither runs once, at its place, and is spine code);
+    //     a function value in body-top or spine-initializer code (an arrow
     //     / block lambda — it runs when it is called, a host callback or timer included) and a function
     //     handed on as a value there (whatever receives it may call it later); a body-top statement in a
     //     declaration's markup (it runs at each instance's mount);
@@ -12122,15 +12124,20 @@ ${
     // NOT a writer: spine code BEFORE the display's place (setup — the display shows the final setup
     // value, A2), load-phase code (it runs before the body), a function body by itself (it is judged where
     // it is called). A display in a declaration's markup has no single place in the body (its instance's),
-    // so only live writers are judged for it (PA reading, S482 lane s482-display-untracked; prov=pa-ruled).
+    // so only live writers are judged for it (lane reading, s482-display-untracked — surfaced to the PA).
+    // A writer that also writes a cell the display reads by name (`${ @tick + n }`, the handler writing
+    // `n` and `@tick`) does not leave it stale: the cell write re-renders it in the same turn (laterWriter).
     // The message names the display, the `let`, one writer (and its call chain) and the fix-it: the cell
     // declaration that replaces the `let`, and `@n` for `n` at every use. A warning: it does not fail the
     // compile (§34).
     // =========================================================================
     type DuCx:struct = { g: Globals, t: Tables, sum: Summary, six: SymIx, writes: FxAtom[][], sites: LetW[][], lets: int[] }
     // A write of a file-scope `let` (`sym`) by code that may run after a display renders: `who` names
-    // the code, `how` the call chain ("" — a direct write), `pos` its place on the spine (live: -1).
-    type DispW:struct = { sym: int, who: string, how: string, pos: int, live: boolean, file: string }
+    // the code, `how` the call chain ("" — a direct write), `pos` its place on the spine (live: -1),
+    // `cells` the cells the same code writes (directly or through its calls — the effect summary's
+    // `writes`, by label: `@x`). `lc`: "" — or the lifecycle body that writes (`effect` / `request`), where
+    // the cell fix-it alone would be refused (§6.7.4 / §6.7.7: that body may not write a cell).
+    type DispW:struct = { sym: int, who: string, how: string, pos: int, live: boolean, file: string, cells: string[], lc: string }
 
     fn displayUntrackedDiags(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], reads: FxAtom[][], lets: int[]) -> Diag[] {
         if (lets.length == 0) return [];
@@ -12157,11 +12164,12 @@ ${
     fn displayDiags(cx: DuCx, ws: DispW[], reads: FxAtom[][], p: ValuePos, prog: boolean) -> Diag[] {
         let out: Diag[] = [];
         let seen: int[] = [];
+        const shown: string[] = valueReads(p.v);
         for (const b of seedBlocks(p.v)) {
             for (const ne of nameExprsIn(b)) {
                 const id: int = constSymOfFact(nameFact(cx.t.names, ne.nid));
                 if (id >= 0 && cx.lets.indexOf(id) >= 0 && seen.indexOf(id) < 0) {
-                    const w: DispW | not = laterWriter(ws, id, p, prog);
+                    const w: DispW | not = laterWriter(ws, id, p, prog, shown);
                     if (w is given) {
                         seen = seen.concat([id]);
                         out = out.concat([displayDiag(cx, p, id, "", w, ne.span, p.file)]);
@@ -12175,7 +12183,7 @@ ${
                 for (const a of reads[j]) {
                     const id: int = atomBinding(a.key);
                     if (a.key.indexOf("b:") == 0 && cx.lets.indexOf(id) >= 0 && seen.indexOf(id) < 0) {
-                        const w: DispW | not = laterWriter(ws, id, p, prog);
+                        const w: DispW | not = laterWriter(ws, id, p, prog, shown);
                         if (w is given) {
                             seen = seen.concat([id]);
                             const chain: string = chainText(fxChain(cx.sum, reads, j, a)) + " → " + letNameOf(cx.t, id);
@@ -12189,19 +12197,28 @@ ${
     }
 
     // The first writer of `sym` that runs after display `p` renders: a live one, or — for a display of
-    // the program body — spine code whose place is after the display's, in the same file.
-    fn laterWriter(ws: DispW[], sym: int, p: ValuePos, prog: boolean) -> DispW | not {
+    // the program body — spine code whose place is after the display's, in the same file. A writer that
+    // also writes a cell the display reads (`shown`, its `@` reads) is not one: that write re-renders the
+    // display in the same turn, which then reads the new value — the display does not go stale.
+    fn laterWriter(ws: DispW[], sym: int, p: ValuePos, prog: boolean, shown: string[]) -> DispW | not {
         for (const w of ws) {
-            if (w.sym == sym && (w.live || (prog && w.file == p.file && w.pos > p.span.start))) return w;
+            if (w.sym == sym && (w.live || (prog && w.file == p.file && w.pos > p.span.start)) && !writesShown(w.cells, shown)) return w;
         }
         return not;
+    }
+
+    fn writesShown(cells: string[], shown: string[]) -> boolean {
+        for (const c of cells) {
+            if (shown.indexOf(c) >= 0) return true;
+        }
+        return false;
     }
 
     fn displayDiag(cx: DuCx, p: ValuePos, sym: int, via: string, w: DispW, span: ASpan, file: string) -> Diag {
         const name: string = letNameOf(cx.t, sym);
         let after: string = "after this display renders";
         if (!w.live) after = "later in the body, after this display renders";
-        const msg: string = p.what + " at line " + lineOf(cx.g, p.file, p.span.start) + " reads `" + name + "`, a file-scope `let`" + via + ", and " + w.who + " writes `" + name + "`" + w.how + " " + after + ". `" + name + "` is plain state and is not tracked: the display shows the value `" + name + "` had when it rendered, and is not updated when `" + name + "` is written (§6.15 A5). " + cellFixIt(cx, sym);
+        const msg: string = p.what + " at line " + lineOf(cx.g, p.file, p.span.start) + " reads `" + name + "`, a file-scope `let`" + via + ", and " + w.who + " writes `" + name + "`" + w.how + " " + after + ". `" + name + "` is plain state and is not tracked: the display shows the value `" + name + "` had when it rendered, and is not updated when `" + name + "` is written (§6.15 A5). " + cellFixIt(cx, sym) + lifecycleFix(w.lc, name);
         return newDiag("W-DISPLAY-UNTRACKED", msg, file, span);
     }
 
@@ -12221,11 +12238,20 @@ ${
                     cv = "(…)";
                 }
                 let cell: string = "let <" + c.name;
-                const ty: Type | not = c.ty;
-                if (ty is given) cell = cell + ":" + typeName(ty);
-                cell = cell + "=" + cv + "/>";
                 let keep: string = "";
                 if (lit == "") keep = " (the same initializer, in the parentheses)";
+                const ty: Type | not = c.ty;
+                if (ty is given) {
+                    const el: Type | not = seqElem(unMaybe(ty));
+                    if (el is given) {
+                        // a tape cell: no `let` (O3 — E-GRANT-LET-ON-SEQUENCE); its grants are in its type (§66.12)
+                        cell = "<" + c.name + ":" + elemName(el) + "[replace, …]";
+                        keep = keep + " — a tape cell takes its write grants in its type: `replace` for a whole-value write, and the edits its writes make (§66.12; `let` is not written on a sequence)";
+                    } else {
+                        cell = cell + ":" + typeName(ty);
+                    }
+                }
+                cell = cell + "=" + cv + "/>";
                 return "Make `" + c.name + "` a cell: replace `" + written + " = " + wv + ";` with `" + cell + "`" + keep + ", and write `@" + c.name + "` for `" + c.name + "` at every read and write (`" + "$" + "{@" + c.name + "}`, `@" + c.name + " = …`) — a write of a cell updates every display that reads it";
             }
         }
@@ -12250,8 +12276,8 @@ ${
         const k: ANodeK = n.k;
         return match k {
             .Elem(e: e) :> elemDispWriters(cx, e, file, prog),
-            .Effect(w: w) :> siteDispWriters(cx, AAttrValue.Braced(w.body, ""), effectWho(cx, w, file), -1, true, [], "", file),
-            .Request(r: r) :> (r.pend < 0 ? siteDispWriters(cx, AAttrValue.Braced(r.body, ""), "the `<request>` body at line " + lineOf(cx.g, file, r.span.start), -1, true, [], "", file) : []),
+            .Effect(w: w) :> inLifecycle(siteDispWriters(cx, AAttrValue.Braced(w.body, ""), effectWho(cx, w, file), -1, true, [], "", file), "effect"),
+            .Request(r: r) :> (r.pend < 0 ? inLifecycle(siteDispWriters(cx, AAttrValue.Braced(r.body, ""), "the `<request>` body at line " + lineOf(cx.g, file, r.span.start), -1, true, [], "", file), "request") : []),
             .Run(b: b, meta: mt) :> runDispWriters(cx, b, mt, n.span.start, file, prog),
             .Gather(f: f) :> rowDispWriters(cx, f, file, prog),
             .Text(text: x) :> [],
@@ -12259,6 +12285,20 @@ ${
             .DeclNode(d: x) :> [],
             .Css(c: x) :> []
         };
+    }
+
+    fn inLifecycle(ws: DispW[], lc: string) -> DispW[] {
+        let out: DispW[] = [];
+        for (const w of ws) { out = out.concat([{ sym: w.sym, who: w.who, how: w.how, pos: w.pos, live: w.live, file: w.file, cells: w.cells, lc: lc }]); }
+        return out;
+    }
+
+    // An `<effect>` / `<request>` body may not write a cell (§6.7.4, §6.7.7), so the cell fix-it is not
+    // enough there: the write moves out of the body as well.
+    fn lifecycleFix(lc: string, name: string) -> string {
+        if (lc == "effect") return ". An `<effect>` may not write a cell, directly or through a call (§6.7.4, E-EFFECT-WRITES-STATE): with `" + name + "` a cell, move this write out of the effect into the code that writes its trigger (the handler or function), or make `" + name + "` a derived cell of what it is computed from (§6.6)";
+        if (lc == "request") return ". A `<request>` body writes only its own cell (§6.7.7): with `" + name + "` a cell, move this write out of the function the request calls into the handler or function that should cause it, or compute `" + name + "` from the request's cell (a derived cell, §6.6)";
+        return "";
     }
 
     fn effectWho(cx: DuCx, w: AEffect, file: string) -> string {
@@ -12286,7 +12326,10 @@ ${
     // markup runs at each instance's mount (live).
     fn runDispWriters(cx: DuCx, b: ABlock, meta: string, pos: int, file: string, prog: boolean) -> DispW[] {
         const line: int = lineOf(cx.g, file, pos);
-        if (meta != "") return siteDispWriters(cx, AAttrValue.Braced(b, ""), "the runtime `^{ }` block at line " + line + " (it re-runs when a cell it reads changes, §22.5)", -1, true, [], "", file);
+        // a `^{ }` that uses no cell and calls no scrml function never re-runs: its one run is at its place
+        const rerun: boolean = atUsesIn(cx.t, b).length > 0 || scanBlock({ t: cx.t, file: file }, b, emptyScan()).refs.length > 0;
+        if (meta != "" && (rerun || !prog)) return siteDispWriters(cx, AAttrValue.Braced(b, ""), "the runtime `^{ }` block at line " + line + " (it re-runs when a cell it reads changes, §22.5)", -1, true, [], "", file);
+        if (meta != "") return siteDispWriters(cx, AAttrValue.Braced(b, ""), "the runtime `^{ }` block at line " + line, pos, false, deferredSpansIn(b), "a function value in the runtime `^{ }` block at line " + line + " (it runs when it is called — a callback, a timer)", file);
         const fv: string = "a function value in the body-top statement at line " + line + " (it runs when it is called — a callback, a timer)";
         if (!prog) return siteDispWriters(cx, AAttrValue.Braced(b, ""), "the statement at line " + line + " (it runs at each instance's mount)", -1, true, [], "", file);
         return siteDispWriters(cx, AAttrValue.Braced(b, ""), "the body-top statement at line " + line, pos, false, deferredSpansIn(b), fv, file);
@@ -12329,16 +12372,25 @@ ${
     // spine code) and a function handed on as a value from spine code are live, named `deferWho`.
     fn siteDispWriters(cx: DuCx, v: AAttrValue, who: string, pos: int, live: boolean, defer: ASpan[], deferWho: string, file: string) -> DispW[] {
         let out: DispW[] = [];
+        const scan: BodyScan = scanValue({ t: cx.t, file: file }, v, emptyScan());
+        let cells: string[] = [];
+        for (const sw of scan.writes) { cells = cells.concat([sw.cell]); }
+        for (const r of scan.refs) {
+            const j: int = ixGet(cx.six, r.sym);
+            if (j >= 0) {
+                for (const a of cx.sum.writes[j]) { cells = cells.concat([a.key.substring(2)]); }
+            }
+        }
         for (const b of seedBlocks(v)) {
             for (const w of letWritesIn(cx.t, b, cx.lets, file)) {
                 if (!live && spanInAny(w.span, defer)) {
-                    out = out.concat([{ sym: w.sym, who: deferWho, how: "", pos: -1, live: true, file: file }]);
+                    out = out.concat([{ sym: w.sym, who: deferWho, how: "", pos: -1, live: true, file: file, cells: cells, lc: "" }]);
                 } else {
-                    out = out.concat([{ sym: w.sym, who: who, how: "", pos: pos, live: live, file: file }]);
+                    out = out.concat([{ sym: w.sym, who: who, how: "", pos: pos, live: live, file: file, cells: cells, lc: "" }]);
                 }
             }
         }
-        for (const r of scanValue({ t: cx.t, file: file }, v, emptyScan()).refs) {
+        for (const r of scan.refs) {
             const j: int = ixGet(cx.six, r.sym);
             if (j >= 0 && !isValueLabel(r.name)) {
                 let rl: boolean = live;
@@ -12351,7 +12403,7 @@ ${
                 for (const a of cx.writes[j]) {
                     const w: LetW = cx.sites[a.root][a.pos];
                     const chain: string = chainText(fxChain(cx.sum, cx.writes, j, a)) + " → " + w.name;
-                    out = out.concat([{ sym: w.sym, who: rw, how: " (through `" + chain + "`)", pos: pos, live: rl, file: file }]);
+                    out = out.concat([{ sym: w.sym, who: rw, how: " (through `" + chain + "`)", pos: pos, live: rl, file: file, cells: cells, lc: "" }]);
                 }
             }
         }
