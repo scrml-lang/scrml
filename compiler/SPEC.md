@@ -47217,7 +47217,9 @@ scrml distinguishes two categories of value constraint:
 or external reactive references. These are ~~governed by `<machine>` (§51)~~ not inline predicates; each kind has its
 own mechanism (the §53.3.2 table; `<machine>` was removed S305/S307). Examples:
 - Enum transition rules (depends on current variant) — the value's transition graph, `rule=` state-children (§66.13.2)
-- Cross-field struct invariants (depends on sibling field values) — an `<engine for=Struct>` guard (§53.8.1)
+- Cross-field struct invariants (depends on sibling field values) — an `<engine for=Struct>` guard (§53.8.1).
+  ⚑ OPEN: `<engine>` is soft-deprecated (§66.21); the non-deprecated way to state a cross-field struct invariant
+  is an open owner question (gap g-spec-struct-invariant-form-s482)
 - Constraints referencing reactive variables (`<=@maxMana`) — a type's rule checks only its own value; to compare
   against another cell, write a derived check (e.g. `<overBudget=(@spent > @maxMana)/>`) and use it in markup or the
   handler that changes the value (ruling:user-voice-scrml.md-S482-contract-003-derived-check)
@@ -47349,8 +47351,8 @@ The canonical decision rule for when to use an inline predicate vs ~~a `<machine
 | `number(>0 && <10000)` | Stateless | Inline predicate |
 | `string(.length > 7 && .length < 255)` | Stateless | Inline predicate |
 | `string(email)` | Stateless | Inline predicate (named shape) |
-| `start < end` on a struct | Contextual (needs sibling) | ~~`<machine for Struct>`~~ an `<engine for=Struct>` guard, `* => * given (self.start < self.end)` (§53.8.1; the `<engine for=T>` element is §66.21 Stage-1 soft-deprecated, `W-ENGINE-ELEMENT-DEPRECATED` — it parses and is not removed) |
-| `.Pending => .Processing` | Contextual (needs prior state) | ~~`<machine>`~~ the value's transition graph: `rule=` state-children on the enum value (§66.13.2; ruling:user-voice-scrml.md S435 Q6 — *"Every field's permitted changes are declared on its type: fixed, a lifecycle, a transition graph, or `let`/`replace`."*) |
+| `start < end` on a struct | Contextual (needs sibling) | ~~`<machine for Struct>`~~ an `<engine for=Struct>` guard, `* => * given (self.start < self.end)` (§53.8.1; the `<engine for=T>` element is §66.21 Stage-1 soft-deprecated, `W-ENGINE-ELEMENT-DEPRECATED` — it parses and is not removed). ⚑ OPEN: `<engine>` is soft-deprecated (§66.21); the non-deprecated way to state a cross-field struct invariant is an open owner question (gap g-spec-struct-invariant-form-s482) |
+| `.Pending => .Processing` | Contextual (needs prior state) | ~~`<machine>`~~ the value's transition graph: `rule=` state-children on the enum value (§66.13.2; ruling:S435 (PA proposal text answered "a", L488), as §66.13.1 cites it: *"Every field's permitted changes are declared on its type: fixed, a lifecycle, a transition graph, or `let`/`replace`."*) |
 | `number(>=0 && <=@maxMana)` | Contextual (references reactive var) | ~~`<machine>`~~ a derived check: `<overBudget=(@spent > @maxMana)/>`, used in markup or the handler that changes the value (ruling:user-voice-scrml.md-S482-contract-003-derived-check) |
 
 The boundary case `number(>=0 && <=@maxMana)` SHALL be rejected with `E-CONTRACT-003` if
@@ -47661,7 +47663,7 @@ type Email:struct = { addr: string.pattern(/^[^@]+@[^@]+$/) }
 
 - **Compile-time + runtime boundary check** (§53.4 SPARK three-zone enforcement). A value that doesn't satisfy the predicate cannot inhabit the type. Compile-time provable violations emit `E-CONTRACT-001`; non-provable violations emit `E-CONTRACT-001-RT` at runtime.
 - **Stronger than state-cell validators** (which gate form-validity reactively but allow the underlying cell to hold the invalid value while the user types) and stronger than schema constraints (which enforce only at INSERT/UPDATE).
-- **Cross-field via predicate args.** As with state-cell validators, predicate args MAY reference other cells: `gte(@startDate)` in the type of an `endDate` field is a reactive-aware refinement-type predicate. Same circular-dep rules apply (E-VALIDATOR-CIRCULAR-DEP — §55.11, §34).
+- **Cross-field via predicate args.** ⚑ CONTRADICTED (gap g-spec-refinement-cross-cell-arg-s482): this sentence conflicts with E-CONTRACT-003 (§53.11), S458 R4 (*"cross-field arguments (`gte(@x)`) are ruled OUT of type position … §53.6.1's `gte(@startDate)` example is corrected"*) and the S482 ruling that a type's rule checks only its own value; the correction S458 R4 ruled is owed, and the sentence stands unedited here. As with state-cell validators, predicate args MAY reference other cells: `gte(@startDate)` in the type of an `endDate` field is a reactive-aware refinement-type predicate. Same circular-dep rules apply (E-VALIDATOR-CIRCULAR-DEP — §55.11, §34).
 
 **Cross-ref §55.1** for the universal-core predicate listing and the cross-locus consistency table.
 **Cross-ref §55.3** for the §55-side description of refinement-type validator firing.
