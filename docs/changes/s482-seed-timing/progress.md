@@ -137,3 +137,28 @@ Brief: ~/.cache/scrml/review/s482-briefs/fix-2105-r2.md; review ~/.cache/scrml/r
 | types-gate --check | OK, 182 unchanged |
 | host-global-scan 1/2, 2/2 | 0 violations (pre-existing compile throws only) |
 | e2e-render-map | 259 pass / 0 fail |
+
+## r3 — #2105 r2 review fix round (S482)
+
+Brief: ~/.cache/scrml/review/s482-briefs/fix-2105-r3.md; review ~/.cache/scrml/review/s482-2105-r2rev/review.md. Probes + harness: ~/.cache/scrml/review/s482-2105-r3/ (`h/run.sh`, `h/all.sh`, `h/cond.sh`; `p` → the r2rev probes). Base = origin/main 1e8a11758.
+
+- 1. MED-B: analyze `outerSeedReachDiags` lists DERIVED outer cells as hops (`derived: true`) — never judged at their own place, followed (`cellRunsAt` / `cellHop`) at the reader's place. A function's `c:` atoms now name outer cells too (`cellUsesDirect` + `outerCellDecls` / `outerCellUseOf`; in the body's judgment such an atom matches no body cell or place, so nothing changes there). m01 / m06 / m09 / m10 → E-SCOPE-001 (main 10 / 5 / 4 / 10; r2 a load-time TDZ on `decl_program`); e12d stays legal (5 → 10).
+- 2. LOW-1: print `readsCellReach` — names bound INSIDE the expression root (`boundSyms`: lambda / block-lambda params and locals, expression `match` binders) are exempt from `freeLocalRead`. Supersedes r2's "a lambda parameter written there changes: derived, as on base": v14 → V3 (constant, Q13), v13 compiles (no `zz-` in any client file; server holds it, = base). Row items, arm payloads, for-lift variables stay fail-closed (w-family = base). The `outerRefusal` "it also reads a cell" message is no longer reachable from a lambda binder; it remains for genuine cell reads / unfollowable calls.
+- 3. LOW-2 + NIT: SPEC §7.6 R1 per-shape note — c05b / c05c / c06 / y16 / y23 / y24 / y26 rendered values on main (`12 | 11`, `1`, `12`, `6`, `6`, `3 | 2`, `v!`): "correct on main, now refused (R1 / R2)"; the TDZ crash attributed to r0. m01 / m06 / m09 / m10 added to the direction note. Period after "(R2)".
+
+### r3 gates (head vs base origin/main 1e8a11758)
+
+| gate | result |
+|---|---|
+| pre-commit (code, Chromium pins) | PASS (58371 pass / 0 fail) |
+| pretest | exit 0 |
+| bootstrap-conformance --json | head = base: PASS 851 / FAIL 3 / NOT-TWINNED 628 / UNSUPPORTED 491 / CRASH 0; 0 per-case bucket/emitted diffs (1973) |
+| slices outer-cell-place (+4 r3 pins), client-roots, registry-client, seed-reach | 106 pass / 0 fail / 5 skip (registry-client env-gated) |
+| Chromium SCRML_BROWSER_TESTS=1: seed-timing (+ m01 / e12d) + use-site-row (+ v14) | 24 pass / 0 fail |
+| r2rev 159-probe set, r3 vs r2 head | identical (condensed: exit, codes, zz, every LOAD/CLICK errs + body) |
+| v/ + w/ family (30), r3 vs base | identical |
+| m/ + e/ family (24), r3 vs base | only m01 m02 m06 m07 m08 m09 m10 e12 e12c e12e e12f → E-SCOPE-001 (all ruled: R1 + R2) |
+| extra (v04e v13 v13b v14 v14b w05 w06 w07 w14 w15 w17 q1), r3 vs base | only v14 / v14b V12 → V3 (Q13) |
+| corpus differential (2977) | vs base: 0 newly rejected / accepted / code changes; 1 client diff (own-value-type/unproven-annotation-pos, Q13 names); 0 server diffs; 0 files with any diagnostic-text change. vs r2 head: 0 diffs of any kind |
+| client identifier diff | 1 file (the same one): `seeded hold seed` + local temporaries |
+| s34-census --check-new --base 1e8a11758 | PASS |
