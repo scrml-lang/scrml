@@ -551,9 +551,9 @@ The `<` in `count < limit` is inside a `${ }` brace-delimited context. The block
 
 **Worked example — valid (nested braces inside logic context):**
 ```scrml
-${ users.filter(u => u.age < 18).map(u => { return <span>; }) }
+${ users.filter(u => u.age < 18).map(u => { return <span>${u.name}</>; }) }
 ```
-Wait — the `<span>` here is OUTSIDE any brace-delimited context at the time it is encountered only if the inner `{ }` braces have been balanced. The block splitter SHALL correctly track brace depth: the `{` after `=>` opens a nested brace; the `}` after `return <span>;` closes it; the outer `${ }` then closes. The `<span>` in the example above IS inside brace depth > 0, so it is raw content. This is correct: JSX-like inline markup inside a logic context is not scrml syntax; it would be a compile error at the tokenizer level.
+Wait — the `<span>` here is OUTSIDE any brace-delimited context at the time it is encountered only if the inner `{ }` braces have been balanced. The block splitter SHALL correctly track brace depth: the `{` after `=>` opens a nested brace; the `}` after `return <span>${u.name}</>;` closes it; the outer `${ }` then closes. The `<span>` in the example above IS inside brace depth > 0, so it is raw content. This is correct: JSX-like inline markup inside a logic context is not scrml syntax; it would be a compile error at the tokenizer level.
 
 **Worked example — invalid (demonstrates misclassification without this rule):**
 ```scrml
@@ -1108,7 +1108,7 @@ advanceAttrValue(src, start):
 ```scrml
 <TabStrip
     tabs=@myTabs
-    tabPanel={ (tab) => <article><h2>${tab.label}/<p>${tab.body}// }
+    tabPanel={ (tab) => <article><h2>${tab.label}</><p>${tab.body}</></> }
 />
 ```
 
@@ -3692,8 +3692,9 @@ changes. Read sites for the derived cell use `@name` exactly as for any other re
 
 **Normative statements:**
 
-- The `const <name> = expr` form SHALL be the sole declaration syntax for derived reactive
-  values. The form `@derived name = expr` (an alternative considered during design) SHALL
+- ~~The `const <name> = expr` form SHALL be the sole declaration syntax for derived reactive
+  values.~~ *(superseded S435/§66.21 row 2: a derived cell is declared `<name=(expr)/>`, §66.9;
+  `const <name> = expr` is deprecated, `W-CONST-CELL-DEPRECATED` — S482 #2101 r1 LOW-3)* The form `@derived name = expr` (an alternative considered during design) SHALL
   NOT be recognized. Any use of `@derived` as a keyword SHALL be a compile error
   (E-REACTIVE-001) with a hint suggesting `const <name> = expr`.
 - A derived reactive value declaration SHALL be valid anywhere a `const-decl` is valid:
@@ -3702,8 +3703,8 @@ changes. Read sites for the derived cell use `@name` exactly as for any other re
   is DEPRECATED. It still parses + registers in logic and top-level contexts. Inside a **raw
   markup element body**, however, NEITHER form is a valid derived-decl: the legacy `const @name`
   silently drops the cell (it stays inert text — neither registered nor emitted), and the
-  canonical `const <name>` does NOT register there either — its `<name>` parses as a markup
-  element open-tag and loud-errors `E-CTX-001`. The canonical derived-decl form `const <name>`
+  `const <name>` (itself deprecated, §66.21 row 2) does NOT register there either — its `<name>` parses as a markup
+  element open-tag and loud-errors `E-CTX-001`. The `const <name>` form
   is for **logic / file-top-level / `${ ... }`** contexts (and the top of a state block); to
   declare a derived cell whose result a markup body consumes, write it in a `${ ... }` logic
   block. The compiler SHALL emit the info-level lint `W-CONST-AT-DEPRECATED` (§34) at every
@@ -3860,6 +3861,7 @@ flush site.
 > code exists, so a `flush()` call is an unknown function, `E-SCOPE-001` on the bootstrap — flagged: a named
 > refusal pointing at pull-on-read may be owed under D28.)*
 
+<!-- retired-neg: flush-call — the record of the retired `flush()` (S473 D22), labelled RETIRED above -->
 ```scrml
 @price = newPrice;
 flush();                            // RETIRED (S473 D22) — forces re-evaluation of all dirty derived nodes
@@ -16773,6 +16775,7 @@ The `fixed` attribute on an element inside a component body marks that element a
 - A caller attempting to override a `fixed` attribute SHALL be a compile error (E-COMPONENT-001).
 
 **Worked example:**
+<!-- retired-neg: fixed-attr — §15.7 is the record of the retired attribute (RETIRED S473 D26, banner above) -->
 ```scrml
 const card = <div class="card">
     <div class="card__footer" fixed>
@@ -18035,7 +18038,7 @@ const TabStrip = <div class="tabs" props={
 
 <TabStrip
     tabs=@myTabs
-    tabPanel={ (tab) => <article><h2>${tab.label}/<p>${tab.body}// }
+    tabPanel={ (tab) => <article><h2>${tab.label}</><p>${tab.body}</></> }
 />
 ```
 
@@ -18163,7 +18166,7 @@ lifted elements to named slots.
 To provide per-item slot content, declare a parametric snippet prop:
   body: snippet(item: ItemType)
 and pass a lambda at the call site:
-  body={ (item) => <li>${item}/ }
+  body={ (item) => <li>${item}</> }
 ```
 
 **Correct idiom — slot content above the `lift` boundary:**
@@ -18495,11 +18498,11 @@ Desugars to:
 ```scrml
 ${
   if (@step.is(Loading)) {
-    lift <section><Spinner /><</>
+    lift <section><Spinner /></>
   } else if (@step.is(Error)) {
-    lift <section><ErrorMessage msg=@step.message /><</>
+    lift <section><ErrorMessage msg=@step.message /></>
   } else {
-    lift <section><p>Done//
+    lift <section><p>Done</></>
   }
 }
 ```
@@ -22025,7 +22028,7 @@ Error E-TYPE-081 at line 6: `partial match` is not valid in a rendering context.
   variant `.Inactive`, making it indistinguishable from a missing-arm bug.
   Use `match` with an `else` arm instead:
     match @status {
-        .Active => <p>Active/,
+        .Active => <p>Active</>,
         else => {}   // or provide markup for .Inactive
     }
 ```
@@ -22262,7 +22265,7 @@ type PaymentError:enum = {
     ExpiredCard
         renders <div class="error">Card has expired. Please update your payment method.</>
     NetworkError(detail: string)
-        renders <div class="error">${detail} <button onclick=retry()>Retry//
+        renders <div class="error">${detail} <button onclick=retry()>Retry</></>
 }
 ```
 
@@ -29050,7 +29053,7 @@ executes at program run time. These phases SHALL NOT be mixed in a single `^{}` 
 The compiler's codegen pass SHALL produce the following structure for every runtime `^{}`
 block:
 
-```
+```text
 _scrml_meta_effect(
   <scopeId>,
   function(meta) {
@@ -30427,7 +30430,7 @@ The bare `prose` class SHALL emit a base rule (color, max-width, font-size, line
 
 Each nested rule SHALL use the form:
 
-```
+```css
 .prose :where(<selector>):not(:where([class~="not-prose"] *)) { ... }
 ```
 
@@ -31772,7 +31775,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-CONTRACT-001 | §53.11 | Inline predicate violation at compile time (statically provable) | Error |
 | E-CONTRACT-001-RT | §53.11 | Inline predicate violation at runtime | Runtime |
 | E-CONTRACT-002 | §53.11 | Named shape not found in registry, or the inline predicate is malformed, or a union with a refined member has a member with no runtime test (S459) (reported where the refinement is declared, every zone; emitted at `compiler/src/type-system.ts` `checkRefinementJudgeable`.) | Error |
-| E-CONTRACT-003 | §53.11 | Predicate references external state — use `<machine>` instead | Error |
+| E-CONTRACT-003 | §53.11 | Predicate references external state. ~~— use `<machine>` instead~~ ⚑ **INTERIM (S482, #2101 r1)** — `<machine>` was REMOVED (S305/S307, §51.0.L, `E-DEPRECATED-001`), so the advice to write one is struck. What E-CONTRACT-003 should advise instead is an OPEN OWNER QUESTION: the §66 field contracts (§66.13) have no value guard over an external cell, and the only stated successor, the keyword swap to `<engine>`, is itself §66.21-soft. Gap `g-spec-contract-003-machine-advice-s482`. | Error |
 | E-CONTRACT-004-WARN | §53.11 | `bind:value` HTML attribute conflicts with predicate-generated attribute | Warning |
 | E-BPP-001 | §3.5 | Body pre-parser encountered unparseable logic block | Error |
 | E-BS-000 | §4 | Block splitter encountered malformed block structure | Error |
@@ -31884,7 +31887,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | W-GIVEN-PRESENCE-DEPRECATED | §42.2.3, §63.7 | The in-place presence guard — `given x :> { … }`, the multi-name `given x, y :> { … }`, the same guard inside a markup `${ … }`, and the `given x :>` match arm — is SOFT-DEPRECATED (§63.1 Stage 1). It parses, lowers and runs as before; one diagnostic per site (a guard written with the legacy `=>` separator fires this code alone, not W-GIVEN-ARROW-LEGACY as well). The message names the canonical form — `if (x is given) { … }` / `if (x is given && y is given) { … }`; for the arm, `else :>` after the `not :>` arm — plus `scrml fix` and §42.2.3. NOT fired at the §66.7.5 rebind head `given c = @h :>`, at an engine transition guard `given (cond)` (§4.11.4), or at `given` used as an identifier. Resolution: `scrml fix` (its default `given-presence` rule, `compiler/src/commands/fix-given-presence.js`), which verifies each site by compiling and refuses a site impl#1 compiles differently today. **Provenance:** ruling:user-voice-scrml.md S462 "a, go" — *"the in-place presence guard `given x :> { … }` (incl. multi-variable `given x, y :>`, the markup-context form, and the `given x :>` match arm) is SOFT-DEPRECATED through the §63 lifecycle"* (code name: PA reading recorded with the ruling, bryan's veto window). Emitted at `compiler/src/type-system.ts:14266` (the `given-guard` case; message via `givenPresenceDeprecatedMessage`); not at a malformed head (E-SYNTAX-044 alone) nor at the empty node impl#1 leaves after a declaration ending in `is given`. Also emitted by the bootstrap for the logic-context guard (its in-place guard parser in `compiler/self-host-v2/parse.scrml`, which reads the guard as `if (x is given && …)`); the bootstrap parses neither the `given` arm nor a markup-`${}` guard, so it has no emit site for those. **Severity Info** (S462 fix round, PA call in bryan's veto window: matches the sibling W-IS-SOME-DEPRECATED and the §63 precedents W-ARM-PIPE-LEGACY / W-MATCH-ARROW-LEGACY; first landed as Warning). | Info |
 | E-GIVEN-PRESENCE-DEPRECATED | §42.2.3, §63.7 | **Reserved** (§63.2) end-of-window code for the in-place presence guard and the `given x :>` match arm. Not scheduled (§63.7 permanent-soft; gate-blocked until the `scrml fix` rule is verified-landed, §63.4). Never fires before a §62 MAJOR event schedules it. **Provenance:** ruling:user-voice-scrml.md S462 "a, go" (*"a reserved E-code in §34"*; the name is the PA reading recorded with the ruling). **Nominal / not yet emitted.** | Error |
 | W-COLON-SHORTHAND-LEGACY-PLACEMENT | §4.14, §51.0.I, §18.0.1 | A `:`-shorthand body uses the legacy AFTER-`>` placement (`<Variant rule=... > : expr`) instead of the canonical inside-opener placement (`<Variant rule=... : expr>`). Both parse, build, and emit identically during the deprecation window; the inside-opener form is canonical across every locus (Pillar 5 — one `:`-shorthand placement: HTML elements §24, `<each>` per-item §17.7.6, match block-form arms §18.0.1, engine state-children §51.0.I). The lint is ARM / state-child-context-scoped — it fires ONLY where after-`>` was ever a legal placement (engine state-children + match arms); HTML elements and `<each>` per-item never used after-`>`, so the lint never fires there. Resolution: move the `: expr` inside the opener, before the `>`, or run `bun scrml migrate --fix` (AST-driven; MUST NOT be a text replace — a `>` can appear inside a string attribute value or a markup body). New code SHALL use the inside-opener placement; existing samples MAY migrate at convenience. The end-of-window timing promotes this to a reserved `E-COLON-SHORTHAND-LEGACY-PLACEMENT` (not yet emitted). (S160 — S154 ruling (b); mirrors the W-MATCH-ARROW-LEGACY / W-GIVEN-ARROW-LEGACY / W-LIFECYCLE-LEGACY-ARROW deprecation template.) | Info |
-| W-CONST-AT-DEPRECATED | §6.6.1 | The legacy expression-form derived-cell declaration `const @name = expr` is deprecated; the canonical (and per §6.6.1 SOLE) derived-cell form is `const <name> = expr`. The `@`-form still compiles + registers in logic / top-level / `${...}` contexts during the deprecation window. Inside a **raw markup element body**, however, NEITHER form is a valid derived-decl: the legacy `const @name` silently DROPS the cell (inert text — the read site then resolves to nothing), and the canonical `const <name>` does NOT register there either — its `<name>` parses as a markup element open-tag and loud-errors `E-CTX-001`. The canonical derived-decl form `const <name>` is for **logic / file-top-level / `${...}`** contexts; to declare a derived cell a markup body consumes, write it in a `${...}` logic block. Resolution: rewrite `const @name = expr` as `<name=(expr)/>` (§66.9), or run `bun scrml migrate --fix` (AST-driven). New code SHALL use `<name=(expr)/>`; existing samples MAY migrate at convenience. **R4 (S482):** the fix-it is the §66 locked declaration `<name=(expr)/>` (§66.9 — derived exactly when `expr` reads a cell), not `const <name> = expr`, which is itself deprecated (§66.21 row 2, `W-CONST-CELL-DEPRECATED`). Provenance: ruling:user-voice-scrml.md S482 "⭐ RULED — every retirement / deprecation PR adds a retired-forms ledger row and migrates" — the same answer confirmed audit R4: *"re-point the W-CONST-AT-DEPRECATED fix-it from the deprecated `const <x>` to `<x=(expr)/>`"*. Retired-forms ledger row `const-at`. (impl#1's message still names `const <name>` — frozen; the bootstrap refuses `const @x` by name with the `<x=(expr)/>` fix-it, `compiler/self-host-v2/refusals.scrml`.) The end-of-window timing promotes this to a reserved `E-CONST-AT-DEPRECATED` (not yet emitted). **Fires:** in logic / top-level contexts emitted by TS (`compiler/src/type-system.ts`, the `case "state-decl"` path, gated on `shape === "derived" && isConst === true && structuralForm === false`); at the markup-element-body silent-drop site (where no AST node is produced) emitted by TAB (`compiler/src/ast-builder.js` `scanMarkupBodyConstAtDecls`, called from `liftBareDeclarations` on the non-decl-site markup path). (Added 2026-06-13, sym-cell-registration-completeness; markup-body fire site added 2026-06-13 fixup; the Info-severity precedent is W-MATCH-ARROW-LEGACY — like it, an info-level deprecation steering lint; the deprecation-CYCLE shape (warn-window -> reserved hard error) mirrors W-PURE-DEPRECATED / W-MATCH-ARROW-LEGACY both.) | Info |
+| W-CONST-AT-DEPRECATED | §6.6.1 | The legacy expression-form derived-cell declaration `const @name = expr` is deprecated; the derived-cell form is the §66 locked declaration `<name=(expr)/>` (§66.9). *(S482 #2101 r1 LOW-3: this row called `const <name> = expr` "the canonical (and per §6.6.1 SOLE)" form; that form is itself deprecated, §66.21 row 2, `W-CONST-CELL-DEPRECATED`.)* The `@`-form still compiles + registers in logic / top-level / `${...}` contexts during the deprecation window. Inside a **raw markup element body**, however, NEITHER form is a valid derived-decl: the legacy `const @name` silently DROPS the cell (inert text — the read site then resolves to nothing), and `const <name>` does NOT register there either — its `<name>` parses as a markup element open-tag and loud-errors `E-CTX-001`. The (itself deprecated) `const <name>` form is for **logic / file-top-level / `${...}`** contexts; to declare a derived cell a markup body consumes, write it in a `${...}` logic block. Resolution: rewrite `const @name = expr` as `<name=(expr)/>` (§66.9), or run `bun scrml migrate --fix` (AST-driven). New code SHALL use `<name=(expr)/>`; existing samples MAY migrate at convenience. **R4 (S482):** the fix-it is the §66 locked declaration `<name=(expr)/>` (§66.9 — derived exactly when `expr` reads a cell), not `const <name> = expr`, which is itself deprecated (§66.21 row 2, `W-CONST-CELL-DEPRECATED`). Provenance: ruling:user-voice-scrml.md S482 "⭐ RULED — every retirement / deprecation PR adds a retired-forms ledger row and migrates" — the same answer confirmed audit R4: *"re-point the W-CONST-AT-DEPRECATED fix-it from the deprecated `const <x>` to `<x=(expr)/>`"*. Retired-forms ledger row `const-at`. (impl#1's message still names `const <name>` — frozen; the bootstrap refuses `const @x` by name with the `<x=(expr)/>` fix-it, `compiler/self-host-v2/refusals.scrml`.) The end-of-window timing promotes this to a reserved `E-CONST-AT-DEPRECATED` (not yet emitted). **Fires:** in logic / top-level contexts emitted by TS (`compiler/src/type-system.ts`, the `case "state-decl"` path, gated on `shape === "derived" && isConst === true && structuralForm === false`); at the markup-element-body silent-drop site (where no AST node is produced) emitted by TAB (`compiler/src/ast-builder.js` `scanMarkupBodyConstAtDecls`, called from `liftBareDeclarations` on the non-decl-site markup path). (Added 2026-06-13, sym-cell-registration-completeness; markup-body fire site added 2026-06-13 fixup; the Info-severity precedent is W-MATCH-ARROW-LEGACY — like it, an info-level deprecation steering lint; the deprecation-CYCLE shape (warn-window -> reserved hard error) mirrors W-PURE-DEPRECATED / W-MATCH-ARROW-LEGACY both.) | Info |
 | W-MATCH-VALUE-UNUSED | §48.11, §48.13 | The last statement of a function with NO return-type annotation is a value-producing `match` whose value is NOT returned (no `return`) and is therefore discarded — ~~the function falls through to `undefined` (a plain `function` has NO implicit return per §48.11 / §7.3)~~ the function returns no value (no form has an implicit tail return, §48 "The return rule"). ~~This is spec-correct fall-through, but~~ The silently-discarded value is almost always a mistake. Resolution: add `return` before the `match` ~~, or change the declaration to `fn` / a return-typed `function` (which carry tail-expression implicit return)~~. Does NOT fire for `return match`, ~~`fn`/return-typed functions~~ a function with a declared return type (its unreturned tail is E-TYPE-043), a side-effect-only (block-arm) match, or a match that is not the last statement. **Amended S469** (ruling:user-voice-scrml.md S469 "⭐ RULED — fall-off and tail returns: ALWAYS EXPLICIT" — *"Always explicit (Recommended)"*): the struck text described the retired tail return; the warning's reach to an un-annotated `fn` is **Nominal on impl#1** (impl#1 fires it on a plain `function` only). (Catalog addition S144 Cluster D — Bug AA; emitted by CG at `compiler/src/codegen/emit-functions.ts`.) | Warning |
 | E-VARIANT-AMBIGUOUS | §14.10, §18.0.3 | Bare variant reference (e.g., `let x = .Small` or `<Small>` arm pattern) is ambiguous because the position's type is a union with multiple members declaring the variant, OR the position has no statically-known enum type context. §14.10 covers general expression positions (LHS state-decl / let / const annotations, fn params, fn return); §18.0.3 covers match-arm patterns. Qualify the variant: `TypeName.Small` / `<TypeName.Small>`. | Error |
 | E-ENGINE-INVALID-TRANSITION | §51.0.F, §51.0.G | Direct write to engine variable or `.advance()` violates the from-state's `rule=` contract. Statically rejected when from-state is known; runtime-thrown otherwise. **S479 (§6.13.5):** on a `debounced=` / `throttled=` engine cell the runtime check runs when the held write COMMITS (a violating commit leaves the cell at its prior value — a §19.17 trap, reported when the commit runs in a timer), and a LITERAL held write whose target no variant reachable from the initial variant admits is rejected statically at the write site (ruling:user-voice-scrml.md S479 "⭐ RULED — the rest of S478 hand-off §3.B, PA recs adopted" item 8; both emitted by the bootstrap — the static check at `compiler/self-host-v2/analyze.scrml`, the commit check in the runtime `compiler/self-host-v2/slice-m1/runtime/runtime.js` `timed`; Nominal on impl#1). **v0.3 Option-d carve-out:** self-writes (target equals current variant) are NO-OPS, NOT violations — see §51.0.F.1 + W-ENGINE-SELF-WRITE-DETECTED. | Runtime |
@@ -33802,7 +33805,7 @@ A `<channel>` is a **scrml-defined structural element** that provides persistent
 
 **Grammar (informal):**
 
-```
+```ebnf
 program-body       ::= ( channel-decl | page-decl | markup | logic-block | ... )*
 channel-decl       ::= '<channel' attribute* '>' channel-body '</>'
 channel-body       ::= ( state-decl | logic-block | server-fn-decl | <onTransition> ... )*
@@ -39301,6 +39304,7 @@ The gate is **binding-aware** (mirroring the §41.19/§41.20 import-binding prec
 
 A `fn` that requires asynchronous data (e.g., a server call result) SHALL receive that data as a parameter at its call site, not perform the async operation internally. The call site itself uses the body-split / CPS mechanism (§19.9.3) — the canonical scrml async surface; no source-level `await` is required.
 
+<!-- retired-neg: async-await — Invalid — E-FN-005 (async / await in a `fn`, §19.9.8) -->
 ```scrml
 // Invalid — E-FN-005: async fn declaration
 async fn buildProfile(id: int) {
@@ -40709,6 +40713,7 @@ for { tick(); }                                    // valid — a statement loop
 
 A `while (cond) { … }` statement. `while` is a reserved word with no meaning in scrml (§49.1).
 
+<!-- retired-neg: while-loop — the E-LOOP-WHILE-RETIRED catalogue example -->
 ```scrml
 while (pos < len) { pos += 1; }   // Error E-LOOP-WHILE-RETIRED
 for (pos < len) { pos += 1; }     // the fix: the same head, under `for`
@@ -40723,6 +40728,7 @@ for (pos < len) { pos += 1; }     // the fix: the same head, under `for`
 
 A `do { … } while (cond)` statement. `do` is a reserved word with no meaning in scrml (§49.1).
 
+<!-- retired-neg: do-while-loop — the E-LOOP-DO-WHILE-RETIRED catalogue example -->
 ```scrml
 do { tries += 1; } while (!ok && tries < 5);                 // Error E-LOOP-DO-WHILE-RETIRED
 for { tries += 1; if (ok || tries >= 5) { break; } }          // the fix (§49.3.6)
@@ -40922,6 +40928,7 @@ once outside the loop, or pass it as a parameter to a function called before the
 
 ### Example 8 — Invalid: a retired `while` (E-LOOP-WHILE-RETIRED)
 
+<!-- retired-neg: while-loop — Example 8 — Invalid: a retired `while` (E-LOOP-WHILE-RETIRED) -->
 ```scrml
 ${
     while (hasData()) {
@@ -41046,7 +41053,7 @@ the PA's brief, "Move §49.13 into §66.12". Direction of change: inert.)*
 The primary motivating use case is the regex iteration idiom:
 
 ```scrml
-while ((m = re.exec(str)) is given) {
+for ((m = re.exec(str)) is given) {
     // process match m
 }
 ```
@@ -41216,16 +41223,14 @@ The type of `x = value` is the type of `value`, which must be assignable to the 
 
 #### 50.5.1 Assignment to fn-Local Variables
 
-> ⚑ **S469 pointer:** the examples here use JavaScript's `push` / `unshift` / `splice` on a tape, which the language refuses (`E-TAPE-JS-METHOD`); tape methods are named after their grants (`.append` / `.pop`, `.prepend` / `.shift`, `.insert` / `.remove`), and a local tape needs a typed grant (§66.12.6, O63).
-
 Assignment to variables declared inside a `fn` body is valid as an expression. The fn body's constraints (§48.3) are not relaxed; the expression form of assignment is purely a parsing/evaluation concern, not a permissions concern.
 
 ```scrml
-fn scanMatches(str: string, re: asIs) {
-    let results = [];
+fn scanMatches(str: string, re: asIs) -> ScanResult {
+    let results: string[free, append] = [];        // a local tape needs a typed grant (§66.12.6, O63)
     let m = not;
-    while ((m = re.exec(str)) is given) {
-        results.push(m[0]);
+    for ((m = re.exec(str)) is given) {            // `while` retired S469 (§49.4.1)
+        results.append(m[0]);                      // `push` refused, E-TAPE-JS-METHOD (§66.12.6)
     }
     let out = <ScanResult>;
     out.matches = results;
@@ -41282,17 +41287,17 @@ Reactive variable assignment-as-expression compiles to the reactive setter. The 
 
 #### 50.8.1 W-ASSIGN-001 — Assignment in Condition Without Double Parentheses
 
-**Trigger:** `=` appears as the root (outermost) expression of a `while`, `if`, or `else-if` condition without being wrapped in an additional pair of parentheses.
+**Trigger:** `=` appears as the root (outermost) expression of a `for` (condition head), `if`, or `else-if` condition without being wrapped in an additional pair of parentheses.
 
 **Severity:** Warning.
 
 **Message:**
 ```
-W-ASSIGN-001: Assignment (`=`) used as the condition of `while` at line N.
+W-ASSIGN-001: Assignment (`=`) used as the condition of `for` at line N.
   Did you mean `==` for equality comparison?
   If assignment is intentional, use double parentheses to signal intent:
 
-    while ((x = expr)) { ... }
+    for ((x = expr)) { ... }
 
   Single parentheses in a condition with `=` as the root expression are ambiguous.
 ```
@@ -41453,23 +41458,21 @@ ${
 
 #### 50.10.1 Valid — Regex Iteration (Primary Use Case)
 
-> ⚑ **S469 pointer:** the examples here use JavaScript's `push` / `unshift` / `splice` on a tape, which the language refuses (`E-TAPE-JS-METHOD`); tape methods are named after their grants (`.append` / `.pop`, `.prepend` / `.shift`, `.insert` / `.remove`), and a local tape needs a typed grant (§66.12.6, O63).
-
 ```scrml
 ${
-    function extractAll(str: string, pattern: string) {
+    function extractAll(str: string, pattern: string) -> string[] {
         const re = new RegExp(pattern, "g");
-        let results = [];
+        let results: string[free, append] = [];
         let m = not;
-        while ((m = re.exec(str)) is given) {
-            results.push(m[0]);
+        for ((m = re.exec(str)) is given) {
+            results.append(m[0]);
         }
         return results;
     }
 }
 ```
 
-Expected: Compiles without error or warning. `m = re.exec(str)` is not the root expression of the while condition — `is given` is — so W-ASSIGN-001 is not triggered. `m` is declared with `let` before the loop. The double-parens form around the assignment `(m = re.exec(str))` is the expression form; the outer condition parens are the while's required syntax.
+Expected: Compiles without error or warning. `m = re.exec(str)` is not the root expression of the `for` condition — `is given` is — so W-ASSIGN-001 is not triggered. `m` is declared with `let` before the loop. The double-parens form around the assignment `(m = re.exec(str))` is the expression form; the outer condition parens are the `for` head's required syntax. *(S482 #2101 r1: migrated from `while` / `.push` / an ungranted `let results = []` — the retired forms, §49.4.1, §66.12.6. Checked on the bootstrap: no language error; it refuses `new RegExp(…)`, `.exec(…)` and the index read on `exec`'s result as E-BOOTSTRAP-UNSUPPORTED — App. D host calls it does not build yet, `g-boot-assign-as-expression-unbuilt-s473` for the condition form.)*
 
 Compiled JavaScript output (abbreviated; `is given` lowers per §42.5 with single-evaluation temp form per §42.2.4):
 ```javascript
@@ -41552,7 +41555,7 @@ fn parseTokens(input: string) {
     const tokenRe = /\w+/g;
     let tokens = [];
     let m = not;
-    while ((m = tokenRe.exec(input)) is given) {
+    for ((m = tokenRe.exec(input)) is given) {
         let t   = <Token>;
         t.value = m[0];
         t.start = m.index;
@@ -47325,8 +47328,8 @@ The canonical decision rule for when to use an inline predicate vs a `<machine>`
 | `number(>=0 && <=@maxMana)` | Contextual (references reactive var) | `<machine>` |
 
 The boundary case `number(>=0 && <=@maxMana)` SHALL be rejected with `E-CONTRACT-003` if
-written as an inline predicate, because `@maxMana` is an external reactive reference. The
-developer SHALL express this constraint as a `<machine>` guard instead.
+written as an inline predicate, because `@maxMana` is an external reactive reference. ~~The
+developer SHALL express this constraint as a `<machine>` guard instead.~~ ⚑ **INTERIM (S482, #2101 r1)** — `<machine>` was REMOVED (S305/S307, §51.0.L, `E-DEPRECATED-001`), so the advice to write one is struck. What E-CONTRACT-003 should advise instead is an OPEN OWNER QUESTION: the §66 field contracts (§66.13) have no value guard over an external cell, and the only stated successor, the keyword swap to `<engine>`, is itself §66.21-soft. Gap `g-spec-contract-003-machine-advice-s482`.
 
 ### §53.3.3 Assignment Semantics
 
@@ -47784,21 +47787,14 @@ field-level check already rejects the value.
 
 If a predicate expression contains any reference to a reactive variable (`@name`), sibling field
 reference (`self.field`), or any identifier that resolves outside the incoming-value scope, the
-compiler SHALL emit `E-CONTRACT-003` at compile time with a message directing the developer to
-use `<machine>` instead.
+compiler SHALL emit `E-CONTRACT-003` at compile time. ~~with a message directing the developer to
+use `<machine>` instead.~~ ⚑ **INTERIM (S482, #2101 r1)** — `<machine>` was REMOVED (S305/S307, §51.0.L, `E-DEPRECATED-001`), so the advice to write one is struck. What E-CONTRACT-003 should advise instead is an OPEN OWNER QUESTION: the §66 field contracts (§66.13) have no value guard over an external cell, and the only stated successor, the keyword swap to `<engine>`, is itself §66.21-soft. Gap `g-spec-contract-003-machine-advice-s482`.
 
 ```scrml
 // INVALID — @maxMana is an external reactive reference
 <hp>: number(>=0 && <=@maxMana) = 100;
 // E-CONTRACT-003: predicate references external reactive variable '@maxMana'.
 // Inline predicates must be stateless.
-// For constraints that reference reactive state, use <machine>.
-// Example:
-//   <machine name=HpRange for=number> {
-//       * => * given (value >= 0 && value <= @maxMana)
-//   }
-//   /
-//   <hp>: HpRange = 100
 ```
 
 ---
@@ -48001,21 +47997,16 @@ E-CONTRACT-003: Inline predicate references external reactive variable '@maxMana
   Inline predicates must be stateless — they may only reference the incoming value
   and its properties. They may not reference reactive variables, sibling fields,
   or any external binding.
-
-  For constraints that depend on external state, use <machine>:
-
-    <machine name=HpRange for=number> {
-        * => * given (value >= 0 && value <= @maxMana)
-    }
-    </>
-    <hp>: HpRange = 100
 ```
+
+⚑ **INTERIM (S482, #2101 r1)** — `<machine>` was REMOVED (S305/S307, §51.0.L, `E-DEPRECATED-001`), so the advice to write one is struck. What E-CONTRACT-003 should advise instead is an OPEN OWNER QUESTION: the §66 field contracts (§66.13) have no value guard over an external cell, and the only stated successor, the keyword swap to `<engine>`, is itself §66.21-soft. Gap `g-spec-contract-003-machine-advice-s482`. *(Struck from the message above: "For constraints that depend on external state, use
+\<machine\>", with a `machine name=HpRange for=number` example.)*
 
 Normative statements:
 > The compiler SHALL emit E-CONTRACT-003 when a predicate expression contains any reference
 > that resolves outside the incoming-value scope.
-> The compiler SHALL include an example of the equivalent `<machine>` construct in the
-> E-CONTRACT-003 message.
+> ~~The compiler SHALL include an example of the equivalent `<machine>` construct in the
+> E-CONTRACT-003 message.~~ ⚑ **INTERIM (S482, #2101 r1)** — `<machine>` was REMOVED (S305/S307, §51.0.L, `E-DEPRECATED-001`), so the advice to write one is struck. What E-CONTRACT-003 should advise instead is an OPEN OWNER QUESTION: the §66 field contracts (§66.13) have no value guard over an external cell, and the only stated successor, the keyword swap to `<engine>`, is itself §66.21-soft. Gap `g-spec-contract-003-machine-advice-s482`.
 > E-CONTRACT-003 SHALL be emitted at compile time. It is never a runtime error.
 
 ### E-CONTRACT-004-WARN: `bind:value` type attribute conflict
@@ -48161,15 +48152,9 @@ E-CONTRACT-003: Inline predicate references external reactive variable '@maxScor
   Inline predicates must be stateless — they may only reference the incoming value
   and its properties. They may not reference reactive variables, sibling fields,
   or any external binding.
-
-  For constraints that depend on external state, use <machine>:
-
-    <machine name=ScoreRange for=number> {
-        * => * given (value >= 0 && value <= @maxScore)
-    }
-    </>
-    <playerScore>: ScoreRange = 0
 ```
+
+⚑ **INTERIM (S482, #2101 r1)** — `<machine>` was REMOVED (S305/S307, §51.0.L, `E-DEPRECATED-001`), so the advice to write one is struck. What E-CONTRACT-003 should advise instead is an OPEN OWNER QUESTION: the §66 field contracts (§66.13) have no value guard over an external cell, and the only stated successor, the keyword swap to `<engine>`, is itself §66.21-soft. Gap `g-spec-contract-003-machine-advice-s482`. *(Struck from this expected output: the `machine name=ScoreRange for=number` suggestion.)*
 
 ---
 
@@ -52531,7 +52516,7 @@ Conditional application reuses the **`class:`-family** (§5.5.2) sibling: **`sty
 
 One fixed chain, reasoned top-to-bottom, **no `(id,class,type)` arithmetic anywhere** (§Rulings row 5):
 
-```
+```text
 applied style=  >  class / id / specific author rule (component-scope `#{}`)  >  universal `*` / bare-root (`html`, `body`) author rule  >  program-global `#{}` (escape hatch — `@layer global`)  >  <defaults> / DOM-inherited  >  built-in reset (`@layer reset`)  >  browser initial
 ```
 

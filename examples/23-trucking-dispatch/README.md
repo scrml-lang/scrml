@@ -41,7 +41,7 @@ The app exercises:
 
 ## File layout
 
-```
+```text
 examples/23-trucking-dispatch/
 ├── README.md                  this file
 ├── FRICTION.md                friction log (26+ entries)

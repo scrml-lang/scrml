@@ -284,9 +284,19 @@ jobs:
       # row's hit outside labelled negatives / allow markers / the dated `pending` debt, or any count rising.
       # Ruling: user-voice-scrml.md S482 "every retirement / deprecation PR adds a retired-forms ledger row
       # and migrates". Tested by compiler/tests/unit/retired-forms-lint-s482.test.js.
-      - name: Retired-forms gate (no retired form outside labelled negatives; soft counts may not rise)
+      # #2101 r1 (HIGH-3): every (row, file) count must EQUAL the baseline, and the baseline / ledger are
+      # compared with the base revision's (--base-ref, scripts/ci-pr-base.sh; HEAD~1 on push / schedule):
+      # a PR cannot raise a count, add a key, give a new HARD row debt, or drop / downgrade a row.
+      - name: Retired-forms gate (no retired form outside labelled negatives; counts equal the base-checked baseline)
         if: ${{ !cancelled() }}
-        run: bun scripts/retired-forms-lint.ts
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          MERGE_GROUP_BASE: ${{ github.event.merge_group.base_sha }}
+        run: |
+          BASE=$(scripts/ci-pr-base.sh --fallback HEAD~1) ||
+            { echo "retired-forms gate: no base revision — refusing (fail closed)" >&2; exit 1; }
+          bun scripts/retired-forms-lint.ts --base-ref "$BASE"
       # S409 — checks every Sections row's range/size AND asserts the scan reached all sections (a
       # stray line ends the table scan, and a zero over a partial scan is not a pass).
       # S474 — stale totals / row Lines-Size cells (exit 4) WARN: generated-regen.yml regenerates them.
