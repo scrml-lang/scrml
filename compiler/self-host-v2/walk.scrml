@@ -531,6 +531,13 @@ ${
         return out;
     }
 
+    // s482 r1 (#2105 review HIGH-1) — one node's shared-instance reference (sharedRefs, per node):
+    // print.scrml constReads counts a read of a cell declared outside the body as a read of that
+    // binding (§7.6 rule (b): such a cell is classified as the library's plain initializers are).
+    export fn sharedRefOf(n: Node) -> Sym | not {
+        return sharedOf(n);
+    }
+
     fn sharedOf(n: Node) -> Sym | not {
         return match n {
             .NInst(i: i) :> sharedDecl(i),

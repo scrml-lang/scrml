@@ -11841,7 +11841,7 @@ ${
         // file-scope bindings it reads or writes, at any depth)
         out = out.concat(valueLetDiags(g, t, sum, writes, sites, lets));
         out = out.concat(derivedUntrackedDiags(g, t, sum, reads, lets));
-        return out.concat(bodyReachDiags(g, t, sum, usesR, binds));
+        return out.concat(bodyReachDiags(g, t, sum, usesR, binds)).concat(outerSeedReachDiags(g, t, sum, usesR, binds));
     }
 
     // =========================================================================
@@ -12983,6 +12983,83 @@ ${
             }
         }
         return out;
+    }
+
+    // s482 r1 (#2105 review MED-1 / MED-2; §7.6 R1 — a cell declared outside the body is Load code:
+    // "before the body, in link order, then source order", ruling:user-voice-scrml.md-S482-outside-
+    // cell-seed-time; §7.6 R2 — "Code that runs at place p … may reach … only bindings whose place is
+    // before p. Otherwise E-SCOPE-001"). The seed of such a cell (in an imported file, or in the
+    // entry file before or after `<program>`) runs at its place among the file-scope bindings outside
+    // the body — after those before it in link order, then source order, and before the program
+    // body. One that reaches a binding declared after it there, or ANY binding of the program body
+    // (the body runs after every outside seed — a cell written after `</program>` too), directly,
+    // through a function it calls or hands on, or through a cell it reads whose seed has not run, is
+    // E-SCOPE-001 — at compile time, not a load-time ReferenceError (probes c05b / c05c / c06 / y16 /
+    // y23 / y24 / y26) nor a value from the wrong order (y20). The same judgment as a body seed
+    // (cellReach / codeReach), on places in that order: a binding outside the body at 2i+1 (its
+    // index i among the file-scope bindings, link order), the cell at 2a (a = the bindings before
+    // it), a body binding after them all. Not judged: a derived locked cell (computed when read,
+    // §66.9 rule 3), a persisted one (its seed is its stored value's default, computed at
+    // construction — g-boot-persist-seed-at-construction-s482).
+    fn outerSeedReachDiags(g: Globals, t: Tables, sum: Summary, usesD: FxAtom[][], binds: int[]) -> Diag[] {
+        const late: int = 2000000000;
+        let body: int[] = [];
+        for (const f0 of g.files) {
+            for (const it0 of f0.items) {
+                const k0: AItemK = it0.k;
+                const ps0: AItem[] = match k0 {
+                    .ProgramItem(p: p) :> p.items,
+                    // no-default-arm: only the program holds body bindings
+                    _ :> []
+                };
+                for (const bp0 of bodyPlaces(g, f0.path, ps0)) { body = body.concat([bp0.sym]); }
+            }
+        }
+        let places: BodyPlace[] = [];
+        let i: int = 0;
+        for (const kc of g.consts) {
+            if (kc.ok) {
+                let pos: int = 2 * i + 1;
+                if (body.indexOf(kc.sym.id) >= 0) pos = late;
+                places = places.concat([{ sym: kc.sym.id, name: kc.name, pos: pos }]);
+            }
+            i = i + 1;
+        }
+        let out: Diag[] = [];
+        for (const f of g.files) {
+            for (const it of f.items) {
+                const k: AItemK = it.k;
+                const ad: ADecl | not = match k {
+                    .DeclItem(d: x) :> x,
+                    // no-default-arm: a cell outside the body is a top-level declaration item
+                    _ :> not
+                };
+                if (ad is given && attrNamed(ad.mods, "persist") is not) {
+                    for (const gd of g.decls) {
+                        const di: DeclInfo = gd.info;
+                        if (di.nid == ad.nid && di.sym.id != g.program.id && di.fields.length == 1 && di.fields[0].nid == di.nid) {
+                            const fi: FieldInfo = di.fields[0];
+                            if (fi.wcap is given || !lockedDerived(g, t, [], fi.init)) {
+                                let a: int = 0;
+                                for (const kc2 of g.consts) { if (kc2.nid < di.nid) a = a + 1; }
+                                const cx: BodyCx = { g: g, t: t, sum: sum, usesD: usesD, binds: binds, file: f.path, places: places, cells: [], prog: g.program.id, pfields: programCells(g) };
+                                const c: BodyCell = { sym: fi.sym.id, name: ad.name, pos: 2 * a, init: fi.init, derived: false };
+                                const r: SeedReach | not = cellReach(cx, c, c.pos, [c.sym]);
+                                if (r is given) out = out.concat([outerLaterDiag(r, ad.name, r.bp.pos == late)]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    fn outerLaterDiag(r: SeedReach, cell: string, inBody: boolean) -> Diag {
+        const n: string = r.bp.name;
+        let where: string = "`" + n + "` is declared after `@" + cell + "` (in link order — each imported file before the file that imports it — then source order)";
+        if (inBody) where = "`" + n + "` is declared in the program body, which runs after every cell declared outside it is seeded";
+        return newDiag("E-SCOPE-001", "`" + n + "` is used before it is initialized — the seed of `@" + cell + "` (a cell declared outside the program body: its seed runs before the body, in link order, §7.6 R1 S482)" + r.how + " and " + where + ", so `" + n + "` is not initialized when that seed runs (§7.6 R2). Declare `" + n + "` before `@" + cell + "`, or declare the cell where the value is ready", r.file, r.span);
     }
 
     // The program body's cells (BodyCell): each declaration item of the body that is a field of

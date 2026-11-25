@@ -51,7 +51,7 @@ ${
              findFn, findServerFn, findDb } from "./core.scrml";
     import { Node, allNodes } from "./walk.scrml";
     import { JsExpr, JsStmt, JsProp, jid, jstr, jnum, jcall, jmember, jmcall, sexpr, printModule } from "./js.scrml";
-    import { RouteOut, Ctx, coreRefusal, sliceName, serverCtx, serverFnJs, envelopedFnJs, symNameOf, routeJs, routeName, routePath, calledServerFnsWith, shakeProgram, routeEntryChecks,
+    import { RouteOut, Ctx, coreRefusal, sliceName, serverCtx, serverFnJs, envelopedFnJs, symNameOf, routeJs, routeName, routePath, calledServerFnsWith, shakeProgram, outerRefusal, routeEntryChecks,
              sqlTextName, dbVarName, hostImports, hostFnJs, constsReadIn, constStmts, serverInits, wireOrNull, channelRefusal, chOpsJs,
              ChReset, chFoldWhy, chResets, chValueJs, chEdgesJs } from "./print.scrml";
 
@@ -80,6 +80,9 @@ ${
         // s482 r1 (#2061 review M1/M2): the program the client artifact is printed from too
         // (print.scrml shakeProgram — no unreached nested function, no unconstructed component)
         const p: CoreProgram = shakeProgram(p0, []);
+        // s482 r1 (#2105 review HIGH-1): print.scrml outerRefusal — never printed here either
+        const orf: string[] = outerRefusal(p);
+        if (orf.length > 0) return { js: "", refused: orf, routes: [] };
         // s481 r1 (#2041 review H1/M1): the bindings no code reads whose initializer reaches
         // server-only code — this artifact runs them (print.scrml serverInits)
         const si: int[] = serverInits(p);
