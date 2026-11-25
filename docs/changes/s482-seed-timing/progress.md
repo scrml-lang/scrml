@@ -110,3 +110,30 @@ Brief: ~/.cache/scrml/review/s482-briefs/fix-2105-r1.md; review ~/.cache/scrml/r
 | types-gate --check | OK, 182 unchanged |
 | host-global-scan 1/2, 2/2 | 0 violations, exit 0 |
 | e2e-render-map | 259 pass / 0 fail |
+
+## r2 — #2105 r1 review fix round (S482)
+
+Brief: ~/.cache/scrml/review/s482-briefs/fix-2105-r2.md; review ~/.cache/scrml/review/s482-2105-r1rev/review.md. Probes + harness: ~/.cache/scrml/review/s482-2105-r2/ (`h/run.sh`, `h/all.sh`, `p/r2/` new probes). Base = origin/main 1e8a11758.
+
+- 0. merged origin/main (#2106 Q6 hold): main deleted constructReadDiags (our r2 LOW-A message edit inside it dropped with it); SPEC §7.6 body-sequence paragraph kept both sides (main's struck effect/request sentence). Hold/seed tests re-run (hold-body, effect-deps-mount, handler-reach slices + hold-body Chromium): pass.
+- 1. HIGH-A: print.scrml `readsCellReach` — in an expression root, a `Local` that is not a file-scope binding (findConst / a `<db>` load value) counts as a cell read, fail closed (`freeLocalRead`); a function body's own bindings are not judged so. Audit: its other callers — `constSeedField` (Q13 locked fields / program cells; field and prop-default initializers see only file-scope bindings and places, so only a lambda parameter written there changes: derived, as on base) and `outerRefusal` (fail closed the same way). Chromium w01/w02/w04/w08/w10/w11/w12 = base; a13 2; w20 (row constant, no row item) seeded at each row's mount (2 2, a later row 11).
+- 2. MED-A: analyze `outerSeedReachDiags` places the program's own cells after every outside seed; `codeReach` finds them (direct, and a function's `c:` atom); `fileScopePass` runs that judgment for a program with no file-scope binding too (`anyOuterCell`). e12 / e12c / e12e / e12f → E-SCOPE-001; e12b / e12d controls unchanged.
+- 3. LOW-A, 4. LOW-B, 5. INFO-1: SPEC §7.6 R1 direction text per shape; circular-server-only provenance (i3d, j4); gap g-boot-server-init-writes-client-binding-s482 (W- follow-up, not built).
+- 6. INFO-2: g-boot-body-unread-cell-server-only-s482 + o2b, o9. o9 NOT fixed here: its plain-`let` twin (p/r2/o9-let) ships identically on base and head — the shared classification counts a client write as a use (constReads); an outer-only fix would split one shape's two spellings. Fix for both recorded in the gap.
+
+### r2 gates (head vs base origin/main 1e8a11758)
+
+| gate | result |
+|---|---|
+| pre-commit (merge, code, docs) | PASS (58367 pass / 0 fail) |
+| pre-push | PASS (first attempt: shard 1 memory kill without SCRML_HOOK_SHARD_MEM_MB; re-run with it) |
+| pretest | exit 0 |
+| bootstrap-conformance --json | head = base: PASS 851 / FAIL 3 / NOT-TWINNED 628 / UNSUPPORTED 491 / CRASH 0; 0 per-case diffs (1973) |
+| slices (outer-cell-place, client-roots, registry-client, seed-reach, value-no-write, body-run-order, hold-body ×2, effect-deps-mount, handler-reach) | 219 pass / 0 fail / 5 skip (registry-client env-gated) |
+| Chromium SCRML_BROWSER_TESTS=1 (seed-timing, use-site-row NEW, hold-body, construct-init-place, effect-deps-mount, rcdata-holes, rcdata-init-place) | 62 pass / 0 fail |
+| r1rev harness, 159 probes (u61 ×63, x/, fix/, r0/, e/, w/, r2/) head vs base | u61 identical (client-zz 1 line both); every other change listed in the r2 report with its ruling basis |
+| corpus differential (2977) | 0 newly rejected / accepted / code changes; 1 client diff (own-value-type/unproven-annotation-pos, Q13 names); 0 server diffs |
+| s34-census --check-new --base 1e8a11758 | PASS |
+| types-gate --check | OK, 182 unchanged |
+| host-global-scan 1/2, 2/2 | 0 violations (pre-existing compile throws only) |
+| e2e-render-map | 259 pass / 0 fail |
