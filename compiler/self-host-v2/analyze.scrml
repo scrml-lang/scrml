@@ -11847,6 +11847,8 @@ ${
         // file-scope bindings it reads or writes, at any depth)
         out = out.concat(valueLetDiags(g, t, sum, writes, sites, lets));
         out = out.concat(derivedUntrackedDiags(g, t, sum, reads, lets));
+        // s482 (lane s482-display-untracked) — §6.15 A5, W-DISPLAY-UNTRACKED, on the same closures
+        out = out.concat(displayUntrackedDiags(g, t, sum, writes, sites, reads, lets));
         return out.concat(bodyReachDiags(g, t, sum, usesR, binds));
     }
 
@@ -12090,6 +12092,270 @@ ${
     fn untrackedDiag(p: ValuePos, how: string, name: string, span: ASpan, file: string) -> Diag {
         const msg: string = p.what + " " + how + ", a file-scope `let` that code writes. `" + name + "` is plain state and is not tracked: a derived value is recomputed only when a cell it reads changes (§6.6), so this one would not update when `" + name + "` is written (§6.15 A3). Make `" + name + "` a cell, or compute this value in the handler that writes `" + name + "`";
         return newDiag("E-DERIVED-READS-UNTRACKED", msg, file, span);
+    }
+
+    // =========================================================================
+    // s482 (lane s482-display-untracked; RULED S482, ruling:user-voice-scrml.md-S482-display-untracked-
+    // warning: *"build it — a warning when a plain `let` that is displayed is written by a later effect,
+    // request or handler, with a fix-it to make it a cell."* — owner: *"yes, your recommendations on all
+    // four"*) — W-DISPLAY-UNTRACKED, §6.15 A5. A display of a plain file-scope `let` shows the value the
+    // `let` had when the display rendered: a write of a plain `let` marks nothing (§6.6 — the dirty flags
+    // track cells only), so the display is not updated when code that runs AFTER it renders writes the
+    // `let` (the printer binds `${n}` as `rt.text(…, () => n)`, re-read only when a cell it reads changes).
+    // The displays: every render position of §6.15 item 3 (valuePositions' RenderKind — an interpolation,
+    // a Tier-0 gather, a non-handler attribute value: `class=`, `class:x=`, `style=`, `if=` / `show=`,
+    // `<each in=… key=…>`, …), in the program body and in a declaration's markup. What they read: the
+    // `let` by name, or through a function they call or hand on, at any depth (the `reads` closure, as A3).
+    // The writers that run after the display renders (`writes` closure, as A1 / A3 — constrained to the
+    // #2096 path):
+    //   live — an event handler (`on…=`, any element, a component's markup included); an `<effect>` /
+    //     `when … changes` body; a `<request>` body (Q6 holds its first run to after the body — so does
+    //     an effect's); a runtime `^{ }` block (it re-runs when a cell it reads changes, §22.5 — a first run
+    //     at a spine place is setup, a re-run is not, and the bootstrap does not tell them apart: counted
+    //     live, fail toward the warning); a function value in body-top or spine-initializer code (an arrow
+    //     / block lambda — it runs when it is called, a host callback or timer included) and a function
+    //     handed on as a value there (whatever receives it may call it later); a body-top statement in a
+    //     declaration's markup (it runs at each instance's mount);
+    //   spine, after the display's place — a `<program>` body-top statement or a file-scope initializer
+    //     on the spine whose source place is after the display (same file): it runs after the display
+    //     rendered, during the body.
+    // NOT a writer: spine code BEFORE the display's place (setup — the display shows the final setup
+    // value, A2), load-phase code (it runs before the body), a function body by itself (it is judged where
+    // it is called). A display in a declaration's markup has no single place in the body (its instance's),
+    // so only live writers are judged for it (PA reading, S482 lane s482-display-untracked; prov=pa-ruled).
+    // The message names the display, the `let`, one writer (and its call chain) and the fix-it: the cell
+    // declaration that replaces the `let`, and `@n` for `n` at every use. A warning: it does not fail the
+    // compile (§34).
+    // =========================================================================
+    type DuCx:struct = { g: Globals, t: Tables, sum: Summary, six: SymIx, writes: FxAtom[][], sites: LetW[][], lets: int[] }
+    // A write of a file-scope `let` (`sym`) by code that may run after a display renders: `who` names
+    // the code, `how` the call chain ("" — a direct write), `pos` its place on the spine (live: -1).
+    type DispW:struct = { sym: int, who: string, how: string, pos: int, live: boolean, file: string }
+
+    fn displayUntrackedDiags(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], reads: FxAtom[][], lets: int[]) -> Diag[] {
+        if (lets.length == 0) return [];
+        const cx: DuCx = { g: g, t: t, sum: sum, six: nodeSymIx(sum.nodes), writes: writes, sites: sites, lets: lets };
+        let ws: DispW[] = [];
+        for (const ds of g.decls) {
+            for (const n of declMarkup(ds)) { ws = ws.concat(nodeDispWriters(cx, n, ds.file, ds.isProgram)); }
+        }
+        ws = ws.concat(spineInitWriters(cx));
+        if (ws.length == 0) return [];
+        let out: Diag[] = [];
+        for (const ds of g.decls) {
+            for (const n of declMarkup(ds)) {
+                for (const p of nodePositions(t, n, ds.file)) {
+                    if (p.vk == ValueKind.RenderKind) out = out.concat(displayDiags(cx, ws, reads, p, ds.isProgram));
+                }
+            }
+        }
+        return out;
+    }
+
+    // One display: each written `let` it reads (directly, then through a call), reported once, with
+    // the first writer that runs after it renders.
+    fn displayDiags(cx: DuCx, ws: DispW[], reads: FxAtom[][], p: ValuePos, prog: boolean) -> Diag[] {
+        let out: Diag[] = [];
+        let seen: int[] = [];
+        for (const b of seedBlocks(p.v)) {
+            for (const ne of nameExprsIn(b)) {
+                const id: int = constSymOfFact(nameFact(cx.t.names, ne.nid));
+                if (id >= 0 && cx.lets.indexOf(id) >= 0 && seen.indexOf(id) < 0) {
+                    const w: DispW | not = laterWriter(ws, id, p, prog);
+                    if (w is given) {
+                        seen = seen.concat([id]);
+                        out = out.concat([displayDiag(cx, p, id, "", w, ne.span, p.file)]);
+                    }
+                }
+            }
+        }
+        for (const r of scanValue({ t: cx.t, file: p.file }, p.v, emptyScan()).refs) {
+            const j: int = ixGet(cx.six, r.sym);
+            if (j >= 0 && !isValueLabel(r.name)) {
+                for (const a of reads[j]) {
+                    const id: int = atomBinding(a.key);
+                    if (a.key.indexOf("b:") == 0 && cx.lets.indexOf(id) >= 0 && seen.indexOf(id) < 0) {
+                        const w: DispW | not = laterWriter(ws, id, p, prog);
+                        if (w is given) {
+                            seen = seen.concat([id]);
+                            const chain: string = chainText(fxChain(cx.sum, reads, j, a)) + " → " + letNameOf(cx.t, id);
+                            out = out.concat([displayDiag(cx, p, id, " (it calls `" + r.name + "`, which reads it: `" + chain + "`)", w, r.span, r.file)]);
+                        }
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    // The first writer of `sym` that runs after display `p` renders: a live one, or — for a display of
+    // the program body — spine code whose place is after the display's, in the same file.
+    fn laterWriter(ws: DispW[], sym: int, p: ValuePos, prog: boolean) -> DispW | not {
+        for (const w of ws) {
+            if (w.sym == sym && (w.live || (prog && w.file == p.file && w.pos > p.span.start))) return w;
+        }
+        return not;
+    }
+
+    fn displayDiag(cx: DuCx, p: ValuePos, sym: int, via: string, w: DispW, span: ASpan, file: string) -> Diag {
+        const name: string = letNameOf(cx.t, sym);
+        let after: string = "after this display renders";
+        if (!w.live) after = "later in the body, after this display renders";
+        const msg: string = p.what + " at line " + lineOf(cx.g, p.file, p.span.start) + " reads `" + name + "`, a file-scope `let`" + via + ", and " + w.who + " writes `" + name + "`" + w.how + " " + after + ". `" + name + "` is plain state and is not tracked: the display shows the value `" + name + "` had when it rendered, and is not updated when `" + name + "` is written (§6.15 A5). " + cellFixIt(cx, sym);
+        return newDiag("W-DISPLAY-UNTRACKED", msg, file, span);
+    }
+
+    // The fix-it: the cell declaration that replaces the `let` (§66.9 rule 2 — `let` before the `<`; an
+    // opener value other than a literal or an `@` reference is parenthesized, §66.2), and `@n` for `n`.
+    fn cellFixIt(cx: DuCx, sym: int) -> string {
+        for (const c of cx.g.consts) {
+            if (c.sym.id == sym) {
+                let written: string = "let " + c.name;
+                const an: Type | not = c.annot;
+                if (an is given) written = written + ": " + typeName(an);
+                const lit: string = literalShown(c.init);
+                let wv: string = lit;
+                let cv: string = lit;
+                if (lit == "") {
+                    wv = "…";
+                    cv = "(…)";
+                }
+                let cell: string = "let <" + c.name;
+                const ty: Type | not = c.ty;
+                if (ty is given) cell = cell + ":" + typeName(ty);
+                cell = cell + "=" + cv + "/>";
+                let keep: string = "";
+                if (lit == "") keep = " (the same initializer, in the parentheses)";
+                return "Make `" + c.name + "` a cell: replace `" + written + " = " + wv + ";` with `" + cell + "`" + keep + ", and write `@" + c.name + "` for `" + c.name + "` at every read and write (`" + "$" + "{@" + c.name + "}`, `@" + c.name + " = …`) — a write of a cell updates every display that reads it";
+            }
+        }
+        return "Make it a cell";
+    }
+
+    // A literal initializer as written ("" — anything else).
+    fn literalShown(e: AExpr) -> string {
+        const k: AExprK = e.k;
+        return match k {
+            .Num(raw: r) :> r,
+            .Str(v: s) :> "\"" + s + "\"",
+            .Bool(v: b) :> (b ? "true" : "false"),
+            .NotLit :> "not",
+            // no-default-arm: one question — is it a literal
+            _ :> ""
+        };
+    }
+
+    // The writers in one markup node, at any depth.
+    fn nodeDispWriters(cx: DuCx, n: ANode, file: string, prog: boolean) -> DispW[] {
+        const k: ANodeK = n.k;
+        return match k {
+            .Elem(e: e) :> elemDispWriters(cx, e, file, prog),
+            .Effect(w: w) :> siteDispWriters(cx, AAttrValue.Braced(w.body, ""), effectWho(cx, w, file), -1, true, [], "", file),
+            .Request(r: r) :> (r.pend < 0 ? siteDispWriters(cx, AAttrValue.Braced(r.body, ""), "the `<request>` body at line " + lineOf(cx.g, file, r.span.start), -1, true, [], "", file) : []),
+            .Run(b: b, meta: mt) :> runDispWriters(cx, b, mt, n.span.start, file, prog),
+            .Gather(f: f) :> rowDispWriters(cx, f, file, prog),
+            .Text(text: x) :> [],
+            .Interp(e: x) :> [],
+            .DeclNode(d: x) :> [],
+            .Css(c: x) :> []
+        };
+    }
+
+    fn effectWho(cx: DuCx, w: AEffect, file: string) -> string {
+        if (w.keyword) return "the `when … changes` body at line " + lineOf(cx.g, file, w.span.start);
+        return "the `<effect>` body at line " + lineOf(cx.g, file, w.span.start);
+    }
+
+    fn rowDispWriters(cx: DuCx, f: AFor, file: string, prog: boolean) -> DispW[] {
+        let out: DispW[] = [];
+        for (const r of gatherRows(f)) { out = out.concat(nodeDispWriters(cx, r, file, prog)); }
+        return out;
+    }
+
+    fn elemDispWriters(cx: DuCx, e: AElem, file: string, prog: boolean) -> DispW[] {
+        let out: DispW[] = [];
+        for (const a of e.attrs) {
+            if (eventName(a.name) != "") out = out.concat(siteDispWriters(cx, a.value, "the `" + a.name + "=` handler on `<" + e.tag + ">` at line " + lineOf(cx.g, file, a.span.start), -1, true, [], "", file));
+        }
+        for (const kid of e.kids) { out = out.concat(nodeDispWriters(cx, kid, file, prog)); }
+        return out;
+    }
+
+    // A `${ }` statement run: a runtime `^{ }` block is live (it re-runs); a body-top statement of the
+    // program is spine code at its place, except its function values (live); one in a declaration's
+    // markup runs at each instance's mount (live).
+    fn runDispWriters(cx: DuCx, b: ABlock, meta: string, pos: int, file: string, prog: boolean) -> DispW[] {
+        const line: int = lineOf(cx.g, file, pos);
+        if (meta != "") return siteDispWriters(cx, AAttrValue.Braced(b, ""), "the runtime `^{ }` block at line " + line + " (it re-runs when a cell it reads changes, §22.5)", -1, true, [], "", file);
+        const fv: string = "a function value in the body-top statement at line " + line + " (it runs when it is called — a callback, a timer)";
+        if (!prog) return siteDispWriters(cx, AAttrValue.Braced(b, ""), "the statement at line " + line + " (it runs at each instance's mount)", -1, true, [], "", file);
+        return siteDispWriters(cx, AAttrValue.Braced(b, ""), "the body-top statement at line " + line, pos, false, deferredSpansIn(b), fv, file);
+    }
+
+    // The program body's file-scope initializers on the spine (a call or a function value there may
+    // write a `let`; one with no single place is a value position and may not, A1).
+    fn spineInitWriters(cx: DuCx) -> DispW[] {
+        let out: DispW[] = [];
+        for (const f of cx.g.files) {
+            for (const it of f.items) {
+                const k: AItemK = it.k;
+                const ps: AItem[] = match k {
+                    .ProgramItem(p: p) :> p.items,
+                    // no-default-arm: only the program body holds a spine
+                    _ :> []
+                };
+                for (const ci of ps) {
+                    const ck: AItemK = ci.k;
+                    const c: AConst | not = match ck {
+                        .ConstItem(c: x) :> x,
+                        // no-default-arm: one question of an item — is it a file-scope binding
+                        _ :> not
+                    };
+                    if (c is given) {
+                        let kw: string = "const";
+                        if (c.mutable) kw = "let";
+                        const line: int = lineOf(cx.g, f.path, ci.span.start);
+                        const fv: string = "a function value in the initializer of `" + kw + " " + c.name + "` at line " + line + " (it runs when it is called — a callback, a timer)";
+                        out = out.concat(siteDispWriters(cx, AAttrValue.Bare(c.init), "the initializer of `" + kw + " " + c.name + "` at line " + line, ci.span.start, false, deferredSpansInExpr(c.init), fv, f.path));
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    // The `let` writes of one piece of code `v` (`who`, at `pos`; `live`): direct, and through each
+    // function it calls or hands on (the `writes` closure). A write inside `defer` (a function value of
+    // spine code) and a function handed on as a value from spine code are live, named `deferWho`.
+    fn siteDispWriters(cx: DuCx, v: AAttrValue, who: string, pos: int, live: boolean, defer: ASpan[], deferWho: string, file: string) -> DispW[] {
+        let out: DispW[] = [];
+        for (const b of seedBlocks(v)) {
+            for (const w of letWritesIn(cx.t, b, cx.lets, file)) {
+                if (!live && spanInAny(w.span, defer)) {
+                    out = out.concat([{ sym: w.sym, who: deferWho, how: "", pos: -1, live: true, file: file }]);
+                } else {
+                    out = out.concat([{ sym: w.sym, who: who, how: "", pos: pos, live: live, file: file }]);
+                }
+            }
+        }
+        for (const r of scanValue({ t: cx.t, file: file }, v, emptyScan()).refs) {
+            const j: int = ixGet(cx.six, r.sym);
+            if (j >= 0 && !isValueLabel(r.name)) {
+                let rl: boolean = live;
+                let rw: string = who;
+                if (!live && (r.asValue || spanInAny(r.span, defer))) {
+                    rl = true;
+                    rw = deferWho;
+                    if (!spanInAny(r.span, defer)) rw = who + ", which hands `" + r.name + "` on as a function value (whatever receives it may call it later)";
+                }
+                for (const a of cx.writes[j]) {
+                    const w: LetW = cx.sites[a.root][a.pos];
+                    const chain: string = chainText(fxChain(cx.sum, cx.writes, j, a)) + " → " + w.name;
+                    out = out.concat([{ sym: w.sym, who: rw, how: " (through `" + chain + "`)", pos: pos, live: rl, file: file }]);
+                }
+            }
+        }
+        return out;
     }
 
     // s482 (lane s482-place-fu, #2079 review PRE-2) — the element, named for a message, whose
