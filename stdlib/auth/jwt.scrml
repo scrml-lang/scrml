@@ -175,10 +175,10 @@ ${
      *
      * @param token — JWT string
      * @returns payload object or `not` if token is absent
-     * @fails JwtError::DecodeFailed if base64url decode or JSON.parse throws
+     * @fails JwtError.DecodeFailed if base64url decode or JSON.parse throws
      *
      * Example:
-     *   const payload = decodeJwt(token) !{ ::DecodeFailed(m) -> not }
+     *   const payload = decodeJwt(token) !{ .DecodeFailed(m) -> not }
      *   if (payload && payload.role == "admin") { ... }
      */
     export function decodeJwt(token) ! -> JwtError {
@@ -343,7 +343,7 @@ ${
      *
      * @returns { header, payload, signingInput, signature } or `not` on a
      *          structural (non-3-part) token.
-     * @fails JwtError::DecodeFailed if base64url-decode or JSON.parse throws.
+     * @fails JwtError.DecodeFailed if base64url-decode or JSON.parse throws.
      */
     function decodeJwtParts(token) ! -> JwtError {
         if (!token || typeof token != "string") return not

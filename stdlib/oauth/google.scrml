@@ -81,7 +81,7 @@ ${
      *
      * @param tokens — the object returned by exchangeCode()
      * @returns object — claims (sub, email, ...) or `not` if no id_token
-     * @fails OAuthError::ParseFailed if base64url decode or JSON.parse throws
+     * @fails OAuthError.ParseFailed if base64url decode or JSON.parse throws
      */
     export function parseIdToken(tokens) ! -> OAuthError {
         if (!tokens || !tokens.idToken) return not;

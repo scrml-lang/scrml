@@ -115,7 +115,7 @@ ${
     /**
      * Get a value by key.
      * Returns parsed JSON value, or `not` if not found or expired.
-     * Fails with KvError::ParseFailed if the stored value is malformed JSON.
+     * Fails with KvError.ParseFailed if the stored value is malformed JSON.
      */
     export function get(store, key) ! -> KvError {
         const now = Date.now();

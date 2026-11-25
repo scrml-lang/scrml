@@ -73,6 +73,16 @@ set changes, both sides rejected).
 
 ## 5 — impl#1 gap: g-impl1-variant-colons-lint-s482 (LOW, carried) filed in docs/known-gaps.md.
 
-## Next
-1 SPEC · 2 bootstrap lint + severity regen · 4 corpus migration (+ per-file bootstrap byte compare) · 5 impl#1 gap
-· ledger row (retired-lint PR #? not merged at start — row text in PR body).
+## Commit 3 — stdlib doc comments; gates; ledger row
+- stdlib doc-comment examples (`HostError::Thrown`, `| ::Thrown(…) ->`, `@fails E::V`) → `.` (6 files, 17 lines;
+  comments only — no compile effect).
+- Gates (all foreground, systemd-run scoped): pre-commit PASS ×2 (58284 / 58289 pass, 0 fail); pretest 0;
+  bootstrap-conformance --json base 26e13e4b1 vs head: PASS 849→850 (the new case), FAIL 3→3, CRASH 0, 0 verdict
+  changes on existing cases; impl#1 conformance 1784 pass + 188 xfail of 1972, new case XFAIL as pinned;
+  corpus differential (2975 files, bootstrap, base files+base compiler vs head files+head compiler): 0 verdict
+  diffs, 0 output-byte diffs, 12 code-set diffs — all files rejected on both sides whose `::`-in-expression named
+  refusal (which drops a cascade) is gone, each impl#1-verified identical; s34-census --check-new PASS (3 rows);
+  severity --check current; host-global-scan 1/2 + 2/2 rc 0; snippet-gate 120/0; claim-gate 0 failed;
+  types-gate OK 182 unchanged; corpus-compile-floor PASS; e2e-render-map 259/0.
+- Ledger: #2101 (s482-retired-lint) is OPEN, not merged — the `variant-colons` row update is in the PR body; the PA
+  merges main and lands it in a follow-up commit.
