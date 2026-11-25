@@ -81,3 +81,15 @@ cell after `n = 5`, before `n = 7`) 11 (ruling: 6, its place); z09 6; z10 (prop 
 - s34-census --check-new --base 52eb72585 PASS; types-gate --check OK (182 unchanged); snippet-gate
   120/0/9 spec-ahead; e2e-render-map 259/0; host-global-scan --check 1/2 exit 0, 2/2 exit 0;
   claim-gate 0 failed; delta-lint PASS; retired-forms gate: not on main (N/A)
+
+## r1 — #2105 review fix round (S482)
+
+Brief: ~/.cache/scrml/review/s482-briefs/fix-2105-r1.md; review ~/.cache/scrml/review/s482-2105/review.md.
+
+- 0. merged origin/main (b65149386) — clean.
+- 1. HIGH-1 (security): outer cells take the S481 server-only classification — print.scrml `outerPlaced` (in `shakeProgram`, so both printers judge one program) runs `serverInitsExposing` on the program with each live outer cell as a binding whose initializer is its seed (`outerAsConsts`; `constReads` counts a shared-instance reference as a read — walk.scrml `sharedRefOf`); a server-only one is that binding in the printed program (no client file holds it; print-server `serverConsts` runs it). `serverInitsRound` judges "client reads" from the client's own code (largest set) — closes the pre-existing plain-const t6c leak. `runsK`: an outer seed is placed even when it does nothing (t11). `outerRefusal`: a server-only seed reading a cell → E-BOOTSTRAP-UNSUPPORTED (g-boot-outer-cell-server-seed-reads-cell-s482).
+- 2. MED-1 + 4. MED-2: analyze `outerSeedReachDiags` — an outer seed reaching a later link-order binding, any body binding, or (on demand, `outerCellOf`) a later outer cell whose seed does → E-SCOPE-001. Gap g-spec-imported-cell-seed-time-s482 residue made exact.
+- 3. LOW-1 → built: `nodeGivenSeeds` / `rt.givenSeed` / `rt.propSeed(…, dfltSeed)`; g-boot-use-site-value-seed-s482 resolved (re-rated MED first).
+- 5. LOW-2: E-DERIVED-ENGINE-NO-RULES no longer calls a constant derived (wording split on `cellReads`; lockedWhat needs the tables, which that pass precedes).
+- 6. g-boot-body-unread-cell-server-only-s482 filed (HIGH, ruling-gated, fork (a)/(b)/(c), rec (a)).
+- Pins: compiler/self-host-v2/slice-m4/outer-cell-place-s482.test.js.

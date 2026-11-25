@@ -1269,10 +1269,20 @@ export function derived(scope, init) { return new Derived(scope, init); }
  * s482 (lane s482-seed-timing; ruling:user-voice-scrml.md-S482-locked-field-derived) — a locked
  * attribute whose default is a constant (it reads no cell): with no use-site value it is that
  * constant, a seed computed at the instance's mount (`seeded`); a use-site value is computed when it
- * is read (`derived`), as before.
+ * is read (`derived`) — unless the compiler marked it a constant seed (`givenSeed`, s482 r1): then it
+ * is seeded at the mount too. `dfltSeed` false: the default itself is derived (or a literal).
  */
-export function propSeed(scope, given, init) {
-  return given === undefined ? seeded(init) : derived(scope, init);
+export function propSeed(scope, given, init, dfltSeed = true) {
+  if (given === undefined) return dfltSeed ? seeded(init) : derived(scope, init);
+  // s482 r1 (#2105 review LOW-1, §66.7.6 rule 5): a use-site value the compiler marked a constant
+  // seed (givenSeed) is computed at the mount, like a constant default
+  return given.$seed === true ? seeded(init) : derived(scope, init);
+}
+
+/** s482 r1 (#2105 review LOW-1) — marks a constant use-site value: a seed computed at the mount. */
+export function givenSeed(thunk) {
+  thunk.$seed = true;
+  return thunk;
 }
 
 // ---------------------------------------------------------------------------

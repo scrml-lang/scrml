@@ -14,6 +14,10 @@
 //   (§7.6 R1 + R2), not a load-time ReferenceError (red on fc3097098: c05c / c06 / y16 / y26 crashed
 //   the page at load) nor a value from the wrong order (y20: k = 2, source order 10).
 //
+// LOW-1 (built) — §66.7.6 rule 5: a use-site value that reads no cell is a seed computed at the
+//   instance's mount, as the same expression written as the default is (Q13). Red on fc3097098:
+//   `<cp v=(rn() + 1)/>` gave 11 (computed at the first read, after the click), the default 2.
+//
 // Every case runs on the SHIPPING path: the scrml-boot CLI (leak checks: every client file read) and
 // scripts/scrml-boot.ts `compileSource` + the conformance runner's happy-dom `runBootstrapArtifact`.
 
@@ -41,10 +45,10 @@ async function errors(files) {
   const res = await compileSource(writeApp(files));
   return res.diagnostics.filter((d) => d.severity === "error");
 }
-async function texts(files, ids) {
+async function texts(files, ids, input = []) {
   const res = await compileSource(writeApp(files));
   if (!res.ok) throw new Error("did not compile: " + res.diagnostics.filter((d) => d.severity === "error").map((d) => d.code + " " + d.message).join("; "));
-  const run = await runBootstrapArtifact(res.client.html, res.client.js, [], {}, [], undefined);
+  const run = await runBootstrapArtifact(res.client.html, res.client.js, input, {}, [], undefined);
   return ids.map((id) => String(run.body.querySelector("#" + id)?.textContent ?? "<none>").replace(/\s+/g, " ").trim());
 }
 
@@ -237,6 +241,17 @@ let <a:int=(rk() + 1)/>
 ` }, "k", "declared in the program body");
   }, 180000);
 
+  test("r1: a seed reading a cell declared LATER outside the body constructs it on demand — its seed reaching a binding placed between them is judged at the reader's place", async () => {
+    await scope({ "main.scrml": `\${ let n: int = 1; }
+let <a:int=(@b + 1)/>
+\${ const k: int = n + 10; }
+let <b:int=(k + 1)/>
+<program>
+<p id="o">\${@a},\${@b}</p>
+</program>
+` }, "k", "uses `@b` before its place");
+  }, 180000);
+
   test("controls: an earlier binding (y17: the seed runs before the body's write — 2), a later outer cell read on demand (c05: 12,11)", async () => {
     expect(await texts({ "main.scrml": `\${ let n: int = 1; }
 \${ function rk() -> int { return n; } }
@@ -253,5 +268,41 @@ export let <b:int=(n + 10)/>
 `,
       "main.scrml": `\${ import { a, b } from "./lib.scrml"; }\n<program>\n<p id="o">\${@a},\${@b}</p>\n</program>\n`,
     }, ["o"])).toEqual(["12,11"]);
+  }, 180000);
+});
+
+describe("LOW-1 — a constant use-site value is a seed computed at the mount (§66.7.6 rule 5)", () => {
+  const CP = (def) => `<program>
+\${ let n: int = 1; }
+\${ function rn() -> int { return n; } }
+let <m:int=1/>
+let <show:boolean=false/>
+<cp v:int=(${def})>
+</> renders <p if=(@show)>\${v}</p>
+<span id="o"><cp v=(rn() + 1)/></span>
+<span id="o2"><cp v=(@m + 1)/></span>
+<span id="o3"><cp/></span>
+<button id="b" onclick={ n = 10; @m = 10; @show = true; }>b</button>
+</program>
+`;
+  test("a13 / u3: constant use-site value 2 (the mount), a cell-reading one stays derived (11), the literal default 0", async () => {
+    expect(await texts({ "main.scrml": CP("0") }, ["o", "o2", "o3"], [{ click: "#b" }])).toEqual(["2", "11", "0"]);
+  }, 180000);
+
+  test("u4: over a DERIVED default — the constant use-site value is seeded (2), the default stays derived (110)", async () => {
+    expect(await texts({ "main.scrml": CP("@m + 100") }, ["o", "o3"], [{ click: "#b" }])).toEqual(["2", "110"]);
+  }, 180000);
+
+  test("u1: an instance under if= is seeded when its branch mounts (11), not at load", async () => {
+    expect(await texts({ "main.scrml": `<program>
+\${ let n: int = 1; }
+\${ function rn() -> int { return n; } }
+let <show:boolean=false/>
+<cp v:int=(0)>
+</> renders <p id="o">\${v}</p>
+<div if=(@show)><cp v=(rn() + 1)/></div>
+<button id="b" onclick={ n = 10; @show = true; }>b</button>
+</program>
+` }, ["o"], [{ click: "#b" }])).toEqual(["11"]);
   }, 180000);
 });

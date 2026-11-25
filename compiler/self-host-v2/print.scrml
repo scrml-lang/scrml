@@ -4059,7 +4059,10 @@ ${
     // (clientRegistryIds; r1: by identity, never by name), set by printProgramExposing (withReg);
     // the only types a runtime `reflect` registry prints (regArgs). Empty elsewhere: no other
     // context prints one.
-    type PrintIx:struct = { constructed: string[], reinits: string[], reg: int[] }
+    // s482 r1 (#2105 review LOW-1): `gseeds` — the field of every LOCKED attribute some use site gives
+    // a CONSTANT seed (givenSeedExpr) — §66.7.6 rule 5: a use-site value is a seed computed at the
+    // instance's mount (fieldCtorGiven, createJs).
+    type PrintIx:struct = { constructed: string[], reinits: string[], reg: int[], gseeds: string[] }
 
     fn fieldKey(d: Sym, idx: int) -> string {
         return d.id + ":" + idx;
@@ -4068,11 +4071,49 @@ ${
     fn printIx(p: CoreProgram) -> PrintIx {
         let constructed: string[] = [];
         let reinits: string[] = [];
+        let gseeds: string[] = [];
         for (const n of allNodes(Node.NProgram(p))) {
             constructed = constructed.concat(nodeConstructs(n));
             reinits = reinits.concat(nodeInitOfs(n));
+            gseeds = gseeds.concat(nodeGivenSeeds(p, n));
         }
-        return { constructed: constructed, reinits: reinits, reg: [] };
+        return { constructed: constructed, reinits: reinits, reg: [], gseeds: gseeds };
+    }
+
+    // s482 r1 (#2105 review LOW-1; §66.7.6 rule 5 — a use-site value is a seed computed at the
+    // instance's mount; ruling:user-voice-scrml.md-S482-locked-field-derived — derived only when it
+    // reads a cell): the fields a use site (View.Instance) gives a CONSTANT seed — one that reads
+    // no cell (readsCellReach, fail closed) and whose place can be observed (seedLive). A literal is
+    // the same value wherever it runs; one that reads a cell stays derived.
+    fn nodeGivenSeeds(p: CoreProgram, n: Node) -> string[] {
+        const v: View | not = match n {
+            .NView(v: x) :> x,
+            // no-default-arm: one question — is it a view
+            _ :> not
+        };
+        if (v is not) return [];
+        const pair: GivenAt | not = match v {
+            .Instance(decl: d, attrs: attrs) :> { decl: d, attrs: attrs },
+            // no-default-arm: only an instance is given values
+            _ :> not
+        };
+        if (pair is not) return [];
+        let out: string[] = [];
+        for (const a of pair.attrs) {
+            if (givenSeedExpr(p, a.value)) out = out.concat([fieldKey(pair.decl, a.field)]);
+        }
+        return out;
+    }
+
+    type GivenAt:struct = { decl: Sym, attrs: ConstructAttr[] }
+
+    fn givenSeedExpr(p: CoreProgram, e: Expr) -> boolean {
+        return seedLive(e) && !readsCellReach(p, e);
+    }
+
+    // A locked attribute some use site gives a constant seed (PrintIx.gseeds).
+    fn givenSeedField(ix: PrintIx, d: Decl, i: int, f: Field) -> boolean {
+        return f.wcap is not && f.persist is not && f.init is given && ix.gseeds.indexOf(fieldKey(d.sym, i)) >= 0;
     }
 
     fn nodeConstructs(n: Node) -> string[] {
@@ -4181,7 +4222,10 @@ ${
         for (const f of d.fields) {
             if (isParam(ctx.pix, d, k, f)) {
                 const v: Expr | not = constructValue(attrs, k);
-                if (v is given) {
+                if (v is given && givenSeedField(ctx.pix, d, k, f) && givenSeedExpr(ctx.p, v)) {
+                    // s482 r1 (#2105 review LOW-1): a constant use-site value — a seed at the mount
+                    args = args.concat([rtCall(ctx, "givenSeed", [jthunk(exprJs(ctx, v))])]);
+                } else if (v is given) {
                     args = args.concat([jthunk(exprJs(ctx, v))]);
                 } else {
                     args = args.concat([JsExpr.JUndefined]);
@@ -4210,7 +4254,7 @@ ${
             stmts = [JsStmt.SConst(iv, kidSlot(ctx, kid, dsym.hint))];
             // s482: an instance the program body mounts, holding a live seed (held by the
             // program's factory, holdJs): its seeds run here, at its place in the body's run
-            if (isProgramTid(ctx.p, tid) && liveSeedDecl(ctx.p, d)) stmts = stmts.concat([sexpr(rtCall(ctx, "seedAll", [jid(iv)]))]);
+            if (isProgramTid(ctx.p, tid) && liveSeedDecl(ctx.p, ctx.pix, d)) stmts = stmts.concat([sexpr(rtCall(ctx, "seedAll", [jid(iv)]))]);
         } else {
             stmts = [JsStmt.SConst(iv, createJs(ctx, d, attrs, scopeVar()))];
             if (alias is given) {
@@ -4423,7 +4467,7 @@ ${
                 body = body.concat([JsStmt.SAssign(slot, init)]);
                 init = slot;
             }
-            body = body.concat([JsStmt.SAssign(fieldCell(jid("inst$"), d, i), fieldCtorGiven(fctx, d, f, i, init, usePn))]);
+            body = body.concat([JsStmt.SAssign(fieldCell(jid("inst$"), d, i), fieldCtorGiven(fctx, d, f, i, init, usePn, givenSeedField(ctx.pix, d, i, f)))]);
             body = body.concat(idleWatchJs(fctx, d, f, i));
             i = i + 1;
         }
@@ -4459,7 +4503,7 @@ ${
         let k: int = 0;
         for (const v of mountedInstances(views)) {
             const kd: Decl | not = kidDeclOf(fctx.p, v);
-            if (kd is given && liveSeedDecl(fctx.p, kd)) {
+            if (kd is given && liveSeedDecl(fctx.p, fctx.pix, kd)) {
                 out = out.concat([sexpr(rtCall(fctx, "hold", [JsExpr.JIndex(jmember(jid("inst$"), "kids"), JsExpr.JAnnot(jnum(k), kd.sym.hint))]))]);
             }
             k = k + 1;
@@ -4599,12 +4643,17 @@ ${
     // s482 (lane s482-seed-timing, Q13) — fieldCtor, for a field that may be given a use-site value
     // (`given`, its factory parameter; "" when it is not a parameter). A locked attribute whose
     // DEFAULT is a constant seed (constSeedField) is that seed when the use site gives no value; a
-    // given value is computed when it is read, as before (`rt.propSeed(scope, <given>, <init>)`:
-    // `<given> === undefined ? rt.seeded(<init>) : rt.derived(scope, <init>)`) — ⚑ INTERIM
-    // (g-boot-use-site-value-seed-s482): a use-site value that reads no cell is not yet held to the
-    // mount.
-    fn fieldCtorGiven(ctx: Ctx, d: Decl, f: Field, i: int, init: JsExpr, usePn: string) -> JsExpr {
+    // given value is computed when it is read (`rt.propSeed(scope, <given>, <init>)`:
+    // `<given> === undefined ? rt.seeded(<init>) : rt.derived(scope, <init>)`), unless it is marked
+    // a constant seed — ~~⚑ INTERIM (g-boot-use-site-value-seed-s482)~~ resolved s482 r1, below.
+    // s482 r1 (#2105 review LOW-1 → built; §66.7.6 rule 5): a given value the use site marks a
+    // constant seed (`rt.givenSeed(<thunk>)`, createJs) is that seed too — computed at the mount
+    // (`given.$seed`); `useSeed`: some use site gives this field one, so a field whose default is
+    // derived or a literal takes the same path (`rt.propSeed(scope, <given>, <init>, false)`: no given
+    // value → derived, as before).
+    fn fieldCtorGiven(ctx: Ctx, d: Decl, f: Field, i: int, init: JsExpr, usePn: string, useSeed: boolean) -> JsExpr {
         if (usePn != "" && constSeedField(ctx.p, f)) return rtCall(ctx, "propSeed", [jmember(jid("inst$"), "scope"), jid(usePn), init]);
+        if (usePn != "" && useSeed) return rtCall(ctx, "propSeed", [jmember(jid("inst$"), "scope"), jid(usePn), init, JsExpr.JBool(false)]);
         return fieldCtor(ctx, d, f, i, init);
     }
 
@@ -6417,23 +6466,28 @@ ${
     // s482 — does a declaration's record hold a seed whose place matters (seedLive), itself or in
     // a record it mounts unconditionally, at any depth? Such an instance, mounted unconditionally
     // by the program body, is HELD (`rt.hold`) and seeded at its mount (`rt.seedAll`).
-    export fn liveSeedDecl(p: CoreProgram, d: Decl) -> boolean {
-        return liveSeedIn(p, d, []);
+    // s482 r1 (#2105 review LOW-1): `ix` — and a locked attribute some use site gives a constant
+    // seed (givenSeedField): it is seeded at the mount too.
+    export fn liveSeedDecl(p: CoreProgram, ix: PrintIx, d: Decl) -> boolean {
+        return liveSeedIn(p, ix, d, []);
     }
 
-    fn liveSeedIn(p: CoreProgram, d: Decl, seen: int[]) -> boolean {
+    fn liveSeedIn(p: CoreProgram, ix: PrintIx, d: Decl, seen: int[]) -> boolean {
         if (hasInt(seen, d.sym.id)) return false;
+        let fi: int = 0;
         for (const f of d.fields) {
             const init: Expr | not = f.init;
             if (f.wcap is given && f.persist is not && init is given && seedLive(init)) return true;
             if (constSeedField(p, f)) return true;     // s482 (lane s482-seed-timing, Q13)
+            if (givenSeedField(ix, d, fi, f)) return true;
+            fi = fi + 1;
         }
         const views: View[] | not = d.renders;
         if (views is not) return false;
         for (const v of mountedInstances(views)) {
             const kd: int = viewInstanced(v);
             for (const d2 of p.decls) {
-                if (d2.sym.id == kd && liveSeedIn(p, d2, seen.concat([d.sym.id]))) return true;
+                if (d2.sym.id == kd && liveSeedIn(p, ix, d2, seen.concat([d.sym.id]))) return true;
             }
         }
         return false;
@@ -7451,7 +7505,7 @@ ${
     }
 
     fn withReg(ctx: Ctx, reg: int[]) -> Ctx {
-        const ix: PrintIx = { constructed: ctx.pix.constructed, reinits: ctx.pix.reinits, reg: reg };
+        const ix: PrintIx = { constructed: ctx.pix.constructed, reinits: ctx.pix.reinits, reg: reg, gseeds: ctx.pix.gseeds };
         return { p: ctx.p, pix: ix, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
                  rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles, ns: ctx.ns, owned: ctx.owned };
     }

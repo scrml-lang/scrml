@@ -5574,7 +5574,7 @@ ${
             // E-DERIVED-ENGINE-NO-RULES ("Transitions are determined by the
             // source, not authored"); `let` is the seeded, writable form.
             mode = FieldMode.Derived;
-            if (rg.graph is given) st = derivedRules(te.file, body, st);
+            if (rg.graph is given) st = derivedRules(te.file, body, cellReads(init), st);
         }
         // s475 (s475-boot-lifecycle-type): which DECLARATION may carry the lifecycle type it was given
         // (a lifecycle other than `(not to T)` was refused where it was read: no second report)
@@ -6281,7 +6281,13 @@ ${
     }
 
     // §51.0.J: every `rule=` on a state-child of a DERIVED value.
-    fn derivedRules(file: string, body: ADeclChild[], st0: AS) -> AS {
+    // s482 r1 (#2105 review LOW-2; ruling:user-voice-scrml.md-S482-locked-field-derived — "derived
+    // only when it reads a cell", §66.9 rule 1): `named` — the initializer names a cell itself, so
+    // the value is derived for certain; otherwise it reads bindings through what it calls, and is
+    // derived only if that reaches a cell (lockedWhat's question, which this pass — before the
+    // tables — cannot ask): a CONSTANT otherwise, seeded once at its place. Either way nothing
+    // authors its transitions, so the refusal stands; the message no longer calls a constant derived.
+    fn derivedRules(file: string, body: ADeclChild[], named: boolean, st0: AS) -> AS {
         let st: AS = st0;
         for (const c of body) {
             // s478: §51.0.R "`<onIdle>` is permitted on derived engines … the watchdog can
@@ -6290,7 +6296,8 @@ ${
             for (const x of idleOf(c)) { st = addDiag(st, file, x.span, "E-BOOTSTRAP-UNSUPPORTED", "`<onIdle>` on a derived value is not in the bootstrap yet — a derived engine's watchdog fires only when its source reaches the `to=` target (§51.0.R), which is not built; use `let` for a value the watchdog writes"); }
             for (const sc of stateChildOf(c)) {
                 for (const a of sc.attrs) {
-                    if (a.name == "rule") st = addDiag(st, file, a.span, "E-DERIVED-ENGINE-NO-RULES", "`rule=` on the state-child `<" + sc.name + ">` of a derived value — a locked declaration whose initializer reads cells is derived (§66.9 rule 3), and a derived value's transitions are determined by its source, not authored (§51.0.J). Remove `rule=`, or write `let` before the `<` for a value seeded once from its initializer and then moved along its rules");
+                    if (a.name == "rule" && named) st = addDiag(st, file, a.span, "E-DERIVED-ENGINE-NO-RULES", "`rule=` on the state-child `<" + sc.name + ">` of a derived value — a locked declaration whose initializer reads a cell is derived (§66.9 rule 3), and a derived value's transitions are determined by its source, not authored (§51.0.J). Remove `rule=`, or write `let` before the `<` for a value seeded once from its initializer and then moved along its rules");
+                    else if (a.name == "rule") st = addDiag(st, file, a.span, "E-DERIVED-ENGINE-NO-RULES", "`rule=` on the state-child `<" + sc.name + ">` of a locked value — its initializer is computed, not written: derived if it reads a cell through what it calls (§66.9 rule 3, a derived value's transitions are determined by its source, §51.0.J), and otherwise a constant, seeded once at its place and never moved (§66.9 rule 1, S482). Either way no transition of it is authored. Remove `rule=`, or write `let` before the `<` for a value seeded once from its initializer and then moved along its rules");
                 }
             }
         }
@@ -13025,7 +13032,10 @@ ${
             }
             i = i + 1;
         }
-        let out: Diag[] = [];
+        // every such cell, with its file (a seed reading one placed later constructs it on demand —
+        // its seed runs at the reader's place, so it is judged there too: codeReach / outerCellOf)
+        let cells: BodyCell[] = [];
+        let files: string[] = [];
         for (const f of g.files) {
             for (const it of f.items) {
                 const k: AItemK = it.k;
@@ -13042,17 +13052,43 @@ ${
                             if (fi.wcap is given || !lockedDerived(g, t, [], fi.init)) {
                                 let a: int = 0;
                                 for (const kc2 of g.consts) { if (kc2.nid < di.nid) a = a + 1; }
-                                const cx: BodyCx = { g: g, t: t, sum: sum, usesD: usesD, binds: binds, file: f.path, places: places, cells: [], prog: g.program.id, pfields: programCells(g) };
-                                const c: BodyCell = { sym: fi.sym.id, name: ad.name, pos: 2 * a, init: fi.init, derived: false };
-                                const r: SeedReach | not = cellReach(cx, c, c.pos, [c.sym]);
-                                if (r is given) out = out.concat([outerLaterDiag(r, ad.name, r.bp.pos == late)]);
+                                cells = cells.concat([{ sym: fi.sym.id, name: ad.name, pos: 2 * a, init: fi.init, derived: false }]);
+                                files = files.concat([f.path]);
                             }
                         }
                     }
                 }
             }
         }
+        let out: Diag[] = [];
+        let ci: int = 0;
+        for (const c of cells) {
+            const cx: BodyCx = { g: g, t: t, sum: sum, usesD: usesD, binds: binds, file: files[ci], places: places, cells: cells, prog: g.program.id, pfields: programCells(g) };
+            const r: SeedReach | not = cellReach(cx, c, c.pos, [c.sym]);
+            if (r is given) out = out.concat([outerLaterDiag(r, c.name, r.bp.pos == late)]);
+            ci = ci + 1;
+        }
         return out;
+    }
+
+    // s482 r1 — a read `@x` of a cell declared outside the body (its one own-value field), as the
+    // field's Sym id, when it is one of cx.cells (only outerSeedReachDiags lists such cells); else -1.
+    fn outerCellOf(cx: BodyCx, e: AExpr) -> int {
+        const f: NameFact | not = nameFact(cx.t.names, e.nid);
+        const did: int = match f {
+            .NField(decl: d, inst: x, idx: i) :> (i == 0 ? d.id : -1),
+            // no-default-arm: one question — is it a read of a declaration field
+            _ :> -1
+        };
+        if (did < 0) return -1;
+        for (const gd of cx.g.decls) {
+            const di: DeclInfo = gd.info;
+            if (di.sym.id == did && di.fields.length == 1) {
+                const sid: int = di.fields[0].sym.id;
+                for (const c of cx.cells) { if (c.sym == sid) return sid; }
+            }
+        }
+        return -1;
     }
 
     fn outerLaterDiag(r: SeedReach, cell: string, inBody: boolean) -> Diag {
@@ -13236,7 +13272,9 @@ ${
         }
         for (const a of ats) {
             if (!spanInAny(a.span, defer)) {
-                const c: BodyCell | not = cellOfSym(cx.cells, progCellOf(cx.t, a, cx.prog, cx.pfields));
+                let cid: int = progCellOf(cx.t, a, cx.prog, cx.pfields);
+                if (cid < 0) cid = outerCellOf(cx, a);     // s482 r1: a cell declared outside the body (outerSeedReachDiags)
+                const c: BodyCell | not = cellOfSym(cx.cells, cid);
                 if (c is given && seen.indexOf(c.sym) < 0 && cellRunsAt(c, pos)) {
                     const inner: SeedReach | not = cellReach(cx, c, pos, seen.concat([c.sym]));
                     if (inner is given) return { bp: inner.bp, how: cellHop(c, inner), file: cx.file, span: a.span };
