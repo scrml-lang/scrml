@@ -38,7 +38,7 @@ Any other value (`<program mcp="bogus">`) falls back to `dev-only` and emits `W-
 
 When `<program mcp>` is present, your build directory gains:
 
-```
+```text
 <outputDir>/
   ├── _server.js             ← boot import + startMcpServer({...}) wiring
   ├── _scrml/mcp.js          ← the scrml:mcp runtime shim (the 11-tool server)

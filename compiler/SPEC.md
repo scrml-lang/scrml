@@ -11,7 +11,7 @@
 > **Amendments applied:** 2026-04-08 — §51 added: State Transition Rules and `<machine>` state type (E-ENGINE-001..E-ENGINE-012, E-ENGINE-001-RT). §14.4 amended: `transitions {}` block grammar. §6.1 amended: machine-bound reactive variable declaration.
 > **Amendments applied:** 2026-04-08 — §52 added: State Authority Declarations. Two-tier authority model (`<var server>` Tier 2 — V-kill decl form per §6.1.5; `authority=` on `<Type>` Tier 1), compiler-generated sync infrastructure. §6.1.5 grammar: `state-decl` production carries the `server` decl-attr. §11.3.5 added: `protect=` / `authority=` relationship. E-AUTH-001..E-AUTH-005, W-AUTH-001.
 > **Amendments applied:** 2026-04-08 — §51 revised: `for EnumTypeName` → `for TypeName` (machines govern structs too). `self.*` in guards, `[label]` named clauses, `* => *` wildcard rules, E-ENGINE-013. Radical doubt debate Approach C.
-> **Amendments applied:** 2026-04-09 — §4.4 rewritten: three closer forms → two (`</tagname>` explicit, `</>` inferred). §4.8 deleted (bare `/` disambiguation no longer needed). §3.1 table updated. §3.2 E-CTX-002 wording updated. §4.5, §4.9 updated. §34 error codes updated. Appendix E added: migration guide. All examples updated throughout. **(S482 correction, 2026-11-24: "all examples updated" was not true — 26 example lines and 2 prose/diagnostic renderings (`lift <li>…/;`, `fallback={<div>…/}`, `?? <p>…/}`, `<h2>…/`, bare `/` lines) survived, and the trailing-`/` form was re-adopted downstream as a "terse `/}` closer". S482 migrated every straggler to `</>`. The bootstrap refuses, with E-SYNTAX-050 and the Appendix E hint, a `/}` value closer and every trailing `content/` / bare `/` (not the end of a URL or path word) in markup it reads where that `/` leaves its element, or an element around it, unclosed. A retired closer in a region it does not read as markup text (a body or construct refused by name, logic it cannot parse, a `${ }` block inside markup a runaway raw body swallowed) is not yet named: INTERIM, g-boot-retired-closer-unread-s482. Ruling: user-voice-scrml.md, "the `/}` "terse closer" is the retired trailing-slash closer; Appendix E governs (S482)".)**
+> **Amendments applied:** 2026-04-09 — §4.4 rewritten: three closer forms → two (`</tagname>` explicit, `</>` inferred). §4.8 deleted (bare `/` disambiguation no longer needed). §3.1 table updated. §3.2 E-CTX-002 wording updated. §4.5, §4.9 updated. §34 error codes updated. Appendix E added: migration guide. All examples updated throughout. **(S482 correction, 2026-11-24: "all examples updated" was not true — 26 example lines and 2 prose/diagnostic renderings (`lift <li>…/;`, `fallback={<div>…/}`, `?? <p>…/}`, `<h2>…/`, bare `/` lines) survived, and the trailing-`/` form was re-adopted downstream as a "terse `/}` closer". S482 migrated the stragglers to `</>` — the SPEC's tagged fences in #2095, the 177 sample lines and the untagged-fence / quoted-text sites in s482-retired-lint (#2101 r1). The retired-forms gate (§63, "The retired-forms ledger (S482)"; ledger row `closer-trailing-slash`) reports zero hits of it in what it reads — the `scrml` and untagged fences of the SPEC and the public markdown, and the corpus `.scrml` files (§63 lists exactly what it reads and its known limits) — and fails on a new one. The bootstrap refuses, with E-SYNTAX-050 and the Appendix E hint, a `/}` value closer, and a trailing `content/` / bare `/` in markup it reads (a markup value in logic included) where, in the retired reading, that `/` closes an element left unclosed — its own, or one around it — unless an element inside that one is itself left unclosed with no such `/` (the file's own missing closer), or the `/` sits in an element closed by its own name in which none was named. Not yet named (INTERIM, g-boot-retired-closer-unread-s482): a `/` ending a URL or path word (`see a/b/`, `http://x.com/`, `10:30/` — read as text so prose is never refused), and a retired closer in a region the bootstrap does not read as markup text (a body or construct refused by name, logic it cannot parse, a `${ }` block inside markup a runaway raw body swallowed). Ruling: user-voice-scrml.md, "the `/}` "terse closer" is the retired trailing-slash closer; Appendix E governs (S482)".)**
 > **Amendments applied:** 2026-04-08 — §53 added: Inline Type Predicates. Stateless value constraints (`number(>0 && <10000)`, `string(email)`), three-zone SPARK enforcement, named shape registry, `bind:value` HTML attribute generation. E-CONTRACT-001..E-CONTRACT-004-WARN.
 
 **Version:** 0.5.2-draft
@@ -551,9 +551,9 @@ The `<` in `count < limit` is inside a `${ }` brace-delimited context. The block
 
 **Worked example — valid (nested braces inside logic context):**
 ```scrml
-${ users.filter(u => u.age < 18).map(u => { return <span>; }) }
+${ users.filter(u => u.age < 18).map(u => { return <span>${u.name}</>; }) }
 ```
-Wait — the `<span>` here is OUTSIDE any brace-delimited context at the time it is encountered only if the inner `{ }` braces have been balanced. The block splitter SHALL correctly track brace depth: the `{` after `=>` opens a nested brace; the `}` after `return <span>;` closes it; the outer `${ }` then closes. The `<span>` in the example above IS inside brace depth > 0, so it is raw content. This is correct: JSX-like inline markup inside a logic context is not scrml syntax; it would be a compile error at the tokenizer level.
+Wait — the `<span>` here is OUTSIDE any brace-delimited context at the time it is encountered only if the inner `{ }` braces have been balanced. The block splitter SHALL correctly track brace depth: the `{` after `=>` opens a nested brace; the `}` after `return <span>${u.name}</>;` closes it; the outer `${ }` then closes. The `<span>` in the example above IS inside brace depth > 0, so it is raw content. This is correct: JSX-like inline markup inside a logic context is not scrml syntax; it would be a compile error at the tokenizer level.
 
 **Worked example — invalid (demonstrates misclassification without this rule):**
 ```scrml
@@ -1108,7 +1108,7 @@ advanceAttrValue(src, start):
 ```scrml
 <TabStrip
     tabs=@myTabs
-    tabPanel={ (tab) => <article><h2>${tab.label}/<p>${tab.body}// }
+    tabPanel={ (tab) => <article><h2>${tab.label}</><p>${tab.body}</></> }
 />
 ```
 
@@ -3692,8 +3692,9 @@ changes. Read sites for the derived cell use `@name` exactly as for any other re
 
 **Normative statements:**
 
-- The `const <name> = expr` form SHALL be the sole declaration syntax for derived reactive
-  values. The form `@derived name = expr` (an alternative considered during design) SHALL
+- ~~The `const <name> = expr` form SHALL be the sole declaration syntax for derived reactive
+  values.~~ *(superseded S435/§66.21 row 2: a derived cell is declared `<name=(expr)/>`, §66.9;
+  `const <name> = expr` is deprecated, `W-CONST-CELL-DEPRECATED` — S482 #2101 r1 LOW-3)* The form `@derived name = expr` (an alternative considered during design) SHALL
   NOT be recognized. Any use of `@derived` as a keyword SHALL be a compile error
   (E-REACTIVE-001) with a hint suggesting `const <name> = expr`.
 - A derived reactive value declaration SHALL be valid anywhere a `const-decl` is valid:
@@ -3702,15 +3703,16 @@ changes. Read sites for the derived cell use `@name` exactly as for any other re
   is DEPRECATED. It still parses + registers in logic and top-level contexts. Inside a **raw
   markup element body**, however, NEITHER form is a valid derived-decl: the legacy `const @name`
   silently drops the cell (it stays inert text — neither registered nor emitted), and the
-  canonical `const <name>` does NOT register there either — its `<name>` parses as a markup
-  element open-tag and loud-errors `E-CTX-001`. The canonical derived-decl form `const <name>`
+  `const <name>` (itself deprecated, §66.21 row 2) does NOT register there either — its `<name>` parses as a markup
+  element open-tag and loud-errors `E-CTX-001`. The `const <name>` form
   is for **logic / file-top-level / `${ ... }`** contexts (and the top of a state block); to
   declare a derived cell whose result a markup body consumes, write it in a `${ ... }` logic
   block. The compiler SHALL emit the info-level lint `W-CONST-AT-DEPRECATED` (§34) at every
   `const @name = expr` site — including the silent-drop site inside a markup element body —
-  naming the canonical `const <name> = expr` rewrite; `bun scrml migrate --fix` rewrites it
+  naming the canonical `<name=(expr)/>` rewrite (§66.9); `bun scrml migrate --fix` rewrites it
   (AST-driven). The end-of-window timing promotes this to a reserved `E-CONST-AT-DEPRECATED`.
   (Mirrors the `pure`→`fn` / `server function`→`function` deprecation cycles.)
+  **R4 (S482):** the fix-it is the §66 locked declaration `<name=(expr)/>` (§66.9 — derived exactly when `expr` reads a cell), not `const <name> = expr`, which is itself deprecated (§66.21 row 2, `W-CONST-CELL-DEPRECATED`). Provenance: ruling:user-voice-scrml.md S482 "⭐ RULED — every retirement / deprecation PR adds a retired-forms ledger row and migrates" — the same answer confirmed audit R4: *"re-point the W-CONST-AT-DEPRECATED fix-it from the deprecated `const <x>` to `<x=(expr)/>`"*. Retired-forms ledger row `const-at`.
 - The right-hand side expression SHALL be evaluated lazily (see §6.6.3). The compiler
   SHALL NOT evaluate it at declaration time beyond recording the dependency edges.
 
@@ -3859,6 +3861,7 @@ flush site.
 > code exists, so a `flush()` call is an unknown function, `E-SCOPE-001` on the bootstrap — flagged: a named
 > refusal pointing at pull-on-read may be owed under D28.)*
 
+<!-- retired-neg: flush-call — the record of the retired `flush()` (S473 D22), labelled RETIRED above -->
 ```scrml
 @price = newPrice;
 flush();                            // RETIRED (S473 D22) — forces re-evaluation of all dirty derived nodes
@@ -16845,6 +16848,7 @@ The `fixed` attribute on an element inside a component body marks that element a
 - A caller attempting to override a `fixed` attribute SHALL be a compile error (E-COMPONENT-001).
 
 **Worked example:**
+<!-- retired-neg: fixed-attr — §15.7 is the record of the retired attribute (RETIRED S473 D26, banner above) -->
 ```scrml
 const card = <div class="card">
     <div class="card__footer" fixed>
@@ -18107,7 +18111,7 @@ const TabStrip = <div class="tabs" props={
 
 <TabStrip
     tabs=@myTabs
-    tabPanel={ (tab) => <article><h2>${tab.label}/<p>${tab.body}// }
+    tabPanel={ (tab) => <article><h2>${tab.label}</><p>${tab.body}</></> }
 />
 ```
 
@@ -18235,7 +18239,7 @@ lifted elements to named slots.
 To provide per-item slot content, declare a parametric snippet prop:
   body: snippet(item: ItemType)
 and pass a lambda at the call site:
-  body={ (item) => <li>${item}/ }
+  body={ (item) => <li>${item}</> }
 ```
 
 **Correct idiom — slot content above the `lift` boundary:**
@@ -18567,11 +18571,11 @@ Desugars to:
 ```scrml
 ${
   if (@step.is(Loading)) {
-    lift <section><Spinner /><</>
+    lift <section><Spinner /></>
   } else if (@step.is(Error)) {
-    lift <section><ErrorMessage msg=@step.message /><</>
+    lift <section><ErrorMessage msg=@step.message /></>
   } else {
-    lift <section><p>Done//
+    lift <section><p>Done</></>
   }
 }
 ```
@@ -22097,7 +22101,7 @@ Error E-TYPE-081 at line 6: `partial match` is not valid in a rendering context.
   variant `.Inactive`, making it indistinguishable from a missing-arm bug.
   Use `match` with an `else` arm instead:
     match @status {
-        .Active => <p>Active/,
+        .Active => <p>Active</>,
         else => {}   // or provide markup for .Inactive
     }
 ```
@@ -22334,7 +22338,7 @@ type PaymentError:enum = {
     ExpiredCard
         renders <div class="error">Card has expired. Please update your payment method.</>
     NetworkError(detail: string)
-        renders <div class="error">${detail} <button onclick=retry()>Retry//
+        renders <div class="error">${detail} <button onclick=retry()>Retry</></>
 }
 ```
 
@@ -24743,220 +24747,6 @@ In this example:
 - Error variants with `renders` clauses display context-specific error UIs (retry buttons, explanatory text) without any explicit match handling in the template.
 - *(S451 — §19.6.1 Scope.)* The `load…()` functions here are rendered, so each must be a CLIENT `!` function — one that builds the widget from cells already loaded. A widget whose data comes from the server loads it with a `<request>` and reads the failure from `<#id>.error` (§19.6.2); a `load…()` that called the server here would be E-VALUE-SERVER-CALL (§13.7). *(Provenance: ruling:user-voice-scrml.md S451 "your recs on all five" item 1 · supersedes: nothing struck — the example never said where the `load…()` functions run.)*
 
----
-
-## Appendix A: Interaction Matrix
-
-| Feature | Error System Interaction |
-|---------|------------------------|
-| `fail` keyword | Produces error variant value; requires `!` function |
-| `?` operator | Propagates error to caller; requires `!` function |
-| `!` signature | Declares function as failable; error type in signature |
-| `renders` clause | Optional markup on enum variants; auto-displays in boundary |
-| `<errorBoundary>` | Catches errors in markup; uses `renders` or `fallback` |
-| `match` (§18) | Exhaustive over success + error variants in logic context |
-| `?{}` SQL (§8) | A failable expression everywhere (S451 R11): propagates `SqlError` implicitly in `!` functions (§19.8.2); handled at the site with `!{}` / `match` outside them, else E-ERROR-002 (§19.8.3). No row is not a failure (`.get()` → `not`, `.all()` → `[]`). *(Supersedes: "Produces `SqlError` in `!` functions; `not`/empty outside".)* |
-| `@reactive` (§6) | Reactive variables can hold error variants; trigger updates |
-| `~{}` tests | `assert.fails` / `assert.fails.with` for failable functions |
-| `server` functions (§12) | CPS preserves `!`; errors serialize as tagged JSON. A client call of a server function is failable whether or not it is declared `!` (transport / non-2xx / decode), handled like any `!` call, else E-ERROR-002 (§19.9.10, S451) |
-| `transaction` | Auto-rollback on `fail`; syntactic sugar over BEGIN/COMMIT/ROLLBACK |
-| `pure` (§33) | `pure` and `!` coexist; pure functions can fail without side effects |
-| `lin` (§35) | `lin` variables inside `!` functions follow normal linear rules; `fail` is a scope exit that must consume `lin` variables |
-| `<state>` types (§11 → §6, §52) | `<errorBoundary>` is a pre-defined state type |
-
-## Appendix B: Superseded Spec Text
-
-This section replaces the entirety of §19 (Error Handling) as it existed in the 0.5.0-draft spec. Specifically:
-
-- **§19.1 (Error Context `!{}`):** The `!{}` inline handler syntax is retained as one of the four valid handling modes for `!` function results (§19.4.3, option 3). ~~The arm syntax `| ::ErrorTypeA e -> handlerA` is retained.~~ *(Historical — S451. That sentence read `e` as the error value. A parenthesis-free binder binds the variant's PAYLOAD: `| .V m :>` is `| .V(m) :>`, under §18.7's positional arity (§19.4.3); `->` is a deprecated arm separator (§18.2). Provenance: ruling:user-voice-scrml.md S451 "1a 2 yes 3 yes 4a" — item 2: *"Appendix B's contrary line is historical."*)*
-- **§19.2 (Error Propagation):** Replaced by explicit `?` operator (§19.5) and `!` function signatures (§19.4). Propagation is no longer "inferred by the compiler" -- it is explicit via `?`.
-- **§19.3 (Throwing Errors):** `throw` is replaced by `fail`. SPEC-ISSUE-011 is resolved by this document.
-- **§19.4 (Error Arm Syntax):** Retained within `!{}` inline handler and `match` expressions.
-
-## Appendix C: Future Considerations
-
-The following are explicitly out of scope for this version but noted for future work:
-
-1. **Error type composition** -- Combining multiple error types into a unified error type (e.g., `type AppError = PaymentError | AuthError | SqlError`). This requires union-of-enum support in the type system.
-2. **Error recovery / retry policies** -- Declarative retry logic on `<errorBoundary>` (e.g., `<errorBoundary retries=3 delay=1000>`).
-3. **Error logging / telemetry hooks** -- Automatic error reporting to external services when errors are caught by boundaries.
-4. **Async error streams** -- Error handling for long-lived connections (WebSocket, SSE) where errors arrive asynchronously.
-
-## Appendix D: JS Standard Library Access in Logic Contexts
-
-**Added:** 2026-04-08. Based on self-hosting gauntlet R1 friction — both teams independently relied on JS globals without spec coverage.
-
-> **Amendment S469 — Appendix D says what the language admits.** **Provenance:** ruling:user-voice-scrml.md S440
-> "dpa-055 R1 = Appendix D rewrite + (i) no ambient `Math`" — *"rewrite + i, next Q"* (*"rewrite SPEC Appendix D to
-> what the language actually admits … IN: typed arrays (`Float32Array`…, `Float16Array`), `ArrayBuffer`,
-> `DataView`, the value-ish constructors that already work; OUT: `BigInt` (S440 #4), `Proxy`/`Reflect` … D7 = (i):
-> honor §41.18 — no ambient `Math`"*), ruled S440 and not applied until now · ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: what MUST be spelled out" — *"yeah, I like that better"* and the S469
-> parse rulings (the host conversions `String`, `Number`, `parseInt`, `parseFloat` leave: text goes through a
-> template, parsing through `T.parse`, §14.13) · the conversions deep-dive §14 item 3. **supersedes:** the three
-> lists below as written 2026-04-08 (struck, not deleted). **Direction of change:** newly-rejecting for the OUT
-> names; inert for the rest (the ⚑ list keeps today's behaviour while it is decided). **Nominal / spec-ahead:**
-> impl#1 still admits every struck name (an impl#1 note, FORK RULE row 0).
-
-**What the language admits without import (S469):**
-
-- **IN (S440 dpa-055 R1):** the typed arrays `Float64Array`, `Float32Array`, `Float16Array`, `Int8Array`,
-  `Int16Array`, `Int32Array`, `Uint8Array`, `Uint16Array`, `Uint32Array`; `ArrayBuffer`; `DataView`.
-- **OUT:** `BigInt` (S440 #4), `Proxy`, `Reflect` (S440 dpa-055 R1); `Math` (no ambient `Math`: `scrml:math`,
-  §41.18); `String`, `Number`, `parseInt`, `parseFloat` (S469 conversions: a template is the
-  into-text tool, `T.parse` the parse, §14.13); `isNaN`, `isFinite` *(derived, not a conversion: number
-  predicates, OUT with ambient `Math` under S440 dpa-055 R1 D7 — `scrml:math.isNaN` remains, §41.18; an
-  `isFinite` there is not specified)*; `Array` (S469 *"I do not want JS style
-  arrays in scrml at all"* — the sequence is the tape, §66.12; derived, not separately ruled).
-- **The browser roots `window`, `document`, `navigator` (S471):** IN in a body the compiler places on the client
-  (§12) — an event handler, an `<onMount>` or `<effect>` body, a client function; OUT everywhere else — a
-  server-placed body and a `fn` body (E-FN-004, §48.3.4). For `window` and `document`, route analysis enforces it: a
-  function whose body reads one is client-only (§12.4), so a server function reaching it is E-ROUTE-002 and one body
-  needing both sides is E-ROUTE-005. `navigator` is not in §12.4's client-only list (it has a server referent under
-  Bun), so outside `fn` its OUT is **Nominal / not yet enforced**. Their members are untyped host values (typing is
-  dpa-075 F3, not ruled). *(S473: ruled; drafted as §21.3.3 — typed access is a `<host>` binding, and an untyped
-  use draws `W-HOST-UNTYPED-CALL`, rule 22.)*
-  > **Provenance:** ruling:user-voice-scrml.md S471 "your recs on F0 and F1" (dpa-075 F1 (e): *"Appendix D lists
-  > `window`/`document`/`navigator` (IN for client bodies, OUT elsewhere, aligned with E-ROUTE-005)"*) · **Direction of
-  > change:** clarifying — it names what §6.7.4 rule 5 and E-ROUTE-005 already treat as client-only.
-- ⚑ **OPEN (not yet decided in or out):** every other name of the struck lists (`Boolean`, `Date`, `Error`,
-  `Map`, `Object`, `Promise`, `RegExp`, `Set`, `Symbol`, `TypeError`, `RangeError`, `WeakMap`, `WeakSet`, `WeakRef`,
-  `JSON`, `console`, `Intl`, `encodeURI`, `decodeURI`, `encodeURIComponent`, `decodeURIComponent`, `structuredClone`,
-  `queueMicrotask`, `setTimeout`, `clearTimeout`, `setInterval`, `clearInterval`). R1's *"the value-ish
-  constructors that already work"* is IN by ruling; which of these it names is not enumerated in the ruling, so this
-  appendix does not guess.
-
-~~Inside `${}` logic blocks, the following JavaScript standard globals are available without import or `^{}` ceremony. These are provided by the Bun runtime and are part of the ECMAScript specification.~~ *(struck S469 — the lists below are the 2026-04-08 text.)*
-
-**Value types and constructors:**
-`Array`, `Boolean`, `Date`, `Error`, `Map`, `Number`, `Object`, `Promise`, `RegExp`, `Set`, `String`, `Symbol`, `TypeError`, `RangeError`, `WeakMap`, `WeakSet`, `WeakRef`, `BigInt`, `ArrayBuffer`, `DataView`, `Float32Array`, `Float64Array`, `Int8Array`, `Int16Array`, `Int32Array`, `Uint8Array`, `Uint16Array`, `Uint32Array`
-
-**Utility objects:**
-`JSON` (`.stringify()`, `.parse()`), `Math`, `console`, `Intl`, `Reflect`, `Proxy`
-
-**Global functions:**
-`parseInt`, `parseFloat`, `isNaN`, `isFinite`, `encodeURI`, `decodeURI`, `encodeURIComponent`, `decodeURIComponent`, `structuredClone`, `queueMicrotask`, `setTimeout`, `clearTimeout`, `setInterval`, `clearInterval`
-
-**Note:** `setTimeout`, `setInterval`, and `Promise` are available but their use inside `fn` bodies is prohibited by E-FN-005 (async/timing constraints). Use them in regular `function` bodies only.
-
-~~Instance methods on these types (`.map()`, `.filter()`, `.has()`, `.get()`, `.set()`, `.push()`, `.slice()`, `.trim()`, `.startsWith()`, etc.) are available on any value of the corresponding type.~~ *(struck S469: a value's methods are its type's, not the host's. A string's are D.1 below; a tape's are §66.12.6 (JavaScript's array method names are refused, `E-TAPE-JS-METHOD`); a map's are §59. Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — strings: code points everywhere, `.length` included"; ruling:user-voice-scrml.md S469 "⭐ RULED — tape methods are named after their grants". Direction of change: the struck sentence was the only text admitting the host methods wholesale; what it admitted beyond the typed tables is now refused, `E-STRING-METHOD-UNKNOWN` for a string, D.1 — S469 "more string methods admitted".)*
-
-### D.1 Strings — the typed method table (S469)
-
-> **Amendment S469 — a string counts code points, everywhere.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐
-> RULED — strings: code points everywhere, `.length` included" — *"Code points everywhere (Recommended)"* (*"A
-> string's `.length`, `slice`, `charAt`, index and iteration all count code points ("a😀".length → 2). It differs
-> from JS, and `.length` is O(n). Graphemes (combined emoji) are not addressed; a grapheme API may come later. Tape
-> `.length` is unaffected."*). **supersedes:** for strings, the sentence *"Instance methods on these types (`.map()`,
-> `.filter()`, `.has()`, `.get()`, `.set()`, `.push()`, `.slice()`, `.trim()`, `.startsWith()`, etc.) are available
-> on any value of the corresponding type"* (struck below), which handed every host string method through with
-> JavaScript's UTF-16 meaning; and §49.3.5's note *"`s.length` counts UTF-16 units"*, which the S469 string
-> iteration ruling had asked for and this ruling reverses. **Direction of change:** semantics-changed for every
-> string position and length (JavaScript counts UTF-16 units); newly-rejecting nothing by itself (see "Not in the
-> table"). The bootstrap implements it (`compiler/self-host-v2/analyze.scrml` `strMethodOp`, `methodSig`;
-> `compiler/self-host-v2/slice-m1/runtime/runtime.js` `strLength`, `strSlice`, `strCharAt`, `strIncludes`,
-> `strStartsWith`, `strEndsWith`, `strSplit`); impl#1 carries the divergence (§34.0) and still emits JavaScript's
-> UTF-16 methods.
-
-A `string` is a sequence of Unicode **code points**. Every position, length and match on a string counts code
-points: a surrogate pair is one position; a lone surrogate is a position of its own. A match (`includes`,
-`startsWith`, `endsWith`, a `split` separator) succeeds only where it starts and ends on a code-point boundary, so
-a lone-surrogate argument never matches half of a pair. Graphemes (a base character with combining marks, a
-multi-code-point emoji) are NOT a unit here: `"👍🏽".length` is `2`. A grapheme API may come later. A TAPE's
-`.length` counts its elements and is unaffected.
-
-| Member | Type | Meaning |
-|---|---|---|
-| `s.length` | `int` | the number of code points (`"a😀".length` → `2`). Computing it is O(n). |
-| `s[i]` | `string` | the code point at position `i`; out of range it traps (§66.12.8 rule 6). |
-| `for (c of s)` | `c: string` | each code point in order (§49.3.5). |
-| `s.charAt(i)` | `(i: int) -> string` | the code point at position `i`, or `""` when there is none (a negative `i` included). Never traps. *(PA derivation: the ruling makes a negative position out of range, and `charAt` keeps its non-trapping `""` answer for every out-of-range position; aligning it with `at` — `string \| not` — is the alternative, not taken because `""` is already a defined, non-absent "no character" here.)* |
-| `s.slice(from)`, `s.slice(from, to)` | `(from: int, to: int) -> string` (`to` optional) | the code points from position `from` up to (not including) `to`, or to the end. ~~A negative position counts from the end; positions are clamped to `0 … s.length` (JavaScript's argument rules, counted in code points).~~ *(struck S469 — no negative positions.)* A position greater than `s.length` is clamped to `s.length`, and `to < from` gives `""`. A NEGATIVE position is out of range: a negative literal (`s.slice(-1)`) is compile error **`E-POSITION-NEGATIVE`**; a negative computed position traps with `E-INDEX-OUT-OF-RANGE-RT` (§19.17). Count from the end explicitly: `s.slice(s.length - 1)`. |
-| `s.includes(t)` | `(t: string) -> bool` | `t` occurs in `s` on code-point boundaries. |
-| `s.startsWith(t)`, `s.endsWith(t)` | `(t: string) -> bool` | `s` begins / ends with `t`, on a code-point boundary. |
-| `s.split(sep)` | `(sep: string) -> string[]` | `""` splits into code points; any other separator splits only at code-point boundaries. The result is a new tape with no grants (§66.12.6 rule 2). |
-| `s.toUpperCase()`, `s.toLowerCase()` | `() -> string` | Unicode default case mapping (the result may differ in length). |
-| `s.trim()` | `() -> string` | `s` without leading and trailing white space (JavaScript's set). |
-| `s.trimStart()`, `s.trimEnd()` *(S469)* | `() -> string` | `s` without leading / trailing white space. |
-| `s.indexOf(t)`, `s.lastIndexOf(t)` *(S469)* | `(t: string) -> int \| not` | the code-point position of the first / last occurrence of `t` on code-point boundaries, or `not` when there is none — never `-1`. *(The host's optional start-position argument is not admitted: PA reading of "a typed signature"; slice first, then search.)* |
-| `s.replace(find, with)`, `s.replaceAll(find, with)` *(S469)* | `(find: string, with: string) -> string` | `s` with the first / every occurrence of `find` (on code-point boundaries) replaced by `with`. Both are plain strings: no regular expression (until regex has a ruled type), and `with` is literal text — the host's `$&` / `$1` replacement patterns do not apply *(derived: "plain strings only")*. `replaceAll` with `find` `""` inserts `with` between code points *(derived: JavaScript's behaviour, counted in code points)*. |
-| `s.padStart(width, fill)`, `s.padEnd(width, fill)` *(S469)* | `(width: int, fill: string) -> string` (`fill` optional, default `" "`) | `s` with `fill` repeated before / after it until it is `width` code points long, the last repeat cut on a code-point boundary; `s` unchanged when already that long. A negative `width` is out of range: a negative literal is `E-POSITION-NEGATIVE`, a computed one traps (`E-INDEX-OUT-OF-RANGE-RT`) *(derived: the no-negatives ruling applied to a width, as for `repeat`)*. String padding lives here; `scrml:format` pads ints only (§41.22). |
-| `s.repeat(n)` *(S469)* | `(n: int) -> string` | `s` written `n` times. A negative `n` is out of range: a negative literal is `E-POSITION-NEGATIVE`, a computed one traps (`E-INDEX-OUT-OF-RANGE-RT`) *(derived: the no-negatives ruling applied to a count)*. |
-
-~~**Not in the table.** Other host string methods (`indexOf`, `lastIndexOf`, `replace`, `replaceAll`, `padStart`,
-`padEnd`, `repeat`, `codePointAt`, `normalize`, `localeCompare`, `match`, `search`, `substring`, `at`, …) are
-not specified as scrml string methods. ⚑ **OPEN (not ruled):** which of them the language admits, and with what
-type; any that takes or returns a position SHALL count code points when it is specified. Until then impl#1 passes
-them to JavaScript (an impl#1 note, not language — FORK RULE row 0) and the bootstrap refuses them
-(`E-BOOTSTRAP-UNSUPPORTED`). Padding is `scrml:format`'s `pad` / `padEnd` (§41.22).~~ *(RULED S469 — below.)*
-
-**Not in the table: refused (S469).** The table is the whole string surface. A call of any other method on a
-`string` (`codePointAt`, `normalize`, `localeCompare`, `match`, `search`, `substring`, `at`, `concat`, …) SHALL
-be compile error **`E-STRING-METHOD-UNKNOWN`** (§34), naming the nearest admitted form where there is one. A
-method may be admitted later, and an admitted one may be deprecated later (§63). ⚑ **INTERIM (S474, FORK RULE row C):** the refusal stands until each method is admitted. It is neither a proven exploit nor a semantic impossibility, so it is not PERMANENT. The capable forms owed are typed, code-point-counted signatures, admitted by ruling: `normalize` over a unit enum of the Unicode forms, a locale-aware comparison returning an ordering (a method or a `scrml:format` function; not ruled), and `codePointAt(i) -> int | not`. `match` / `search` wait on a ruled regex type. `substring` / `at` / `concat` already have admitted forms (`slice`, `s[i]`, a template), which the message names (`g-string-methods-off-table-capable-form-owed-s474`; capability ledger IN-44; the regex dependency is IN-15). impl#1 still passes these to
-JavaScript (an impl#1 note, not language — FORK RULE row 0); ~~the bootstrap refuses them today under
-`E-BOOTSTRAP-UNSUPPORTED`, and does not yet build the S469 additions.~~ the bootstrap builds the S469 additions and
-refuses every other method as `E-STRING-METHOD-UNKNOWN` (`compiler/self-host-v2/analyze.scrml`; status update,
-s469-boot-ruled-backlog).
-
-> **Amendment S469 — more string methods admitted; the rest refused; no negative positions.** **Provenance:**
-> ruling:user-voice-scrml.md S469 "⭐ RULED — more string methods admitted" — *"indexOf / lastIndexOf, replace / replaceAll, padStart / padEnd / repeat, trimStart / trimEnd, I suppose including them all is safe enough. things can be depped later."* (*"Each gets a typed signature counted in code points. `indexOf`/`lastIndexOf` return `int | not` (no -1). `replace`/`replaceAll` take plain strings only (no regex until regex has a ruled type). Anything not admitted is refused."*) · ruling:user-voice-scrml.md S469 "⭐ RULED — no negative positions anywhere" — *"No negatives anywhere (Recommended)"* (*"A negative position is out of range for every string and tape position: `slice(-1)` is refused (a literal at compile time; a computed one traps at run time, the PA reading), `s[-1]` / `xs[-1]` trap, `at(-1)` is `not`. Count from the end explicitly: `s.slice(s.length - 1)`."*) **supersedes:** the struck OPEN paragraph and the struck `slice` negative-position
-> sentence. **Direction of change:** newly-accepting (the eight admitted methods); newly-rejecting (every other
-> string method; a negative `slice` / `repeat` literal); semantics-changed (a negative computed `slice` position now
-> traps). ~~**Nominal / spec-ahead:** neither compiler builds the additions; the bootstrap's `slice` still counts a
-> negative from the end and is owed the change.~~ **Status (s469-boot-ruled-backlog):** the bootstrap builds the
-> additions, emits `E-STRING-METHOD-UNKNOWN` and `E-POSITION-NEGATIVE`, and its `slice` no longer counts a negative
-> from the end. **Nominal on impl#1** (impl#1 carries it, §34.0).
-
-**Normative statements:**
-
-- A string's `.length` SHALL be its number of code points.
-- Every string position (`s[i]`, `charAt`, `slice`, `indexOf`, `lastIndexOf`) and every width (`padStart`,
-  `padEnd`) SHALL count code points, and a string iteration SHALL step by code point.
-- A negative position SHALL be out of range for every string and tape position (S469). An index read (`s[i]`,
-  `xs[i]`) with a negative index SHALL trap (`E-INDEX-OUT-OF-RANGE-RT`), literal or computed. `xs.at(i)` SHALL be
-  `not` and `s.charAt(i)` SHALL be `""` for a negative `i`, literal or computed. A negative LITERAL `slice` position
-  SHALL be compile error `E-POSITION-NEGATIVE` (as ruled); a negative computed one SHALL trap. *(Derived, not
-  separately ruled:)* a negative `repeat` count or `padStart` / `padEnd` width follows `slice` — a literal is
-  `E-POSITION-NEGATIVE`, a computed one traps; a tape method position follows §66.12.8 rule 7.
-- A string method not in the table SHALL be compile error `E-STRING-METHOD-UNKNOWN`.
-- A string match (`includes`, `startsWith`, `endsWith`, `split`, `indexOf`, `lastIndexOf`, `replace`, `replaceAll`) SHALL succeed only on code-point boundaries.
-- A tape's `.length` SHALL be its element count (unchanged).
-
----
-
-## Appendix E: `</>` Closer Migration Guide
-
-**Added:** 2026-04-09. Records the migration from bare `/` and trailing `content/` closer forms to `</>`.
-
-### Background
-
-Prior to S80, scrml supported three closer forms:
-1. Trailing-slash: `<tag>content/`
-2. Explicit: `</tagname>`
-3. Bare-slash (inferred): `/` on its own line or trailing content
-
-After debate (score 55/60 vs 24/60), the trailing-slash and bare-slash forms were unified into the `</>` inferred closer token. The bare `/` no longer has syntactic significance as a block delimiter.
-
-### Migration Rules
-
-| Old form | New form | Notes |
-|---|---|---|
-| `<tag>content/` | `<tag>content</>` | Trailing slash becomes `</>` |
-| `/` (bare, own line) | `</>` | Bare slash becomes `</>` |
-| `</tagname>` | `</tagname>` | No change |
-| `/>` | `/>` | No change — self-closing, not a closer |
-
-### What Does NOT Change
-
-- `/` inside `${ }`, `?{ }`, `#{ }`, `^{ }`, `~{ }` contexts — these are division operators, regex delimiters, or URL path components, not block closers
-- `//` comments — unchanged
-- `/>` self-closing void-element syntax — unchanged
-- `</tagname>` explicit closers — unchanged
-
-### Normative Basis
-
-The `</>` form is specified in §4.4.2. The removal of bare `/` as a closer is authoritative as of this amendment. Any source file using bare `/` or trailing content`/` closers SHALL be rejected by the compiler with a diagnostic pointing to §4.4. The diagnostic SHALL include a hint: "Did you mean `</>`?"
-
 ### 19.15 The `<render of=X/>` Render-Expression (held-variant display)
 
 **Added 2026-06-15 (S196); RATIFIED S195** (held-error-display deep-dive + adversarial debate; design-insight "Held-error display — render-expression primitive (a/c)"). The render-expression closes the held-error-DISPLAY gap: a variant's `renders` clause (§19.2) fires automatically only when an `<errorBoundary>` catches a LIVE `!`-call (§19.6.3), but the canonical errors-as-states lift routes the failure into a HELD state cell (`@phase = .Failed(err)`), where no `renders` clause could fire. `<render of=X/>` fires a HELD value's per-variant `renders` markup from any markup position.
@@ -25481,6 +25271,222 @@ S440, are earlier runtime errors at a value boundary. They keep their own sectio
 - *(S473, DRAFT.)* In a `kind="service"` program (§68) the unit of execution is the **turn**: a trap ends its turn
   only, is reported to stderr with its code and location, and the program carries on with its next event, unless
   the program declares `on-trap="stop"` (then it stops with exit code 70). §68.6 is the full rule.
+
+---
+
+## Appendix A: Interaction Matrix
+
+| Feature | Error System Interaction |
+|---------|------------------------|
+| `fail` keyword | Produces error variant value; requires `!` function |
+| `?` operator | Propagates error to caller; requires `!` function |
+| `!` signature | Declares function as failable; error type in signature |
+| `renders` clause | Optional markup on enum variants; auto-displays in boundary |
+| `<errorBoundary>` | Catches errors in markup; uses `renders` or `fallback` |
+| `match` (§18) | Exhaustive over success + error variants in logic context |
+| `?{}` SQL (§8) | A failable expression everywhere (S451 R11): propagates `SqlError` implicitly in `!` functions (§19.8.2); handled at the site with `!{}` / `match` outside them, else E-ERROR-002 (§19.8.3). No row is not a failure (`.get()` → `not`, `.all()` → `[]`). *(Supersedes: "Produces `SqlError` in `!` functions; `not`/empty outside".)* |
+| `@reactive` (§6) | Reactive variables can hold error variants; trigger updates |
+| `~{}` tests | `assert.fails` / `assert.fails.with` for failable functions |
+| `server` functions (§12) | CPS preserves `!`; errors serialize as tagged JSON. A client call of a server function is failable whether or not it is declared `!` (transport / non-2xx / decode), handled like any `!` call, else E-ERROR-002 (§19.9.10, S451) |
+| `transaction` | Auto-rollback on `fail`; syntactic sugar over BEGIN/COMMIT/ROLLBACK |
+| `pure` (§33) | `pure` and `!` coexist; pure functions can fail without side effects |
+| `lin` (§35) | `lin` variables inside `!` functions follow normal linear rules; `fail` is a scope exit that must consume `lin` variables |
+| `<state>` types (§11 → §6, §52) | `<errorBoundary>` is a pre-defined state type |
+
+## Appendix B: Superseded Spec Text
+
+This section replaces the entirety of §19 (Error Handling) as it existed in the 0.5.0-draft spec. Specifically:
+
+- **§19.1 (Error Context `!{}`):** The `!{}` inline handler syntax is retained as one of the four valid handling modes for `!` function results (§19.4.3, option 3). ~~The arm syntax `| ::ErrorTypeA e -> handlerA` is retained.~~ *(Historical — S451. That sentence read `e` as the error value. A parenthesis-free binder binds the variant's PAYLOAD: `| .V m :>` is `| .V(m) :>`, under §18.7's positional arity (§19.4.3); `->` is a deprecated arm separator (§18.2). Provenance: ruling:user-voice-scrml.md S451 "1a 2 yes 3 yes 4a" — item 2: *"Appendix B's contrary line is historical."*)*
+- **§19.2 (Error Propagation):** Replaced by explicit `?` operator (§19.5) and `!` function signatures (§19.4). Propagation is no longer "inferred by the compiler" -- it is explicit via `?`.
+- **§19.3 (Throwing Errors):** `throw` is replaced by `fail`. SPEC-ISSUE-011 is resolved by this document.
+- **§19.4 (Error Arm Syntax):** Retained within `!{}` inline handler and `match` expressions.
+
+## Appendix C: Future Considerations
+
+The following are explicitly out of scope for this version but noted for future work:
+
+1. **Error type composition** -- Combining multiple error types into a unified error type (e.g., `type AppError = PaymentError | AuthError | SqlError`). This requires union-of-enum support in the type system.
+2. **Error recovery / retry policies** -- Declarative retry logic on `<errorBoundary>` (e.g., `<errorBoundary retries=3 delay=1000>`).
+3. **Error logging / telemetry hooks** -- Automatic error reporting to external services when errors are caught by boundaries.
+4. **Async error streams** -- Error handling for long-lived connections (WebSocket, SSE) where errors arrive asynchronously.
+
+## Appendix D: JS Standard Library Access in Logic Contexts
+
+**Added:** 2026-04-08. Based on self-hosting gauntlet R1 friction — both teams independently relied on JS globals without spec coverage.
+
+> **Amendment S469 — Appendix D says what the language admits.** **Provenance:** ruling:user-voice-scrml.md S440
+> "dpa-055 R1 = Appendix D rewrite + (i) no ambient `Math`" — *"rewrite + i, next Q"* (*"rewrite SPEC Appendix D to
+> what the language actually admits … IN: typed arrays (`Float32Array`…, `Float16Array`), `ArrayBuffer`,
+> `DataView`, the value-ish constructors that already work; OUT: `BigInt` (S440 #4), `Proxy`/`Reflect` … D7 = (i):
+> honor §41.18 — no ambient `Math`"*), ruled S440 and not applied until now · ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: what MUST be spelled out" — *"yeah, I like that better"* and the S469
+> parse rulings (the host conversions `String`, `Number`, `parseInt`, `parseFloat` leave: text goes through a
+> template, parsing through `T.parse`, §14.13) · the conversions deep-dive §14 item 3. **supersedes:** the three
+> lists below as written 2026-04-08 (struck, not deleted). **Direction of change:** newly-rejecting for the OUT
+> names; inert for the rest (the ⚑ list keeps today's behaviour while it is decided). **Nominal / spec-ahead:**
+> impl#1 still admits every struck name (an impl#1 note, FORK RULE row 0).
+
+**What the language admits without import (S469):**
+
+- **IN (S440 dpa-055 R1):** the typed arrays `Float64Array`, `Float32Array`, `Float16Array`, `Int8Array`,
+  `Int16Array`, `Int32Array`, `Uint8Array`, `Uint16Array`, `Uint32Array`; `ArrayBuffer`; `DataView`.
+- **OUT:** `BigInt` (S440 #4), `Proxy`, `Reflect` (S440 dpa-055 R1); `Math` (no ambient `Math`: `scrml:math`,
+  §41.18); `String`, `Number`, `parseInt`, `parseFloat` (S469 conversions: a template is the
+  into-text tool, `T.parse` the parse, §14.13); `isNaN`, `isFinite` *(derived, not a conversion: number
+  predicates, OUT with ambient `Math` under S440 dpa-055 R1 D7 — `scrml:math.isNaN` remains, §41.18; an
+  `isFinite` there is not specified)*; `Array` (S469 *"I do not want JS style
+  arrays in scrml at all"* — the sequence is the tape, §66.12; derived, not separately ruled).
+- **The browser roots `window`, `document`, `navigator` (S471):** IN in a body the compiler places on the client
+  (§12) — an event handler, an `<onMount>` or `<effect>` body, a client function; OUT everywhere else — a
+  server-placed body and a `fn` body (E-FN-004, §48.3.4). For `window` and `document`, route analysis enforces it: a
+  function whose body reads one is client-only (§12.4), so a server function reaching it is E-ROUTE-002 and one body
+  needing both sides is E-ROUTE-005. `navigator` is not in §12.4's client-only list (it has a server referent under
+  Bun), so outside `fn` its OUT is **Nominal / not yet enforced**. Their members are untyped host values (typing is
+  dpa-075 F3, not ruled). *(S473: ruled; drafted as §21.3.3 — typed access is a `<host>` binding, and an untyped
+  use draws `W-HOST-UNTYPED-CALL`, rule 22.)*
+  > **Provenance:** ruling:user-voice-scrml.md S471 "your recs on F0 and F1" (dpa-075 F1 (e): *"Appendix D lists
+  > `window`/`document`/`navigator` (IN for client bodies, OUT elsewhere, aligned with E-ROUTE-005)"*) · **Direction of
+  > change:** clarifying — it names what §6.7.4 rule 5 and E-ROUTE-005 already treat as client-only.
+- ⚑ **OPEN (not yet decided in or out):** every other name of the struck lists (`Boolean`, `Date`, `Error`,
+  `Map`, `Object`, `Promise`, `RegExp`, `Set`, `Symbol`, `TypeError`, `RangeError`, `WeakMap`, `WeakSet`, `WeakRef`,
+  `JSON`, `console`, `Intl`, `encodeURI`, `decodeURI`, `encodeURIComponent`, `decodeURIComponent`, `structuredClone`,
+  `queueMicrotask`, `setTimeout`, `clearTimeout`, `setInterval`, `clearInterval`). R1's *"the value-ish
+  constructors that already work"* is IN by ruling; which of these it names is not enumerated in the ruling, so this
+  appendix does not guess.
+
+~~Inside `${}` logic blocks, the following JavaScript standard globals are available without import or `^{}` ceremony. These are provided by the Bun runtime and are part of the ECMAScript specification.~~ *(struck S469 — the lists below are the 2026-04-08 text.)*
+
+**Value types and constructors:**
+`Array`, `Boolean`, `Date`, `Error`, `Map`, `Number`, `Object`, `Promise`, `RegExp`, `Set`, `String`, `Symbol`, `TypeError`, `RangeError`, `WeakMap`, `WeakSet`, `WeakRef`, `BigInt`, `ArrayBuffer`, `DataView`, `Float32Array`, `Float64Array`, `Int8Array`, `Int16Array`, `Int32Array`, `Uint8Array`, `Uint16Array`, `Uint32Array`
+
+**Utility objects:**
+`JSON` (`.stringify()`, `.parse()`), `Math`, `console`, `Intl`, `Reflect`, `Proxy`
+
+**Global functions:**
+`parseInt`, `parseFloat`, `isNaN`, `isFinite`, `encodeURI`, `decodeURI`, `encodeURIComponent`, `decodeURIComponent`, `structuredClone`, `queueMicrotask`, `setTimeout`, `clearTimeout`, `setInterval`, `clearInterval`
+
+**Note:** `setTimeout`, `setInterval`, and `Promise` are available but their use inside `fn` bodies is prohibited by E-FN-005 (async/timing constraints). Use them in regular `function` bodies only.
+
+~~Instance methods on these types (`.map()`, `.filter()`, `.has()`, `.get()`, `.set()`, `.push()`, `.slice()`, `.trim()`, `.startsWith()`, etc.) are available on any value of the corresponding type.~~ *(struck S469: a value's methods are its type's, not the host's. A string's are D.1 below; a tape's are §66.12.6 (JavaScript's array method names are refused, `E-TAPE-JS-METHOD`); a map's are §59. Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — strings: code points everywhere, `.length` included"; ruling:user-voice-scrml.md S469 "⭐ RULED — tape methods are named after their grants". Direction of change: the struck sentence was the only text admitting the host methods wholesale; what it admitted beyond the typed tables is now refused, `E-STRING-METHOD-UNKNOWN` for a string, D.1 — S469 "more string methods admitted".)*
+
+### D.1 Strings — the typed method table (S469)
+
+> **Amendment S469 — a string counts code points, everywhere.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐
+> RULED — strings: code points everywhere, `.length` included" — *"Code points everywhere (Recommended)"* (*"A
+> string's `.length`, `slice`, `charAt`, index and iteration all count code points ("a😀".length → 2). It differs
+> from JS, and `.length` is O(n). Graphemes (combined emoji) are not addressed; a grapheme API may come later. Tape
+> `.length` is unaffected."*). **supersedes:** for strings, the sentence *"Instance methods on these types (`.map()`,
+> `.filter()`, `.has()`, `.get()`, `.set()`, `.push()`, `.slice()`, `.trim()`, `.startsWith()`, etc.) are available
+> on any value of the corresponding type"* (struck below), which handed every host string method through with
+> JavaScript's UTF-16 meaning; and §49.3.5's note *"`s.length` counts UTF-16 units"*, which the S469 string
+> iteration ruling had asked for and this ruling reverses. **Direction of change:** semantics-changed for every
+> string position and length (JavaScript counts UTF-16 units); newly-rejecting nothing by itself (see "Not in the
+> table"). The bootstrap implements it (`compiler/self-host-v2/analyze.scrml` `strMethodOp`, `methodSig`;
+> `compiler/self-host-v2/slice-m1/runtime/runtime.js` `strLength`, `strSlice`, `strCharAt`, `strIncludes`,
+> `strStartsWith`, `strEndsWith`, `strSplit`); impl#1 carries the divergence (§34.0) and still emits JavaScript's
+> UTF-16 methods.
+
+A `string` is a sequence of Unicode **code points**. Every position, length and match on a string counts code
+points: a surrogate pair is one position; a lone surrogate is a position of its own. A match (`includes`,
+`startsWith`, `endsWith`, a `split` separator) succeeds only where it starts and ends on a code-point boundary, so
+a lone-surrogate argument never matches half of a pair. Graphemes (a base character with combining marks, a
+multi-code-point emoji) are NOT a unit here: `"👍🏽".length` is `2`. A grapheme API may come later. A TAPE's
+`.length` counts its elements and is unaffected.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `s.length` | `int` | the number of code points (`"a😀".length` → `2`). Computing it is O(n). |
+| `s[i]` | `string` | the code point at position `i`; out of range it traps (§66.12.8 rule 6). |
+| `for (c of s)` | `c: string` | each code point in order (§49.3.5). |
+| `s.charAt(i)` | `(i: int) -> string` | the code point at position `i`, or `""` when there is none (a negative `i` included). Never traps. *(PA derivation: the ruling makes a negative position out of range, and `charAt` keeps its non-trapping `""` answer for every out-of-range position; aligning it with `at` — `string \| not` — is the alternative, not taken because `""` is already a defined, non-absent "no character" here.)* |
+| `s.slice(from)`, `s.slice(from, to)` | `(from: int, to: int) -> string` (`to` optional) | the code points from position `from` up to (not including) `to`, or to the end. ~~A negative position counts from the end; positions are clamped to `0 … s.length` (JavaScript's argument rules, counted in code points).~~ *(struck S469 — no negative positions.)* A position greater than `s.length` is clamped to `s.length`, and `to < from` gives `""`. A NEGATIVE position is out of range: a negative literal (`s.slice(-1)`) is compile error **`E-POSITION-NEGATIVE`**; a negative computed position traps with `E-INDEX-OUT-OF-RANGE-RT` (§19.17). Count from the end explicitly: `s.slice(s.length - 1)`. |
+| `s.includes(t)` | `(t: string) -> bool` | `t` occurs in `s` on code-point boundaries. |
+| `s.startsWith(t)`, `s.endsWith(t)` | `(t: string) -> bool` | `s` begins / ends with `t`, on a code-point boundary. |
+| `s.split(sep)` | `(sep: string) -> string[]` | `""` splits into code points; any other separator splits only at code-point boundaries. The result is a new tape with no grants (§66.12.6 rule 2). |
+| `s.toUpperCase()`, `s.toLowerCase()` | `() -> string` | Unicode default case mapping (the result may differ in length). |
+| `s.trim()` | `() -> string` | `s` without leading and trailing white space (JavaScript's set). |
+| `s.trimStart()`, `s.trimEnd()` *(S469)* | `() -> string` | `s` without leading / trailing white space. |
+| `s.indexOf(t)`, `s.lastIndexOf(t)` *(S469)* | `(t: string) -> int \| not` | the code-point position of the first / last occurrence of `t` on code-point boundaries, or `not` when there is none — never `-1`. *(The host's optional start-position argument is not admitted: PA reading of "a typed signature"; slice first, then search.)* |
+| `s.replace(find, with)`, `s.replaceAll(find, with)` *(S469)* | `(find: string, with: string) -> string` | `s` with the first / every occurrence of `find` (on code-point boundaries) replaced by `with`. Both are plain strings: no regular expression (until regex has a ruled type), and `with` is literal text — the host's `$&` / `$1` replacement patterns do not apply *(derived: "plain strings only")*. `replaceAll` with `find` `""` inserts `with` between code points *(derived: JavaScript's behaviour, counted in code points)*. |
+| `s.padStart(width, fill)`, `s.padEnd(width, fill)` *(S469)* | `(width: int, fill: string) -> string` (`fill` optional, default `" "`) | `s` with `fill` repeated before / after it until it is `width` code points long, the last repeat cut on a code-point boundary; `s` unchanged when already that long. A negative `width` is out of range: a negative literal is `E-POSITION-NEGATIVE`, a computed one traps (`E-INDEX-OUT-OF-RANGE-RT`) *(derived: the no-negatives ruling applied to a width, as for `repeat`)*. String padding lives here; `scrml:format` pads ints only (§41.22). |
+| `s.repeat(n)` *(S469)* | `(n: int) -> string` | `s` written `n` times. A negative `n` is out of range: a negative literal is `E-POSITION-NEGATIVE`, a computed one traps (`E-INDEX-OUT-OF-RANGE-RT`) *(derived: the no-negatives ruling applied to a count)*. |
+
+~~**Not in the table.** Other host string methods (`indexOf`, `lastIndexOf`, `replace`, `replaceAll`, `padStart`,
+`padEnd`, `repeat`, `codePointAt`, `normalize`, `localeCompare`, `match`, `search`, `substring`, `at`, …) are
+not specified as scrml string methods. ⚑ **OPEN (not ruled):** which of them the language admits, and with what
+type; any that takes or returns a position SHALL count code points when it is specified. Until then impl#1 passes
+them to JavaScript (an impl#1 note, not language — FORK RULE row 0) and the bootstrap refuses them
+(`E-BOOTSTRAP-UNSUPPORTED`). Padding is `scrml:format`'s `pad` / `padEnd` (§41.22).~~ *(RULED S469 — below.)*
+
+**Not in the table: refused (S469).** The table is the whole string surface. A call of any other method on a
+`string` (`codePointAt`, `normalize`, `localeCompare`, `match`, `search`, `substring`, `at`, `concat`, …) SHALL
+be compile error **`E-STRING-METHOD-UNKNOWN`** (§34), naming the nearest admitted form where there is one. A
+method may be admitted later, and an admitted one may be deprecated later (§63). ⚑ **INTERIM (S474, FORK RULE row C):** the refusal stands until each method is admitted. It is neither a proven exploit nor a semantic impossibility, so it is not PERMANENT. The capable forms owed are typed, code-point-counted signatures, admitted by ruling: `normalize` over a unit enum of the Unicode forms, a locale-aware comparison returning an ordering (a method or a `scrml:format` function; not ruled), and `codePointAt(i) -> int | not`. `match` / `search` wait on a ruled regex type. `substring` / `at` / `concat` already have admitted forms (`slice`, `s[i]`, a template), which the message names (`g-string-methods-off-table-capable-form-owed-s474`; capability ledger IN-44; the regex dependency is IN-15). impl#1 still passes these to
+JavaScript (an impl#1 note, not language — FORK RULE row 0); ~~the bootstrap refuses them today under
+`E-BOOTSTRAP-UNSUPPORTED`, and does not yet build the S469 additions.~~ the bootstrap builds the S469 additions and
+refuses every other method as `E-STRING-METHOD-UNKNOWN` (`compiler/self-host-v2/analyze.scrml`; status update,
+s469-boot-ruled-backlog).
+
+> **Amendment S469 — more string methods admitted; the rest refused; no negative positions.** **Provenance:**
+> ruling:user-voice-scrml.md S469 "⭐ RULED — more string methods admitted" — *"indexOf / lastIndexOf, replace / replaceAll, padStart / padEnd / repeat, trimStart / trimEnd, I suppose including them all is safe enough. things can be depped later."* (*"Each gets a typed signature counted in code points. `indexOf`/`lastIndexOf` return `int | not` (no -1). `replace`/`replaceAll` take plain strings only (no regex until regex has a ruled type). Anything not admitted is refused."*) · ruling:user-voice-scrml.md S469 "⭐ RULED — no negative positions anywhere" — *"No negatives anywhere (Recommended)"* (*"A negative position is out of range for every string and tape position: `slice(-1)` is refused (a literal at compile time; a computed one traps at run time, the PA reading), `s[-1]` / `xs[-1]` trap, `at(-1)` is `not`. Count from the end explicitly: `s.slice(s.length - 1)`."*) **supersedes:** the struck OPEN paragraph and the struck `slice` negative-position
+> sentence. **Direction of change:** newly-accepting (the eight admitted methods); newly-rejecting (every other
+> string method; a negative `slice` / `repeat` literal); semantics-changed (a negative computed `slice` position now
+> traps). ~~**Nominal / spec-ahead:** neither compiler builds the additions; the bootstrap's `slice` still counts a
+> negative from the end and is owed the change.~~ **Status (s469-boot-ruled-backlog):** the bootstrap builds the
+> additions, emits `E-STRING-METHOD-UNKNOWN` and `E-POSITION-NEGATIVE`, and its `slice` no longer counts a negative
+> from the end. **Nominal on impl#1** (impl#1 carries it, §34.0).
+
+**Normative statements:**
+
+- A string's `.length` SHALL be its number of code points.
+- Every string position (`s[i]`, `charAt`, `slice`, `indexOf`, `lastIndexOf`) and every width (`padStart`,
+  `padEnd`) SHALL count code points, and a string iteration SHALL step by code point.
+- A negative position SHALL be out of range for every string and tape position (S469). An index read (`s[i]`,
+  `xs[i]`) with a negative index SHALL trap (`E-INDEX-OUT-OF-RANGE-RT`), literal or computed. `xs.at(i)` SHALL be
+  `not` and `s.charAt(i)` SHALL be `""` for a negative `i`, literal or computed. A negative LITERAL `slice` position
+  SHALL be compile error `E-POSITION-NEGATIVE` (as ruled); a negative computed one SHALL trap. *(Derived, not
+  separately ruled:)* a negative `repeat` count or `padStart` / `padEnd` width follows `slice` — a literal is
+  `E-POSITION-NEGATIVE`, a computed one traps; a tape method position follows §66.12.8 rule 7.
+- A string method not in the table SHALL be compile error `E-STRING-METHOD-UNKNOWN`.
+- A string match (`includes`, `startsWith`, `endsWith`, `split`, `indexOf`, `lastIndexOf`, `replace`, `replaceAll`) SHALL succeed only on code-point boundaries.
+- A tape's `.length` SHALL be its element count (unchanged).
+
+---
+
+## Appendix E: `</>` Closer Migration Guide
+
+**Added:** 2026-04-09. Records the migration from bare `/` and trailing `content/` closer forms to `</>`.
+
+### Background
+
+Prior to S80, scrml supported three closer forms:
+1. Trailing-slash: `<tag>content/`
+2. Explicit: `</tagname>`
+3. Bare-slash (inferred): `/` on its own line or trailing content
+
+After debate (score 55/60 vs 24/60), the trailing-slash and bare-slash forms were unified into the `</>` inferred closer token. The bare `/` no longer has syntactic significance as a block delimiter.
+
+### Migration Rules
+
+| Old form | New form | Notes |
+|---|---|---|
+| `<tag>content/` | `<tag>content</>` | Trailing slash becomes `</>` |
+| `/` (bare, own line) | `</>` | Bare slash becomes `</>` |
+| `</tagname>` | `</tagname>` | No change |
+| `/>` | `/>` | No change — self-closing, not a closer |
+
+### What Does NOT Change
+
+- `/` inside `${ }`, `?{ }`, `#{ }`, `^{ }`, `~{ }` contexts — these are division operators, regex delimiters, or URL path components, not block closers
+- `//` comments — unchanged
+- `/>` self-closing void-element syntax — unchanged
+- `</tagname>` explicit closers — unchanged
+
+### Normative Basis
+
+The `</>` form is specified in §4.4.2. The removal of bare `/` as a closer is authoritative as of this amendment. Any source file using bare `/` or trailing content`/` closers SHALL be rejected by the compiler with a diagnostic pointing to §4.4. The diagnostic SHALL include a hint: "Did you mean `</>`?"
+
+The retired closer is the retired-forms ledger's row `closer-trailing-slash` (§63, "The retired-forms ledger (S482)"). The retired-forms gate reports zero hits of it in what it reads (§63: the `scrml` and untagged fences of the SPEC and the public markdown, and the corpus `.scrml` files; this Appendix is read like any SPEC text — it is not a migration region, #2101 r3) and fails on a new one (S482: the last sample and untagged-fence sites were migrated by `s482-retired-lint`).
 
 ---
 
@@ -29120,7 +29126,7 @@ executes at program run time. These phases SHALL NOT be mixed in a single `^{}` 
 The compiler's codegen pass SHALL produce the following structure for every runtime `^{}`
 block:
 
-```
+```text
 _scrml_meta_effect(
   <scopeId>,
   function(meta) {
@@ -30497,7 +30503,7 @@ The bare `prose` class SHALL emit a base rule (color, max-width, font-size, line
 
 Each nested rule SHALL use the form:
 
-```
+```css
 .prose :where(<selector>):not(:where([class~="not-prose"] *)) { ... }
 ```
 
@@ -31842,7 +31848,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-CONTRACT-001 | §53.11 | Inline predicate violation at compile time (statically provable) | Error |
 | E-CONTRACT-001-RT | §53.11 | Inline predicate violation at runtime | Runtime |
 | E-CONTRACT-002 | §53.11 | Named shape not found in registry, or the inline predicate is malformed, or a union with a refined member has a member with no runtime test (S459) (reported where the refinement is declared, every zone; emitted at `compiler/src/type-system.ts` `checkRefinementJudgeable`.) | Error |
-| E-CONTRACT-003 | §53.11 | Predicate references external state — use `<machine>` instead | Error |
+| E-CONTRACT-003 | §53.11 | Predicate references external state. ~~— use `<machine>` instead~~ — a type's rule checks only its own value; to compare against another cell, write a derived check (e.g. `<overBudget=(@spent > @maxMana)/>`) and use it in markup or the handler that changes the value. Provenance: ruling:user-voice-scrml.md-S482-contract-003-derived-check (`<machine>` was removed S305/S307; the message names the derived check). (Emitted by the bootstrap at `compiler/self-host-v2/parse.scrml` `refSimple`, and by impl#1 at `compiler/src/type-system.ts` `checkRefinementJudgeable`.) | Error |
 | E-CONTRACT-004-WARN | §53.11 | `bind:value` HTML attribute conflicts with predicate-generated attribute | Warning |
 | E-BPP-001 | §3.5 | Body pre-parser encountered unparseable logic block | Error |
 | E-BS-000 | §4 | Block splitter encountered malformed block structure | Error |
@@ -31956,7 +31962,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | W-GIVEN-PRESENCE-DEPRECATED | §42.2.3, §63.7 | The in-place presence guard — `given x :> { … }`, the multi-name `given x, y :> { … }`, the same guard inside a markup `${ … }`, and the `given x :>` match arm — is SOFT-DEPRECATED (§63.1 Stage 1). It parses, lowers and runs as before; one diagnostic per site (a guard written with the legacy `=>` separator fires this code alone, not W-GIVEN-ARROW-LEGACY as well). The message names the canonical form — `if (x is given) { … }` / `if (x is given && y is given) { … }`; for the arm, `else :>` after the `not :>` arm — plus `scrml fix` and §42.2.3. NOT fired at the §66.7.5 rebind head `given c = @h :>`, at an engine transition guard `given (cond)` (§4.11.4), or at `given` used as an identifier. Resolution: `scrml fix` (its default `given-presence` rule, `compiler/src/commands/fix-given-presence.js`), which verifies each site by compiling and refuses a site impl#1 compiles differently today. **Provenance:** ruling:user-voice-scrml.md S462 "a, go" — *"the in-place presence guard `given x :> { … }` (incl. multi-variable `given x, y :>`, the markup-context form, and the `given x :>` match arm) is SOFT-DEPRECATED through the §63 lifecycle"* (code name: PA reading recorded with the ruling, bryan's veto window). Emitted at `compiler/src/type-system.ts:14266` (the `given-guard` case; message via `givenPresenceDeprecatedMessage`); not at a malformed head (E-SYNTAX-044 alone) nor at the empty node impl#1 leaves after a declaration ending in `is given`. Also emitted by the bootstrap for the logic-context guard (its in-place guard parser in `compiler/self-host-v2/parse.scrml`, which reads the guard as `if (x is given && …)`); the bootstrap parses neither the `given` arm nor a markup-`${}` guard, so it has no emit site for those. **Severity Info** (S462 fix round, PA call in bryan's veto window: matches the sibling W-IS-SOME-DEPRECATED and the §63 precedents W-ARM-PIPE-LEGACY / W-MATCH-ARROW-LEGACY; first landed as Warning). | Info |
 | E-GIVEN-PRESENCE-DEPRECATED | §42.2.3, §63.7 | **Reserved** (§63.2) end-of-window code for the in-place presence guard and the `given x :>` match arm. Not scheduled (§63.7 permanent-soft; gate-blocked until the `scrml fix` rule is verified-landed, §63.4). Never fires before a §62 MAJOR event schedules it. **Provenance:** ruling:user-voice-scrml.md S462 "a, go" (*"a reserved E-code in §34"*; the name is the PA reading recorded with the ruling). **Nominal / not yet emitted.** | Error |
 | W-COLON-SHORTHAND-LEGACY-PLACEMENT | §4.14, §51.0.I, §18.0.1 | A `:`-shorthand body uses the legacy AFTER-`>` placement (`<Variant rule=... > : expr`) instead of the canonical inside-opener placement (`<Variant rule=... : expr>`). Both parse, build, and emit identically during the deprecation window; the inside-opener form is canonical across every locus (Pillar 5 — one `:`-shorthand placement: HTML elements §24, `<each>` per-item §17.7.6, match block-form arms §18.0.1, engine state-children §51.0.I). The lint is ARM / state-child-context-scoped — it fires ONLY where after-`>` was ever a legal placement (engine state-children + match arms); HTML elements and `<each>` per-item never used after-`>`, so the lint never fires there. Resolution: move the `: expr` inside the opener, before the `>`, or run `bun scrml migrate --fix` (AST-driven; MUST NOT be a text replace — a `>` can appear inside a string attribute value or a markup body). New code SHALL use the inside-opener placement; existing samples MAY migrate at convenience. The end-of-window timing promotes this to a reserved `E-COLON-SHORTHAND-LEGACY-PLACEMENT` (not yet emitted). (S160 — S154 ruling (b); mirrors the W-MATCH-ARROW-LEGACY / W-GIVEN-ARROW-LEGACY / W-LIFECYCLE-LEGACY-ARROW deprecation template.) | Info |
-| W-CONST-AT-DEPRECATED | §6.6.1 | The legacy expression-form derived-cell declaration `const @name = expr` is deprecated; the canonical (and per §6.6.1 SOLE) derived-cell form is `const <name> = expr`. The `@`-form still compiles + registers in logic / top-level / `${...}` contexts during the deprecation window. Inside a **raw markup element body**, however, NEITHER form is a valid derived-decl: the legacy `const @name` silently DROPS the cell (inert text — the read site then resolves to nothing), and the canonical `const <name>` does NOT register there either — its `<name>` parses as a markup element open-tag and loud-errors `E-CTX-001`. The canonical derived-decl form `const <name>` is for **logic / file-top-level / `${...}`** contexts; to declare a derived cell a markup body consumes, write it in a `${...}` logic block. Resolution: rewrite `const @name = expr` as `const <name> = expr`, or run `bun scrml migrate --fix` (AST-driven). New code SHALL use `const <name>`; existing samples MAY migrate at convenience. The end-of-window timing promotes this to a reserved `E-CONST-AT-DEPRECATED` (not yet emitted). **Fires:** in logic / top-level contexts emitted by TS (`compiler/src/type-system.ts`, the `case "state-decl"` path, gated on `shape === "derived" && isConst === true && structuralForm === false`); at the markup-element-body silent-drop site (where no AST node is produced) emitted by TAB (`compiler/src/ast-builder.js` `scanMarkupBodyConstAtDecls`, called from `liftBareDeclarations` on the non-decl-site markup path). (Added 2026-06-13, sym-cell-registration-completeness; markup-body fire site added 2026-06-13 fixup; the Info-severity precedent is W-MATCH-ARROW-LEGACY — like it, an info-level deprecation steering lint; the deprecation-CYCLE shape (warn-window -> reserved hard error) mirrors W-PURE-DEPRECATED / W-MATCH-ARROW-LEGACY both.) | Info |
+| W-CONST-AT-DEPRECATED | §6.6.1 | The legacy expression-form derived-cell declaration `const @name = expr` is deprecated; the derived-cell form is the §66 locked declaration `<name=(expr)/>` (§66.9). *(S482 #2101 r1 LOW-3: this row called `const <name> = expr` "the canonical (and per §6.6.1 SOLE)" form; that form is itself deprecated, §66.21 row 2, `W-CONST-CELL-DEPRECATED`.)* The `@`-form still compiles + registers in logic / top-level / `${...}` contexts during the deprecation window. Inside a **raw markup element body**, however, NEITHER form is a valid derived-decl: the legacy `const @name` silently DROPS the cell (inert text — the read site then resolves to nothing), and `const <name>` does NOT register there either — its `<name>` parses as a markup element open-tag and loud-errors `E-CTX-001`. The (itself deprecated) `const <name>` form is for **logic / file-top-level / `${...}`** contexts; to declare a derived cell a markup body consumes, write it in a `${...}` logic block. Resolution: rewrite `const @name = expr` as `<name=(expr)/>` (§66.9), or run `bun scrml migrate --fix` (AST-driven). New code SHALL use `<name=(expr)/>`; existing samples MAY migrate at convenience. **R4 (S482):** the fix-it is the §66 locked declaration `<name=(expr)/>` (§66.9 — derived exactly when `expr` reads a cell), not `const <name> = expr`, which is itself deprecated (§66.21 row 2, `W-CONST-CELL-DEPRECATED`). Provenance: ruling:user-voice-scrml.md S482 "⭐ RULED — every retirement / deprecation PR adds a retired-forms ledger row and migrates" — the same answer confirmed audit R4: *"re-point the W-CONST-AT-DEPRECATED fix-it from the deprecated `const <x>` to `<x=(expr)/>`"*. Retired-forms ledger row `const-at`. (impl#1's message still names `const <name>` — frozen; the bootstrap refuses `const @x` by name with the `<x=(expr)/>` fix-it, `compiler/self-host-v2/refusals.scrml`.) The end-of-window timing promotes this to a reserved `E-CONST-AT-DEPRECATED` (not yet emitted). **Fires:** in logic / top-level contexts emitted by TS (`compiler/src/type-system.ts`, the `case "state-decl"` path, gated on `shape === "derived" && isConst === true && structuralForm === false`); at the markup-element-body silent-drop site (where no AST node is produced) emitted by TAB (`compiler/src/ast-builder.js` `scanMarkupBodyConstAtDecls`, called from `liftBareDeclarations` on the non-decl-site markup path). (Added 2026-06-13, sym-cell-registration-completeness; markup-body fire site added 2026-06-13 fixup; the Info-severity precedent is W-MATCH-ARROW-LEGACY — like it, an info-level deprecation steering lint; the deprecation-CYCLE shape (warn-window -> reserved hard error) mirrors W-PURE-DEPRECATED / W-MATCH-ARROW-LEGACY both.) | Info |
 | W-MATCH-VALUE-UNUSED | §48.11, §48.13 | The last statement of a function with NO return-type annotation is a value-producing `match` whose value is NOT returned (no `return`) and is therefore discarded — ~~the function falls through to `undefined` (a plain `function` has NO implicit return per §48.11 / §7.3)~~ the function returns no value (no form has an implicit tail return, §48 "The return rule"). ~~This is spec-correct fall-through, but~~ The silently-discarded value is almost always a mistake. Resolution: add `return` before the `match` ~~, or change the declaration to `fn` / a return-typed `function` (which carry tail-expression implicit return)~~. Does NOT fire for `return match`, ~~`fn`/return-typed functions~~ a function with a declared return type (its unreturned tail is E-TYPE-043), a side-effect-only (block-arm) match, or a match that is not the last statement. **Amended S469** (ruling:user-voice-scrml.md S469 "⭐ RULED — fall-off and tail returns: ALWAYS EXPLICIT" — *"Always explicit (Recommended)"*): the struck text described the retired tail return; the warning's reach to an un-annotated `fn` is **Nominal on impl#1** (impl#1 fires it on a plain `function` only). (Catalog addition S144 Cluster D — Bug AA; emitted by CG at `compiler/src/codegen/emit-functions.ts`.) | Warning |
 | E-VARIANT-AMBIGUOUS | §14.10, §18.0.3 | Bare variant reference (e.g., `let x = .Small` or `<Small>` arm pattern) is ambiguous because the position's type is a union with multiple members declaring the variant, OR the position has no statically-known enum type context. §14.10 covers general expression positions (LHS state-decl / let / const annotations, fn params, fn return); §18.0.3 covers match-arm patterns. Qualify the variant: `TypeName.Small` / `<TypeName.Small>`. | Error |
 | E-ENGINE-INVALID-TRANSITION | §51.0.F, §51.0.G | Direct write to engine variable or `.advance()` violates the from-state's `rule=` contract. Statically rejected when from-state is known; runtime-thrown otherwise. **S479 (§6.13.5):** on a `debounced=` / `throttled=` engine cell the runtime check runs when the held write COMMITS (a violating commit leaves the cell at its prior value — a §19.17 trap, reported when the commit runs in a timer), and a LITERAL held write whose target no variant reachable from the initial variant admits is rejected statically at the write site (ruling:user-voice-scrml.md S479 "⭐ RULED — the rest of S478 hand-off §3.B, PA recs adopted" item 8; both emitted by the bootstrap — the static check at `compiler/self-host-v2/analyze.scrml`, the commit check in the runtime `compiler/self-host-v2/slice-m1/runtime/runtime.js` `timed`; Nominal on impl#1). **v0.3 Option-d carve-out:** self-writes (target equals current variant) are NO-OPS, NOT violations — see §51.0.F.1 + W-ENGINE-SELF-WRITE-DETECTED. | Runtime |
@@ -32063,7 +32069,8 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-EACH-NOT-SEQUENCE | §17.7.2 | `<each in=expr>` over a value that is not a sequence (§66.12.1: arrays and tuples; a map iterates through its `.entries()` / `.keys()` / `.values()` array views, §59.8). Fires only when the value is PROVABLY not a sequence: `S | not` over a sequence `S` is admitted (`not` renders `<empty>`, §17.7.4), and an unresolved `in=` type is silent (provable-or-silent). **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 3; the three SPEC-text OPEN items, #3). **Named; impl pending — Nominal / not yet emitted** (measured S440: impl#1 compiles `<each in=@n>` over a `number` cell at exit 0); impl#1 carries it (§34.0). | Error |
 | E-META-EVAL-001 | §22.4 | Compile-time meta evaluation failed at runtime — the `^{}` block body threw an exception when evaluated by the meta interpreter. The error message includes the underlying runtime error. ALSO (S459, impl#1 status per §22.4): the compile-time body contains a statement form impl#1 cannot evaluate at compile time (a payload-binding `match` arm, a multi-subject `match`, a `match` value with a block arm, a destructuring declaration, a declaration whose value is another statement form, a `?{}`, or any statement kind the serializer does not write) — the block is refused, naming the form, rather than evaluated with the statement dropped. (Catalog addition S64 audit; emitted at `compiler/src/meta-eval.ts` — `serializeNode` / `MetaSerializeRefusal`) | Error |
 | E-META-EVAL-002 | §22.4 | (S458 final review F3) a compile-time `^{}` emits markup from inside a `${}` logic body — a statement list, branch, loop, match arm or function body has no markup position to receive it (§22.4.1). Re-parsing the code emitted by a `^{}` meta block failed. The meta block produced output that is not syntactically valid scrml/JavaScript. The error message includes the underlying parse error. ALSO (S457, impl#1 status per §22.4.1): the emitted output contains something other than standard markup elements, text and comments with plain attribute values — a `${}` logic block, a `?{}`, a function, a declaration, a component or a scrml structural element, which would reach code generation without the type system and route inference. ALSO (S459 round 3, PA addendum 3): the emitted output carries an attribute whose name is not on the closed attribute list of §22.12 for its element's namespace (§22.4.1), or an `id` / `name` value in the `_scrml` / `__scrml` namespace. ALSO (S459 round 4, PA decisions F2 / F4): an `id` / `name` value the `document` half of §22.12's *Named properties* rule refuses (it names a member of `document`; the form half is a run-time rule only — ruling:user-voice-scrml.md S460 "n4 b"), or a URL-valued attribute whose value the §5.2 rule 3 test refuses (`javascript:`, a leading-space or `java<LF>script:` spelling, a non-raster `data:` image, …). ALSO (ruling:user-voice-scrml.md S458 "your recs on all four" · PA-ruled S459 consequence (bare data-scrml = the component CSS scope root, emit-css @scope)): the emitted output carries an attribute whose name (ASCII case folded) is `data-scrml` or begins with `data-scrml-` — the compiler-owned attribute namespace of §22.4.1; the runtime `meta.emit` gate refuses the same attribute at run time (§22.12), with no code. (Catalog addition S64 audit; emitted at `compiler/src/meta-eval.ts` — `reparseEmitted` and `checkEmittedNodes`) **Provenance:** ruling:user-voice-scrml.md S457 (the S457 meta allow-list arc) + ruling:user-voice-scrml.md S458 "1a" + ruling:user-voice-scrml.md S458 "your recs on all four". | Error |
-| E-SYNTAX-050 | §4 | Bare `/` is no longer a valid closer for an open tag. Use `</>` to close the most recently opened tag, or use the explicit form `</TagName>`. **Scoping note (S111 — quoted-text model, scope b):** this code fires from the block splitter's `looksLikeCloser` bare-`/` heuristic, which is a **free-text-mode** mechanism. Under §4.18 it continues to fire in plain-markup free-text bodies (`<p>`, `<h1>`, …), but it SHALL NOT fire inside a **code-default body** (engine state-child / match arm / `:`-shorthand body) — there a `/` is an ordinary operator character of the code-default expression grammar, not a closer-shaped token, and the free-text bare-`/` heuristic does not run. (Catalog addition S64 audit; emitted at `compiler/src/block-splitter.js`) **S482 (Appendix E):** the trailing-slash `/}` value closer (`fallback={<div>…/}`) is the same retired form — there is no "terse" closer — and is refused with this code; the diagnostic carries the Appendix E hint "Did you mean `</>`?". A trailing `content/` or bare `/` (the last thing on its line, before a `;`, or before a tag) is named by this code where it leaves its element, or an element around it, unclosed — in the retired reading the `/` closed its element, so the closer written for an outer element was spent on it. A `/` in text is otherwise text, and a `/` ending a URL or path word (`http://x.com/`, `a/b/`) is never named. | Error |
+| E-SYNTAX-050 | §4 | Bare `/` is no longer a valid closer for an open tag. Use `</>` to close the most recently opened tag, or use the explicit form `</TagName>`. **Scoping note (S111 — quoted-text model, scope b):** this code fires from the block splitter's `looksLikeCloser` bare-`/` heuristic, which is a **free-text-mode** mechanism. Under §4.18 it continues to fire in plain-markup free-text bodies (`<p>`, `<h1>`, …), but it SHALL NOT fire inside a **code-default body** (engine state-child / match arm / `:`-shorthand body) — there a `/` is an ordinary operator character of the code-default expression grammar, not a closer-shaped token, and the free-text bare-`/` heuristic does not run. (Catalog addition S64 audit; emitted at `compiler/src/block-splitter.js`) **S482 (Appendix E):** the trailing-slash `/}` value closer (`fallback={<div>…/}`) is the same retired form — there is no "terse" closer — and is refused with this code; the diagnostic carries the Appendix E hint "Did you mean `</>`?". A trailing `content/` or bare `/` (the last thing on its line, before a `;`, or before a tag) is named by this code where it leaves its element, or an element around it, unclosed — in the retired reading the `/` closed its element, so the closer written for an outer element was spent on it. A `/` in text is otherwise text, and a `/` ending a URL or path word (`http://x.com/`, `a/b/`) is never named (INTERIM — a real retired closer ending such a word is not named either, g-boot-retired-closer-unread-s482). **S482 (s482-retired-lint, #2095 r1 review LOW-1 / LOW-4):** a candidate is not named when an element inside the unclosed one was itself left unclosed with no candidate (no retired reading closes that element — the missing closer is the file's own), nor when it sits in an element closed by its own name in which no retired closer was named; a markup value in logic (`return <div>…`) is read by its own reader, and the retired closers it finds are named (`compiler/self-host-v2/parse.scrml` `slashHitIn` / `slashDrop` / `parseMarkupValue`). | Error |
+| E-CELL-ANGLE-READ | §4, §6.1 | A cell written `<x>` where a value is READ — an operand (`<n> + 1`, `f(<n>)`, `<xs>.length`), an interpolation (`${<n>}`), an attribute expression (`if={<n> > 0}`, `if=(<n> > 0)`), a statement (`<n> + 1;`). `<x>` is not a read form (the §4 table: "`@x` reads"): `<x>` names a cell only where it is declared (`let <x:T=v/>`), and in markup it opens an element. One error over the `<x>`, fix-it `@x`; the expression reads on as `@x`, so what follows is checked as the fixed source would be. Not this code: the retired declaration `<x> = v` (§66.21), a markup value that closes (`return <li> - item</li>`), a void element (`<br>`). **Provenance:** ruling:user-voice-scrml.md S482 "⭐ RULED — every retirement / deprecation PR adds a retired-forms ledger row and migrates" — the same answer confirmed audit R3: *"`<x>` in an expression is not a read form — §4 table: "`@x` reads"; the parser gives one targeted error with a fix-it to `@x`"*; retired-forms ledger row `angle-cell-read` (`compiler/retired-forms.json`). **Direction of change:** newly-rejecting only in wording — every such source was already refused (a parse cascade or a by-name markup-value refusal); corpus measured S482: 0 files change verdict. Emitted by the bootstrap at `compiler/self-host-v2/parse.scrml` (`angleCellRead`; the lexer cuts `<x>` to one token at `compiler/self-host-v2/lex.scrml` `angleCellReadEnd`). **Nominal on impl#1** (frozen; it reports its own parse errors). | Error |
 | E-UNQUOTED-DISPLAY-TEXT | §4.18.7, §4.18, §4.14, §18.0.1, §51.0, §40.8 | (S111 — quoted-text model, scope b.) A run of bare (unquoted) source characters appears in a **code-default body** — an engine state-child body (§51.0), a match block-form arm body (§18.0.1), a `:`-shorthand body (§4.14), or (S441) a `<program>` / `<page>` / `<channel>` body (§40.8; valid code there is a statement sequence, and a markup element is a second declared-text form; one diagnostic per maximal run of invalid statements, which raise nothing else), or (S472) a `<db>` body (§4.18.1 S472 amendment — an item body: a run that is a valid statement there is `E-DB-BODY-STATEMENT`, not this code; one diagnostic per run of consecutive prose lines) — and the run is neither a valid scrml expression (identifier, keyword, call, member access, literal, nested `<tag>` markup-as-value, `${...}` interpolation — per §4.18.2) nor a `"..."` display-text literal (§4.18.3). In a code-default body the default is code and display text is the explicit `"..."`-quoted exception; a bare prose run is therefore an error. **Fire condition:** the block splitter / tokenizer, scanning a code-default-mode body, encounters a non-whitespace run that is not valid code and not a display-text literal. The diagnostic SHALL identify the offending run and suggest wrapping it in a display-text literal (`"<the run>"`). **Does NOT fire** in free-text-mode bodies — a bare prose run in a plain-markup `<p>` / `<h1>` body is display text, unchanged. This is the enforcement code for the explicit text/code boundary the quoted-text model establishes. (**Wired S441** at the `<program>` / `<page>` / `<channel>` locus in both front ends — `compiler/src/ast-builder.js` `rejectBodyTopProse` and `compiler/native-parser/parse-markup.js` `rejectBodyTopProseNative`; immediate error, no §63 window, per ruling:user-voice-scrml.md S441 "declared-prose implementation: \"yes to all four\"" (*"yes to all four, your recs on the rest"*). **Wired S472** at the `<db>` locus in the bootstrap — emitted at `compiler/self-host-v2/parse.scrml` (`dbProseDiag`) — per ruling:user-voice-scrml.md S472 "⭐ RULED — `<db>` body + client reads, Q1–Q6 = PA recs" item 3 (*"loose prose is `E-UNQUOTED-DISPLAY-TEXT`"*); impl#1 reads a `<db>` body as markup (carried divergence, S471 policy). The three code-bearing loci remain spec-ahead-of-implementation per the established §34 pattern — S68 A5-1, S78 backfill; Wave 2+ of the quoted-text-model implementation arc wires them. Authority: `scrml-support/archive/changes/quoted-text-model/IMPLEMENTATION-ROADMAP.md`.) | Error |
 | W-DISPLAY-TEXT-OVERQUOTE | §4.18.7, §4.18.1, §4.18.3, §18.0.1, §51.0 | (S181 — the inverse of E-UNQUOTED-DISPLAY-TEXT.) A `"..."` display-text literal is the **sole content** of a **plain-markup element** (an HTML element — NOT a component, NOT a scrml structural element) that is **nested inside a code-default body** (an engine state-child body §51.0, a match block-form arm body §18.0.1, or a `:`-shorthand body §4.14). The nested plain-markup element opens a **free-text body** (§4.18.1 — body modes nest), so the `"..."` the adopter wrote (correct in the enclosing code-default body) renders **literally** — the quote marks appear in the output. This surfaces the over-quoting footgun: the mirror of E-UNQUOTED-DISPLAY-TEXT, which is the UNDER-quoting case (bare prose in the code-default body itself, where a literal is required). **Fire condition:** a plain-markup element (`getElementShape(tag) !== null`) nested in one of the three code-default-body loci whose body, after ignoring whitespace-only formatting, is exactly one display-text literal (`"..."` with no interior unescaped `"`). **Does NOT fire:** a `"..."` directly in the code-default body (the CORRECT §4.18.3 display-text literal); bare free text in a plain-markup body; a `"..."` in plain markup OUTSIDE any code-default-body context; a NON-sole-content quoted string (`<p>"a" and "b"</p>` — the adopter clearly intends literal quotes); a `:`-shorthand body that IS a display-text literal (the quotes are stripped per §4.18.3 — correct, no footgun). The diagnostic SHALL suggest bare free text (`<p>On the way.</p>`). Partitions into `result.warnings` (non-fatal). Fire site: `type-system.ts` `checkDisplayTextOverquote` (the type pass — the FileAST carries the engine `bodyChildren` / match arm bodies and the wired W-/I- diagnostic stream). Reserved for promotion to a hard reject only if the under-quoting E-UNQUOTED-DISPLAY-TEXT is wired (they share the code-default-body boundary). | Info |
 | E-PARSEVARIANT-TYPE-NOT-ENUM | §41.13, §53.14 | Second argument to `parseVariant` is not a bare scrml-native `:enum` type identifier. Struct types, named-shape types, refinement-type literals, string literals, and arbitrary expressions are rejected. Resolution: pass an enum type as the second argument; for struct-shape boundary parsing, use a server-function normalization step or §53.4 SPARK boundary refinement on assignment. (Stage TS — type-system pass; catalog addition S65 — parseVariant Path-A architectural commit) | Error |
@@ -32352,7 +32359,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-INPUT-005 | §36 | Two input-state-type elements (`<keyboard id=>`, `<mouse id=>`, `<gamepad id=>`) in the same scope use the same `id` value. Input state ids must be unique within their scope. (Catalog addition S84 Wave 2 #5; full prose at §36 lines 15628-15644.) | Error |
 | E-DEPRECATED-001 | §51.3.2 | The `<machine>` keyword is rejected. Deprecation cycle endpoint — activates after the W-DEPRECATED-001 deprecation window when the parser stops accepting `<machine>` and adopters MUST migrate to `<engine>`. Mirrors the `server function` → plain `function` deprecation cycle (W-DEPRECATED-SERVER-MODIFIER → E-DEPRECATED-SERVER-MODIFIER). (Catalog addition S84 Wave 2 #5; spec body at §51.3.2 line 22018, W-DEPRECATED-001 row at line 14432.) | Error |
 | E-PURE-DEPRECATED | §33, §48.11 | The `pure` modifier is rejected. Deprecation cycle endpoint — activates after the W-PURE-DEPRECATED deprecation window when the parser stops accepting the `pure` modifier and adopters MUST migrate `pure function` / `pure fn` to `fn` (and `pure server function` to `server fn`). Mirrors the `<machine>`→`<engine>` (W-DEPRECATED-001 → E-DEPRECATED-001) and `server function`→`function` (W-DEPRECATED-SERVER-MODIFIER → E-DEPRECATED-SERVER-MODIFIER) deprecation cycles. RESERVED — not yet emitted (the warning is the active stage). (Added 2026-06-09, deprecate-pure-modifier.) | Error |
-| E-CONST-AT-DEPRECATED | §6.6.1 | The legacy `const @name = expr` derived-cell form is rejected. Deprecation cycle endpoint — activates after the W-CONST-AT-DEPRECATED deprecation window when the parser stops accepting the `const @name` form and adopters MUST migrate to `const <name> = expr`. Mirrors the `pure function`→`fn` (W-PURE-DEPRECATED → E-PURE-DEPRECATED) and `server function`→`function` (W-DEPRECATED-SERVER-MODIFIER → E-DEPRECATED-SERVER-MODIFIER) deprecation cycles. RESERVED — not yet emitted (the warning is the active stage). (Added 2026-06-13, sym-cell-registration-completeness.) | Error |
+| E-CONST-AT-DEPRECATED | §6.6.1 | The legacy `const @name = expr` derived-cell form is rejected. Deprecation cycle endpoint — activates after the W-CONST-AT-DEPRECATED deprecation window when the parser stops accepting the `const @name` form and adopters MUST migrate to `<name=(expr)/>` (§66.9; R4, S482 — `const <name>` is itself deprecated, §66.21). Mirrors the `pure function`→`fn` (W-PURE-DEPRECATED → E-PURE-DEPRECATED) and `server function`→`function` (W-DEPRECATED-SERVER-MODIFIER → E-DEPRECATED-SERVER-MODIFIER) deprecation cycles. RESERVED — not yet emitted (the warning is the active stage). (Added 2026-06-13, sym-cell-registration-completeness.) | Error |
 | E-STATE-BLOCK-BARE-WRITE-DECL | §38.4, §6 | A bare `@name = init` directly in a `<db>` / `<state>` STATE-block markup body is rejected. Deprecation cycle endpoint — activates after the W-STATE-BLOCK-BARE-WRITE-DECL window when adopters MUST move state-block cell declarations into a `${...}` logic block using the structural form (`${ <name> = init }`). Mirrors the Unit CC `E-WRITE-NOT-IN-LOGIC-CONTEXT` shape for the state-block locus. RESERVED — not yet emitted (the warning is the active stage). (Added 2026-06-13, sym-cell-registration-completeness.) | Error |
 | E-WHITESPACE-001 | §15.15.5 | A `< identifier>` opener with whitespace between `<` and the identifier. Deprecation cycle endpoint — activates after the W-WHITESPACE-001 deprecation window (reclassified unscheduled per §63.7; formerly labeled P3, 2026-04-30) when the parser stops accepting the space-after-`<` form. (Catalog addition S84 Wave 2 #5; spec body at §15.15.5 lines 372, 8418, W-WHITESPACE-001 row at line 14431.) | Error |
 | ~~E-ENGINE-006~~ | §51.5 | **STRUCK S307 (2026-07-31) — never implemented.** Machine rebinding: an attempt to shadow a machine-bound variable with a different machine. Catalogued at S84 Wave 2 #5 with a `§51.5 line NNNNN` prose anchor that is now ~7,800 lines stale; a three-pattern sweep (bare grep · dynamic-construction probe · whole-repo excl. dist/node_modules) found the code in `compiler/SPEC.md` and NOWHERE else. A catalogued code that cannot fire is a false claim in the versioned contract (§62.2), and it inflates the freeze denominator exactly as the retired-vs-uncatalogued probe trap did at S305. | — |
@@ -33874,7 +33881,7 @@ A `<channel>` is a **scrml-defined structural element** that provides persistent
 
 **Grammar (informal):**
 
-```
+```ebnf
 program-body       ::= ( channel-decl | page-decl | markup | logic-block | ... )*
 channel-decl       ::= '<channel' attribute* '>' channel-body '</>'
 channel-body       ::= ( state-decl | logic-block | server-fn-decl | <onTransition> ... )*
@@ -39373,6 +39380,7 @@ The gate is **binding-aware** (mirroring the §41.19/§41.20 import-binding prec
 
 A `fn` that requires asynchronous data (e.g., a server call result) SHALL receive that data as a parameter at its call site, not perform the async operation internally. The call site itself uses the body-split / CPS mechanism (§19.9.3) — the canonical scrml async surface; no source-level `await` is required.
 
+<!-- retired-neg: async-await — Invalid — E-FN-005 (async / await in a `fn`, §19.9.8) -->
 ```scrml
 // Invalid — E-FN-005: async fn declaration
 async fn buildProfile(id: int) {
@@ -40781,6 +40789,7 @@ for { tick(); }                                    // valid — a statement loop
 
 A `while (cond) { … }` statement. `while` is a reserved word with no meaning in scrml (§49.1).
 
+<!-- retired-neg: while-loop — the E-LOOP-WHILE-RETIRED catalogue example -->
 ```scrml
 while (pos < len) { pos += 1; }   // Error E-LOOP-WHILE-RETIRED
 for (pos < len) { pos += 1; }     // the fix: the same head, under `for`
@@ -40795,6 +40804,7 @@ for (pos < len) { pos += 1; }     // the fix: the same head, under `for`
 
 A `do { … } while (cond)` statement. `do` is a reserved word with no meaning in scrml (§49.1).
 
+<!-- retired-neg: do-while-loop — the E-LOOP-DO-WHILE-RETIRED catalogue example -->
 ```scrml
 do { tries += 1; } while (!ok && tries < 5);                 // Error E-LOOP-DO-WHILE-RETIRED
 for { tries += 1; if (ok || tries >= 5) { break; } }          // the fix (§49.3.6)
@@ -40994,6 +41004,7 @@ once outside the loop, or pass it as a parameter to a function called before the
 
 ### Example 8 — Invalid: a retired `while` (E-LOOP-WHILE-RETIRED)
 
+<!-- retired-neg: while-loop — Example 8 — Invalid: a retired `while` (E-LOOP-WHILE-RETIRED) -->
 ```scrml
 ${
     while (hasData()) {
@@ -41118,7 +41129,7 @@ the PA's brief, "Move §49.13 into §66.12". Direction of change: inert.)*
 The primary motivating use case is the regex iteration idiom:
 
 ```scrml
-while ((m = re.exec(str)) is given) {
+for ((m = re.exec(str)) is given) {
     // process match m
 }
 ```
@@ -41288,16 +41299,14 @@ The type of `x = value` is the type of `value`, which must be assignable to the 
 
 #### 50.5.1 Assignment to fn-Local Variables
 
-> ⚑ **S469 pointer:** the examples here use JavaScript's `push` / `unshift` / `splice` on a tape, which the language refuses (`E-TAPE-JS-METHOD`); tape methods are named after their grants (`.append` / `.pop`, `.prepend` / `.shift`, `.insert` / `.remove`), and a local tape needs a typed grant (§66.12.6, O63).
-
 Assignment to variables declared inside a `fn` body is valid as an expression. The fn body's constraints (§48.3) are not relaxed; the expression form of assignment is purely a parsing/evaluation concern, not a permissions concern.
 
 ```scrml
-fn scanMatches(str: string, re: asIs) {
-    let results = [];
+fn scanMatches(str: string, re: asIs) -> ScanResult {
+    let results: string[free, append] = [];        // a local tape needs a typed grant (§66.12.6, O63)
     let m = not;
-    while ((m = re.exec(str)) is given) {
-        results.push(m[0]);
+    for ((m = re.exec(str)) is given) {            // `while` retired S469 (§49.4.1)
+        results.append(m[0]);                      // `push` refused, E-TAPE-JS-METHOD (§66.12.6)
     }
     let out = <ScanResult>;
     out.matches = results;
@@ -41354,17 +41363,17 @@ Reactive variable assignment-as-expression compiles to the reactive setter. The 
 
 #### 50.8.1 W-ASSIGN-001 — Assignment in Condition Without Double Parentheses
 
-**Trigger:** `=` appears as the root (outermost) expression of a `while`, `if`, or `else-if` condition without being wrapped in an additional pair of parentheses.
+**Trigger:** `=` appears as the root (outermost) expression of a `for` (condition head), `if`, or `else-if` condition without being wrapped in an additional pair of parentheses.
 
 **Severity:** Warning.
 
 **Message:**
 ```
-W-ASSIGN-001: Assignment (`=`) used as the condition of `while` at line N.
+W-ASSIGN-001: Assignment (`=`) used as the condition of `for` at line N.
   Did you mean `==` for equality comparison?
   If assignment is intentional, use double parentheses to signal intent:
 
-    while ((x = expr)) { ... }
+    for ((x = expr)) { ... }
 
   Single parentheses in a condition with `=` as the root expression are ambiguous.
 ```
@@ -41525,23 +41534,21 @@ ${
 
 #### 50.10.1 Valid — Regex Iteration (Primary Use Case)
 
-> ⚑ **S469 pointer:** the examples here use JavaScript's `push` / `unshift` / `splice` on a tape, which the language refuses (`E-TAPE-JS-METHOD`); tape methods are named after their grants (`.append` / `.pop`, `.prepend` / `.shift`, `.insert` / `.remove`), and a local tape needs a typed grant (§66.12.6, O63).
-
 ```scrml
 ${
-    function extractAll(str: string, pattern: string) {
+    function extractAll(str: string, pattern: string) -> string[] {
         const re = new RegExp(pattern, "g");
-        let results = [];
+        let results: string[free, append] = [];
         let m = not;
-        while ((m = re.exec(str)) is given) {
-            results.push(m[0]);
+        for ((m = re.exec(str)) is given) {
+            results.append(m[0]);
         }
         return results;
     }
 }
 ```
 
-Expected: Compiles without error or warning. `m = re.exec(str)` is not the root expression of the while condition — `is given` is — so W-ASSIGN-001 is not triggered. `m` is declared with `let` before the loop. The double-parens form around the assignment `(m = re.exec(str))` is the expression form; the outer condition parens are the while's required syntax.
+Expected: Compiles without error or warning. `m = re.exec(str)` is not the root expression of the `for` condition — `is given` is — so W-ASSIGN-001 is not triggered. `m` is declared with `let` before the loop. The double-parens form around the assignment `(m = re.exec(str))` is the expression form; the outer condition parens are the `for` head's required syntax. *(S482 #2101 r1: migrated from `while` / `.push` / an ungranted `let results = []` — the retired forms, §49.4.1, §66.12.6. Checked on the bootstrap: no language error; it refuses `new RegExp(…)`, `.exec(…)` and the index read on `exec`'s result as E-BOOTSTRAP-UNSUPPORTED — App. D host calls it does not build yet, `g-boot-assign-as-expression-unbuilt-s473` for the condition form.)*
 
 Compiled JavaScript output (abbreviated; `is given` lowers per §42.5 with single-evaluation temp form per §42.2.4):
 ```javascript
@@ -41624,7 +41631,7 @@ fn parseTokens(input: string) {
     const tokenRe = /\w+/g;
     let tokens = [];
     let m = not;
-    while ((m = tokenRe.exec(input)) is given) {
+    for ((m = tokenRe.exec(input)) is given) {
         let t   = <Token>;
         t.value = m[0];
         t.start = m.index;
@@ -47260,10 +47267,15 @@ This is the **route-admission × row-selection** axis of §52.15.4; it stacks wi
 scrml distinguishes two categories of value constraint:
 
 **Contextual constraints** — the validity of a mutation depends on prior state, sibling fields,
-or external reactive references. These are governed by `<machine>` (§51). Examples:
-- Enum transition rules (depends on current variant)
-- Cross-field struct invariants (depends on sibling field values)
-- Constraints referencing reactive variables (`<=@maxMana`)
+or external reactive references. These are ~~governed by `<machine>` (§51)~~ not inline predicates; each kind has its
+own mechanism (the §53.3.2 table; `<machine>` was removed S305/S307). Examples:
+- Enum transition rules (depends on current variant) — the value's transition graph, `rule=` state-children (§66.13.2)
+- Cross-field struct invariants (depends on sibling field values) — an `<engine for=Struct>` guard (§53.8.1).
+  ⚑ OPEN: `<engine>` is soft-deprecated (§66.21); the non-deprecated way to state a cross-field struct invariant
+  is an open owner question (gap g-spec-struct-invariant-form-s482)
+- Constraints referencing reactive variables (`<=@maxMana`) — a type's rule checks only its own value; to compare
+  against another cell, write a derived check (e.g. `<overBudget=(@spent > @maxMana)/>`) and use it in markup or the
+  handler that changes the value (ruling:user-voice-scrml.md-S482-contract-003-derived-check)
 
 **Stateless constraints** — the validity of a value can be determined from the incoming value
 alone. No prior state, no sibling fields, no reactive references need to be consulted. These
@@ -47274,7 +47286,7 @@ are governed by **inline type predicates** (this section). Examples:
 
 The semantic distinction is clean and binary. Developers apply the **stateless test** at
 declaration time: "Can I validate this incoming value without knowing what the variable held
-before, or what any sibling field currently holds?" If yes — inline predicate. If no — machine.
+before, or what any sibling field currently holds?" If yes — inline predicate. If no — ~~machine~~ the mechanism for its kind (the §53.3.2 table).
 
 This separation is motivated by two concrete requirements:
 
@@ -47382,7 +47394,7 @@ and reject the program.
 
 ### §53.3.2 The Stateless Test
 
-The canonical decision rule for when to use an inline predicate vs a `<machine>`:
+The canonical decision rule for when to use an inline predicate vs ~~a `<machine>`~~ a contextual mechanism (the table's last column; `<machine>` was removed S305/S307):
 
 > A constraint is **stateless** if its validity can be determined from the incoming value alone,
 > without consulting the variable's prior value, any sibling field, or any reactive reference.
@@ -47392,13 +47404,13 @@ The canonical decision rule for when to use an inline predicate vs a `<machine>`
 | `number(>0 && <10000)` | Stateless | Inline predicate |
 | `string(.length > 7 && .length < 255)` | Stateless | Inline predicate |
 | `string(email)` | Stateless | Inline predicate (named shape) |
-| `start < end` on a struct | Contextual (needs sibling) | `<machine for Struct>` |
-| `.Pending => .Processing` | Contextual (needs prior state) | `<machine>` |
-| `number(>=0 && <=@maxMana)` | Contextual (references reactive var) | `<machine>` |
+| `start < end` on a struct | Contextual (needs sibling) | ~~`<machine for Struct>`~~ an `<engine for=Struct>` guard, `* => * given (self.start < self.end)` (§53.8.1; the `<engine for=T>` element is §66.21 Stage-1 soft-deprecated, `W-ENGINE-ELEMENT-DEPRECATED` — it parses and is not removed). ⚑ OPEN: `<engine>` is soft-deprecated (§66.21); the non-deprecated way to state a cross-field struct invariant is an open owner question (gap g-spec-struct-invariant-form-s482) |
+| `.Pending => .Processing` | Contextual (needs prior state) | ~~`<machine>`~~ the value's transition graph: `rule=` state-children on the enum value (§66.13.2; ruling:S435 (PA proposal text answered "a", L488), as §66.13.1 cites it: *"Every field's permitted changes are declared on its type: fixed, a lifecycle, a transition graph, or `let`/`replace`."*) |
+| `number(>=0 && <=@maxMana)` | Contextual (references reactive var) | ~~`<machine>`~~ a derived check: `<overBudget=(@spent > @maxMana)/>`, used in markup or the handler that changes the value (ruling:user-voice-scrml.md-S482-contract-003-derived-check) |
 
 The boundary case `number(>=0 && <=@maxMana)` SHALL be rejected with `E-CONTRACT-003` if
-written as an inline predicate, because `@maxMana` is an external reactive reference. The
-developer SHALL express this constraint as a `<machine>` guard instead.
+written as an inline predicate, because `@maxMana` is an external reactive reference. ~~The
+developer SHALL express this constraint as a `<machine>` guard instead.~~ **(S482, RULED — ruling:user-voice-scrml.md-S482-contract-003-derived-check.)** `<machine>` was removed (S305/S307, §51.0.L, `E-DEPRECATED-001`). A type's rule checks only its own value; to compare against another cell, write a derived check (e.g. `<overBudget=(@spent > @maxMana)/>`) and use it in markup or the handler that changes the value. The developer SHALL express such a constraint as a derived check, not in the type.
 
 ### §53.3.3 Assignment Semantics
 
@@ -47704,7 +47716,7 @@ type Email:struct = { addr: string.pattern(/^[^@]+@[^@]+$/) }
 
 - **Compile-time + runtime boundary check** (§53.4 SPARK three-zone enforcement). A value that doesn't satisfy the predicate cannot inhabit the type. Compile-time provable violations emit `E-CONTRACT-001`; non-provable violations emit `E-CONTRACT-001-RT` at runtime.
 - **Stronger than state-cell validators** (which gate form-validity reactively but allow the underlying cell to hold the invalid value while the user types) and stronger than schema constraints (which enforce only at INSERT/UPDATE).
-- **Cross-field via predicate args.** As with state-cell validators, predicate args MAY reference other cells: `gte(@startDate)` in the type of an `endDate` field is a reactive-aware refinement-type predicate. Same circular-dep rules apply (E-VALIDATOR-CIRCULAR-DEP — §55.11, §34).
+- **No cross-field arguments in type position.** A predicate argument in refinement-type position SHALL NOT reference another cell: `gte(@startDate)` in the type of an `endDate` field is refused with `E-CONTRACT-003` (§53.11), because a type's rule checks only its own value (ruling:user-voice-scrml.md-S458-R4 — *"cross-field arguments (`gte(@x)`) are ruled OUT of type position (§53.3.1 / E-CONTRACT-003 stand; §53.6.1's `gte(@startDate)` example is corrected)"*). To compare against another cell, write a derived check — `<endsBeforeStart=(@endDate < @startDate)/>` — and use it in markup or the handler that changes the value (ruling:user-voice-scrml.md-S482-contract-003-derived-check). A state-cell validator (`<endDate gte(@startDate)>`, §55.11) is not type position: its cross-field argument stands, under the circular-dependency rule (E-VALIDATOR-CIRCULAR-DEP — §55.11, §34). *(S482 correction, #2101 r5, gap g-spec-refinement-cross-cell-arg-s482: this bullet said predicate args MAY reference other cells and called `gte(@startDate)` in an `endDate` type a reactive-aware refinement-type predicate.)*
 
 **Cross-ref §55.1** for the universal-core predicate listing and the cross-locus consistency table.
 **Cross-ref §55.3** for the §55-side description of refinement-type validator firing.
@@ -47856,21 +47868,14 @@ field-level check already rejects the value.
 
 If a predicate expression contains any reference to a reactive variable (`@name`), sibling field
 reference (`self.field`), or any identifier that resolves outside the incoming-value scope, the
-compiler SHALL emit `E-CONTRACT-003` at compile time with a message directing the developer to
-use `<machine>` instead.
+compiler SHALL emit `E-CONTRACT-003` at compile time. ~~with a message directing the developer to
+use `<machine>` instead.~~ with a message that says a type's rule checks only its own value and, to compare against another cell, directs the developer to a derived check (e.g. `<overBudget=(@spent > @maxMana)/>`) used in markup or the handler that changes the value (ruling:user-voice-scrml.md-S482-contract-003-derived-check).
 
 ```scrml
 // INVALID — @maxMana is an external reactive reference
 <hp>: number(>=0 && <=@maxMana) = 100;
 // E-CONTRACT-003: predicate references external reactive variable '@maxMana'.
 // Inline predicates must be stateless.
-// For constraints that reference reactive state, use <machine>.
-// Example:
-//   <machine name=HpRange for=number> {
-//       * => * given (value >= 0 && value <= @maxMana)
-//   }
-//   /
-//   <hp>: HpRange = 100
 ```
 
 ---
@@ -48074,20 +48079,22 @@ E-CONTRACT-003: Inline predicate references external reactive variable '@maxMana
   and its properties. They may not reference reactive variables, sibling fields,
   or any external binding.
 
-  For constraints that depend on external state, use <machine>:
-
-    <machine name=HpRange for=number> {
-        * => * given (value >= 0 && value <= @maxMana)
-    }
-    </>
-    <hp>: HpRange = 100
+  A type's rule checks only its own value. To compare against another cell, write a
+  derived check — <over=(@hp > @maxMana)/> — and use it in markup or in the handler
+  that changes the value.
 ```
+
+**(S482, RULED — ruling:user-voice-scrml.md-S482-contract-003-derived-check.)** `<machine>` was removed (S305/S307, §51.0.L, `E-DEPRECATED-001`). A type's rule checks only its own value; to compare against another cell, write a derived check (e.g. `<overBudget=(@spent > @maxMana)/>`) and use it in markup or the handler that changes the value. *(Struck from the message above: "For constraints that depend on external state, use
+\<machine\>", with a `machine name=HpRange for=number` example; the derived-check paragraph replaces it.)*
 
 Normative statements:
 > The compiler SHALL emit E-CONTRACT-003 when a predicate expression contains any reference
 > that resolves outside the incoming-value scope.
-> The compiler SHALL include an example of the equivalent `<machine>` construct in the
-> E-CONTRACT-003 message.
+> ~~The compiler SHALL include an example of the equivalent `<machine>` construct in the
+> E-CONTRACT-003 message.~~ The compiler SHALL say in the E-CONTRACT-003 message that a type's rule checks
+> only its own value, and SHALL direct the developer to a derived check (e.g.
+> `<overBudget=(@spent > @maxMana)/>`) used in markup or the handler that changes the value
+> (ruling:user-voice-scrml.md-S482-contract-003-derived-check).
 > E-CONTRACT-003 SHALL be emitted at compile time. It is never a runtime error.
 
 ### E-CONTRACT-004-WARN: `bind:value` type attribute conflict
@@ -48234,14 +48241,12 @@ E-CONTRACT-003: Inline predicate references external reactive variable '@maxScor
   and its properties. They may not reference reactive variables, sibling fields,
   or any external binding.
 
-  For constraints that depend on external state, use <machine>:
-
-    <machine name=ScoreRange for=number> {
-        * => * given (value >= 0 && value <= @maxScore)
-    }
-    </>
-    <playerScore>: ScoreRange = 0
+  A type's rule checks only its own value. To compare against another cell, write a
+  derived check — <over=(@playerScore > @maxScore)/> — and use it in markup or in the handler
+  that changes the value.
 ```
+
+**(S482, RULED — ruling:user-voice-scrml.md-S482-contract-003-derived-check.)** `<machine>` was removed (S305/S307, §51.0.L, `E-DEPRECATED-001`). A type's rule checks only its own value; to compare against another cell, write a derived check (e.g. `<overBudget=(@spent > @maxMana)/>`) and use it in markup or the handler that changes the value. *(Struck from this expected output: the `machine name=ScoreRange for=number` suggestion; the derived-check paragraph replaces it.)*
 
 ---
 
@@ -52074,6 +52079,87 @@ Two adjacent code classes are ruled OUT of the stage machine:
 The `--fix`/`scrml fix` codemod applies only to the from→to deprecations of the stage
 machine; the two classes above are never scheduled and never removed.
 
+**The retired-forms ledger (S482).** Every change that retires (HARD — refused, no window) or deprecates
+(SOFT — a §63 Stage-1 warning) a syntax form SHALL, in the same change: (1) add a row to the retired-forms
+ledger `compiler/retired-forms.json` — the old form, the new form, its tier, the error or warning code, the
+SPEC section and the ruling citation, and a detector where the form is detectable from text; and (2) for a
+HARD form, migrate every SPEC example and every positive example in the corpus (conformance and acceptance
+positives, samples, examples, stdlib, the public docs) to the new form, or record each remaining site as dated
+`pending` debt; for a SOFT form, record the starting count per file. The retired-forms gate
+(`scripts/retired-forms-lint.ts`, CI `checks` and the pre-commit hook) enforces it. **What the gate checks —
+exactly this (S482, #2101 r1–r5):**
+- *What it reads:* every ledger row with a detector, over (a) the `.scrml` files under `conformance/cases`,
+  `compiler/self-host-v2/acceptance`, `samples`, `examples`, `stdlib`, `docs/tutorial-snippets`,
+  `docs/readme-snippets`, `docs/website`; (b) in every `.md` file of the repository — except the paths the
+  ledger lists with a reason (change and progress notes, the changelog, generated files, hand-offs, PA working notes
+  and task lists, dated audits, scoping notes and disposition records, archived drafts, test fixtures, an
+  untracked local playground, impl#1 internals and stage contracts, other frameworks' benchmarks, dependencies) and the directories it skips at any depth (`node_modules`, `dist`, dot-directories)
+  — every fenced code block, as CommonMark (GFM) reads it (the `marked` lexer, #2101 r3, cross-checked by
+  commonmark.js, #2101 r5), whose info string is
+  empty, starts with `scrml` (`scrml`, `scrml{.example}`, `scrml,ignore`) or is an attribute block with the
+  class `.scrml` (`{.scrml}`), including a fence inside a blockquote or a list item (it ends where its container
+  ends); each fence is placed on its source lines by the lexer's own token positions, and a block that cannot be
+  placed exactly there exits 2 (it is never read at a guessed line). The file set — the `.scrml` roots, the excluded paths and the skipped directories — is the ledger's
+  `corpus`, so it is checked against the base like the rows (below). Source is read once,
+  in source order, by a port of the bootstrap's readers: comments, strings, regular-expression literals, raw
+  bodies (`<pre>`, `<code>`, `<script>`, `<style>`, §4.17; an unclosed one runs only to the next closing tag),
+  `_{ }` / `?{ }` / `#{ }` bodies (a brace inside a string of the body is not counted), and the free text of a
+  closed HTML element are never matched; a detector matches across line breaks and every match is one hit.
+  The trailing-`/` closer uses the bootstrap's candidate and hit rule; the legacy cell read `<x>` its
+  operand-slot rule.
+- *What it allows:* a hit in a conformance / acceptance case's own file (its `case.scrml`, or a file the case
+  names) whose expected codes name the row's code — one hit per expected occurrence of that code (its
+  `codeCounts` entry, else 1; rows that share a code share the count), and for a row whose code is generic
+  (`E-SCOPE-001`, `E-PARSE-FN`, `E-PARSE-TYPE`, `E-GRANT-UNKNOWN`) only when the case id also matches the row's
+  `caseIdPattern`; a fence with `<!-- retired-neg: <row-id> — <reason> -->` on the line(s) directly above it, at the
+  fence's blockquote depth; a `retired-ok: <row-id> — <reason>` inside a comment on the hit's line or the line
+  before. No section or region of any file is exempt — not §63, not §66.21 (#2101 r4): a negative example anywhere,
+  this section included, is a fence marked `retired-neg`. A code named in prose or in a comment allows nothing.
+- *What fails:* any (row, file) count that differs from the baseline (`scripts/retired-forms-baseline.json`):
+  a HARD hit outside the dated `pending` debt, a count above the baseline, and a count below it until the
+  baseline is lowered in the same change (`--update`); a ledger that lists `migrationRegions` (retired, #2101 r4).
+  Against the base revision (`--base-ref`; CI: the PR's base, the hook: the merge-base with `origin/main`; a
+  revision that does not resolve exits 2): a baseline count above the base's, a key the base lacks (except a new
+  SOFT row's starting count), debt for a new HARD row, a ledger row removed, downgraded HARD → SOFT, or given a
+  null detector; and the BASE ledger's own rules — each base row's detector, codes and `caseIdPattern`, and the
+  base's file set (`corpus`) — run over the changed tree, finding a (row, file) count above the base baseline. So
+  a change cannot widen what a row allows (a code added, a widened `caseIdPattern`, a narrowed or never-matching
+  detector, a newly excluded path) to let a new hit through.
+- *Known limits:* counts are per (row, file), so swapping one hit for another of the same row in the same file
+  passes; within a negative case's count, which hit is allowed is not tied to the line its diagnostic points
+  at; the source walker, the markdown reader and the builtin detectors are the changed tree's own script, so
+  narrowing them is a reviewed code diff, not a ledger diff the base rules catch (and a base ledger older than
+  `corpus` is read with the changed tree's); fences tagged as another language, indented code
+  blocks, HTML `<pre>` blocks and markdown prose are not read; markdown the lexer mis-reads exits 2 rather
+  than be read or passed — both when its cursor runs past the source and when the fence texts it reads differ from
+  CommonMark's: marked 14 reads a fence after a lazy continuation line inside a list in a blockquote
+  (`> - a⏎b⏎> ```scrml…`) as paragraph text, so every markdown file is also read by commonmark.js, the reference
+  implementation, and the gate exits 2 when the two readers' multisets of read fence texts (each line trimmed)
+  differ (#2101 r5); **INTERIM:** that exit 2 asks the author to reshape valid CommonMark marked 14 mis-reads —
+  the capable form is one reader that agrees with CommonMark: marked 18.0.0 (published 2026-04-07) and later
+  agree with commonmark.js on the 40,000 r4 fuzz documents and the lazy-continuation reproducers (17.x and
+  earlier do not), but the gate's placement wrappers hook marked internals (`blockTokens`, tokenizer methods)
+  and must be re-proven on marked ≥ 18.0.0 before the bump (g-tool-retired-lint-marked-bump-s482); after it the
+  cross-check only guards against a regression; **INTERIM:** an unterminated string or template literal in a
+  fence (a stray ```` ``` ```` line inside it is a template-literal opener to scrml) hides the rest of that fence,
+  as it would in a source file the compiler then refuses — the capable form fails the gate when a fence's text
+  ends inside an unterminated string or template literal, so nothing after it goes unread; the hook reads the working tree, not the index (CI reads the commit);
+  text cannot tell a tape from a host array (`tape-js-method`) or a cell from an element (`render-by-tag`, which
+  the bootstrap enforces); rows marked `enforcedBy: "lint-only"` have no compiler refusal, and
+  `state-type-fn-overload` (§17.5) has neither a code nor a detector; `tape-js-method` sees a method by its dotted name only
+  (`xs["push"](1)` is not a hit) and a discarded `.sort()` only after `;` / `{` / `}` (not `if (a) xs.sort()`); a retired closer inside a
+  raw body left unclosed (`<code>x⏎<p>and/⏎more</>`) is raw text to the gate, while the bootstrap names it; the closer rule's path-word
+  exemption is the bootstrap's INTERIM. A SPEC example outside §66 is written in
+the current language unless it is a labelled negative or a marked deprecated demonstration (S482). The ledger
+also feeds the bootstrap conformance report's legacy-dialect markers. A retirement banner ("all examples
+updated") is not a migration: the gate, not the banner, is the record. **Provenance:** ruling:user-voice-scrml.md
+S482 "⭐ RULED — every retirement / deprecation PR adds a retired-forms ledger row and migrates" — *"every PR
+that retires or deprecates a syntax form must do both: 1. add a row to the retired-forms ledger
+(`compiler/retired-forms.json`): the old form, the new form, its tier, the error or warning code, and the ruling
+citation; 2. migrate the SPEC examples, or for a deprecated form, record the starting count, which then only goes
+down."* · ruling:user-voice-scrml.md S482 "⭐ RULED — every SPEC example is in the current language, except
+labelled negatives and marked deprecated demonstrations".
+
 ### 63.9 Cross-references
 
 §62 (the language-version scheme — the version events that clock this lifecycle; the
@@ -52595,7 +52681,7 @@ Conditional application reuses the **`class:`-family** (§5.5.2) sibling: **`sty
 
 One fixed chain, reasoned top-to-bottom, **no `(id,class,type)` arithmetic anywhere** (§Rulings row 5):
 
-```
+```text
 applied style=  >  class / id / specific author rule (component-scope `#{}`)  >  universal `*` / bare-root (`html`, `body`) author rule  >  program-global `#{}` (escape hatch — `@layer global`)  >  <defaults> / DOM-inherited  >  built-in reset (`@layer reset`)  >  browser initial
 ```
 
@@ -56156,7 +56242,7 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 | O32 | §66.2.4 | Whether compound literals may stand bare in an opener. |
 | ~~O33~~ RULED S473 (D6) | §66.3 | Attributes with no default: required at every use, or canonical-empty; their value in the shared instance. RULED: canonical-empty (§6.2 Shape 4), at every use that omits it and in the shared instance; the bootstrap refuses at compile time until built. Provenance: ruling:user-voice-scrml.md S473 D6 "your recs on all". |
 | O34 | §66.12.5 | A tuple position with no default, with or without a lifecycle. |
-| O35 | §66.3 | The unruled parts of DD §7 #17 (own-value-only inference / required attribute types; annotation required for `not`/`[]`/`{}`; `<x>` in logic). |
+| O35 | §66.3 | The unruled parts of DD §7 #17 (own-value-only inference / required attribute types; annotation required for `not`/`[]`/`{}`; ~~`<x>` in logic~~ — RULED S482 for a READ: `<x>` where a value is read is not a read form, one `E-CELL-ANGLE-READ` with the `@x` fix-it, ruling:user-voice-scrml.md S482 "every retirement / deprecation PR adds a retired-forms ledger row and migrates"). |
 | ~~O35(d)~~ RULED S462 | §66.3 | Must a NON-literal own value carry `:T`? RULED: inferred from an enumerated set (§66.3 rule 5, base type, rule 6); outside it a hard error, `E-DECL-TYPE-NOT-INFERABLE` (rule 7; diverges from §7.5.2's locals rule); a cycle's diagnostic wins (rule 8); `:T` required at `persist=` / server / export (rule 9; export is the default until O2 / O39); an unproven `:T` is `E-DECL-TYPE-UNPROVEN` (rule 10). Provenance: ruling:user-voice-scrml.md S462 "go on the package" · dd:scrml-support/docs/deep-dives/own-value-type-annotation-o35d-dpa-065-2026-10-08.md. |
 | ~~O36~~ RULED S477 | §66.11 | Enforcement of an invariant the compiler cannot prove statically. RULED: a provable violation is `E-WRITE-INVARIANT`; an unprovable write is checked at run time and traps (`E-WRITE-INVARIANT-RT`; a position outside the tape `E-INDEX-OUT-OF-RANGE-RT`) — §66.11.7. Provenance: ruling:user-voice-scrml.md S477 "⭐ RULED — O36" — *"036 yes"*. |
 | ~~O37~~ RULED (c) | §66.12.3 | A helper's result written back into a `replace`-less sequence: "fine" in the answered "type" text vs a `replace` under the one-axis rule (trust return type · certify callee body · leave a replace; PA lean certify). Call direction is ruled. |

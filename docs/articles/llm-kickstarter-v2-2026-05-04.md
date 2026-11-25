@@ -1326,7 +1326,7 @@ If you reach for `import X from 'some-npm-package'` while writing scrml, stop. C
 
 The bootstrap — the compiler this document is checked against — runs from a clone of the repository:
 
-```
+```text
 bun run boot:compile <file>          — compile once to dist/<name>/ next to the input (-o <dir> to choose)
 bun run boot:dev <file>              — compile + serve on http://127.0.0.1:3000/ + recompile and reload on save
 bun run lsp:boot                     — a language server with the bootstrap's diagnostics, for your editor

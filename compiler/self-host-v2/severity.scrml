@@ -126,6 +126,7 @@ ${
             "E-AUTH-ATTR-INVALID" :> Severity.Error,
             "E-AWAIT-NOT-IN-SCRML" :> Severity.Error,
             "E-CALL-ARITY" :> Severity.Error,
+            "E-CELL-ANGLE-READ" :> Severity.Error,
             "E-CHANNEL-001" :> Severity.Error,
             "E-CHANNEL-003" :> Severity.Error,
             "E-CHANNEL-004" :> Severity.Error,

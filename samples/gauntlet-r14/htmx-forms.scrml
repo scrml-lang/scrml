@@ -73,7 +73,7 @@
         <ul if=@errors.length>
             ${
                 for (let err of @errors) {
-                    lift <li class="error">${err}/
+                    lift <li class="error">${err}</>
                 }
             }
         </ul>

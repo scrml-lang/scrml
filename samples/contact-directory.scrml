@@ -231,7 +231,7 @@
             ${
                 if (contacts.length == 0) {
                     lift <div class="empty-state">
-                        <p>No contacts found./
+                        <p>No contacts found.</>
                     </div>
                 }
             }
@@ -240,22 +240,22 @@
                 for (let contact of contacts) {
                     lift <div class="contact-card" class:active=@hasSearch>
                         <div class="contact-main">
-                            <span class="contact-name">${contact.name}/
-                            <span class="contact-tag">${contact.category}/
+                            <span class="contact-name">${contact.name}</>
+                            <span class="contact-tag">${contact.category}</>
                         </div>
                         <div class="contact-details">
-                            <span>${contact.email}/
-                            <span>${contact.phone}/
+                            <span>${contact.email}</>
+                            <span>${contact.phone}</>
                         </div>
                         <div class="contact-actions">
                             <button
                                 onclick=openEditForm(contact.id, contact.name, contact.email, contact.phone, contact.category)
                                 class="btn-edit"
-                            >Edit/
+                            >Edit</>
                             <button
                                 onclick=requestDelete(contact.id)
                                 class="btn-delete"
-                            >Delete/
+                            >Delete</>
                         </div>
                     </div>
                 }

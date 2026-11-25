@@ -244,11 +244,11 @@
             <tbody>${
                 for (let url of @urls) {
                     lift <tr>
-                        <td class="short-code-cell">${url.short_code}/
-                        <td class="long-url-cell">${url.long_url}/
-                        <td class="clicks-cell">${url.clicks}/
+                        <td class="short-code-cell">${url.short_code}</>
+                        <td class="long-url-cell">${url.long_url}</>
+                        <td class="clicks-cell">${url.clicks}</>
                         <td>
-                            <button onclick=deleteUrl(url.short_code) class="btn-delete">Delete/
+                            <button onclick=deleteUrl(url.short_code) class="btn-delete">Delete</>
                         </td>
                     </tr>
                 }

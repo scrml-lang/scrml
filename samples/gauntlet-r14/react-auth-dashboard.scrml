@@ -56,7 +56,7 @@ ${ server function handle(request, resolve) {
                 for (let user of @users) {
                     lift <li>
                         ${user.name}
-                        <button onclick=removeUser(user.id)>Remove/
+                        <button onclick=removeUser(user.id)>Remove</>
                     </li>
                 }
             }

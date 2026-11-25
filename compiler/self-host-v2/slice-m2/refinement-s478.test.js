@@ -63,6 +63,21 @@ describe("judged where declared, any zone (§53.11)", () => {
   test("a reference outside the incoming value is E-CONTRACT-003 (§53.3.1)", () => {
     expect(errs(cell("<m:number=100/>\n<x:number(>=0 && <=@m)=1/>"))).toEqual(["E-CONTRACT-003"]);
   });
+  // S482 ruling (ruling:user-voice-scrml.md-S482-contract-003-derived-check): the message advises a derived
+  // check, not the removed `<machine>` — for an `@cell` reference and for a bare outer name alike
+  test("E-CONTRACT-003 advises a derived check, never `<machine>` (S482 ruling)", () => {
+    for (const decl of ["<m:number=100/>\n<x:number(>=0 && <=@m)=1/>", "<x:number(<=max)=1/>"]) {
+      const ds = run(cell(decl)).filter((d) => d.code === "E-CONTRACT-003");
+      expect(ds.length).toBeGreaterThan(0);
+      for (const d of ds) {
+        expect(d.message).toContain("A type's rule checks only its own value");
+        expect(d.message).toContain("derived check");
+        expect(d.message).toContain("the handler that changes the value");
+        expect(d.message).not.toContain("machine");
+      }
+    }
+    expect(run(cell("<m:number=100/>\n<x:number(>=0 && <=@m)=1/>")).find((d) => d.code === "E-CONTRACT-003").message).toContain("<over=(@cell > @m)/>`, where `@cell` is the refined cell");
+  });
   test("a union with a refined member and a map of refined entries is E-CONTRACT-002 (no runtime test)", () => {
     expect(errs(cell("<x:number(>0) | [string: number(>0)]=1/>"))).toEqual(["E-CONTRACT-002"]);
   });

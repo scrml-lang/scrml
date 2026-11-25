@@ -52,12 +52,12 @@
             ${
                 for (let p of @products) {
                     lift <tr>
-                        <td>${p.name}/
-                        <td>$${p.price}/
-                        <td>${p.stock}/
+                        <td>${p.name}</>
+                        <td>$${p.price}</>
+                        <td>${p.stock}</>
                         <td>
-                            <button onclick=startEdit(p.id, p.name, p.price)>Edit/
-                            <button onclick=deleteProduct(p.id)>Delete/
+                            <button onclick=startEdit(p.id, p.name, p.price)>Edit</>
+                            <button onclick=deleteProduct(p.id)>Delete</>
                         </td>
                     </tr>
                 }

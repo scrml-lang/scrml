@@ -215,34 +215,38 @@ export function unimplementedRequired(ex: Record<string, any>, knownCodes: Set<s
  * reports E-PROGRAM-MISSING). A heuristic over source text; the report prints the per-marker
  * counts so it is auditable, and a legacy case the bootstrap accepts cleanly is graded normally.
  */
-export const LEGACY_MARKERS: ReadonlyArray<[string, RegExp]> = [
-  // §66.21 row 1: `<x> = v`, `<x>: T = v` (also inside `${ … }`)
-  // (with or without attributes: `<count server> = 0`)
-  ["rhs-decl", /<[A-Za-z_][\w]*(?:\s[^<>\n]*)?>\s*(?::[^=\n]*)?=(?!=)/],
-  // §66.21 row 2: `const <x> = expr`
-  ["const-cell", /\bconst\s+<[A-Za-z_]/],
-  // §66.21 row 3: `const X = <root …>` component
-  ["component-const", /\bconst\s+[A-Z]\w*\s*=\s*</],
-  // §66.21 row 4: `<engine for=T …>`
-  ["engine-element", /<engine\b/],
-  // no `<program>` root in the entry file
-  ["no-program-root", /^(?![\s\S]*<program\b)/],
-  // §4.2 / §4.3 legacy state-object openers (S478 triage C7, fork F2): the spaced opener
-  // `< profile …>` (§4.3 W-WHITESPACE-001 soft deprecation) and the inline-typed `<session { f: T }`.
-  // Line-anchored, so a `<` comparison inside an expression does not count. No `scrml fix` §66
-  // rule rewrites either form (see NO_FIX_RULE_MARKERS), so a case carrying one is NOT-TWINNED.
-  // INTERIM: the capable form is the bootstrap parsing the §4.2 spaced opener
-  // (g-boot-spaced-state-opener-s478).
-  ["spaced-state-opener", /^[ \t]*<[ \t]+[A-Za-z_]\w*/m],
-  ["inline-typed-state-opener", /^[ \t]*<[A-Za-z_]\w*[ \t]*\{/m],
-];
+export const LEGACY_MARKERS: ReadonlyArray<[string, RegExp]> = legacyMarkersFromLedger();
+// S482 (s482-retired-lint) — the markers are rows of the retired-forms ledger, compiler/retired-forms.json
+// (`legacyMarker`, in `order`), no longer a list here. Ruling: user-voice-scrml.md S482 "⭐ RULED — every
+// retirement / deprecation PR adds a retired-forms ledger row and migrates" — "the ledger also feeds
+// bootstrap-conformance". The seven markers and their patterns are the ones this file held:
+//   rhs-decl (§66.21 row 1: `<x> = v`, `<x>: T = v`, also inside `${ … }`, with or without attributes),
+//   const-cell (§66.21 row 2), component-const (§66.21 row 3), engine-element (§66.21 row 4),
+//   no-program-root (no `<program>` root in the entry file — every §66 program has one; the bootstrap
+//   requires it and reports E-PROGRAM-MISSING), spaced-state-opener and inline-typed-state-opener
+//   (§4.2 / §4.3 legacy state-object openers, S478 triage C7, fork F2; line-anchored, so a `<`
+//   comparison inside an expression does not count; no `scrml fix` §66 rule rewrites either form —
+//   `noFixRule`, NO_FIX_RULE_MARKERS — so a case carrying one is NOT-TWINNED. INTERIM: the capable form
+//   is the bootstrap parsing the §4.2 spaced opener, g-boot-spaced-state-opener-s478).
 
 /**
  * Markers of legacy forms that no `scrml fix` §66 rule rewrites. A twin whose output still
  * carries one is half-migrated, so twinOf reports it as a blocker (NOT-TWINNED) instead of grading
  * the unchanged legacy text as if it were §66. INTERIM (S478 F2) — g-boot-spaced-state-opener-s478.
  */
-export const NO_FIX_RULE_MARKERS: ReadonlySet<string> = new Set(["spaced-state-opener", "inline-typed-state-opener"]);
+export const NO_FIX_RULE_MARKERS: ReadonlySet<string> = new Set(ledgerMarkers().filter((m) => m.noFixRule).map((m) => m.name));
+
+type LedgerMarker = { name: string; order: number; pattern: string; flags: string; noFixRule?: boolean };
+
+/** The `legacyMarker` entries of compiler/retired-forms.json, in `order`. */
+function ledgerMarkers(): LedgerMarker[] {
+  const ledger = JSON.parse(readFileSync(join(REPO_ROOT, "compiler", "retired-forms.json"), "utf8")) as { rows: { legacyMarker?: LedgerMarker }[] };
+  return ledger.rows.map((r) => r.legacyMarker).filter((m): m is LedgerMarker => !!m).sort((a, b) => a.order - b.order);
+}
+
+function legacyMarkersFromLedger(): ReadonlyArray<[string, RegExp]> {
+  return ledgerMarkers().map((m) => [m.name, new RegExp(m.pattern, m.flags)] as [string, RegExp]);
+}
 
 /** `file:line marker: reason` blockers for the NO_FIX_RULE_MARKERS a (twinned) file still carries. */
 function unrewrittenMarkerBlockers(file: string, output: string): string[] {

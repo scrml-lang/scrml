@@ -130,10 +130,10 @@ ${
                 lift <section class="form-step">
                     <h2>Confirm Details</>
                     <dl>
-                        <dt>Name/<dd>${@firstName} ${@lastName}</>
-                        <dt>Email/<dd>${@email}</>
-                        <dt>Street/<dd>${@street}</>
-                        <dt>City/<dd>${@city}, ${@stateVal} ${@zip}</>
+                        <dt>Name</><dd>${@firstName} ${@lastName}</>
+                        <dt>Email</><dd>${@email}</>
+                        <dt>Street</><dd>${@street}</>
+                        <dt>City</><dd>${@city}, ${@stateVal} ${@zip}</>
                     </dl>
                     <div class="step-actions">
                         <button onclick=goBack()>Back</>

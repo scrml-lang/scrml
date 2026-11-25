@@ -55,12 +55,12 @@ ${ import { generateUUID } from 'scrml:crypto' }
             ${
                 for (let job of @jobs) {
                     lift <tr>
-                        <td>${job.name}/
-                        <td>${job.status}/
+                        <td>${job.name}</>
+                        <td>${job.status}</>
                         <td>
-                            <button onclick=runJob(job.id)>Run/
-                            <button onclick=completeJob(job.id)>Complete/
-                            <button onclick=deleteJob(job.id)>Delete/
+                            <button onclick=runJob(job.id)>Run</>
+                            <button onclick=completeJob(job.id)>Complete</>
+                            <button onclick=deleteJob(job.id)>Delete</>
                         </td>
                     </tr>
                 }
@@ -71,7 +71,7 @@ ${ import { generateUUID } from 'scrml:crypto' }
     <ul>
         ${
             for (let log of @logs) {
-                lift <li>[${log.job_id}] ${log.message}/
+                lift <li>[${log.job_id}] ${log.message}</>
             }
         }
     </ul>

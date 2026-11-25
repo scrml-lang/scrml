@@ -119,8 +119,8 @@ const <hasPrev> = @currentIndex > 0
             for (let i = 0; i < @currentQuestion.options.length; i++) {
                 let option = @currentQuestion.options[i]
                 lift <button class=optionClass(i) onclick=selectAnswer(i)>
-                    <span class="option-letter">${String.fromCharCode(65 + i)}./
-                    <span class="option-text">${option}/
+                    <span class="option-letter">${String.fromCharCode(65 + i)}.</>
+                    <span class="option-text">${option}</>
                 </button>
             }
         }

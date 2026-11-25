@@ -31,7 +31,7 @@ ${
     // The compiler sees: token is declared once, consumed once (at the if-as-expression binding).
     // This is valid: both branches produce a value, token is the single result.
 
-    lift <p class="token-display">Authenticated: ${token}/
+    lift <p class="token-display">Authenticated: ${token}</>
 }</>
 
 // ======================================================================
@@ -61,8 +61,8 @@ ${
     // batchKey is now consumed. batchLabel is a regular let — can be used freely in the loop.
     for (let item of items) {
         lift <li class="batch-item" data-batch=batchLabel>
-            <span>${item.id}/
-            <span>${item.name}/
+            <span>${item.id}</>
+            <span>${item.name}</>
         </li>
     }
 }</>
@@ -92,8 +92,8 @@ ${
     // lin guarantee: the token was NOT used anywhere before this point,
     // and will NOT be usable after (compiler enforces).
     lift <div class="secure-panel" data-session=sessionToken>
-        <h3>Secure Content/
-        <p>Session established./
+        <h3>Secure Content</>
+        <p>Session established.</>
     </div>
 }</>
 

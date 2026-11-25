@@ -40,8 +40,8 @@
         ${
             for (let item of sortedItems()) {
                 lift <li>
-                    <span>${item.text}/
-                    <button onclick=removeItem(item.id)>x/
+                    <span>${item.text}</>
+                    <button onclick=removeItem(item.id)>x</>
                 </li>
             }
         }

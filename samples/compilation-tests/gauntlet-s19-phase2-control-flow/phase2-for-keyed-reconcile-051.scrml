@@ -4,7 +4,7 @@
     <cards>: Card[] = [{id:1, title:"a"}, {id:2, title:"b"}]
     <div>
         ${ for (let card of @cards key card.id) {
-            lift <div class="card">${card.title}/
+            lift <div class="card">${card.title}</>
         } }
     </>
 </>

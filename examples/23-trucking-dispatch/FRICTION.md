@@ -850,6 +850,7 @@ The kickstarter doesn't mention this gap. Adopters will write destructuring libe
 from `schema.scrml` (where every other M3 file reads it from).
 
 **What I tried:**
+<!-- retired-neg: machine-element — this friction log quotes the code written and tried at the time (M3 dogfood); the machine element is retired, today it is the engine element -->
 ```scrml
 ${
     import { DriverStatus } from '../../schema.scrml'
@@ -877,6 +878,7 @@ capability imports, not for cross-file user types. There is no
 **Workaround used:** Re-declare `DriverStatus` in `hos.scrml` as a local
 enum (lifted from `schema.scrml` verbatim):
 
+<!-- retired-neg: machine-element — this friction log quotes the code written and tried at the time (M3 dogfood); the machine element is retired, today it is the engine element -->
 ```scrml
 ${
     type DriverStatus:enum = {

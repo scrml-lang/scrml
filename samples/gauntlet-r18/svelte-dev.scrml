@@ -69,7 +69,7 @@
         <ul>
             ${
                 for (let entry of @logEntries) {
-                    lift <li>${entry}/
+                    lift <li>${entry}</>
                 }
             }
         </ul>

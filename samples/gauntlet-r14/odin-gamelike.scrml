@@ -84,7 +84,7 @@
     <ul>
         ${
             for (let m of @moveLog) {
-                lift <li>${m}/
+                lift <li>${m}</>
             }
         }
     </ul>

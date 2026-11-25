@@ -11,8 +11,13 @@
  * WHY (S280): marketing/public content makes CLAIMS, and a claim that was true
  * when written rots silently — nothing fails when a published code sample stops
  * compiling. Evidence: bryan's outreach email carried a worked example using
- * `@name` decls, `<machine>`, and `->` match arms; all three are now invalid
- * syntax. A compile-gate over public content fails that on sight.
+ * `@name` decls, `<machine>`, and `->` match arms. The first two are now refused
+ * (E-STATE-UNDECLARED, E-DEPRECATED-001); `->` arms are a DEPRECATED spelling, not
+ * invalid — SPEC §34 W-MATCH-ARROW-LEGACY: "uses a deprecated arm separator — `=>`
+ * or `->` — instead of the canonical `:>`. All three forms parse" (S482 audit C2;
+ * the ledger rows machine-element / at-implicit-decl / match-arrow-arm,
+ * compiler/retired-forms.json). A compile-gate over public content fails the
+ * refused ones on sight.
  *
  * SCOPE — what is gated and what is deliberately NOT:
  *   GATED   public-facing surfaces (see PUBLIC_SURFACE below). Anything that

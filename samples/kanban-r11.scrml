@@ -180,12 +180,12 @@ ${
             <div class="column-cards">${
                 for (let card of @todoCards) {
                     lift <div class="kanban-card" key=${card.id}>
-                        <p class="card-text">${card.text}/
+                        <p class="card-text">${card.text}</>
                         <div class="card-actions">
                             <button
                                 class="btn-move"
                                 onclick=moveTodoToInProgress(card.id)
-                            >Move to In Progress/
+                            >Move to In Progress</>
                         </div>
                     </div>
                 }
@@ -212,16 +212,16 @@ ${
             <div class="column-cards">${
                 for (let card of @inProgressCards) {
                     lift <div class="kanban-card" key=${card.id}>
-                        <p class="card-text">${card.text}/
+                        <p class="card-text">${card.text}</>
                         <div class="card-actions">
                             <button
                                 class="btn-move btn-back"
                                 onclick=moveInProgressToTodo(card.id)
-                            >Back to Todo/
+                            >Back to Todo</>
                             <button
                                 class="btn-move"
                                 onclick=moveInProgressToDone(card.id)
-                            >Move to Done/
+                            >Move to Done</>
                         </div>
                     </div>
                 }
@@ -247,12 +247,12 @@ ${
             <div class="column-cards">${
                 for (let card of @doneCards) {
                     lift <div class="kanban-card kanban-card--done" key=${card.id}>
-                        <p class="card-text">${card.text}/
+                        <p class="card-text">${card.text}</>
                         <div class="card-actions">
                             <button
                                 class="btn-move btn-back"
                                 onclick=moveDoneToInProgress(card.id)
-                            >Back to In Progress/
+                            >Back to In Progress</>
                         </div>
                     </div>
                 }

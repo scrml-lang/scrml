@@ -14,7 +14,7 @@ Authority: `docs/changes/conformance-suite-d3-2026-06-29/SCOPE.md` +
 
 ## Layout
 
-```
+```text
 conformance/
   cases/<category>/<case-id>/
       case.scrml       real scrml source (opens in editor/LSP; itself dog-food)

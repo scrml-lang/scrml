@@ -40,7 +40,7 @@
         <select bind:value=@selectedCat>
             ${
                 for (let cat of @categories) {
-                    lift <option value=${cat.id}>${cat.name}/
+                    lift <option value=${cat.id}>${cat.name}</>
                 }
             }
         </select>
@@ -52,8 +52,8 @@
         ${
             for (let task of @tasks) {
                 lift <li>
-                    <span>${task.title} (${task.category})/
-                    <button onclick=toggleTask(task.id, task.done)>Toggle/
+                    <span>${task.title} (${task.category})</>
+                    <button onclick=toggleTask(task.id, task.done)>Toggle</>
                 </li>
             }
         }

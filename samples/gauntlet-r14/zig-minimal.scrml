@@ -44,8 +44,8 @@
             for (let item of @items) {
                 lift <li>
                     ${item.name}
-                    <button onclick=toggleDone(item.id)>Toggle/
-                    <button onclick=remove(item.id)>x/
+                    <button onclick=toggleDone(item.id)>Toggle</>
+                    <button onclick=remove(item.id)>x</>
                 </li>
             }
         }

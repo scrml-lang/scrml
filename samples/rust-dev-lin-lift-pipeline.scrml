@@ -72,12 +72,12 @@ ${
 @pipelineResult = "idle"
 
 <div class="pipeline">
-    <h1>Order Processing Pipeline/
-    <p>Order ID: ${@orderId}/
+    <h1>Order Processing Pipeline</>
+    <p>Order ID: ${@orderId}</>
 
-    <button onclick=runPipeline()>Process Order/
+    <button onclick=runPipeline()>Process Order</>
 
-    <p>${@pipelineResult}/
+    <p>${@pipelineResult}</>
 </div>
 
 ${

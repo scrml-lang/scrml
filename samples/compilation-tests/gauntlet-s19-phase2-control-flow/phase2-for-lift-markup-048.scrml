@@ -3,7 +3,7 @@
     <items>: string[] = ["a", "b", "c"]
     <ul>
         ${ for (item of @items) {
-            lift <li>${item}/
+            lift <li>${item}</>
         } }
     </>
 </>

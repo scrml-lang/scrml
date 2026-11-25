@@ -3174,11 +3174,17 @@ ${
     // =========================================================================
     fn parseMarkupValue(tp: TP, arm: boolean) -> RExpr {
         const t: PTok = cur(tp);
+        // s482-retired-lint (R3) — the lexer cut a legacy cell read `<n>` to one token (lex.scrml
+        // angleCellReadEnd)
+        const an: string = angleReadName(t.text);
+        if (an != "") return angleCellRead(tp, t.start, t.end, an);
         // the element's own reader, over the file's offsets (the span is padded to
         // its offset, so every diagnostic it reports is at its place in the file)
         const m0: MP = { src: " ".repeat(t.start) + t.text, pos: t.start, nid: tp.nid, diags: [], file: tp.file, hoist: [], dbFns: [], hosts: [], pages: [], eps: [], chans: [], onchs: [], schemaN: 0, tables: [], ns: tp.ns, lim: noLim(), slash: noSlash() };
         const rn: RNodeOne = parseMarkupNode(m0);
-        let ds: Diag[] = rn.mp.diags;
+        // s482-retired-lint (#2095 r1 review LOW-4) — the retired closers the element's own reader
+        // found are named here (RETIRED CLOSERS: slashDiags), not dropped with its MP
+        let ds: Diag[] = slashDiags(rn.mp).diags;
         // text the token holds past the element the reader read (the lexer's extent
         // ran on): E-PARSE-TRAILING (§34: "An unexpected token after a complete
         // expression") — never silently dropped (s478 review L2)
@@ -3201,6 +3207,34 @@ ${
         }
         const t2: TP = { toks: tp.toks, i: tp.i, nid: rn.mp.nid, diags: tp.diags.concat(ds), file: tp.file, ns: tp.ns, inFn: tp.inFn };
         return mkE(adv(t2), t.start, AExprK.Recovered);
+    }
+
+    // s482-retired-lint (R3; ruling user-voice-scrml.md S482 "every retirement / deprecation PR adds a
+    // retired-forms ledger row and migrates" — the same answer confirmed: "`<x>` in an expression is
+    // not a read form — §4 table: "`@x` reads"; the parser gives one targeted error with a fix-it to
+    // `@x`"). `<n>` where a value is read — an operand (`<n> + 1`, `f(<n>)`) or the head of an
+    // expression (`{<n> > 0}`, `${<n>}`) — is one E-CELL-ANGLE-READ over the `<n>`, fix-it `@n`; the
+    // token is consumed and the expression reads on AS `@n` (what the fix-it
+    // writes: `<xs>.length` is then a member read of `@xs`, not a second error on a recovered
+    // operand). Retired-forms ledger row `angle-cell-read`.
+    fn angleCellRead(tp: TP, start: int, end: int, name: string) -> RExpr {
+        const d: Diag = newDiag("E-CELL-ANGLE-READ", "`<" + name + ">` is not a read — a cell is read as `@" + name + "` (§4: \"`@x` reads\"); `<" + name + ">` names a cell only where it is declared (`let <" + name + "/>`), and in markup it opens an element. Write `@" + name + "`", tp.file, mkSpan(start, end));
+        const t2: TP = { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns, inFn: tp.inFn };
+        return mkE(adv(t2), start, AExprK.At(name));
+    }
+
+    // `<name>` exactly (an identifier between `<` and `>`), its name; else "".
+    fn angleReadName(text: string) -> string {
+        if (text.length < 3 || text.charAt(0) != "<" || text.charAt(text.length - 1) != ">") return "";
+        const name: string = text.substring(1, text.length - 1);
+        if (!isIdentStartCh(name.charAt(0)) || isVoidName(name.toLowerCase())) return "";
+        let i: int = 1;
+        for (; i < name.length; ) {
+            const ch: string = name.charAt(i);
+            if (!(isIdentStartCh(ch) || (ch >= "0" && ch <= "9"))) return "";
+            i = i + 1;
+        }
+        return name;
     }
 
     // The message of the INTERIM markup-value refusal (also how parseFileNs finds it).
@@ -7886,6 +7920,10 @@ ${
     // The judgement of `base(pred)` where it is declared: `code` "" (the refinement
     // stands), E-CONTRACT-002 / -003 (§53.11), or E-BOOTSTRAP-UNSUPPORTED (a form
     // the grammar or impl#1 reads that the bootstrap does not judge).
+    // E-CONTRACT-003's advice (S482, ruling:user-voice-scrml.md-S482-contract-003-derived-check): a
+    // type's rule checks only its own value; another cell is compared in a derived check, not in the type
+    // (`<machine>`, the old advice, was removed S305/S307). The example names the cell it is compared against
+    // but not the refined cell: a type is read before its cell's name is known here, so `@cell` stands for it.
     fn judgeRefine(base: string, pred: string) -> RefJudge {
         const shown: string = base + "(" + pred + ")";
         const ts: RefTok[] = refToks(pred);
@@ -7893,11 +7931,11 @@ ${
         if (r.code == "" && r.i < ts.length) r = refErr(r.i, "E-CONTRACT-002", "text is left over after the predicate, at `" + refAt(ts, r.i).v + "`");
         if (r.code == "E-CONTRACT-003" && r.msg.substring(0, 6) == "IDENT:") {
             const nm2: string = r.msg.substring(6);
-            return { code: r.code, p: r.p, msg: "the inline predicate `" + shown + "` references the name `" + nm2 + "` — an inline predicate is stateless: its only subject is the incoming value (§53.2.1: \"No external identifiers MAY appear — if they do, the compiler SHALL emit `E-CONTRACT-003`\"; §53.3.1: it SHALL NOT access \"Any function parameter or outer binding\"). Write the bound as a number literal (`" + base + "(<=100)`), or for a constraint on external state use a `<machine>` guard" };
+            return { code: r.code, p: r.p, msg: "the inline predicate `" + shown + "` references the name `" + nm2 + "` — an inline predicate is stateless: its only subject is the incoming value (§53.2.1: \"No external identifiers MAY appear — if they do, the compiler SHALL emit `E-CONTRACT-003`\"; §53.3.1: it SHALL NOT access \"Any function parameter or outer binding\"). Write the bound as a number literal (`" + base + "(<=100)`). A type's rule checks only its own value; to compare against another cell, write a derived check (e.g. `<over=(@cell > @limit)/>`, where `@cell` is the refined cell and `@limit` the cell it is compared against) and use it in markup or the handler that changes the value" };
         }
         if (r.code == "E-CONTRACT-003") {
             const nm: string = r.msg.substring(4);
-            return { code: r.code, p: r.p, msg: "the inline predicate `" + shown + "` references `@" + nm + "` — an inline predicate is stateless: it may reference only the incoming value and its properties, not a reactive variable, a sibling field or an outer binding (§53.3.1, §53.11 E-CONTRACT-003). For a constraint on external state use a `<machine>` guard: `<machine name=Range for=" + base + "> { * => * given (value <= @" + nm + ") }`" };
+            return { code: r.code, p: r.p, msg: "the inline predicate `" + shown + "` references `@" + nm + "` — an inline predicate is stateless: it may reference only the incoming value and its properties, not a reactive variable, a sibling field or an outer binding (§53.3.1, §53.11 E-CONTRACT-003). A type's rule checks only its own value; to compare against another cell, write a derived check (e.g. `<over=(@cell > @" + nm + ")/>`, where `@cell` is the refined cell) and use it in markup or the handler that changes the value" };
         }
         if (r.code == "E-CONTRACT-002" && r.msg.substring(0, 6) == "SHAPE:") {
             return { code: r.code, p: r.p, msg: "the named shape `" + r.msg.substring(6) + "` in `" + shown + "` is not in the shape registry (§53.6.3: \"If a named shape identifier does not match any entry in the built-in or extended registry, the compiler SHALL emit E-CONTRACT-002\"). Built-in shapes: email, url, uuid, phone, date, time, color" };
@@ -8972,7 +9010,9 @@ ${
         // before (and recovered the same way), not read as a malformed `const`.
         const derived: boolean = tk(peekAt(tp, 1), "<");
         // (s478: the markup after `=` is one markup-value token, lex.scrml markupValueAhead)
-        if (derived || (tk(peekAt(tp, 2), "=") && (tk(peekAt(tp, 3), "<") || peekAt(tp, 3).cls == TC.Markup))) {
+        // (s482-retired-lint R3: a legacy cell read `const y = <n> + 1` is not a component — the
+        // lexer cut `<n>` to one token, angleReadName; the expression reader refuses it)
+        if (derived || (tk(peekAt(tp, 2), "=") && (tk(peekAt(tp, 3), "<") || (peekAt(tp, 3).cls == TC.Markup && angleReadName(peekAt(tp, 3).text) == "")))) {
             let what: string = "a component written as a constant (`const Name = <…>`, §21.2 Form 2) — §66.15 writes a component as a declaration";
             if (derived) what = "a derived cell written `const <name> = …` (§6.6) — §66 writes it `<name:T = expr/>` in the `<program>`";
             const dc: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", what + "; neither form is in the bootstrap at logic-block level", kw);
@@ -10861,6 +10901,28 @@ ${
     // error (E-SCOPE-*), reported inside its span — is dropped (the refusal is the
     // root cause; `(x) => x;`, `bump;` naming a function, an undeclared `y;`).
     // The front end's driver applies it to the parse diagnostics (slice-m2/lowered.js).
+    // s482-retired-lint (#2101 r1 LOW-2) — one report per legacy cell read: an E-BOOTSTRAP-UNSUPPORTED
+    // whose span overlaps an E-CELL-ANGLE-READ's in the same file is dropped (the read is the fault the
+    // author fixes first; what the bootstrap does not build around the fixed `@x` is reported then).
+    // Fail-closed: the E-CELL-ANGLE-READ stays, so the file still fails. The driver applies it to the
+    // whole list (slice-m2/lowered.js).
+    export fn oneReportPerAngleRead(ds: Diag[]) -> Diag[] {
+        let reads: Diag[] = [];
+        for (const d of ds) { if (d.code == "E-CELL-ANGLE-READ") reads = reads.concat([d]); }
+        if (reads.length == 0) return ds;
+        let out: Diag[] = [];
+        for (const d of ds) {
+            let keep = true;
+            if (d.code == "E-BOOTSTRAP-UNSUPPORTED") {
+                for (const r of reads) {
+                    if (r.file == d.file && d.span.start < r.span.end && r.span.start < d.span.end) keep = false;
+                }
+            }
+            if (keep) out = out.concat([d]);
+        }
+        return out;
+    }
+
     export fn withoutRefusedNoEffect(parsed: Diag[], later: Diag[]) -> Diag[] {
         let out: Diag[] = [];
         for (const d of parsed) {
@@ -12964,11 +13026,16 @@ ${
             if (!fragOn(m)) {
                 let hit: RSlash[] = m.slash.hit;
                 let owner: string = o.name;
+                let dry: int = start;
                 for (const at of retiredSlashesIn(m.src, start, end)) {
                     hit = hit.concat([{ at: at, tag: owner }]);
                     owner = "";
+                    dry = m.slash.dry;
                 }
-                m = withSlash(m, { cand: m.slash.cand, hit: hit });
+                // s482-retired-lint (#2095 r1 review LOW-1) — a raw body left unclosed with no retired
+                // closer in it: no retired reading closes it, so no element around it names one
+                // either (RSlashes.dry, slashHitIn)
+                m = withSlash(m, { cand: m.slash.cand, hit: hit, dry: dry });
             }
         } else {
             m = mAt(m, close + 3 + lower.length);
@@ -13240,7 +13307,12 @@ ${
         // which no retired reading would have spent elsewhere); named when it, or an element
         // around it, is left unclosed
         if (unclosed || !ownName) m = slashKeep(m, out, tag);
-        if (unclosed) m = slashHit(m, mp.pos, m.pos);
+        // s482-retired-lint (#2095 r1 review LOW-1) — an element closed by its OWN name holds no
+        // retired closer: in the retired reading each trailing `/` shifts the closers after it one
+        // element outward, so its `</x>` would have closed an element of another name. Its
+        // descendants' candidates are dropped (a legal `and/` in a `<p>…</>` under it is prose)
+        if (ownName && !unclosed) m = slashDrop(m, mp.pos, m.pos);
+        if (unclosed) m = slashHitIn(m, mp.pos, m.pos);
         return { nodes: out, mp: m };
     }
 
@@ -13264,9 +13336,13 @@ ${
     // Not in FRAGMENT MODE (a `^{}` output is not source a person wrote).
     // =========================================================================
     type RSlash:struct = { at: int, tag: string }
-    type RSlashes:struct = { cand: RSlash[], hit: RSlash[] }
+    // `dry` (s482-retired-lint, #2095 r1 review LOW-1): the body start of the last element left
+    // unclosed that held no candidate (-1: none). No retired reading closes that element — the file
+    // has a missing closer of its own — so the elements around it, unclosed because it is, name no
+    // candidate either (`<div><p>and/ more</> <span>x` with `</span>` forgotten: the `and/` is prose).
+    type RSlashes:struct = { cand: RSlash[], hit: RSlash[], dry: int }
 
-    fn noSlash() -> RSlashes { return { cand: [], hit: [] }; }
+    fn noSlash() -> RSlashes { return { cand: [], hit: [], dry: -1 }; }
 
     fn withSlash(mp: MP, s: RSlashes) -> MP {
         return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags, file: mp.file, hoist: mp.hoist, dbFns: mp.dbFns, hosts: mp.hosts, pages: mp.pages, eps: mp.eps, chans: mp.chans, onchs: mp.onchs, schemaN: mp.schemaN, tables: mp.tables, ns: mp.ns, lim: mp.lim, slash: s };
@@ -13287,7 +13363,7 @@ ${
             }
         }
         if (add.length == 0) return mp;
-        return withSlash(mp, { cand: mp.slash.cand.concat(add), hit: mp.slash.hit });
+        return withSlash(mp, { cand: mp.slash.cand.concat(add), hit: mp.slash.hit, dry: mp.slash.dry });
     }
 
     // An element whose body is src[from, to) was left unclosed: its candidates are hits.
@@ -13304,7 +13380,41 @@ ${
             }
         }
         if (!moved) return mp;
-        return withSlash(mp, { cand: keep, hit: hit });
+        return withSlash(mp, { cand: keep, hit: hit, dry: mp.slash.dry });
+    }
+
+    // An element whose body is src[from, to) was left unclosed: as slashHit, unless an element
+    // inside it was left unclosed with no candidate (RSlashes.dry in [from, to)). One with no
+    // candidate, and no hit already named inside it (a nested element's retired closer explains
+    // it), sets `dry` to its body start.
+    fn slashHitIn(mp: MP, from: int, to: int) -> MP {
+        if (mp.slash.dry >= from && mp.slash.dry < to) return mp;
+        const m: MP = slashHit(mp, from, to);
+        for (const h of m.slash.hit) {
+            if (h.at >= from && h.at < to) return m;
+        }
+        return withSlash(m, { cand: m.slash.cand, hit: m.slash.hit, dry: from });
+    }
+
+    // An element whose body is src[from, to) closed by its own name: the candidates in it are prose
+    // — unless a retired closer was already named inside it. Then the tree inside it is broken and
+    // the name match may be a coincidence (a `</div>` meant for an outer `<div>` closing an inner
+    // one, as in samples/kanban-r11.scrml), so its candidates are kept.
+    fn slashDrop(mp: MP, from: int, to: int) -> MP {
+        for (const h of mp.slash.hit) {
+            if (h.at >= from && h.at < to) return mp;
+        }
+        let keep: RSlash[] = [];
+        let dropped = false;
+        for (const c of mp.slash.cand) {
+            if (c.at >= from && c.at < to) {
+                dropped = true;
+            } else {
+                keep = keep.concat([c]);
+            }
+        }
+        if (!dropped) return mp;
+        return withSlash(mp, { cand: keep, hit: mp.slash.hit, dry: mp.slash.dry });
     }
 
     // After the file is read: one E-SYNTAX-050 per hit, in source order (a `/` already refused
@@ -15333,7 +15443,7 @@ ${
             if (mEof(m)) {
                 if (tag != "") m = mDiag(m, "E-PARSE-UNCLOSED", "`<" + tag + ">` is never closed", mp.pos, m.pos);
                 // s482-closer-cleanup — the retired closers inside it are named (RETIRED CLOSERS)
-                if (tag != "") m = slashHit(m, mp.pos, m.pos);
+                if (tag != "") m = slashHitIn(m, mp.pos, m.pos);
                 going = false;
             } else if (mLooking(m, "</")) {
                 if (tag == "") {
@@ -15342,7 +15452,7 @@ ${
                 } else {
                     const nc: int = codeCount(m.diags, "E-PARSE-CLOSER");
                     m = parseCloser(m, tag);
-                    if (codeCount(m.diags, "E-PARSE-CLOSER") > nc) m = slashHit(m, mp.pos, m.pos);
+                    if (codeCount(m.diags, "E-PARSE-CLOSER") > nc) m = slashHitIn(m, mp.pos, m.pos);
                     going = false;
                 }
             } else {

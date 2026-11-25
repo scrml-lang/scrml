@@ -34,10 +34,10 @@
             ${
                 for (let job of @jobs) {
                     lift <tr>
-                        <td>${job.name}/
-                        <td>${job.status}/
+                        <td>${job.name}</>
+                        <td>${job.status}</>
                         <td>
-                            <button onclick=runJob(job.id)>Run/
+                            <button onclick=runJob(job.id)>Run</>
                         </td>
                     </tr>
                 }

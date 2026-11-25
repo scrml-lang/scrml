@@ -2,7 +2,7 @@
 <program>
     <ul>
         for (let x of [1,2,3]) {
-            lift <li>${x}/
+            lift <li>${x}</>
         }
     </>
 </>

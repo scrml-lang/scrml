@@ -46,7 +46,7 @@ ${ server function handle(request, resolve) {
         <ul>
             ${
                 for (let user of @users) {
-                    lift <li>${user.name}/
+                    lift <li>${user.name}</>
                 }
             }
         </ul>

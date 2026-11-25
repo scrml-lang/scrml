@@ -2053,7 +2053,9 @@ ${
         const c0: int = peekCode(c, 0);
         const c1: int = peekCode(c, 1);
         if (!(c0 == 60 && ((c1 >= 65 && c1 <= 90) || (c1 >= 97 && c1 <= 122)))) return false;
-        return !legacyDeclHead(c);
+        // s482-retired-lint (R3): a legacy cell read `${<n>}` / `<n> + 1;` heading a statement is an
+        // expression (the parser refuses its `<n>`, E-CELL-ANGLE-READ), not an element
+        return !legacyDeclHead(c) && angleCellReadEnd(c.source, c.pos) < 0;
     }
 
     // `<name> = …` / `<name> : T = …` — the retired (§66.21) declaration spelling, which
@@ -2128,15 +2130,42 @@ ${
     // (parse.scrml parseMarkupValue) — the extent here only bounds it.
     // =========================================================================
     fn markupValueAhead(st: LexState) -> boolean {
-        if (st.tokens.length == 0) return false;
         if (st.interps.length != 0) return false;
         if (st.mode != LexMode.InCode) return false;
-        if (!operandSlotAfter(st.tokens)) return false;
         const c: Cursor = skipTriviaAhead(st.cur);
-        return peekCode(c, 0) == 60 && isAsciiLetter(peekCode(c, 1));
+        if (!(peekCode(c, 0) == 60 && isAsciiLetter(peekCode(c, 1)))) return false;
+        // s482-retired-lint (R3) — at the head of a region or right after a `{` (`{<n> > 0}`,
+        // `${<n>}`) only a legacy cell read `<n>` is a value here (angleCellReadEnd): one token,
+        // which the parser refuses (E-CELL-ANGLE-READ)
+        if (st.tokens.length == 0 || st.tokens[st.tokens.length - 1].kind is .LBrace) return angleCellReadEnd(c.source, c.pos) > 0;
+        // s482-retired-lint (#2101 r1 LOW-2) — after an arithmetic / comparison / equality operator
+        // (`1 + <n>`, `@a == <n>`) the right operand is read too, but ONLY a legacy cell read `<n>`
+        // is a value there (one E-CELL-ANGLE-READ, not the E-PARSE-EXPR cascade): any other `<` keeps
+        // its operator reading (`a < <b>` is not markup here)
+        if (binaryOpLast(st.tokens)) return angleCellReadEnd(c.source, c.pos) > 0;
+        return operandSlotAfter(st.tokens);
     }
 
     fn isAsciiLetter(c: int) -> boolean { return (c >= 65 && c <= 90) || (c >= 97 && c <= 122); }
+
+    // Is the last token a binary arithmetic / comparison / equality operator (#2101 r1 LOW-2)?
+    fn binaryOpLast(ts: Token[]) -> boolean {
+        if (ts.length == 0) return false;
+        const k: TokenKind = ts[ts.length - 1].kind;
+        if (k is .Plus || k is .Minus || k is .Star || k is .Slash || k is .Percent) return true;
+        if (k is .Equal || k is .StrictEqual || k is .NotEqual || k is .StrictNotEqual) return true;
+        if (k is .LessThan || k is .LessEqual || k is .GreaterEqual) return true;
+        // #2101 r2 LOW-2 — `1 > <n>` is the same read (one E-CELL-ANGLE-READ, not the E-PARSE-EXPR
+        // cascade); an arm's `:>` (a `:` touching the `>`) is not a comparison — operandSlotAfter reads it
+        if (k is .GreaterThan) {
+            if (ts.length < 2) return true;
+            const p: Token = ts[ts.length - 2];
+            const pk: TokenKind = p.kind;
+            if (!(pk is .Colon)) return true;
+            return p.span.end != ts[ts.length - 1].span.start;
+        }
+        return false;
+    }
 
     // Does the last token leave an operand to be read?
     fn operandSlotAfter(ts: Token[]) -> boolean {
@@ -2157,10 +2186,47 @@ ${
 
     fn scanMarkupValueStep(st: LexState) -> LexState {
         const c: Cursor = skipTriviaAhead(st.cur);
-        const end: int = markupValueExtentAt(c.source, c.pos);
+        // s482-retired-lint (R3) — a legacy cell read `<n>` in an operand slot is that one token
+        // (the parser refuses it: E-CELL-ANGLE-READ, fix-it `@n`), never an element run to a
+        // later closer
+        const lr: int = angleCellReadEnd(c.source, c.pos);
+        const end: int = lr > 0 ? lr : markupValueExtentAt(c.source, c.pos);
         const to: Cursor = advanceTo(c, end);
         const tok: Token = mkTok(TokenKind.MarkupValue, sliceText(c, to), c, to);
         return mkState(st.older, to, st.mode, st.tokens.concat([tok]), st.bracketStack, st.interps, st.display);
+    }
+
+    // s482-retired-lint (R3; ruling user-voice-scrml.md S482 "every retirement / deprecation PR adds a
+    // retired-forms ledger row and migrates", which confirmed: "`<x>` in an expression is not a read
+    // form — §4 table: "`@x` reads"; the parser gives one targeted error with a fix-it to `@x`").
+    // The end of `<name>` at `pos` when it stands as a LEGACY CELL READ in an operand slot, else -1:
+    // a bare `<name>` (no attributes, an identifier starting lowercase or `_`, not a void element) followed — past spaces /
+    // tabs — by `;` `)` `,` `]` `}` (no element is followed by those), or by an operator or a `.`
+    // when the element never closes as markup (a closer naming another element, or none: the
+    // attribute-value reading, markupAttrValueExtentAt — `<li> - item</li>` closes, so it is markup).
+    export fn angleCellReadEnd(src: string, pos: int) -> int {
+        if (src.charCodeAt(pos) != 60) return -1;
+        let k: int = pos + 1;
+        // a cell name starts lowercase or `_` (a capitalised `<Point>` is a type / component name)
+        const c0: int = k < src.length ? src.charCodeAt(k) : 0;
+        if (!((c0 >= 97 && c0 <= 122) || c0 == 95)) return -1;
+        for (; k < src.length && isIdentCont(src.charCodeAt(k)); ) { k = k + 1; }
+        if (k >= src.length || src.charCodeAt(k) != 62) return -1;
+        if (isVoidName(src.substring(pos + 1, k).toLowerCase())) return -1;
+        const end: int = k + 1;
+        let j: int = end;
+        for (; j < src.length && (src.charCodeAt(j) == 32 || src.charCodeAt(j) == 9); ) { j = j + 1; }
+        if (j >= src.length) return -1;
+        const c: int = src.charCodeAt(j);
+        const c1: int = j + 1 < src.length ? src.charCodeAt(j + 1) : 0;
+        // `<n> = v` is the retired DECLARATION spelling (§66.21, legacyDeclHead), not a read
+        if (c == 61 && c1 != 61) return -1;
+        // ; ) , ] }
+        if (c == 59 || c == 41 || c == 44 || c == 93 || c == 125) return end;
+        // + - * / % = ! & | ? > .  and a `<` that opens no tag
+        const op: boolean = c == 43 || c == 45 || c == 42 || c == 47 || c == 37 || c == 61 || c == 33 || c == 38 || c == 124 || c == 63 || c == 62 || c == 46 || (c == 60 && !markupOpensAt(c, c1));
+        if (op && markupAttrValueExtentAt(src, pos) >= src.length) return end;
+        return -1;
     }
 
     // The end of the element whose `<` is at `pos`: past its matching closer
@@ -2271,7 +2337,12 @@ ${
                 const nl: int = src.indexOf("\n", i);
                 if (nl < 0) return notFound;
                 i = nl + 1;
-            } else if (mode == 2 && depth >= 1 && braces == 0 && c0 == 47 && closeBraceAfter(src, i + 1)) {
+            } else if (mode == 2 && depth >= 1 && braces == 0 && c0 == 47 && src.charCodeAt(i - 1) != 42 && closeBraceAfter(src, i + 1)) {
+                // s482-retired-lint (#2095 r1 review LOW-2) — not the end of a `/* … */` comment (the
+                // `*` test above), and not in a legacy `<cell>` read (`{<n> > 0 /* c */}`,
+                // `{<n> && /x/}`: the body reads as the rest of an expression, as mode 1 decided —
+                // legacyReadBefore)
+                if (depth == 1 && legacyReadBefore(src, bodyAt, i) && !tagFirstIn(src, bodyAt, i)) return -1;
                 return i;
             } else if (attr && c0 == 123) {
                 braces = braces + 1;
@@ -2296,6 +2367,14 @@ ${
         const c: int = src.charCodeAt(j);
         // = ! < > + - * % & | ?
         return c == 61 || c == 33 || c == 60 || c == 62 || c == 43 || c == 45 || c == 42 || c == 37 || c == 38 || c == 124 || c == 63;
+    }
+
+    // Does the text src[from, at) start (past spaces) with a tag (`<b>x</b> err` — prose, not the
+    // `<` operator legacyReadBefore counts)?
+    fn tagFirstIn(src: string, from: int, at: int) -> boolean {
+        let j: int = from;
+        for (; j < at && isNoteSpace(src.charCodeAt(j)); ) { j = j + 1; }
+        return j + 1 < at && markupOpensAt(src.charCodeAt(j), src.charCodeAt(j + 1));
     }
 
     fn isNoteSpace(c: int) -> boolean { return c == 32 || c == 9 || c == 10 || c == 13; }

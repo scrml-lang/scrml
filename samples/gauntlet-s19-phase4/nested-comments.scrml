@@ -87,7 +87,7 @@ const Comment = <article class="comment" props={
     <div class="comment__header">${render header()}</>
     <div class="comment__body">${...}</>
     <div class="comment__footer">
-        ${render footer() ?? <span class="muted">no actions/}
+        ${render footer() ?? <span class="muted">no actions</>}
     </>
 
     // Recursive self-call over replies. Keyed by id for stable DOM identity
@@ -105,7 +105,7 @@ const Comment = <article class="comment" props={
                 ${child.body}
             </>
         } else {
-            lift <p class="muted" if=(depth == 0)>No replies yet./
+            lift <p class="muted" if=(depth == 0)>No replies yet.</>
         } }
     </>
 
@@ -140,7 +140,7 @@ const Comment = <article class="comment" props={
                 ${c.body}
             </>
         } else {
-            lift <p class="empty">Be the first to comment./
+            lift <p class="empty">Be the first to comment.</>
         } }
     </>
 </main>

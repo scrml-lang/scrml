@@ -5,9 +5,9 @@ ${
 <program>
     <ul>
         ${ for (let item of @items) {
-            lift <li>${item}/
+            lift <li>${item}</>
         } else {
-            lift <li class="empty">No items./
+            lift <li class="empty">No items.</>
         } }
     </>
 </>

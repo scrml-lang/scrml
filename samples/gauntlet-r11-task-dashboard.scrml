@@ -263,15 +263,15 @@
             for (let task of visible) {
                 lift <div class="task-card">
                     <div class="task-header">
-                        <h3 class="task-title">${task.title}/
+                        <h3 class="task-title">${task.title}</>
                         <div class="task-actions">
-                            <button class="btn btn-edit" onclick=openEditForm(task)>Edit/
-                            <button class="btn btn-delete" onclick=removeTask(task.id)>Delete/
+                            <button class="btn btn-edit" onclick=openEditForm(task)>Edit</>
+                            <button class="btn btn-delete" onclick=removeTask(task.id)>Delete</>
                         </div>
                     </div>
                     <div class="task-meta">
-                        <span class=statusClass(task.status)>${task.status}/
-                        <span class=priorityClass(task.priority)>${task.priority}/
+                        <span class=statusClass(task.status)>${task.status}</>
+                        <span class=priorityClass(task.priority)>${task.priority}</>
                     </div>
                 </div>
             }

@@ -94,9 +94,9 @@ ${
                 for (let msg of @messages) {
                     // §6.5.3: keyed iteration for efficient DOM reconciliation
                     lift <div key=${msg.id} class="message-item">
-                        <span class="msg-user">${msg.user}/
-                        <span class="msg-timestamp">${msg.timestamp}/
-                        <p class="msg-text">${msg.text}/
+                        <span class="msg-user">${msg.user}</>
+                        <span class="msg-timestamp">${msg.timestamp}</>
+                        <p class="msg-text">${msg.text}</>
                     </div>
                 }
             }

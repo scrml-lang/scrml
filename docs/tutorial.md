@@ -37,7 +37,7 @@ The bootstrap writes the page (`index.html`), the client script and its runtime 
 
 The everyday surface is small:
 
-```
+```text
 bun run boot:compile <file>   — compile once to dist/<name>/ next to the input
 bun run boot:dev <file>       — compile + serve + recompile and reload on save
 bun run lsp:boot              — a language server with the bootstrap's diagnostics, for your editor
