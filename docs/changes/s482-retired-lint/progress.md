@@ -98,3 +98,48 @@ Tests: `compiler/self-host-v2/slice-m4/retired-lint-s482.test.js` (+ closer-clea
 | retired-forms gate on head | OK (exit 0) — 5432 hits scanned, pending HARD debt 820 |
 | retired-forms gate on main (head ledger + baseline) | FAIL (exit 1) — the 177 retired closer lines in 52 sample files |
 | gate runtime | ~0.55 s (`--quiet`, warm) |
+
+## Fix round r2 (#2101 r1 re-review: ~/.cache/scrml/review/s482-2101-r1rev/review.md; artefacts ~/.cache/scrml/review/s482-2101-r2/)
+
+- **0 — merge.** origin/main merged (#2103 `::` deprecation, #2096). severity.scrml regenerated; known-gaps
+  both entries kept. `variant-colons` row = the colons lane's row text (`enforcedBy: bootstrap`); baseline
+  154 → 15 (`--update`). #2103 rewrote `::V ->` / `| ::V` arms to `.V`, which match-arrow-arm / arm-pipe see
+  (they never read `::V`): those keys and the colons case's 2 rhs-decl are recorded at their counts.
+- **1 — MED-1.** §19.15–§19.17 moved back into §19 (a pure move, numbers and headings unchanged). Regions are
+  the ledger's `migrationRegions` (exact heading line, exactly once, own children only). SPEC :24709 counted.
+- **2 — MED-2.** Blockquoted fences and `scrml…` info strings read; SPEC :8621 (rhs-decl), :13443
+  (component-const — an EXECUTED-measurement quote) baselined; :10780's `::` was migrated by #2103.
+- **3 — MED-3.** `--base-ref` runs the BASE ledger's rules over the head tree (`baseRulesOnHead`).
+- **4 — E-CONTRACT-003 (owner ruling, ruling:user-voice-scrml.md-S482-contract-003-derived-check).** The
+  INTERIM notes became the ruled derived-check advice (§34, §53.1, §53.3.2 incl. the table cells, §53.8.3,
+  §53.11, §53.12.4); bootstrap message updated + pinned; gap resolved; impl#1's "use <engine>" filed
+  (g-impl1-contract-003-engine-advice-s482, open).
+- **5 — LOW-5.** Every .md read except EXCLUDED (reasons) / node_modules / dist / dot-dirs; `archive` not
+  skipped. FRICTION.md's 2 HARD fences are deliberate quotes of the code tried then → `retired-neg`
+  marked; 11 SOFT baselined. PIPELINE.md excluded (TS listings, no scrml fence).
+- **6 — LOW-6.** Case budgets (one hit per expected occurrence, shared by rows sharing a code; own files only).
+- **7 — LOW-1/2.** String-aware foreign brace count; unclosed raw body to the next closing tag (exposed
+  samples/api-dashboard.scrml past a `<pre>…</>`: 10 SOFT baselined); `}`+`/` division; `<` operand;
+  bootstrap binaryOpLast `.GreaterThan` (not `:>`). Left as §63 known limits: `xs["push"](1)`,
+  `if (a) xs.sort()`, a closer inside an unclosed raw body.
+- **8 — NITs.** Bad `--base-ref` → exit 2 + message; hook-reads-working-tree documented.
+
+| measure | before (r1rev, 9253aff) | after (r2) |
+|---|---|---|
+| harness2, 60 attempts — escaped | 38 (20 undocumented) | 17 (0 undocumented: 9 by design, 4 documented, 2 now in §63 limits, #29 artefact, #59 legal) |
+| r0 harness, 100 | 94 caught | 94 caught (same 6: path words ×3, `<pre>` body, `.pop()` / `.shift()`) |
+| FP set, 20 | 1 | 1 (`throw` in `^{}`) |
+| `--base-ref` scenarios | narrow / codewiden / heading exit 0; bad ref = stack trace | all 12 exit 1; bad ref exit 2 |
+
+| gate (r2 head) | result |
+|---|---|
+| pre-commit (4 commits) | PASS each (58,394–58,406 pass, 0 fail) |
+| pretest | exit 0 |
+| bootstrap-conformance base (origin/main) vs head | identical: PASS 851 / FAIL 3 / NOT-TWINNED 628 / UNSUPPORTED 491 / CRASH 0 |
+| lint unit test / slice retired-lint / slice refinement | 63/63 · 35/35 · 22/22 |
+| gate head / `--base-ref origin/main` | exit 0 (5,464 hits, debt 907) / exit 0 |
+| corpus differential (2,976 files) | head on base files 0/0/0/0; head files: 0 newly rejected/accepted, 0 byte, 43 code diffs = the migrated samples |
+| s34-census --check-new | PASS (5 rows) |
+| snippet-gate / claim-gate / types-gate | 120/0 (9 spec-ahead) · 26/0 · OK 182 unchanged |
+| host-global-scan 1/2, 2/2 | 0 violations each |
+| e2e-render-map | 259/0 |
