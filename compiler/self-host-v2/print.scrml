@@ -6276,13 +6276,15 @@ ${
     // slot content) and a `bind:` attribute's write-back (it runs on the input event; the
     // attribute's read stays — it shows the cell where it stands). A listener runs only on an
     // event, and the program's DOM is inserted after its render (rt.insert, the render's last
-    // step), so no listener can run during the body. KEPT, fail closed — they run during the
-    // body today, so what they reach must still be initialized then: an `<effect>` (a body-top
-    // write of a dependency runs it there, g-boot-effect-fires-in-body-before-place-s482, an
-    // OPEN owner question) and a `<request>` (rt.requestOn runs its first load synchronously,
-    // where it stands — g-boot-request-runs-in-body-s482; skipping it read the later binding
-    // uninitialized, `NaN`). Nothing is dropped from what is PRINTED: this copy only decides
-    // what reachOf walks.
+    // step), so no listener can run during the body. ~~KEPT, fail closed — they run during the
+    // body today …: an `<effect>` … and a `<request>` …~~ s482 (lane s482-hold-body; RULED S482,
+    // ruling:user-voice-scrml.md-S482-hold-until-body-ends): an `<effect>`'s and a `<request>`'s
+    // BODY are left out too — every run of either triggered during the body is held until the
+    // body ends (rt.runBody, §7.6 R5), so neither runs in the body and what it reaches is read
+    // from its place (g-boot-effect-fires-in-body-before-place-s482 and
+    // g-boot-request-runs-in-body-s482, resolved). Their dependency / target / signal cells stay
+    // (requestOn / effectOn take those cells where they stand). Nothing is dropped from what is
+    // PRINTED: this copy only decides what reachOf walks.
     fn runsNowNodes(ns: Node[]) -> Node[] {
         let out: Node[] = [];
         for (const n of ns) { out = out.concat([runsNowNode(n)]); }
@@ -6317,13 +6319,13 @@ ${
             .Each(src: s, bind: b, key: k, handles: h, row: r) :> View.Each(s, b, k, h, runsNowViews(r)),
             .Instance(decl: d, attrs: a, slot: sl, alias: al) :> View.Instance(d, a, runsNowViews(sl), al),
             .Gather(g: g, rows: rows, key: k) :> View.Gather(g, runsNowRows(rows), k),
-            .Request :> v,                 // kept: its first load runs where it stands (see above)
+            .Request(target: t, deps: ds, body: b, mount: m, state: st, handle: h, cls: k) :> View.Request(t, ds, { stmts: [] }, m, st, h, k),   // s482: its body runs after the body (held)
             .Text :> v,
             .RawText :> v,
             .Dyn :> v,
             .Slot :> v,
             .Star :> v,
-            .Effect :> v,                  // kept: it can run during the body (see above)
+            .Effect(deps: ds) :> View.Effect(ds, { stmts: [] }),   // s482: its body runs after the body (held)
             .Run :> v,
             .Init :> v,
             .ResetOn :> v,
@@ -6522,12 +6524,14 @@ ${
         const progLocal: string = p.program.hint.replaceAll("$", "_") + "$";
         let boot: JsStmt[] = [JsStmt.SConst(progLocal, jcall(jid(nameOf(names, NameKey.SharedGet(p.program.id))), []))];
         boot = boot.concat(cssVarStmts(ctx, p, jmember(jid(progLocal), "scope")));
-        boot = boot.concat([
-            sexpr(jcall(jid(nameOf(names, NameKey.Render(p.program.id))), [
-                jid(progLocal), jmember(jid(progLocal), "scope"),
-                rtCall(ctx, "mount", [jmember(jid("document"), "body")]), JsExpr.JNull,
-            ])),
+        // s482 (lane s482-hold-body; RULED S482, ruling:user-voice-scrml.md-S482-hold-until-body-ends):
+        // the render runs inside `rt.runBody` — effect and request runs triggered during the body are
+        // held until it ends, then run in trigger order (§7.6 R5)
+        const renderCall: JsExpr = jcall(jid(nameOf(names, NameKey.Render(p.program.id))), [
+            jid(progLocal), jmember(jid(progLocal), "scope"),
+            rtCall(ctx, "mount", [jmember(jid("document"), "body")]), JsExpr.JNull,
         ]);
+        boot = boot.concat([sexpr(rtCall(ctx, "runBody", [JsExpr.JArrow([], [sexpr(renderCall)])]))]);
         boot = boot.concat(channelBoot(ctx, p, progLocal));
         body = body.concat([JsStmt.SBlank, JsStmt.SComment("boot")]).concat(dbLoadBoot(ctx, p, boot));
         let head: HNode[] = [HNode.HElem("script", [{ name: "type", value: "module" }, { name: "src", value: jsFile }], [])];
