@@ -4297,10 +4297,12 @@ ${
         let i = 0;
         for (const f of d.fields) {
             let init: JsExpr = defaultThunk(fctx, d, f);
+            let usePn: string = "";
             if (isParam(ctx.pix, d, i, f)) {
                 const pn: string = f.sym.hint.replaceAll("$", "_") + "$";
                 params = params.concat([pn]);
                 init = JsExpr.JBin(JsOp.Nullish, jid(pn), init);
+                usePn = pn;
             }
             // D15: an initializer something re-evaluates (`InitOf`, a reset) is
             // kept on the record, so the instance's OWN initializer is re-run.
@@ -4309,7 +4311,7 @@ ${
                 body = body.concat([JsStmt.SAssign(slot, init)]);
                 init = slot;
             }
-            body = body.concat([JsStmt.SAssign(fieldCell(jid("inst$"), d, i), fieldCtor(fctx, d, f, i, init))]);
+            body = body.concat([JsStmt.SAssign(fieldCell(jid("inst$"), d, i), fieldCtorGiven(fctx, d, f, i, init, usePn))]);
             body = body.concat(idleWatchJs(fctx, d, f, i));
             i = i + 1;
         }
@@ -4477,7 +4479,21 @@ ${
         const ps: Persist | not = f.persist;
         if (ps is given && f.wcap is given) return persistedJs(ctx, f, ps, init);
         if (f.wcap is given) return rtCall(ctx, "seeded", [init]);
+        // s482 (lane s482-seed-timing, Q13): a constant with a live seed is a seed (constSeedField)
+        if (constSeedField(ctx.p, f)) return rtCall(ctx, "seeded", [init]);
         return rtCall(ctx, "derived", [jmember(jid("inst$"), "scope"), init]);
+    }
+
+    // s482 (lane s482-seed-timing, Q13) — fieldCtor, for a field that may be given a use-site value
+    // (`given`, its factory parameter; "" when it is not a parameter). A locked attribute whose
+    // DEFAULT is a constant seed (constSeedField) is that seed when the use site gives no value; a
+    // given value is computed when it is read, as before (`rt.propSeed(scope, <given>, <init>)`:
+    // `<given> === undefined ? rt.seeded(<init>) : rt.derived(scope, <init>)`) — ⚑ INTERIM
+    // (g-boot-use-site-value-seed-s482): a use-site value that reads no cell is not yet held to the
+    // mount.
+    fn fieldCtorGiven(ctx: Ctx, d: Decl, f: Field, i: int, init: JsExpr, usePn: string) -> JsExpr {
+        if (usePn != "" && constSeedField(ctx.p, f)) return rtCall(ctx, "propSeed", [jmember(jid("inst$"), "scope"), jid(usePn), init]);
+        return fieldCtor(ctx, d, f, i, init);
     }
 
     // s451 — a `persist=` field (§6.14.2):
@@ -5902,11 +5918,11 @@ ${
         // held (a persisted cell's default), and the §25.7 CSS bridges; and a READ of a seed, or
         // of a lazy derived value, before its place runs its initializer then (reachOf follows
         // cell reads into their initializers, and instances into their declarations).
-        const held: int[] = heldFields(pd, marked);
+        const held: int[] = heldFields(p0, pd, marked);
         const insts: View[] = programInstances(pd);
         let pre: Node[] = [];
         for (const f of pd.fields) {
-            if (f.wcap is given && f.init is given && !hasInt(held, f.sym.id)) pre = pre.concat([Node.NField(f)]);
+            if ((f.wcap is given || constSeedField(p0, f)) && f.init is given && !hasInt(held, f.sym.id)) pre = pre.concat([Node.NField(f)]);
         }
         const elsewhere: int[] = constructedElsewhere(p0);
         for (const d1 of p0.decls) { if (hasInt(elsewhere, d1.sym.id)) pre = pre.concat([Node.NDecl(d1)]); }
@@ -6132,11 +6148,14 @@ ${
     // value's default — computed at construction, as before (INTERIM, stated in §7.6 rule (b) S482 r1:
     // g-boot-persist-seed-at-construction-s482). Any other seed computes the same
     // value wherever it runs.
-    fn heldFields(pd: Decl, marked: int[]) -> int[] {
+    // s482 (lane s482-seed-timing, Q13): and a locked program cell whose initializer is a constant
+    // with a live seed (constSeedField) — its place is its declaration too.
+    fn heldFields(p: CoreProgram, pd: Decl, marked: int[]) -> int[] {
         let out: int[] = [];
         for (const f of pd.fields) {
             const init: Expr | not = f.init;
             if (f.wcap is given && f.persist is not && init is given && hasInt(marked, f.sym.id) && seedLive(init)) out = out.concat([f.sym.id]);
+            else if (hasInt(marked, f.sym.id) && constSeedField(p, f)) out = out.concat([f.sym.id]);
         }
         return out;
     }
@@ -6157,6 +6176,102 @@ ${
         };
     }
 
+    // s482 (lane s482-seed-timing; ruling:user-voice-scrml.md-S482-locked-field-derived: "a locked
+    // field is derived exactly when its initializer reads a cell, directly or through any function it
+    // calls, at any depth. Otherwise it's a constant, whose initializer is a seed computed at its
+    // place, meaning the instance's mount.") — a LOCKED field (no write capability) whose initializer
+    // is a CONSTANT with a live seed (seedLive: it calls something or reads a binding, so where it
+    // runs can be observed): printed as a seed (`rt.seeded`), held to its place like a `let` seed —
+    // an instance's at its mount, a program cell's at its declaration — and never recomputed. One
+    // whose initializer may read a cell (readsCellReach, fail closed) stays derived (`rt.derived`,
+    // computed when it is read, §66.9 rule 3); a literal one computes the same value wherever it runs.
+    export fn constSeedField(p: CoreProgram, f: Field) -> boolean {
+        const init: Expr | not = f.init;
+        if (f.wcap is given || f.persist is given || init is not) return false;
+        return seedLive(init) && !readsCellReach(p, init);
+    }
+
+    // Does `e` read a cell — directly, through a function it calls or names as a value, or through a
+    // file-scope binding it reads (a function value it holds), at any depth? FAIL CLOSED: what the
+    // walk cannot follow counts as a read (a call through a function value, a server call, a callee
+    // whose body Core does not hold), and so does every read of reactive state that is not a field
+    // read (an instance handle, a validity surface, a request refetch, a re-run initializer).
+    fn readsCellReach(p: CoreProgram, e: Expr) -> boolean {
+        let todo: Node[] = [Node.NExpr(e)];
+        let seenFn: int[] = [];
+        let seenK: int[] = [];
+        for (; todo.length > 0; ) {
+            let next: Node[] = [];
+            for (const r of todo) {
+                for (const n of allNodes(r)) {
+                    if (cellReadOf(n) is given || nodeReadsState(n)) return true;
+                    const fid: int = namedFnOf(n);
+                    if (fid >= 0 && !hasInt(seenFn, fid)) {
+                        seenFn = seenFn.concat([fid]);
+                        let found: boolean = false;
+                        for (const f of p.fns) {
+                            if (f.sym.id == fid) {
+                                found = true;
+                                next = next.concat([Node.NFn(f)]);
+                            }
+                        }
+                        if (!found) return true;
+                    }
+                    const kid: int = localReadOf(n);
+                    if (kid >= 0 && !hasInt(seenK, kid)) {
+                        seenK = seenK.concat([kid]);
+                        const k: CoreConst | not = findConst(p, kid);
+                        if (k is given) next = next.concat([Node.NExpr(k.init)]);
+                    }
+                }
+            }
+            todo = next;
+        }
+        return false;
+    }
+
+    // A scrml function an expression node calls or names as a value (its Sym id), else -1.
+    fn namedFnOf(n: Node) -> int {
+        return match n {
+            .NExpr(e: e) :> exprNamedFn(e),
+            // no-default-arm: one question — is it a call or a function value
+            _ :> -1
+        };
+    }
+
+    fn exprNamedFn(e: Expr) -> int {
+        return match e {
+            .Call(callee: c) :> c.id,
+            .FnRef(fn: f) :> f.id,
+            // no-default-arm: one question — does it name a function
+            _ :> -1
+        };
+    }
+
+    // Reactive state read other than through a cell place, and what the walk cannot follow.
+    fn nodeReadsState(n: Node) -> boolean {
+        return match n {
+            .NExpr(e: e) :> exprReadsState(e),
+            // no-default-arm: one question — an expression that reads state the place walk does not see
+            _ :> false
+        };
+    }
+
+    fn exprReadsState(e: Expr) -> boolean {
+        return match e {
+            .Handle(inst: x) :> true,
+            .InitOf(decl: x) :> true,
+            .Validity(of: x) :> true,
+            .Refetch(req: x) :> true,
+            .CallV(f: x) :> true,
+            .ServerCall(fn: x) :> true,
+            .Query(q: x) :> true,
+            .Foreign(slice: x) :> true,
+            // no-default-arm: one question — does it read state, or call what the walk cannot follow
+            _ :> false
+        };
+    }
+
     // s482 — does a declaration's record hold a seed whose place matters (seedLive), itself or in
     // a record it mounts unconditionally, at any depth? Such an instance, mounted unconditionally
     // by the program body, is HELD (`rt.hold`) and seeded at its mount (`rt.seedAll`).
@@ -6169,6 +6284,7 @@ ${
         for (const f of d.fields) {
             const init: Expr | not = f.init;
             if (f.wcap is given && f.persist is not && init is given && seedLive(init)) return true;
+            if (constSeedField(p, f)) return true;     // s482 (lane s482-seed-timing, Q13)
         }
         const views: View[] | not = d.renders;
         if (views is not) return false;

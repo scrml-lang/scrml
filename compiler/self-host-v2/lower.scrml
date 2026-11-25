@@ -3168,13 +3168,25 @@ ${
         // whether the seed is held for it). Only a writable cell (`let`: a seed, §66.9) whose
         // initializer is not a literal has one: a literal seed computes the same value wherever
         // it runs, and a locked cell is derived — computed when it is read.
+        // s482 (lane s482-seed-timing; ruling:user-voice-scrml.md-S482-locked-field-derived): a locked
+        // cell is derived only when its initializer reads a cell; otherwise it is a constant, "whose
+        // initializer is a seed computed at its place" — so it has a place too (print.scrml
+        // constSeedField decides which locked cell is such a seed; the printer drops any other place).
         const pi: DeclInfo | not = declInfo(c.t, c.t.program);
         if (pi is given) {
             for (const f of pi.fields) {
-                if (f.nid == nid && f.wcap is given && !literalInit(f.init)) return [View.Init(f.sym)];
+                if (f.nid == nid && !literalInit(f.init) && (f.wcap is given || !readsAtCell(f.reads))) return [View.Init(f.sym)];
             }
         }
         return [];
+    }
+
+    // A locked initializer that names a cell (`@x`, analyze's `reads`) is derived (§66.9 rule 3): no place.
+    fn readsAtCell(reads: string[]) -> boolean {
+        for (const r of reads) {
+            if (r.substring(0, 1) == "@") return true;
+        }
+        return false;
     }
 
     fn literalInit(v: AAttrValue) -> boolean {

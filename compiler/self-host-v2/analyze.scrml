@@ -12133,7 +12133,7 @@ ${
                     const n: ANode | not = markupOfItem(pi);
                     if (n is given) tops = tops.concat([n]);
                 }
-                const cells: BodyCell[] = bodyCells(g, ps);
+                const cells: BodyCell[] = bodyCells(g, t, ps);
                 for (const ci of ps) {
                     const ck: AItemK = ci.k;
                     const c: AConst | not = match ck {
@@ -12958,7 +12958,7 @@ ${
                 };
                 const places: BodyPlace[] = bodyPlaces(g, f.path, ps);
                 if (places.length > 0) {
-                    const cx: BodyCx = { g: g, t: t, sum: sum, usesD: usesD, binds: binds, file: f.path, places: places, cells: bodyCells(g, ps), prog: g.program.id, pfields: programCells(g) };
+                    const cx: BodyCx = { g: g, t: t, sum: sum, usesD: usesD, binds: binds, file: f.path, places: places, cells: bodyCells(g, t, ps), prog: g.program.id, pfields: programCells(g) };
                     for (const pi of ps) {
                         const n: ANode | not = markupOfItem(pi);
                         if (n is given) out = out.concat(bodyNodeReach(cx, n));
@@ -12980,7 +12980,12 @@ ${
 
     // The program body's cells (BodyCell): each declaration item of the body that is a field of
     // the program, with its place (the item's source start) — a persisted one left out.
-    fn bodyCells(g: Globals, items: AItem[]) -> BodyCell[] {
+    // s482 (lane s482-seed-timing; ruling:user-voice-scrml.md-S482-locked-field-derived — "a locked
+    // field is derived exactly when its initializer reads a cell, directly or through any function it
+    // calls, at any depth. Otherwise it's a constant, whose initializer is a seed computed at its
+    // place"): a locked cell is DERIVED only when lockedDerived says so; a constant one is a seed at
+    // its place, judged as a `let` seed is.
+    fn bodyCells(g: Globals, t: Tables, items: AItem[]) -> BodyCell[] {
         const fields: FieldInfo[] = programCells(g);
         let out: BodyCell[] = [];
         for (const it of items) {
@@ -12996,7 +13001,7 @@ ${
             };
             if (d is given && attrNamed(d.mods, "persist") is not) {
                 for (const fi of fields) {
-                    if (fi.nid == d.nid) out = out.concat([{ sym: fi.sym.id, name: d.name, pos: it.span.start, init: fi.init, derived: fi.wcap is not }]);
+                    if (fi.nid == d.nid) out = out.concat([{ sym: fi.sym.id, name: d.name, pos: it.span.start, init: fi.init, derived: fi.wcap is not && lockedDerived(g, t, [], fi.init) }]);
                 }
             }
         }

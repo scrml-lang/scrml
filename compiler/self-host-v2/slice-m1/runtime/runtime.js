@@ -1265,6 +1265,16 @@ export function seeded(init) {
 /** A locked field: recomputes from its initializer (derived when it reads cells, §66.9). */
 export function derived(scope, init) { return new Derived(scope, init); }
 
+/**
+ * s482 (lane s482-seed-timing; ruling:user-voice-scrml.md-S482-locked-field-derived) — a locked
+ * attribute whose default is a constant (it reads no cell): with no use-site value it is that
+ * constant, a seed computed at the instance's mount (`seeded`); a use-site value is computed when it
+ * is read (`derived`), as before.
+ */
+export function propSeed(scope, given, init) {
+  return given === undefined ? seeded(init) : derived(scope, init);
+}
+
 // ---------------------------------------------------------------------------
 // Declarations and instances (§5.1, §5.2).
 // ---------------------------------------------------------------------------
