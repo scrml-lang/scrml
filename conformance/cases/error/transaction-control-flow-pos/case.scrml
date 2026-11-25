@@ -14,7 +14,7 @@
                 ?{`UPDATE orders SET name = 'y' WHERE id = ${i}`}.run();
             }
             if (a > 10) {
-                fail E::Bad;
+                fail E.Bad;
             }
         }
         return 1

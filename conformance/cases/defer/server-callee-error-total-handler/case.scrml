@@ -10,13 +10,13 @@ ${
     <trace> = ""
 
     server function release(id: number)! -> RelError {
-        ?{`UPDATE locks SET held = 0 WHERE id = ${id}`}.run() !{ _ :> fail RelError::Busy };
+        ?{`UPDATE locks SET held = 0 WHERE id = ${id}`}.run() !{ _ :> fail RelError.Busy };
         return 1;
     }
 
     function work() {
         defer release(1) !{
-            ::Busy :> @trace = @trace + "busy;",
+            .Busy :> @trace = @trace + "busy;",
             _ :> @trace = @trace + "release-failed;"
         };
         @trace = @trace + "work;";

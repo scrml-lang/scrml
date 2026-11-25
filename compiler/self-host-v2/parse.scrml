@@ -1324,6 +1324,31 @@ ${
         return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns, inFn: tp.inFn };
     }
 
+    // s482 (s482-colons-deprecate) — W-VARIANT-COLONS-LEGACY (§14.5, Warning; one per site): the
+    // deprecated `::` enum variant access (ruling:user-voice-scrml.md-S482-deprecate-colons, "yes,
+    // deprecate :: with warning and fix"), read exactly as `.`. `first` is the site's first token (the
+    // qualifier `E` of `E::V`, else the first `:`), `name` the variant name; `qual` the qualifier ("" for
+    // `::V`). The span runs from `first` through the name; the message carries the `.` spelling. A lint
+    // only — the pattern / `fail` operand is unchanged. One report per place (a region read twice
+    // reports once).
+    fn colonsLint(tp: TP, first: PTok, name: PTok, qual: string) -> TP {
+        for (const d0 of tp.diags) { if (d0.code == "W-VARIANT-COLONS-LEGACY" && d0.span.start == first.start) return tp; }
+        const msg: string = "`" + qual + "::" + name.v + "` uses the deprecated `::` variant access (§14.5). Write `" + qual + "." + name.v + "` — it means the same and compiles to the same program. `scrml fix` rewrites it (rule `variant-colons`).";
+        const d: Diag = newDiag("W-VARIANT-COLONS-LEGACY", msg, tp.file, mkSpan(first.start, name.end));
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file, ns: tp.ns, inFn: tp.inFn };
+    }
+
+    // s482 — the diagnostics from index `from` on that are not a W-VARIANT-COLONS-LEGACY lint.
+    fn faultsSince(ds: Diag[], from: int) -> int {
+        let n: int = 0;
+        let i: int = from;
+        for (; i < ds.length; ) {
+            if (ds[i].code != "W-VARIANT-COLONS-LEGACY") n = n + 1;
+            i = i + 1;
+        }
+        return n;
+    }
+
     fn handledExpr(tp: TP, start: int, subject: AExpr, how: AHow) -> RExpr {
         return mkE(tp, start, AExprK.Handled({ subject: handledSql(subject), how: how }));
     }
@@ -1435,7 +1460,9 @@ ${
                 // r2: the lint names a rewrite, so only for an arm that PARSED — a
                 // non-empty pattern with no diagnostic of its own, followed by its
                 // separator (not an unsupported alternation, not error recovery)
-                const patOk: boolean = t.i > pfrom && t.diags.length == dfrom && sepAt(t, 0);
+                // s482 — the pattern's own W-VARIANT-COLONS-LEGACY (a `| ::V` arm) is a lint, not a
+                // fault: the arm still parsed, and gets its pipe lint too
+                const patOk: boolean = t.i > pfrom && faultsSince(t.diags, dfrom) == 0 && sepAt(t, 0);
                 if (guard && piped && patOk) t = pipeLint(t, pipe, pfrom, rp.pat);
                 let legacy = false;
                 const c: PTok = cur(t);
@@ -1851,7 +1878,7 @@ ${
         if (a.cls == TC.Punct && tk(a, ".") && (b.cls == TC.Ident || b.cls == TC.Keyword) && touching(a, b)) return patBinds(adv(adv(tp)), b, b.v, guard, "", ".");
         if (a.cls == TC.Punct && tk(a, ":") && tk(b, ":") && touching(a, b)) {
             const n: PTok = peekAt(tp, 2);
-            if ((n.cls == TC.Ident || n.cls == TC.Keyword) && touching(b, n)) return patBinds(adv(adv(adv(tp))), n, n.v, guard, "", "::");
+            if ((n.cls == TC.Ident || n.cls == TC.Keyword) && touching(b, n)) return patBinds(adv(adv(adv(colonsLint(tp, a, n, "")))), n, n.v, guard, "", "::");
         }
         if ((a.cls == TC.Ident && a.v == "_") || (a.cls == TC.Keyword && a.v == "else")) {
             const t: TP = adv(tp);
@@ -1902,7 +1929,7 @@ ${
         }
         if (a.cls == TC.Ident && tk(b, ":") && touching(a, b) && tk(peekAt(tp, 2), ":") && touching(b, peekAt(tp, 2))) {
             const qc: PTok = peekAt(tp, 3);
-            if ((qc.cls == TC.Ident || qc.cls == TC.Keyword) && touching(peekAt(tp, 2), qc)) return patBinds(adv(adv(adv(adv(tp)))), qc, qc.v, guard, a.v, "::");
+            if ((qc.cls == TC.Ident || qc.cls == TC.Keyword) && touching(peekAt(tp, 2), qc)) return patBinds(adv(adv(adv(adv(colonsLint(tp, a, qc, a.v))))), qc, qc.v, guard, a.v, "::");
         }
         if (a.cls == TC.Ident && (tk(b, ".") || tk(b, ":")) && touching(a, b)) {
             // `E.V` / `E::V` — a qualified pattern
@@ -7348,7 +7375,7 @@ ${
         const split: boolean = a.line != endLine(cur(tp));
         if (a.cls == TC.Variant) return failArgs(adv(t), start, "", a, split);
         if (a.cls == TC.Punct && tk(a, ".") && isNameTok(b) && touching(a, b)) return failArgs(adv(adv(t)), start, "", b, split);
-        if (a.cls == TC.Punct && tk(a, ":") && tk(b, ":") && touching(a, b) && isNameTok(c) && touching(b, c)) return failArgs(adv(adv(adv(t))), start, "", c, split);
+        if (a.cls == TC.Punct && tk(a, ":") && tk(b, ":") && touching(a, b) && isNameTok(c) && touching(b, c)) return failArgs(adv(adv(adv(colonsLint(t, a, c, "")))), start, "", c, split);
         // s475 r1: `fail m.E.V` — a namespace import's member enum
         const fh: NsHead = nsHeadAt(t, 0);
         if (fh.n > 0) {
@@ -7359,7 +7386,7 @@ ${
         if (a.cls == TC.Ident && b.cls == TC.Punct && tk(b, ".") && isNameTok(c) && touching(a, b) && touching(b, c)) return failArgs(adv(adv(adv(t))), start, a.v, c, split);
         if (a.cls == TC.Ident && tk(b, ":") && tk(c, ":") && touching(a, b) && touching(b, c)) {
             const d: PTok = peekAt(t, 3);
-            if (isNameTok(d) && touching(c, d)) return failArgs(adv(adv(adv(adv(t)))), start, a.v, d, split);
+            if (isNameTok(d) && touching(c, d)) return failArgs(adv(adv(adv(adv(colonsLint(t, a, d, a.v))))), start, a.v, d, split);
         }
         // not a variant (`fail "x"`): kept, so analyze reports E-ERROR-009
         const r: RExpr = parseAssign(t);

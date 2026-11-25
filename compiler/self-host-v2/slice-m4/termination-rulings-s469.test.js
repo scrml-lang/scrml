@@ -106,7 +106,8 @@ describe("rule 10 — `fail` / `defer` / `transaction` are keywords at statement
     expect(tree(one.replace("fail .Timeout", "fail\n            .Timeout"))).toBe(tree(one));
     const q = G(`        if (id == "y") fail L.NotFound(id);`);
     expect(tree(q.replace("fail L.", "fail\n            L."))).toBe(tree(q));
-    expect(codes(G(`        if (id == "y") fail\n            ::Timeout;`))).toEqual([]);
+    // S482: `::` is deprecated (§14.5) — the same tree, with its lint
+    expect(codes(G(`        if (id == "y") fail\n            ::Timeout;`))).toEqual(["W-VARIANT-COLONS-LEGACY"]);
     expect(codes(G(`        if (id == "y") fail.Timeout;`))).toEqual([]);
   });
 

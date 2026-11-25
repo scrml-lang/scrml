@@ -113,7 +113,7 @@
        parameter is substituted from @query.id, URL-encoded at the boundary.
        The variant response is decoded against UserResult via parseVariant;
        the decoded value lands in the request's `.data` surface, a
-       `::ParseError` decode failure in `.error` (§6.7.7 state model:
+       `.ParseError` decode failure in `.error` (§6.7.7 state model:
        `.loading` / `.data` / `.error` / `.stale`). -->
   <div class="endpoint">
     <h2>GET <code>/users/&dollar;{id}</code> → UserResult</h2>

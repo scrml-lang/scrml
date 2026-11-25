@@ -9,8 +9,8 @@
         }
 
         let result = parseJson('{"key": "value"}')!{
-            ::SyntaxError(e) -> "invalid"
-            ::TypeError(e)   -> "bad type"
+            .SyntaxError(e) -> "invalid"
+            .TypeError(e)   -> "bad type"
         }
     }
     <p>Parse attempted: ${result}</>

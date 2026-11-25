@@ -18,8 +18,8 @@ ${
     // Every error variant has its own arm, so `else` takes only the success value.
     function attempt(pw: string) -> string {
         return match check(pw) {
-            ::Locked :> "locked",
-            ::Denied :> "denied",
+            .Locked :> "locked",
+            .Denied :> "denied",
             else     :> "LOGGED IN"
         };
     }

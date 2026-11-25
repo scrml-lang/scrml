@@ -11,10 +11,10 @@ ${
 
     function decode() {
         parseVariant('not valid json', LoadResult) !{
-            ::MissingDiscriminator          :> { @parseError = "missing-discriminator"; },
-            ::UnknownVariant(_)             :> { @parseError = "unknown-variant"; },
-            ::InvalidPayload(field, _)      :> { @parseError = "invalid-payload:" + field; },
-            ::Malformed(_)                  :> { @parseError = "malformed"; }
+            .MissingDiscriminator          :> { @parseError = "missing-discriminator"; },
+            .UnknownVariant(_)             :> { @parseError = "unknown-variant"; },
+            .InvalidPayload(field, _)      :> { @parseError = "invalid-payload:" + field; },
+            .Malformed(_)                  :> { @parseError = "malformed"; }
         };
     }
 }

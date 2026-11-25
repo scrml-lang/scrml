@@ -18,7 +18,7 @@ ${
     // password would reach "LOGGED IN".
     function login() {
         @msg = match check("wrong") {
-            ::Locked :> "locked",
+            .Locked :> "locked",
             else     :> "LOGGED IN"
         };
     }

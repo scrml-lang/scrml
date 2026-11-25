@@ -3,10 +3,10 @@
 ${
     type PaymentError:enum = { InvalidAmount(msg: string) }
     function charge(amt: number)! -> PaymentError {
-        if (amt <= 0) fail PaymentError::InvalidAmount("must be positive");
+        if (amt <= 0) fail PaymentError.InvalidAmount("must be positive");
         return amt;
     }
-    let r = charge(10) !{ ::InvalidAmount(m) -> 0 };
+    let r = charge(10) !{ .InvalidAmount(m) -> 0 };
     log(r);
     function log(n: number) { let _ = n; }
 }

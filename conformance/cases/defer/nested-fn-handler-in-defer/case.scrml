@@ -13,7 +13,7 @@ ${
         defer {
             function inner()! -> E {
                 risky() !{
-                    ::Busy :> @trace = @trace + "busy;"
+                    .Busy :> @trace = @trace + "busy;"
                 };
                 @trace = @trace + "past;";
             }

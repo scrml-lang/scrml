@@ -24,13 +24,13 @@
     }
     function onCommit() {
         transfer(4, false) !{
-            | ::Bad :> @outcome = "bad"
+            | .Bad :> @outcome = "bad"
         }
         @outcome = "committed"
     }
     function onReturnOut() {
         transfer(100, true) !{
-            | ::Bad :> @outcome = "bad"
+            | .Bad :> @outcome = "bad"
         }
         @outcome = "returned"
     }
