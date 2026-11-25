@@ -101,8 +101,9 @@ export function frontEnd(mods, files, entry, opts = {}) {
     typed: tp,
     core: lowered.core,
     // the parse phase's diagnostics, apart (the conformance probe buckets on them)
-    parseDiags,
-    diags: parseDiags.concat(rel.later),
+    // s482-retired-lint (#2101 r1 LOW-2): one report per legacy cell read (parse.scrml oneReportPerAngleRead)
+    parseDiags: mods.parse.oneReportPerAngleRead(parseDiags),
+    diags: mods.parse.oneReportPerAngleRead(parseDiags.concat(rel.later)),
     // s449: the non-fatal I- notes (§55.17.6: I-FORM-SUBMIT-GATED "reports in the warnings stream")
     infos: tp.infos,
     nodes: composed ? Math.max(next, maxNid(tp.files) + 1) : next,

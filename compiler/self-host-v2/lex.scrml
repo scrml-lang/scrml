@@ -2138,10 +2138,25 @@ ${
         // `${<n>}`) only a legacy cell read `<n>` is a value here (angleCellReadEnd): one token,
         // which the parser refuses (E-CELL-ANGLE-READ)
         if (st.tokens.length == 0 || st.tokens[st.tokens.length - 1].kind is .LBrace) return angleCellReadEnd(c.source, c.pos) > 0;
+        // s482-retired-lint (#2101 r1 LOW-2) — after an arithmetic / comparison / equality operator
+        // (`1 + <n>`, `@a == <n>`) the right operand is read too, but ONLY a legacy cell read `<n>`
+        // is a value there (one E-CELL-ANGLE-READ, not the E-PARSE-EXPR cascade): any other `<` keeps
+        // its operator reading (`a < <b>` is not markup here)
+        if (binaryOpLast(st.tokens)) return angleCellReadEnd(c.source, c.pos) > 0;
         return operandSlotAfter(st.tokens);
     }
 
     fn isAsciiLetter(c: int) -> boolean { return (c >= 65 && c <= 90) || (c >= 97 && c <= 122); }
+
+    // Is the last token a binary arithmetic / comparison / equality operator (#2101 r1 LOW-2)?
+    fn binaryOpLast(ts: Token[]) -> boolean {
+        if (ts.length == 0) return false;
+        const k: TokenKind = ts[ts.length - 1].kind;
+        if (k is .Plus || k is .Minus || k is .Star || k is .Slash || k is .Percent) return true;
+        if (k is .Equal || k is .StrictEqual || k is .NotEqual || k is .StrictNotEqual) return true;
+        if (k is .LessThan || k is .LessEqual || k is .GreaterEqual) return true;
+        return false;
+    }
 
     // Does the last token leave an operand to be read?
     fn operandSlotAfter(ts: Token[]) -> boolean {

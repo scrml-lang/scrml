@@ -10870,6 +10870,28 @@ ${
     // error (E-SCOPE-*), reported inside its span — is dropped (the refusal is the
     // root cause; `(x) => x;`, `bump;` naming a function, an undeclared `y;`).
     // The front end's driver applies it to the parse diagnostics (slice-m2/lowered.js).
+    // s482-retired-lint (#2101 r1 LOW-2) — one report per legacy cell read: an E-BOOTSTRAP-UNSUPPORTED
+    // whose span overlaps an E-CELL-ANGLE-READ's in the same file is dropped (the read is the fault the
+    // author fixes first; what the bootstrap does not build around the fixed `@x` is reported then).
+    // Fail-closed: the E-CELL-ANGLE-READ stays, so the file still fails. The driver applies it to the
+    // whole list (slice-m2/lowered.js).
+    export fn oneReportPerAngleRead(ds: Diag[]) -> Diag[] {
+        let reads: Diag[] = [];
+        for (const d of ds) { if (d.code == "E-CELL-ANGLE-READ") reads = reads.concat([d]); }
+        if (reads.length == 0) return ds;
+        let out: Diag[] = [];
+        for (const d of ds) {
+            let keep = true;
+            if (d.code == "E-BOOTSTRAP-UNSUPPORTED") {
+                for (const r of reads) {
+                    if (r.file == d.file && d.span.start < r.span.end && r.span.start < d.span.end) keep = false;
+                }
+            }
+            if (keep) out = out.concat([d]);
+        }
+        return out;
+    }
+
     export fn withoutRefusedNoEffect(parsed: Diag[], later: Diag[]) -> Diag[] {
         let out: Diag[] = [];
         for (const d of parsed) {

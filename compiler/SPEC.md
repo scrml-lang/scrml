@@ -11,7 +11,7 @@
 > **Amendments applied:** 2026-04-08 — §51 added: State Transition Rules and `<machine>` state type (E-ENGINE-001..E-ENGINE-012, E-ENGINE-001-RT). §14.4 amended: `transitions {}` block grammar. §6.1 amended: machine-bound reactive variable declaration.
 > **Amendments applied:** 2026-04-08 — §52 added: State Authority Declarations. Two-tier authority model (`<var server>` Tier 2 — V-kill decl form per §6.1.5; `authority=` on `<Type>` Tier 1), compiler-generated sync infrastructure. §6.1.5 grammar: `state-decl` production carries the `server` decl-attr. §11.3.5 added: `protect=` / `authority=` relationship. E-AUTH-001..E-AUTH-005, W-AUTH-001.
 > **Amendments applied:** 2026-04-08 — §51 revised: `for EnumTypeName` → `for TypeName` (machines govern structs too). `self.*` in guards, `[label]` named clauses, `* => *` wildcard rules, E-ENGINE-013. Radical doubt debate Approach C.
-> **Amendments applied:** 2026-04-09 — §4.4 rewritten: three closer forms → two (`</tagname>` explicit, `</>` inferred). §4.8 deleted (bare `/` disambiguation no longer needed). §3.1 table updated. §3.2 E-CTX-002 wording updated. §4.5, §4.9 updated. §34 error codes updated. Appendix E added: migration guide. All examples updated throughout. **(S482 correction, 2026-11-24: "all examples updated" was not true — 26 example lines and 2 prose/diagnostic renderings (`lift <li>…/;`, `fallback={<div>…/}`, `?? <p>…/}`, `<h2>…/`, bare `/` lines) survived, and the trailing-`/` form was re-adopted downstream as a "terse `/}` closer". S482 migrated every straggler to `</>` — the SPEC's in #2095, the 177 sample lines in s482-retired-lint — and the retired-forms gate (§63, "The retired-forms ledger (S482)"; ledger row `closer-trailing-slash`) now holds the SPEC and the corpus at zero hits. The bootstrap refuses, with E-SYNTAX-050 and the Appendix E hint, a `/}` value closer, and a trailing `content/` / bare `/` in markup it reads (a markup value in logic included) where, in the retired reading, that `/` closes an element left unclosed — its own, or one around it — unless an element inside that one is itself left unclosed with no such `/` (the file's own missing closer), or the `/` sits in an element closed by its own name in which none was named. Not yet named (INTERIM, g-boot-retired-closer-unread-s482): a `/` ending a URL or path word (`see a/b/`, `http://x.com/`, `10:30/` — read as text so prose is never refused), and a retired closer in a region the bootstrap does not read as markup text (a body or construct refused by name, logic it cannot parse, a `${ }` block inside markup a runaway raw body swallowed). Ruling: user-voice-scrml.md, "the `/}` "terse closer" is the retired trailing-slash closer; Appendix E governs (S482)".)**
+> **Amendments applied:** 2026-04-09 — §4.4 rewritten: three closer forms → two (`</tagname>` explicit, `</>` inferred). §4.8 deleted (bare `/` disambiguation no longer needed). §3.1 table updated. §3.2 E-CTX-002 wording updated. §4.5, §4.9 updated. §34 error codes updated. Appendix E added: migration guide. All examples updated throughout. **(S482 correction, 2026-11-24: "all examples updated" was not true — 26 example lines and 2 prose/diagnostic renderings (`lift <li>…/;`, `fallback={<div>…/}`, `?? <p>…/}`, `<h2>…/`, bare `/` lines) survived, and the trailing-`/` form was re-adopted downstream as a "terse `/}` closer". S482 migrated the stragglers to `</>` — the SPEC's tagged fences in #2095, the 177 sample lines and the untagged-fence / quoted-text sites in s482-retired-lint (#2101 r1). The retired-forms gate (§63, "The retired-forms ledger (S482)"; ledger row `closer-trailing-slash`) reports zero hits of it in what it reads — the `scrml` and untagged fences of the SPEC and the public markdown, and the corpus `.scrml` files (§63 lists exactly what it reads and its known limits) — and fails on a new one. The bootstrap refuses, with E-SYNTAX-050 and the Appendix E hint, a `/}` value closer, and a trailing `content/` / bare `/` in markup it reads (a markup value in logic included) where, in the retired reading, that `/` closes an element left unclosed — its own, or one around it — unless an element inside that one is itself left unclosed with no such `/` (the file's own missing closer), or the `/` sits in an element closed by its own name in which none was named. Not yet named (INTERIM, g-boot-retired-closer-unread-s482): a `/` ending a URL or path word (`see a/b/`, `http://x.com/`, `10:30/` — read as text so prose is never refused), and a retired closer in a region the bootstrap does not read as markup text (a body or construct refused by name, logic it cannot parse, a `${ }` block inside markup a runaway raw body swallowed). Ruling: user-voice-scrml.md, "the `/}` "terse closer" is the retired trailing-slash closer; Appendix E governs (S482)".)**
 > **Amendments applied:** 2026-04-08 — §53 added: Inline Type Predicates. Stateless value constraints (`number(>0 && <10000)`, `string(email)`), three-zone SPARK enforcement, named shape registry, `bind:value` HTML attribute generation. E-CONTRACT-001..E-CONTRACT-004-WARN.
 
 **Version:** 0.5.2-draft
@@ -24888,7 +24888,7 @@ After debate (score 55/60 vs 24/60), the trailing-slash and bare-slash forms wer
 
 The `</>` form is specified in §4.4.2. The removal of bare `/` as a closer is authoritative as of this amendment. Any source file using bare `/` or trailing content`/` closers SHALL be rejected by the compiler with a diagnostic pointing to §4.4. The diagnostic SHALL include a hint: "Did you mean `</>`?"
 
-The retired closer is the retired-forms ledger's row `closer-trailing-slash` (§63, "The retired-forms ledger (S482)"); the retired-forms gate holds the SPEC and the corpus at zero hits of it (S482: the last 177 sample lines were migrated by `s482-retired-lint`).
+The retired closer is the retired-forms ledger's row `closer-trailing-slash` (§63, "The retired-forms ledger (S482)"). The retired-forms gate reports zero hits of it in what it reads (§63: the `scrml` and untagged fences of the SPEC and the public markdown, and the corpus `.scrml` files; this Appendix is a migration region, not read) and fails on a new one (S482: the last sample and untagged-fence sites were migrated by `s482-retired-lint`).
 
 ### 19.15 The `<render of=X/>` Render-Expression (held-variant display)
 
@@ -51981,10 +51981,36 @@ SPEC section and the ruling citation, and a detector where the form is detectabl
 HARD form, migrate every SPEC example and every positive example in the corpus (conformance and acceptance
 positives, samples, examples, stdlib, the public docs) to the new form, or record each remaining site as dated
 `pending` debt; for a SOFT form, record the starting count per file. The retired-forms gate
-(`scripts/retired-forms-lint.ts`, CI `checks` and the pre-commit hook) enforces it: a HARD form outside a
-labelled negative (an example or case that expects the row's own code), an explicit
-`<!-- retired-ok: <id> — reason -->` marker, a migration section (Appendix E, §63, §66.21) or the dated
-`pending` debt fails; a SOFT count, or a `pending` count, may not rise. A SPEC example outside §66 is written in
+(`scripts/retired-forms-lint.ts`, CI `checks` and the pre-commit hook) enforces it. **What the gate checks —
+exactly this (S482, #2101 r1):**
+- *What it reads:* every ledger row with a detector, over (a) the `.scrml` files under `conformance/cases`,
+  `compiler/self-host-v2/acceptance`, `samples`, `examples`, `stdlib`, `docs/tutorial-snippets`,
+  `docs/readme-snippets`, `docs/website`; (b) in this SPEC, `NERDME.md`, `DESIGN.md`, `docs/**/*.md` and every
+  `README.md` — except the excluded paths the gate lists with a reason (change notes, the changelog, generated
+  files, hand-offs, dated audits, archived drafts, test fixtures, impl#1 internals, other frameworks'
+  benchmarks) — every fence tagged `scrml` and every UNTAGGED fence. Source is read once, in source order, by a
+  port of the bootstrap's readers: comments, strings, regular-expression literals, raw bodies (`<pre>`,
+  `<code>`, `<script>`, `<style>`, §4.17), `_{ }` / `?{ }` / `#{ }` bodies, and the free text of a closed HTML
+  element are never matched; a detector matches across line breaks and every match is one hit. The
+  trailing-`/` closer uses the bootstrap's candidate and hit rule; the legacy cell read `<x>` its operand-slot rule.
+- *What it allows:* a conformance / acceptance case whose expected codes name the row's code (for a row whose
+  code is generic — `E-SCOPE-001`, `E-PARSE-FN`, `E-PARSE-TYPE`, `E-GRANT-UNKNOWN` — only when the case id also
+  matches the row's `caseIdPattern`); a fence with `<!-- retired-neg: <row-id> — <reason> -->` on the line(s)
+  directly above it; a fence in a migration region of this SPEC (a heading `Appendix E…`, `63…` or `66.21…`, with
+  every deeper heading, to the next heading of its level or higher); a `retired-ok: <row-id> — <reason>` inside a
+  comment on the hit's line or the line before. A code named in prose or in a comment allows nothing.
+- *What fails:* any (row, file) count that differs from the baseline (`scripts/retired-forms-baseline.json`):
+  a HARD hit outside the dated `pending` debt, a count above the baseline, and a count below it until the
+  baseline is lowered in the same change (`--update`). Against the base revision (`--base-ref`; CI: the PR's
+  base, the hook: the merge-base with `origin/main`): a baseline count above the base's, a key the base lacks
+  (except a new SOFT row's starting count), debt for a new HARD row, and a ledger row removed, downgraded
+  HARD → SOFT, or given a null detector.
+- *Known limits:* counts are per (row, file), so swapping one hit for another of the same row in the same file
+  passes; a detector's pattern can be narrowed in a reviewed ledger diff; fences tagged as another language and
+  markdown prose are not read; text cannot tell a tape from a host array (`tape-js-method`) or a cell from an
+  element (`render-by-tag`, which the bootstrap enforces); rows marked `enforcedBy: "lint-only"` have no compiler
+  refusal, and `state-type-fn-overload` (§17.5) has neither a code nor a detector; the closer rule's path-word
+  exemption is the bootstrap's INTERIM. A SPEC example outside §66 is written in
 the current language unless it is a labelled negative or a marked deprecated demonstration (S482). The ledger
 also feeds the bootstrap conformance report's legacy-dialect markers. A retirement banner ("all examples
 updated") is not a migration: the gate, not the banner, is the record. **Provenance:** ruling:user-voice-scrml.md
