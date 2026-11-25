@@ -121,7 +121,7 @@ describe("§1 the S464 brace-loss repro", () => {
   test("each rule alone refuses it (sql-failable, unwrap-logic, client-server-call, pre-migrate)", () => {
     withDir({ "b3.scrml": BROKEN }, (dir) => {
       const f = join(dir, "b3.scrml");
-      for (const rule of ["sql-failable", "unwrap-logic", "client-server-call", "pre-migrate", "arm-pipe", "is-some", "given-presence", "program-move"]) {
+      for (const rule of ["sql-failable", "unwrap-logic", "client-server-call", "pre-migrate", "arm-pipe", "is-some", "given-presence", "variant-colons", "program-move"]) {
         const r = run([f, `--rules=${rule}`]);
         expect(r.code).toBe(3);
         expect(readFileSync(f, "utf8")).toBe(BROKEN);

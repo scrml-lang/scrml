@@ -14,9 +14,9 @@
 <div>
 ${
   let result = match fetchData("/api") {
-    ::Ok(data) => data,
-    ::Network(msg) => "Network error: " + msg,
-    ::Timeout => "Timed out"
+    .Ok(data) => data,
+    .Network(msg) => "Network error: " + msg,
+    .Timeout => "Timed out"
   };
 }
 <p>${result}</>

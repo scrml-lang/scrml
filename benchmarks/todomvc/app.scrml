@@ -138,10 +138,10 @@
         // branches into the derived expression itself — match-form and
         // ternary-form both surfaced derived-emit codegen bugs).
         function computeVisibleTodos() {
-            if (@filter == FilterMode::Active) {
+            if (@filter == FilterMode.Active) {
                 return @todos.filter(function(t) { return !t.completed; });
             }
-            if (@filter == FilterMode::Completed) {
+            if (@filter == FilterMode.Completed) {
                 return @todos.filter(function(t) { return t.completed; });
             }
             return @todos;
@@ -198,13 +198,13 @@
         </>
         <ul class="filters">
             <li>
-                <a href="#/" onclick=setFilter(FilterMode::All)>All</>
+                <a href="#/" onclick=setFilter(FilterMode.All)>All</>
             </li>
             <li>
-                <a href="#/active" onclick=setFilter(FilterMode::Active)>Active</>
+                <a href="#/active" onclick=setFilter(FilterMode.Active)>Active</>
             </li>
             <li>
-                <a href="#/completed" onclick=setFilter(FilterMode::Completed)>Completed</>
+                <a href="#/completed" onclick=setFilter(FilterMode.Completed)>Completed</>
             </li>
         </ul>
         ${

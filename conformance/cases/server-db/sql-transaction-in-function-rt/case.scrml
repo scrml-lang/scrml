@@ -16,7 +16,7 @@
             ?{`UPDATE accounts SET balance = balance - ${amount} WHERE id = 1`}.run()
             let row = ?{`SELECT balance FROM accounts WHERE id = 1`}.get()
             if (row.balance < 0) {
-                fail TransferError::InsufficientFunds(row.balance)
+                fail TransferError.InsufficientFunds(row.balance)
             }
             ?{`UPDATE accounts SET balance = balance + ${amount} WHERE id = 2`}.run()
         }
@@ -26,12 +26,12 @@
     }
     function onOk() {
         transfer(4) !{
-            | ::InsufficientFunds(b) :> @outcome = "insufficient"
+            | .InsufficientFunds(b) :> @outcome = "insufficient"
         }
     }
     function onTooMuch() {
         transfer(100) !{
-            | ::InsufficientFunds(b) :> @outcome = "insufficient"
+            | .InsufficientFunds(b) :> @outcome = "insufficient"
         }
     }
     function onRead() {

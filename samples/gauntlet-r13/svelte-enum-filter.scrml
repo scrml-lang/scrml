@@ -7,7 +7,7 @@
     ${
         type FilterMode:enum = { All, Active, Completed }
 
-        @filter = FilterMode::All;
+        @filter = FilterMode.All;
         @searchTerm = "";
         @items = [
             { text: "Build compiler", done: true },
@@ -23,9 +23,9 @@
             @items = [...@items];
         }
 
-        function setAll() { @filter = FilterMode::All; }
-        function setActive() { @filter = FilterMode::Active; }
-        function setCompleted() { @filter = FilterMode::Completed; }
+        function setAll() { @filter = FilterMode.All; }
+        function setActive() { @filter = FilterMode.Active; }
+        function setCompleted() { @filter = FilterMode.Completed; }
     }
     <h1>Task Filter</>
     <input type="text" bind:value=@searchTerm placeholder="Search..."/>

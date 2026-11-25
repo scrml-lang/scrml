@@ -92,7 +92,7 @@
             @saveError = ""
             if (not (@editingId is not)) {
                 updateContact(@editingId, @formName, @formEmail, @formPhone, @formCategory) !{
-                    | ::SQLError e -> {
+                    | .SQLError e -> {
                         @saveError = e.message
                         @isSubmitting = false
                         return
@@ -105,12 +105,12 @@
                 }
             } else {
                 addContact(@formName, @formEmail, @formPhone, @formCategory) !{
-                    | ::SQLError e -> {
+                    | .SQLError e -> {
                         @saveError = e.message
                         @isSubmitting = false
                         return
                     }
-                    | ::ConflictError e -> {
+                    | .ConflictError e -> {
                         @saveError = "A contact with that email already exists."
                         @isSubmitting = false
                         return
@@ -133,7 +133,7 @@
             let id = @confirmDeleteId
             @confirmDeleteId = not
             deleteContact(id) !{
-                | ::SQLError e -> {
+                | .SQLError e -> {
                     @saveError = e.message
                     return
                 }
@@ -223,7 +223,7 @@
 
             ${
                 let contacts = loadContacts(@searchTerm) !{
-                    | ::SQLError e -> { @saveError = e.message; [] }
+                    | .SQLError e -> { @saveError = e.message; [] }
                     | _ e -> { @saveError = "Failed to load contacts."; [] }
                 }
             }

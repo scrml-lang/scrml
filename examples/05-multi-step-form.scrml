@@ -92,9 +92,9 @@
   }
   <div class="wizard">
     <div class="progress">
-      <span class:active=(@step == Step::Info)>1. Info</span>
-      <span class:active=(@step == Step::Preferences)>2. Preferences</span>
-      <span class:active=(@step == Step::Confirm)>3. Confirm</span>
+      <span class:active=(@step == Step.Info)>1. Info</span>
+      <span class:active=(@step == Step.Preferences)>2. Preferences</span>
+      <span class:active=(@step == Step.Confirm)>3. Confirm</span>
     </div>
 
     <!-- Step-content styles — co-located with the engine whose state-child

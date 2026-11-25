@@ -9,7 +9,7 @@
 
         @title = "";
         @content = "";
-        @status = Status::Draft;
+        @status = Status.Draft;
         @isDraft = true;
         @isReview = false;
         @isValid = false;
@@ -27,14 +27,14 @@
 
         function submit() {
             if (validate()) {
-                @status = Status::Review;
+                @status = Status.Review;
                 @isDraft = false;
                 @isReview = true;
             }
         }
 
         function publish() {
-            @status = Status::Published;
+            @status = Status.Published;
             @isReview = false;
         }
     }

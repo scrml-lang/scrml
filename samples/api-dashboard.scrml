@@ -262,11 +262,11 @@ ${
             INSERT INTO endpoints (method, url, description)
             VALUES (${method}, ${url}, ${description})
         `}.run() !{
-            | ::SQLError e -> {
+            | .SQLError e -> {
                 @submitError = e.message
                 return []
             }
-            | ::ConflictError e -> {
+            | .ConflictError e -> {
                 @submitError = "An endpoint with this URL and method already exists."
                 return []
             }
@@ -332,7 +332,7 @@ ${
         // to Bun route handlers. Bun exposes global fetch. Should be fine.
         // But I'm guessing. This should be explicit in the spec.
         let resp = fetch(url, { method: method }) !{
-            | ::NetworkError e -> {
+            | .NetworkError e -> {
                 return { status: 0, body: "", networkError: e.message }
             }
             | _ -> {

@@ -11,8 +11,8 @@ ${
 
     function useIt(id: int) {
         return match loadThing(id) {
-            ::Ok(v) :> v,
-            ::NotFound :> "nf"
+            .Ok(v) :> v,
+            .NotFound :> "nf"
         };
     }
 }

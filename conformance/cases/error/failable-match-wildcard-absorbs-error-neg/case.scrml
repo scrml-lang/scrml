@@ -18,13 +18,13 @@ ${
     // (a `return match`); after `::Denied` it would take `.Locked` (a statement).
     function attempt(pw: string) -> string {
         return match check(pw) {
-            ::Ok(v) :> "LOGGED IN",
+            .Ok(v) :> "LOGGED IN",
             _       :> "denied"
         };
     }
     function login() {
         match check("wrong") {
-            ::Denied :> { @msg = "denied"; },
+            .Denied :> { @msg = "denied"; },
             _        :> { @msg = attempt("x"); }
         }
     }

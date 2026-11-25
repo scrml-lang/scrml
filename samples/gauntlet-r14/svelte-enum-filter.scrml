@@ -7,7 +7,7 @@
     ${
         type FilterMode:enum = { All, Active, Completed }
 
-        @filter = FilterMode::All;
+        @filter = FilterMode.All;
         @searchTerm = "";
         @items = [
             { text: "Build compiler", done: true },
@@ -41,9 +41,9 @@
     <input type="text" bind:value=@searchTerm placeholder="Search or add..."/>
     <button onclick=addItem()>Add</>
     <div class="filter-buttons">
-        <button onclick=setFilter(FilterMode::All)>All</>
-        <button onclick=setFilter(FilterMode::Active)>Active</>
-        <button onclick=setFilter(FilterMode::Completed)>Done</>
+        <button onclick=setFilter(FilterMode.All)>All</>
+        <button onclick=setFilter(FilterMode.Active)>Active</>
+        <button onclick=setFilter(FilterMode.Completed)>Done</>
     </div>
     <p>Current filter: ${@filter}</>
     <ul>

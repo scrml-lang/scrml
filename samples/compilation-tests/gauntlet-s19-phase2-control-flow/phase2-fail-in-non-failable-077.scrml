@@ -2,7 +2,7 @@
 ${
     type PaymentError:enum = { InvalidAmount(msg: string) }
     function charge(amt: number): number {
-        if (amt <= 0) fail PaymentError::InvalidAmount("bad")
+        if (amt <= 0) fail PaymentError.InvalidAmount("bad")
         return amt
     }
     log(charge(5))

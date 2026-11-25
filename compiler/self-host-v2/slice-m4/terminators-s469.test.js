@@ -189,8 +189,10 @@ describe("F2 — arms are a comma list (E-MATCH-ARM-SEPARATOR at every missing `
       const ds = seps(src);
       expect([q, ds.length]).toEqual([q, 1]);
       expect(src.slice(0, ds[0].span.start).endsWith(`${q}A :> 1`)).toBe(true);
-      expect(codes(src)).toEqual(["E-MATCH-ARM-SEPARATOR"]);
-      expect(codes(P(fn(`        return match k {\n            ${q}A :> 1,\n            ${q}B :> 2\n        };`)))).toEqual([]);
+      // S482: `E::A` also draws W-VARIANT-COLONS-LEGACY (§14.5, deprecated) — not this test's subject
+      const noLint = (cs) => cs.filter((c) => c !== "W-VARIANT-COLONS-LEGACY");
+      expect(noLint(codes(src))).toEqual(["E-MATCH-ARM-SEPARATOR"]);
+      expect(noLint(codes(P(fn(`        return match k {\n            ${q}A :> 1,\n            ${q}B :> 2\n        };`))))).toEqual([]);
     }
   });
 

@@ -28,11 +28,11 @@
   // const inference path — bare `.Admin` would resolve only when
   // the field's type is known).
   const team = [
-    { name: "Ada Lovelace",    role: UserRole::Admin },
-    { name: "Grace Hopper",    role: UserRole::Moderator },
-    { name: "Alan Turing",     role: UserRole::Member },
-    { name: "Linus Torvalds",  role: UserRole::Member },
-    { name: "Anonymous",       role: UserRole::Guest },
+    { name: "Ada Lovelace",    role: UserRole.Admin },
+    { name: "Grace Hopper",    role: UserRole.Moderator },
+    { name: "Alan Turing",     role: UserRole.Member },
+    { name: "Linus Torvalds",  role: UserRole.Member },
+    { name: "Anonymous",       role: UserRole.Guest },
   ];
 
   // Team-shell + hint styles — co-located with the team markup below.

@@ -391,7 +391,7 @@ ${
             if (@selectedPost) {
                 // UPDATE path — Rails: @post.update(post_params)
                 updatePost(@selectedPost.id, title, body, status) !{
-                    | ::SQLError e -> {
+                    | .SQLError e -> {
                         @saveError = "Save failed: " + e.message
                         return
                     }
@@ -403,11 +403,11 @@ ${
             } else {
                 // CREATE path — Rails: Post.create(post_params)
                 let newId = createPost(title, body, status) !{
-                    | ::SQLError e -> {
+                    | .SQLError e -> {
                         @saveError = "Create failed: " + e.message
                         return
                     }
-                    | ::ConflictError e -> {
+                    | .ConflictError e -> {
                         @saveError = "A post with this title already exists."
                         return
                     }
@@ -429,7 +429,7 @@ ${
 
         function deletePost(postId) {
             destroyPost(postId) !{
-                | ::SQLError e -> {
+                | .SQLError e -> {
                     @saveError = "Delete failed: " + e.message
                     return
                 }

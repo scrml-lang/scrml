@@ -8,7 +8,7 @@
         type Direction:enum = { North, South, East, West }
         type GameState:enum = { Menu, Playing, Paused, GameOver }
 
-        @state = GameState::Menu;
+        @state = GameState.Menu;
         @isMenu = true;
         @isPlaying = false;
         @isPaused = false;
@@ -23,16 +23,16 @@
             function applyDelta(pos, delta) {
                 return pos + delta;
             }
-            if (dir == Direction::North) { @y = applyDelta(@y, -1); }
-            if (dir == Direction::South) { @y = applyDelta(@y, 1); }
-            if (dir == Direction::East)  { @x = applyDelta(@x, 1); }
-            if (dir == Direction::West)  { @x = applyDelta(@x, -1); }
+            if (dir == Direction.North) { @y = applyDelta(@y, -1); }
+            if (dir == Direction.South) { @y = applyDelta(@y, 1); }
+            if (dir == Direction.East)  { @x = applyDelta(@x, 1); }
+            if (dir == Direction.West)  { @x = applyDelta(@x, -1); }
             @score = @score + 1;
             @moveLog = [...@moveLog, dir];
         }
 
         function startGame() {
-            @state = GameState::Playing;
+            @state = GameState.Playing;
             @isMenu = false;
             @isPlaying = true;
             @isPaused = false;
@@ -43,19 +43,19 @@
         }
 
         function pauseGame() {
-            @state = GameState::Paused;
+            @state = GameState.Paused;
             @isPlaying = false;
             @isPaused = true;
         }
 
         function resumeGame() {
-            @state = GameState::Playing;
+            @state = GameState.Playing;
             @isPaused = false;
             @isPlaying = true;
         }
 
         function endGame() {
-            @state = GameState::GameOver;
+            @state = GameState.GameOver;
             @isPlaying = false;
             @isPaused = false;
         }
@@ -68,10 +68,10 @@
     <div if=@isPlaying>
         <p>Position: (${@x}, ${@y}) Score: ${@score}</>
         <div class="controls">
-            <button onclick=move(Direction::North)>N</>
-            <button onclick=move(Direction::South)>S</>
-            <button onclick=move(Direction::East)>E</>
-            <button onclick=move(Direction::West)>W</>
+            <button onclick=move(Direction.North)>N</>
+            <button onclick=move(Direction.South)>S</>
+            <button onclick=move(Direction.East)>E</>
+            <button onclick=move(Direction.West)>W</>
         </div>
         <button onclick=pauseGame()>Pause</>
         <button onclick=endGame()>End</>

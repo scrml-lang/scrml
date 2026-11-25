@@ -895,21 +895,21 @@
     {
       "id": "variant-colons",
       "tier": "SOFT",
-      "old": "`Type::Variant`",
-      "new": "`Type.Variant`",
+      "old": "`Type::Variant` / `::Variant`",
+      "new": "`Type.Variant` / `.Variant`",
       "codes": [
         "W-VARIANT-COLONS-LEGACY"
       ],
-      "spec": "§14 (the \"VALID ALIAS\" sentence, superseded), §63",
-      "ruling": "scrml-support/user-voice-scrml.md S482 \"⭐ RULED — `::` variant access is deprecated (§63 window: warning + `scrml fix` to `.`)\"",
+      "spec": "§14.5 (S482: deprecated; the \"VALID ALIAS\" sentence struck), §34, §63.7",
+      "ruling": "scrml-support/user-voice-scrml.md S482 \"⭐ RULED — `::` variant access is deprecated (§63 window: warning + `scrml fix` to `.`)\" — \"yes, deprecate :: with warning and fix\" (ruling:user-voice-scrml.md-S482-deprecate-colons)",
       "retired": "S482",
       "detector": {
         "kind": "regex",
         "pattern": "\\b[A-Z]\\w*::[A-Z]\\w*",
         "flags": ""
       },
-      "note": "The deprecation BUILD (W-VARIANT-COLONS-LEGACY + the `scrml fix` rule) is a later lane; this row records the starting count, which may only go down.",
-      "enforcedBy": "lint-only"
+      "note": "Built in s482-colons-deprecate: bootstrap lint (parse.scrml colonsLint, Warning), `scrml fix` rule `variant-colons` (compiler/src/commands/fix-variant-colons.js), corpus migrated. Intended hit: conformance/cases/enum/variant-colons-deprecated-warn (DEPRECATED-DEMO). The detector sees the qualified form only; `::Variant` shorthand sites are counted by W-VARIANT-COLONS-LEGACY.",
+      "enforcedBy": "bootstrap"
     },
     {
       "id": "colon-shorthand-after",

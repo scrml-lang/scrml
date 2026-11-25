@@ -22,9 +22,9 @@ const run = (src) => frontEnd(mods, [{ path: "t.scrml", src }]);
 const codes = (src) => run(src).diags.map((d) => d.code);
 const sorted = (src) => codes(src).slice().sort();
 const msg = (src, code) => (run(src).diags.find((d) => d.code === code) || { message: "" }).message;
-const clean = (src) => {
+const clean = (src, allow = []) => {
   const r = run(src);
-  expect(r.diags.map((d) => `${d.code}: ${d.message}`)).toEqual([]);
+  expect(r.diags.filter((d) => !allow.includes(d.code)).map((d) => `${d.code}: ${d.message}`)).toEqual([]);
   expect(mods.check.checkCore(r.core)).toEqual([]);
   return r;
 };
@@ -45,8 +45,8 @@ const P = (decls, buttons = [], extra = "") =>
     .join("\n")}\n${extra}        <p id="log">\${@log}</p>\n        <p id="out">\${@out}</p>\n        <p id="n">\${@n}</p>\n    </main>\n</program>\n`;
 
 let k = 0;
-async function runProgram(decls, buttons, press) {
-  const r = clean(P(decls, buttons));
+async function runProgram(decls, buttons, press, allow = []) {
+  const r = clean(P(decls, buttons), allow);
   await loadProgram(r.core, "ue-" + k++);
   for (const b of press) click(btn(b));
   return { log: $("#log").textContent, out: $("#out").textContent, n: $("#n").textContent };
@@ -67,8 +67,10 @@ describe("§19.3 `fail` — returns the error value to the caller (runtime)", ()
     expect(o.log).toBe("t");
   });
 
-  test("`fail E::V` and `fail ::V` are the same forms (§19 alias note)", async () => {
-    const o = await runProgram(`${TYPES}\n    function a()! LoadError {\n        fail LoadError::Timeout;\n    }\n    function b()! LoadError {\n        fail ::NotFound("q");\n    }\n    function go() {\n        a() !{\n            .Timeout :> @log = @log + "1",\n            _ :> @log = @log + "?"\n        };\n        b() !{\n            .NotFound(m) :> @log = @log + m,\n            _ :> @log = @log + "?"\n        };\n    }`, ["go"], ["go"]);
+  // S482 (ruling:user-voice-scrml.md-S482-deprecate-colons): `::` is the DEPRECATED spelling (§14.5) — the
+  // same forms, each drawing W-VARIANT-COLONS-LEGACY (Warning); see slice-m4/variant-colons-s482.test.js.
+  test("`fail E::V` and `fail ::V` are the same forms (§14.5: deprecated, W-VARIANT-COLONS-LEGACY)", async () => {
+    const o = await runProgram(`${TYPES}\n    function a()! LoadError {\n        fail LoadError::Timeout;\n    }\n    function b()! LoadError {\n        fail ::NotFound("q");\n    }\n    function go() {\n        a() !{\n            .Timeout :> @log = @log + "1",\n            _ :> @log = @log + "?"\n        };\n        b() !{\n            .NotFound(m) :> @log = @log + m,\n            _ :> @log = @log + "?"\n        };\n    }`, ["go"], ["go"], ["W-VARIANT-COLONS-LEGACY"]);
     expect(o.log).toBe("1q");
   });
 
@@ -223,7 +225,7 @@ describe("§19.5 `?` — propagation", () => {
 
 describe("§19.7 — `match` on a failable result", () => {
   test("`.Ok(v)` + every error variant; statement arms (mirror: error/match-failable-ok-arm-rt)", async () => {
-    const o = await runProgram(`    type DivErr:enum = { DivByZero }\n    function safeDiv(a: int, b: int)! DivErr {\n        if (b == 0) fail DivErr.DivByZero;\n        return a - b;\n    }\n    function okCase() {\n        match safeDiv(10, 2) {\n            .Ok(v) :> @n = v,\n            .DivByZero :> @n = -1\n        }\n    }\n    function errCase() {\n        match safeDiv(10, 0) {\n            ::Ok(v) :> @log = "ok",\n            ::DivByZero :> @log = "ERR"\n        }\n    }`, ["okCase", "errCase"], ["okCase", "errCase"]);
+    const o = await runProgram(`    type DivErr:enum = { DivByZero }\n    function safeDiv(a: int, b: int)! DivErr {\n        if (b == 0) fail DivErr.DivByZero;\n        return a - b;\n    }\n    function okCase() {\n        match safeDiv(10, 2) {\n            .Ok(v) :> @n = v,\n            .DivByZero :> @n = -1\n        }\n    }\n    function errCase() {\n        match safeDiv(10, 0) {\n            .Ok(v) :> @log = "ok",\n            .DivByZero :> @log = "ERR"\n        }\n    }`, ["okCase", "errCase"], ["okCase", "errCase"]);
     expect(o.n).toBe("8");
     expect(o.log).toBe("ERR");
   });
@@ -246,7 +248,7 @@ describe("§19.7 — `match` on a failable result", () => {
   });
 
   test("E-TYPE-020 — a missing error variant (mirror: error/failable-match-nonexhaustive-err)", () => {
-    const src = P(`    type LoadError2:enum = { NotFound, Timeout }\n    function loadThing(id: int)! LoadError2 {\n        if (id < 0) fail LoadError2.NotFound;\n        return "ok";\n    }\n    function useIt(id: int) -> string {\n        return match loadThing(id) {\n            ::Ok(v) :> "ok",\n            ::NotFound :> "nf"\n        };\n    }`);
+    const src = P(`    type LoadError2:enum = { NotFound, Timeout }\n    function loadThing(id: int)! LoadError2 {\n        if (id < 0) fail LoadError2.NotFound;\n        return "ok";\n    }\n    function useIt(id: int) -> string {\n        return match loadThing(id) {\n            .Ok(v) :> "ok",\n            .NotFound :> "nf"\n        };\n    }`);
     expect(codes(src)).toEqual(["E-TYPE-020"]);
     expect(msg(src, "E-TYPE-020")).toContain("Timeout");
   });

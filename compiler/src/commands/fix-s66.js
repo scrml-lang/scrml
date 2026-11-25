@@ -121,6 +121,7 @@ import { applyMigrations } from "./migrate.js";
 import { fixArmPipe } from "./fix-arm-pipe.js";
 import { fixGivenPresence } from "./fix-given-presence.js";
 import { fixIsSome } from "./fix-is-some.js";
+import { fixVariantColons } from "./fix-variant-colons.js";
 import { fixClientServerCall } from "./fix-client-server-call.js";
 import { fixSqlFailable } from "./fix-sql-failable.js";
 import { fixTerminators, logicBlockStatements, seedPrefixUnits } from "./fix-terminators.js";
@@ -143,7 +144,7 @@ import { join, dirname, basename, resolve, relative, isAbsolute, sep } from "nod
  */
 export const WRAP_OPENER = '<program reset="none">';
 
-export const IMPL1_SAFE_RULES = Object.freeze(["pre-migrate", "arm-pipe", "client-server-call", "sql-failable", "is-some", "given-presence", "stmt-semi", "arm-comma", "program-wrap", "program-move", "unwrap-logic"]);
+export const IMPL1_SAFE_RULES = Object.freeze(["pre-migrate", "arm-pipe", "client-server-call", "sql-failable", "is-some", "given-presence", "variant-colons", "stmt-semi", "arm-comma", "program-wrap", "program-move", "unwrap-logic"]);
 /** The §66 declaration rules: their output is the §66 opener dialect, which impl#1 does NOT compile. */
 export const S66_DECL_RULES = Object.freeze(["rhs-decl", "const-cell", "engine-simple"]);
 /**
@@ -159,6 +160,7 @@ export const S66_RULES = Object.freeze([
   "sql-failable",
   "is-some",
   "given-presence",
+  "variant-colons",
   "stmt-semi",
   "arm-comma",
   "loop-while",
@@ -1624,6 +1626,17 @@ export function fixS66(source, opts = {}) {
     if (gp.changed) src = gp.output;
     applied.push(...gp.applied);
     blockers.push(...gp.blockers);
+  }
+
+  if (enabled.has("variant-colons")) {
+    // §14.5 / §63 (S482, ruling:user-voice-scrml.md-S482-deprecate-colons) — the deprecated `::`
+    // enum variant access → `.`. Chained like is-some: its own location (impl#1's splitter +
+    // tokenizer) + per-file verify (commands/fix-variant-colons.js); a site it cannot verify is left
+    // untouched and reported.
+    const vc = fixVariantColons(src, { filePath, auxSources: opts.auxSources, verify: opts.verify, inPlaceClean: opts.inPlaceClean, allowNonCompiling: opts.allowNonCompiling });
+    if (vc.changed) src = vc.output;
+    applied.push(...vc.applied);
+    blockers.push(...vc.blockers);
   }
 
   if (enabled.has("stmt-semi") || enabled.has("arm-comma")) {

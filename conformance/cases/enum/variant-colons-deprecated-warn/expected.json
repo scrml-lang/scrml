@@ -1,0 +1,32 @@
+{
+  "id": "enum-variant-colons-deprecated-warn",
+  "description": "§14.5 / §63.5 — the deprecated `::` enum variant access (a labelled DEPRECATED-DEMO: the one case that keeps `::` on purpose). `::Ok(v)` / `::DivByZero` arm patterns and `fail DivErr::DivByZero` still compile and run exactly as their `.` spellings (the runtime half is error/match-failable-ok-arm-rt's, whose source is the `.` spelling of this one), and each site draws W-VARIANT-COLONS-LEGACY at Warning severity: 4 arm patterns + 1 `fail` operand = 5.",
+  "language-version": "deprecated",
+  "spec": "§14.5, §63.5, §63.7",
+  "source-test": "compiler/self-host-v2/slice-m4/variant-colons-s482.test.js",
+  "rationale": "ruling:user-voice-scrml.md-S482-deprecate-colons — *\"deprecate `::`: put it in the §63 migration window … It keeps compiling with a warning (W-VARIANT-COLONS-LEGACY) and a `scrml fix` rewrite to `.`.\"* (owner: \"yes, deprecate :: with warning and fix\"). §63.5: during the window the deprecated form is in the contract, its W-code is conformance-required, and its runtime must be identical to the canonical form's. impl#1 accepts `::` without the lint — xfail on the carried gap g-impl1-variant-colons-lint-s482.",
+  "expect": {
+    "codes": ["W-VARIANT-COLONS-LEGACY"],
+    "severity": { "W-VARIANT-COLONS-LEGACY": "warning" },
+    "codeCounts": { "W-VARIANT-COLONS-LEGACY": 5 },
+    "notCodePrefixes": ["E-ERROR-", "E-CG-", "E-CODEGEN-"],
+    "input": [{ "click": "#btn-ok" }, { "click": "#btn-err" }],
+    "state": { "okOut": "ok: 5", "errOut": "ERR: divide by zero" },
+    "domAnchored": [
+      { "selector": "#out-ok", "count": 1, "text": "ok: 5" },
+      { "selector": "#out-err", "count": 1, "text": "ERR: divide by zero" }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-variant-colons-lint-s482",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'W-VARIANT-COLONS-LEGACY' fired 0 time(s), expected exactly 5",
+          "missing:W-VARIANT-COLONS-LEGACY",
+          "severity:code 'W-VARIANT-COLONS-LEGACY' did not fire (expected severity warning)"
+        ]
+      }
+    }
+  }
+}

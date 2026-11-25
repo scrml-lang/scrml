@@ -4,7 +4,7 @@
 
 <div>
     !{
-        ::NetworkError(e) -> let msg = "Network failed"
+        .NetworkError(e) -> let msg = "Network failed"
         _ e -> let msg = "Unknown error"
     }
     <p>Error handler</>

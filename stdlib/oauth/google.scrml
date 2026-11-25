@@ -81,26 +81,26 @@ ${
      *
      * @param tokens — the object returned by exchangeCode()
      * @returns object — claims (sub, email, ...) or `not` if no id_token
-     * @fails OAuthError::ParseFailed if base64url decode or JSON.parse throws
+     * @fails OAuthError.ParseFailed if base64url decode or JSON.parse throws
      */
     export function parseIdToken(tokens) ! -> OAuthError {
         if (!tokens || !tokens.idToken) return not;
         const parts = tokens.idToken.split(".");
         if (parts.length != 3) {
-            fail OAuthError::ParseFailed("[scrml:oauth/google] parseIdToken: malformed JWT");
+            fail OAuthError.ParseFailed("[scrml:oauth/google] parseIdToken: malformed JWT");
         }
         const payload = parts[1];
         // base64url → base64
         const b64 = payload.replace(/-/g, "+").replace(/_/g, "/")
         const pad = b64.length % 4 == 0 ? "" : "=".repeat(4 - (b64.length % 4))
         const json = safeCall(() => atob(b64 + pad)) !{
-            ::Thrown(msg, name) -> {
-                fail OAuthError::ParseFailed(msg);
+            .Thrown(msg, name) -> {
+                fail OAuthError.ParseFailed(msg);
             }
         }
         return safeCall(() => JSON.parse(json)) !{
-            ::Thrown(msg, name) -> {
-                fail OAuthError::ParseFailed(msg);
+            .Thrown(msg, name) -> {
+                fail OAuthError.ParseFailed(msg);
             }
         }
     }
