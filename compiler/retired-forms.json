@@ -1,6 +1,23 @@
 {
   "$comment": "The retired-forms ledger (S482). Ruling: scrml-support/user-voice-scrml.md S482 \"⭐ RULED — every retirement / deprecation PR adds a retired-forms ledger row and migrates\" — \"every PR that retires or deprecates a syntax form must do both: 1. add a row to the retired-forms ledger (`compiler/retired-forms.json`): the old form, the new form, its tier, the error or warning code, and the ruling citation; 2. migrate the SPEC examples, or for a deprecated form, record the starting count, which then only goes down.\" HARD rows fail scripts/retired-forms-lint.ts outside labelled negatives, allow markers and the dated `pending` debt in scripts/retired-forms-baseline.json; SOFT rows ratchet per (row, file). `legacyMarker` rows feed scripts/bootstrap-conformance.ts LEGACY_MARKERS (in `order`). A `detector` is a regex over comment- and string-stripped scrml (per line; flag `m` = over the whole text) or a builtin of the lint; null = not detectable from text (the compiler enforces it). `enforcedBy`: which compiler emits one of the row's codes (\"bootstrap\", \"impl#1\", both), \"lint-only\" (no compiler emits a code — the gate alone holds the form), \"none\" (no code and no detector). `caseIdPattern`: for a row whose codes are generic, a conformance case is a labelled negative only when its id also matches.",
   "version": 1,
+  "migrationRegions": [
+    {
+      "heading": "## Appendix E: `</>` Closer Migration Guide",
+      "children": "^(?![0-9])",
+      "why": "the Appendix E closer migration guide quotes the retired closer forms it migrates; only its own unnumbered sub-headings (Background, Migration Rules, …)"
+    },
+    {
+      "heading": "## 63. Deprecation Lifecycle — the stage machine",
+      "children": "^63\\.[0-9]",
+      "why": "the §63 lifecycle and the `scrml fix` verb quote deprecated forms as the input of each rule; only its own 63.x sub-headings"
+    },
+    {
+      "heading": "### 66.21 Legacy forms and migration — the §63 lifecycle",
+      "children": "^66\\.21\\.[0-9]",
+      "why": "§66.21 lists the legacy declaration forms and their migration; only its own 66.21.x sub-headings"
+    }
+  ],
   "rows": [
     {
       "id": "closer-trailing-slash",
@@ -358,7 +375,7 @@
         "kind": "builtin",
         "name": "tape-js-method"
       },
-      "note": "Text cannot tell a tape from a host array; a hit on host JS (a `_{}` body is never read) takes an allow marker. (b) counts a `.sort(` / `.reverse(` / `.fill(` / `.copyWithin(` call that is a whole statement (a plain receiver chain after `;` / `{` / `}` and only `;` / `}` / a line end after it) — a call whose value is used is legal.",
+      "note": "Text cannot tell a tape from a host array; a hit on host JS (a `_{}` body is never read) takes an allow marker. (b) counts a `.sort(` / `.reverse(` / `.fill(` / `.copyWithin(` call that is a whole statement (a plain receiver chain after `;` / `{` / `}` and only `;` / `}` / a line end after it) — a call whose value is used is legal. Not hits (#2101 r2, SPEC §63 known limits): a computed member call (`xs[\"push\"](1)`), and a discarded call after any other boundary (`if (a) xs.sort()`).",
       "enforcedBy": "bootstrap"
     },
     {

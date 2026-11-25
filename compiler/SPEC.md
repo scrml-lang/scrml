@@ -24695,222 +24695,6 @@ In this example:
 - Error variants with `renders` clauses display context-specific error UIs (retry buttons, explanatory text) without any explicit match handling in the template.
 - *(S451 — §19.6.1 Scope.)* The `load…()` functions here are rendered, so each must be a CLIENT `!` function — one that builds the widget from cells already loaded. A widget whose data comes from the server loads it with a `<request>` and reads the failure from `<#id>.error` (§19.6.2); a `load…()` that called the server here would be E-VALUE-SERVER-CALL (§13.7). *(Provenance: ruling:user-voice-scrml.md S451 "your recs on all five" item 1 · supersedes: nothing struck — the example never said where the `load…()` functions run.)*
 
----
-
-## Appendix A: Interaction Matrix
-
-| Feature | Error System Interaction |
-|---------|------------------------|
-| `fail` keyword | Produces error variant value; requires `!` function |
-| `?` operator | Propagates error to caller; requires `!` function |
-| `!` signature | Declares function as failable; error type in signature |
-| `renders` clause | Optional markup on enum variants; auto-displays in boundary |
-| `<errorBoundary>` | Catches errors in markup; uses `renders` or `fallback` |
-| `match` (§18) | Exhaustive over success + error variants in logic context |
-| `?{}` SQL (§8) | A failable expression everywhere (S451 R11): propagates `SqlError` implicitly in `!` functions (§19.8.2); handled at the site with `!{}` / `match` outside them, else E-ERROR-002 (§19.8.3). No row is not a failure (`.get()` → `not`, `.all()` → `[]`). *(Supersedes: "Produces `SqlError` in `!` functions; `not`/empty outside".)* |
-| `@reactive` (§6) | Reactive variables can hold error variants; trigger updates |
-| `~{}` tests | `assert.fails` / `assert.fails.with` for failable functions |
-| `server` functions (§12) | CPS preserves `!`; errors serialize as tagged JSON. A client call of a server function is failable whether or not it is declared `!` (transport / non-2xx / decode), handled like any `!` call, else E-ERROR-002 (§19.9.10, S451) |
-| `transaction` | Auto-rollback on `fail`; syntactic sugar over BEGIN/COMMIT/ROLLBACK |
-| `pure` (§33) | `pure` and `!` coexist; pure functions can fail without side effects |
-| `lin` (§35) | `lin` variables inside `!` functions follow normal linear rules; `fail` is a scope exit that must consume `lin` variables |
-| `<state>` types (§11 → §6, §52) | `<errorBoundary>` is a pre-defined state type |
-
-## Appendix B: Superseded Spec Text
-
-This section replaces the entirety of §19 (Error Handling) as it existed in the 0.5.0-draft spec. Specifically:
-
-- **§19.1 (Error Context `!{}`):** The `!{}` inline handler syntax is retained as one of the four valid handling modes for `!` function results (§19.4.3, option 3). ~~The arm syntax `| ::ErrorTypeA e -> handlerA` is retained.~~ *(Historical — S451. That sentence read `e` as the error value. A parenthesis-free binder binds the variant's PAYLOAD: `| .V m :>` is `| .V(m) :>`, under §18.7's positional arity (§19.4.3); `->` is a deprecated arm separator (§18.2). Provenance: ruling:user-voice-scrml.md S451 "1a 2 yes 3 yes 4a" — item 2: *"Appendix B's contrary line is historical."*)*
-- **§19.2 (Error Propagation):** Replaced by explicit `?` operator (§19.5) and `!` function signatures (§19.4). Propagation is no longer "inferred by the compiler" -- it is explicit via `?`.
-- **§19.3 (Throwing Errors):** `throw` is replaced by `fail`. SPEC-ISSUE-011 is resolved by this document.
-- **§19.4 (Error Arm Syntax):** Retained within `!{}` inline handler and `match` expressions.
-
-## Appendix C: Future Considerations
-
-The following are explicitly out of scope for this version but noted for future work:
-
-1. **Error type composition** -- Combining multiple error types into a unified error type (e.g., `type AppError = PaymentError | AuthError | SqlError`). This requires union-of-enum support in the type system.
-2. **Error recovery / retry policies** -- Declarative retry logic on `<errorBoundary>` (e.g., `<errorBoundary retries=3 delay=1000>`).
-3. **Error logging / telemetry hooks** -- Automatic error reporting to external services when errors are caught by boundaries.
-4. **Async error streams** -- Error handling for long-lived connections (WebSocket, SSE) where errors arrive asynchronously.
-
-## Appendix D: JS Standard Library Access in Logic Contexts
-
-**Added:** 2026-04-08. Based on self-hosting gauntlet R1 friction — both teams independently relied on JS globals without spec coverage.
-
-> **Amendment S469 — Appendix D says what the language admits.** **Provenance:** ruling:user-voice-scrml.md S440
-> "dpa-055 R1 = Appendix D rewrite + (i) no ambient `Math`" — *"rewrite + i, next Q"* (*"rewrite SPEC Appendix D to
-> what the language actually admits … IN: typed arrays (`Float32Array`…, `Float16Array`), `ArrayBuffer`,
-> `DataView`, the value-ish constructors that already work; OUT: `BigInt` (S440 #4), `Proxy`/`Reflect` … D7 = (i):
-> honor §41.18 — no ambient `Math`"*), ruled S440 and not applied until now · ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: what MUST be spelled out" — *"yeah, I like that better"* and the S469
-> parse rulings (the host conversions `String`, `Number`, `parseInt`, `parseFloat` leave: text goes through a
-> template, parsing through `T.parse`, §14.13) · the conversions deep-dive §14 item 3. **supersedes:** the three
-> lists below as written 2026-04-08 (struck, not deleted). **Direction of change:** newly-rejecting for the OUT
-> names; inert for the rest (the ⚑ list keeps today's behaviour while it is decided). **Nominal / spec-ahead:**
-> impl#1 still admits every struck name (an impl#1 note, FORK RULE row 0).
-
-**What the language admits without import (S469):**
-
-- **IN (S440 dpa-055 R1):** the typed arrays `Float64Array`, `Float32Array`, `Float16Array`, `Int8Array`,
-  `Int16Array`, `Int32Array`, `Uint8Array`, `Uint16Array`, `Uint32Array`; `ArrayBuffer`; `DataView`.
-- **OUT:** `BigInt` (S440 #4), `Proxy`, `Reflect` (S440 dpa-055 R1); `Math` (no ambient `Math`: `scrml:math`,
-  §41.18); `String`, `Number`, `parseInt`, `parseFloat` (S469 conversions: a template is the
-  into-text tool, `T.parse` the parse, §14.13); `isNaN`, `isFinite` *(derived, not a conversion: number
-  predicates, OUT with ambient `Math` under S440 dpa-055 R1 D7 — `scrml:math.isNaN` remains, §41.18; an
-  `isFinite` there is not specified)*; `Array` (S469 *"I do not want JS style
-  arrays in scrml at all"* — the sequence is the tape, §66.12; derived, not separately ruled).
-- **The browser roots `window`, `document`, `navigator` (S471):** IN in a body the compiler places on the client
-  (§12) — an event handler, an `<onMount>` or `<effect>` body, a client function; OUT everywhere else — a
-  server-placed body and a `fn` body (E-FN-004, §48.3.4). For `window` and `document`, route analysis enforces it: a
-  function whose body reads one is client-only (§12.4), so a server function reaching it is E-ROUTE-002 and one body
-  needing both sides is E-ROUTE-005. `navigator` is not in §12.4's client-only list (it has a server referent under
-  Bun), so outside `fn` its OUT is **Nominal / not yet enforced**. Their members are untyped host values (typing is
-  dpa-075 F3, not ruled). *(S473: ruled; drafted as §21.3.3 — typed access is a `<host>` binding, and an untyped
-  use draws `W-HOST-UNTYPED-CALL`, rule 22.)*
-  > **Provenance:** ruling:user-voice-scrml.md S471 "your recs on F0 and F1" (dpa-075 F1 (e): *"Appendix D lists
-  > `window`/`document`/`navigator` (IN for client bodies, OUT elsewhere, aligned with E-ROUTE-005)"*) · **Direction of
-  > change:** clarifying — it names what §6.7.4 rule 5 and E-ROUTE-005 already treat as client-only.
-- ⚑ **OPEN (not yet decided in or out):** every other name of the struck lists (`Boolean`, `Date`, `Error`,
-  `Map`, `Object`, `Promise`, `RegExp`, `Set`, `Symbol`, `TypeError`, `RangeError`, `WeakMap`, `WeakSet`, `WeakRef`,
-  `JSON`, `console`, `Intl`, `encodeURI`, `decodeURI`, `encodeURIComponent`, `decodeURIComponent`, `structuredClone`,
-  `queueMicrotask`, `setTimeout`, `clearTimeout`, `setInterval`, `clearInterval`). R1's *"the value-ish
-  constructors that already work"* is IN by ruling; which of these it names is not enumerated in the ruling, so this
-  appendix does not guess.
-
-~~Inside `${}` logic blocks, the following JavaScript standard globals are available without import or `^{}` ceremony. These are provided by the Bun runtime and are part of the ECMAScript specification.~~ *(struck S469 — the lists below are the 2026-04-08 text.)*
-
-**Value types and constructors:**
-`Array`, `Boolean`, `Date`, `Error`, `Map`, `Number`, `Object`, `Promise`, `RegExp`, `Set`, `String`, `Symbol`, `TypeError`, `RangeError`, `WeakMap`, `WeakSet`, `WeakRef`, `BigInt`, `ArrayBuffer`, `DataView`, `Float32Array`, `Float64Array`, `Int8Array`, `Int16Array`, `Int32Array`, `Uint8Array`, `Uint16Array`, `Uint32Array`
-
-**Utility objects:**
-`JSON` (`.stringify()`, `.parse()`), `Math`, `console`, `Intl`, `Reflect`, `Proxy`
-
-**Global functions:**
-`parseInt`, `parseFloat`, `isNaN`, `isFinite`, `encodeURI`, `decodeURI`, `encodeURIComponent`, `decodeURIComponent`, `structuredClone`, `queueMicrotask`, `setTimeout`, `clearTimeout`, `setInterval`, `clearInterval`
-
-**Note:** `setTimeout`, `setInterval`, and `Promise` are available but their use inside `fn` bodies is prohibited by E-FN-005 (async/timing constraints). Use them in regular `function` bodies only.
-
-~~Instance methods on these types (`.map()`, `.filter()`, `.has()`, `.get()`, `.set()`, `.push()`, `.slice()`, `.trim()`, `.startsWith()`, etc.) are available on any value of the corresponding type.~~ *(struck S469: a value's methods are its type's, not the host's. A string's are D.1 below; a tape's are §66.12.6 (JavaScript's array method names are refused, `E-TAPE-JS-METHOD`); a map's are §59. Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — strings: code points everywhere, `.length` included"; ruling:user-voice-scrml.md S469 "⭐ RULED — tape methods are named after their grants". Direction of change: the struck sentence was the only text admitting the host methods wholesale; what it admitted beyond the typed tables is now refused, `E-STRING-METHOD-UNKNOWN` for a string, D.1 — S469 "more string methods admitted".)*
-
-### D.1 Strings — the typed method table (S469)
-
-> **Amendment S469 — a string counts code points, everywhere.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐
-> RULED — strings: code points everywhere, `.length` included" — *"Code points everywhere (Recommended)"* (*"A
-> string's `.length`, `slice`, `charAt`, index and iteration all count code points ("a😀".length → 2). It differs
-> from JS, and `.length` is O(n). Graphemes (combined emoji) are not addressed; a grapheme API may come later. Tape
-> `.length` is unaffected."*). **supersedes:** for strings, the sentence *"Instance methods on these types (`.map()`,
-> `.filter()`, `.has()`, `.get()`, `.set()`, `.push()`, `.slice()`, `.trim()`, `.startsWith()`, etc.) are available
-> on any value of the corresponding type"* (struck below), which handed every host string method through with
-> JavaScript's UTF-16 meaning; and §49.3.5's note *"`s.length` counts UTF-16 units"*, which the S469 string
-> iteration ruling had asked for and this ruling reverses. **Direction of change:** semantics-changed for every
-> string position and length (JavaScript counts UTF-16 units); newly-rejecting nothing by itself (see "Not in the
-> table"). The bootstrap implements it (`compiler/self-host-v2/analyze.scrml` `strMethodOp`, `methodSig`;
-> `compiler/self-host-v2/slice-m1/runtime/runtime.js` `strLength`, `strSlice`, `strCharAt`, `strIncludes`,
-> `strStartsWith`, `strEndsWith`, `strSplit`); impl#1 carries the divergence (§34.0) and still emits JavaScript's
-> UTF-16 methods.
-
-A `string` is a sequence of Unicode **code points**. Every position, length and match on a string counts code
-points: a surrogate pair is one position; a lone surrogate is a position of its own. A match (`includes`,
-`startsWith`, `endsWith`, a `split` separator) succeeds only where it starts and ends on a code-point boundary, so
-a lone-surrogate argument never matches half of a pair. Graphemes (a base character with combining marks, a
-multi-code-point emoji) are NOT a unit here: `"👍🏽".length` is `2`. A grapheme API may come later. A TAPE's
-`.length` counts its elements and is unaffected.
-
-| Member | Type | Meaning |
-|---|---|---|
-| `s.length` | `int` | the number of code points (`"a😀".length` → `2`). Computing it is O(n). |
-| `s[i]` | `string` | the code point at position `i`; out of range it traps (§66.12.8 rule 6). |
-| `for (c of s)` | `c: string` | each code point in order (§49.3.5). |
-| `s.charAt(i)` | `(i: int) -> string` | the code point at position `i`, or `""` when there is none (a negative `i` included). Never traps. *(PA derivation: the ruling makes a negative position out of range, and `charAt` keeps its non-trapping `""` answer for every out-of-range position; aligning it with `at` — `string \| not` — is the alternative, not taken because `""` is already a defined, non-absent "no character" here.)* |
-| `s.slice(from)`, `s.slice(from, to)` | `(from: int, to: int) -> string` (`to` optional) | the code points from position `from` up to (not including) `to`, or to the end. ~~A negative position counts from the end; positions are clamped to `0 … s.length` (JavaScript's argument rules, counted in code points).~~ *(struck S469 — no negative positions.)* A position greater than `s.length` is clamped to `s.length`, and `to < from` gives `""`. A NEGATIVE position is out of range: a negative literal (`s.slice(-1)`) is compile error **`E-POSITION-NEGATIVE`**; a negative computed position traps with `E-INDEX-OUT-OF-RANGE-RT` (§19.17). Count from the end explicitly: `s.slice(s.length - 1)`. |
-| `s.includes(t)` | `(t: string) -> bool` | `t` occurs in `s` on code-point boundaries. |
-| `s.startsWith(t)`, `s.endsWith(t)` | `(t: string) -> bool` | `s` begins / ends with `t`, on a code-point boundary. |
-| `s.split(sep)` | `(sep: string) -> string[]` | `""` splits into code points; any other separator splits only at code-point boundaries. The result is a new tape with no grants (§66.12.6 rule 2). |
-| `s.toUpperCase()`, `s.toLowerCase()` | `() -> string` | Unicode default case mapping (the result may differ in length). |
-| `s.trim()` | `() -> string` | `s` without leading and trailing white space (JavaScript's set). |
-| `s.trimStart()`, `s.trimEnd()` *(S469)* | `() -> string` | `s` without leading / trailing white space. |
-| `s.indexOf(t)`, `s.lastIndexOf(t)` *(S469)* | `(t: string) -> int \| not` | the code-point position of the first / last occurrence of `t` on code-point boundaries, or `not` when there is none — never `-1`. *(The host's optional start-position argument is not admitted: PA reading of "a typed signature"; slice first, then search.)* |
-| `s.replace(find, with)`, `s.replaceAll(find, with)` *(S469)* | `(find: string, with: string) -> string` | `s` with the first / every occurrence of `find` (on code-point boundaries) replaced by `with`. Both are plain strings: no regular expression (until regex has a ruled type), and `with` is literal text — the host's `$&` / `$1` replacement patterns do not apply *(derived: "plain strings only")*. `replaceAll` with `find` `""` inserts `with` between code points *(derived: JavaScript's behaviour, counted in code points)*. |
-| `s.padStart(width, fill)`, `s.padEnd(width, fill)` *(S469)* | `(width: int, fill: string) -> string` (`fill` optional, default `" "`) | `s` with `fill` repeated before / after it until it is `width` code points long, the last repeat cut on a code-point boundary; `s` unchanged when already that long. A negative `width` is out of range: a negative literal is `E-POSITION-NEGATIVE`, a computed one traps (`E-INDEX-OUT-OF-RANGE-RT`) *(derived: the no-negatives ruling applied to a width, as for `repeat`)*. String padding lives here; `scrml:format` pads ints only (§41.22). |
-| `s.repeat(n)` *(S469)* | `(n: int) -> string` | `s` written `n` times. A negative `n` is out of range: a negative literal is `E-POSITION-NEGATIVE`, a computed one traps (`E-INDEX-OUT-OF-RANGE-RT`) *(derived: the no-negatives ruling applied to a count)*. |
-
-~~**Not in the table.** Other host string methods (`indexOf`, `lastIndexOf`, `replace`, `replaceAll`, `padStart`,
-`padEnd`, `repeat`, `codePointAt`, `normalize`, `localeCompare`, `match`, `search`, `substring`, `at`, …) are
-not specified as scrml string methods. ⚑ **OPEN (not ruled):** which of them the language admits, and with what
-type; any that takes or returns a position SHALL count code points when it is specified. Until then impl#1 passes
-them to JavaScript (an impl#1 note, not language — FORK RULE row 0) and the bootstrap refuses them
-(`E-BOOTSTRAP-UNSUPPORTED`). Padding is `scrml:format`'s `pad` / `padEnd` (§41.22).~~ *(RULED S469 — below.)*
-
-**Not in the table: refused (S469).** The table is the whole string surface. A call of any other method on a
-`string` (`codePointAt`, `normalize`, `localeCompare`, `match`, `search`, `substring`, `at`, `concat`, …) SHALL
-be compile error **`E-STRING-METHOD-UNKNOWN`** (§34), naming the nearest admitted form where there is one. A
-method may be admitted later, and an admitted one may be deprecated later (§63). ⚑ **INTERIM (S474, FORK RULE row C):** the refusal stands until each method is admitted. It is neither a proven exploit nor a semantic impossibility, so it is not PERMANENT. The capable forms owed are typed, code-point-counted signatures, admitted by ruling: `normalize` over a unit enum of the Unicode forms, a locale-aware comparison returning an ordering (a method or a `scrml:format` function; not ruled), and `codePointAt(i) -> int | not`. `match` / `search` wait on a ruled regex type. `substring` / `at` / `concat` already have admitted forms (`slice`, `s[i]`, a template), which the message names (`g-string-methods-off-table-capable-form-owed-s474`; capability ledger IN-44; the regex dependency is IN-15). impl#1 still passes these to
-JavaScript (an impl#1 note, not language — FORK RULE row 0); ~~the bootstrap refuses them today under
-`E-BOOTSTRAP-UNSUPPORTED`, and does not yet build the S469 additions.~~ the bootstrap builds the S469 additions and
-refuses every other method as `E-STRING-METHOD-UNKNOWN` (`compiler/self-host-v2/analyze.scrml`; status update,
-s469-boot-ruled-backlog).
-
-> **Amendment S469 — more string methods admitted; the rest refused; no negative positions.** **Provenance:**
-> ruling:user-voice-scrml.md S469 "⭐ RULED — more string methods admitted" — *"indexOf / lastIndexOf, replace / replaceAll, padStart / padEnd / repeat, trimStart / trimEnd, I suppose including them all is safe enough. things can be depped later."* (*"Each gets a typed signature counted in code points. `indexOf`/`lastIndexOf` return `int | not` (no -1). `replace`/`replaceAll` take plain strings only (no regex until regex has a ruled type). Anything not admitted is refused."*) · ruling:user-voice-scrml.md S469 "⭐ RULED — no negative positions anywhere" — *"No negatives anywhere (Recommended)"* (*"A negative position is out of range for every string and tape position: `slice(-1)` is refused (a literal at compile time; a computed one traps at run time, the PA reading), `s[-1]` / `xs[-1]` trap, `at(-1)` is `not`. Count from the end explicitly: `s.slice(s.length - 1)`."*) **supersedes:** the struck OPEN paragraph and the struck `slice` negative-position
-> sentence. **Direction of change:** newly-accepting (the eight admitted methods); newly-rejecting (every other
-> string method; a negative `slice` / `repeat` literal); semantics-changed (a negative computed `slice` position now
-> traps). ~~**Nominal / spec-ahead:** neither compiler builds the additions; the bootstrap's `slice` still counts a
-> negative from the end and is owed the change.~~ **Status (s469-boot-ruled-backlog):** the bootstrap builds the
-> additions, emits `E-STRING-METHOD-UNKNOWN` and `E-POSITION-NEGATIVE`, and its `slice` no longer counts a negative
-> from the end. **Nominal on impl#1** (impl#1 carries it, §34.0).
-
-**Normative statements:**
-
-- A string's `.length` SHALL be its number of code points.
-- Every string position (`s[i]`, `charAt`, `slice`, `indexOf`, `lastIndexOf`) and every width (`padStart`,
-  `padEnd`) SHALL count code points, and a string iteration SHALL step by code point.
-- A negative position SHALL be out of range for every string and tape position (S469). An index read (`s[i]`,
-  `xs[i]`) with a negative index SHALL trap (`E-INDEX-OUT-OF-RANGE-RT`), literal or computed. `xs.at(i)` SHALL be
-  `not` and `s.charAt(i)` SHALL be `""` for a negative `i`, literal or computed. A negative LITERAL `slice` position
-  SHALL be compile error `E-POSITION-NEGATIVE` (as ruled); a negative computed one SHALL trap. *(Derived, not
-  separately ruled:)* a negative `repeat` count or `padStart` / `padEnd` width follows `slice` — a literal is
-  `E-POSITION-NEGATIVE`, a computed one traps; a tape method position follows §66.12.8 rule 7.
-- A string method not in the table SHALL be compile error `E-STRING-METHOD-UNKNOWN`.
-- A string match (`includes`, `startsWith`, `endsWith`, `split`, `indexOf`, `lastIndexOf`, `replace`, `replaceAll`) SHALL succeed only on code-point boundaries.
-- A tape's `.length` SHALL be its element count (unchanged).
-
----
-
-## Appendix E: `</>` Closer Migration Guide
-
-**Added:** 2026-04-09. Records the migration from bare `/` and trailing `content/` closer forms to `</>`.
-
-### Background
-
-Prior to S80, scrml supported three closer forms:
-1. Trailing-slash: `<tag>content/`
-2. Explicit: `</tagname>`
-3. Bare-slash (inferred): `/` on its own line or trailing content
-
-After debate (score 55/60 vs 24/60), the trailing-slash and bare-slash forms were unified into the `</>` inferred closer token. The bare `/` no longer has syntactic significance as a block delimiter.
-
-### Migration Rules
-
-| Old form | New form | Notes |
-|---|---|---|
-| `<tag>content/` | `<tag>content</>` | Trailing slash becomes `</>` |
-| `/` (bare, own line) | `</>` | Bare slash becomes `</>` |
-| `</tagname>` | `</tagname>` | No change |
-| `/>` | `/>` | No change — self-closing, not a closer |
-
-### What Does NOT Change
-
-- `/` inside `${ }`, `?{ }`, `#{ }`, `^{ }`, `~{ }` contexts — these are division operators, regex delimiters, or URL path components, not block closers
-- `//` comments — unchanged
-- `/>` self-closing void-element syntax — unchanged
-- `</tagname>` explicit closers — unchanged
-
-### Normative Basis
-
-The `</>` form is specified in §4.4.2. The removal of bare `/` as a closer is authoritative as of this amendment. Any source file using bare `/` or trailing content`/` closers SHALL be rejected by the compiler with a diagnostic pointing to §4.4. The diagnostic SHALL include a hint: "Did you mean `</>`?"
-
-The retired closer is the retired-forms ledger's row `closer-trailing-slash` (§63, "The retired-forms ledger (S482)"). The retired-forms gate reports zero hits of it in what it reads (§63: the `scrml` and untagged fences of the SPEC and the public markdown, and the corpus `.scrml` files; this Appendix is a migration region, not read) and fails on a new one (S482: the last sample and untagged-fence sites were migrated by `s482-retired-lint`).
-
 ### 19.15 The `<render of=X/>` Render-Expression (held-variant display)
 
 **Added 2026-06-15 (S196); RATIFIED S195** (held-error-display deep-dive + adversarial debate; design-insight "Held-error display — render-expression primitive (a/c)"). The render-expression closes the held-error-DISPLAY gap: a variant's `renders` clause (§19.2) fires automatically only when an `<errorBoundary>` catches a LIVE `!`-call (§19.6.3), but the canonical errors-as-states lift routes the failure into a HELD state cell (`@phase = .Failed(err)`), where no `renders` clause could fire. `<render of=X/>` fires a HELD value's per-variant `renders` markup from any markup position.
@@ -25435,6 +25219,222 @@ S440, are earlier runtime errors at a value boundary. They keep their own sectio
 - *(S473, DRAFT.)* In a `kind="service"` program (§68) the unit of execution is the **turn**: a trap ends its turn
   only, is reported to stderr with its code and location, and the program carries on with its next event, unless
   the program declares `on-trap="stop"` (then it stops with exit code 70). §68.6 is the full rule.
+
+---
+
+## Appendix A: Interaction Matrix
+
+| Feature | Error System Interaction |
+|---------|------------------------|
+| `fail` keyword | Produces error variant value; requires `!` function |
+| `?` operator | Propagates error to caller; requires `!` function |
+| `!` signature | Declares function as failable; error type in signature |
+| `renders` clause | Optional markup on enum variants; auto-displays in boundary |
+| `<errorBoundary>` | Catches errors in markup; uses `renders` or `fallback` |
+| `match` (§18) | Exhaustive over success + error variants in logic context |
+| `?{}` SQL (§8) | A failable expression everywhere (S451 R11): propagates `SqlError` implicitly in `!` functions (§19.8.2); handled at the site with `!{}` / `match` outside them, else E-ERROR-002 (§19.8.3). No row is not a failure (`.get()` → `not`, `.all()` → `[]`). *(Supersedes: "Produces `SqlError` in `!` functions; `not`/empty outside".)* |
+| `@reactive` (§6) | Reactive variables can hold error variants; trigger updates |
+| `~{}` tests | `assert.fails` / `assert.fails.with` for failable functions |
+| `server` functions (§12) | CPS preserves `!`; errors serialize as tagged JSON. A client call of a server function is failable whether or not it is declared `!` (transport / non-2xx / decode), handled like any `!` call, else E-ERROR-002 (§19.9.10, S451) |
+| `transaction` | Auto-rollback on `fail`; syntactic sugar over BEGIN/COMMIT/ROLLBACK |
+| `pure` (§33) | `pure` and `!` coexist; pure functions can fail without side effects |
+| `lin` (§35) | `lin` variables inside `!` functions follow normal linear rules; `fail` is a scope exit that must consume `lin` variables |
+| `<state>` types (§11 → §6, §52) | `<errorBoundary>` is a pre-defined state type |
+
+## Appendix B: Superseded Spec Text
+
+This section replaces the entirety of §19 (Error Handling) as it existed in the 0.5.0-draft spec. Specifically:
+
+- **§19.1 (Error Context `!{}`):** The `!{}` inline handler syntax is retained as one of the four valid handling modes for `!` function results (§19.4.3, option 3). ~~The arm syntax `| ::ErrorTypeA e -> handlerA` is retained.~~ *(Historical — S451. That sentence read `e` as the error value. A parenthesis-free binder binds the variant's PAYLOAD: `| .V m :>` is `| .V(m) :>`, under §18.7's positional arity (§19.4.3); `->` is a deprecated arm separator (§18.2). Provenance: ruling:user-voice-scrml.md S451 "1a 2 yes 3 yes 4a" — item 2: *"Appendix B's contrary line is historical."*)*
+- **§19.2 (Error Propagation):** Replaced by explicit `?` operator (§19.5) and `!` function signatures (§19.4). Propagation is no longer "inferred by the compiler" -- it is explicit via `?`.
+- **§19.3 (Throwing Errors):** `throw` is replaced by `fail`. SPEC-ISSUE-011 is resolved by this document.
+- **§19.4 (Error Arm Syntax):** Retained within `!{}` inline handler and `match` expressions.
+
+## Appendix C: Future Considerations
+
+The following are explicitly out of scope for this version but noted for future work:
+
+1. **Error type composition** -- Combining multiple error types into a unified error type (e.g., `type AppError = PaymentError | AuthError | SqlError`). This requires union-of-enum support in the type system.
+2. **Error recovery / retry policies** -- Declarative retry logic on `<errorBoundary>` (e.g., `<errorBoundary retries=3 delay=1000>`).
+3. **Error logging / telemetry hooks** -- Automatic error reporting to external services when errors are caught by boundaries.
+4. **Async error streams** -- Error handling for long-lived connections (WebSocket, SSE) where errors arrive asynchronously.
+
+## Appendix D: JS Standard Library Access in Logic Contexts
+
+**Added:** 2026-04-08. Based on self-hosting gauntlet R1 friction — both teams independently relied on JS globals without spec coverage.
+
+> **Amendment S469 — Appendix D says what the language admits.** **Provenance:** ruling:user-voice-scrml.md S440
+> "dpa-055 R1 = Appendix D rewrite + (i) no ambient `Math`" — *"rewrite + i, next Q"* (*"rewrite SPEC Appendix D to
+> what the language actually admits … IN: typed arrays (`Float32Array`…, `Float16Array`), `ArrayBuffer`,
+> `DataView`, the value-ish constructors that already work; OUT: `BigInt` (S440 #4), `Proxy`/`Reflect` … D7 = (i):
+> honor §41.18 — no ambient `Math`"*), ruled S440 and not applied until now · ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: what MUST be spelled out" — *"yeah, I like that better"* and the S469
+> parse rulings (the host conversions `String`, `Number`, `parseInt`, `parseFloat` leave: text goes through a
+> template, parsing through `T.parse`, §14.13) · the conversions deep-dive §14 item 3. **supersedes:** the three
+> lists below as written 2026-04-08 (struck, not deleted). **Direction of change:** newly-rejecting for the OUT
+> names; inert for the rest (the ⚑ list keeps today's behaviour while it is decided). **Nominal / spec-ahead:**
+> impl#1 still admits every struck name (an impl#1 note, FORK RULE row 0).
+
+**What the language admits without import (S469):**
+
+- **IN (S440 dpa-055 R1):** the typed arrays `Float64Array`, `Float32Array`, `Float16Array`, `Int8Array`,
+  `Int16Array`, `Int32Array`, `Uint8Array`, `Uint16Array`, `Uint32Array`; `ArrayBuffer`; `DataView`.
+- **OUT:** `BigInt` (S440 #4), `Proxy`, `Reflect` (S440 dpa-055 R1); `Math` (no ambient `Math`: `scrml:math`,
+  §41.18); `String`, `Number`, `parseInt`, `parseFloat` (S469 conversions: a template is the
+  into-text tool, `T.parse` the parse, §14.13); `isNaN`, `isFinite` *(derived, not a conversion: number
+  predicates, OUT with ambient `Math` under S440 dpa-055 R1 D7 — `scrml:math.isNaN` remains, §41.18; an
+  `isFinite` there is not specified)*; `Array` (S469 *"I do not want JS style
+  arrays in scrml at all"* — the sequence is the tape, §66.12; derived, not separately ruled).
+- **The browser roots `window`, `document`, `navigator` (S471):** IN in a body the compiler places on the client
+  (§12) — an event handler, an `<onMount>` or `<effect>` body, a client function; OUT everywhere else — a
+  server-placed body and a `fn` body (E-FN-004, §48.3.4). For `window` and `document`, route analysis enforces it: a
+  function whose body reads one is client-only (§12.4), so a server function reaching it is E-ROUTE-002 and one body
+  needing both sides is E-ROUTE-005. `navigator` is not in §12.4's client-only list (it has a server referent under
+  Bun), so outside `fn` its OUT is **Nominal / not yet enforced**. Their members are untyped host values (typing is
+  dpa-075 F3, not ruled). *(S473: ruled; drafted as §21.3.3 — typed access is a `<host>` binding, and an untyped
+  use draws `W-HOST-UNTYPED-CALL`, rule 22.)*
+  > **Provenance:** ruling:user-voice-scrml.md S471 "your recs on F0 and F1" (dpa-075 F1 (e): *"Appendix D lists
+  > `window`/`document`/`navigator` (IN for client bodies, OUT elsewhere, aligned with E-ROUTE-005)"*) · **Direction of
+  > change:** clarifying — it names what §6.7.4 rule 5 and E-ROUTE-005 already treat as client-only.
+- ⚑ **OPEN (not yet decided in or out):** every other name of the struck lists (`Boolean`, `Date`, `Error`,
+  `Map`, `Object`, `Promise`, `RegExp`, `Set`, `Symbol`, `TypeError`, `RangeError`, `WeakMap`, `WeakSet`, `WeakRef`,
+  `JSON`, `console`, `Intl`, `encodeURI`, `decodeURI`, `encodeURIComponent`, `decodeURIComponent`, `structuredClone`,
+  `queueMicrotask`, `setTimeout`, `clearTimeout`, `setInterval`, `clearInterval`). R1's *"the value-ish
+  constructors that already work"* is IN by ruling; which of these it names is not enumerated in the ruling, so this
+  appendix does not guess.
+
+~~Inside `${}` logic blocks, the following JavaScript standard globals are available without import or `^{}` ceremony. These are provided by the Bun runtime and are part of the ECMAScript specification.~~ *(struck S469 — the lists below are the 2026-04-08 text.)*
+
+**Value types and constructors:**
+`Array`, `Boolean`, `Date`, `Error`, `Map`, `Number`, `Object`, `Promise`, `RegExp`, `Set`, `String`, `Symbol`, `TypeError`, `RangeError`, `WeakMap`, `WeakSet`, `WeakRef`, `BigInt`, `ArrayBuffer`, `DataView`, `Float32Array`, `Float64Array`, `Int8Array`, `Int16Array`, `Int32Array`, `Uint8Array`, `Uint16Array`, `Uint32Array`
+
+**Utility objects:**
+`JSON` (`.stringify()`, `.parse()`), `Math`, `console`, `Intl`, `Reflect`, `Proxy`
+
+**Global functions:**
+`parseInt`, `parseFloat`, `isNaN`, `isFinite`, `encodeURI`, `decodeURI`, `encodeURIComponent`, `decodeURIComponent`, `structuredClone`, `queueMicrotask`, `setTimeout`, `clearTimeout`, `setInterval`, `clearInterval`
+
+**Note:** `setTimeout`, `setInterval`, and `Promise` are available but their use inside `fn` bodies is prohibited by E-FN-005 (async/timing constraints). Use them in regular `function` bodies only.
+
+~~Instance methods on these types (`.map()`, `.filter()`, `.has()`, `.get()`, `.set()`, `.push()`, `.slice()`, `.trim()`, `.startsWith()`, etc.) are available on any value of the corresponding type.~~ *(struck S469: a value's methods are its type's, not the host's. A string's are D.1 below; a tape's are §66.12.6 (JavaScript's array method names are refused, `E-TAPE-JS-METHOD`); a map's are §59. Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — strings: code points everywhere, `.length` included"; ruling:user-voice-scrml.md S469 "⭐ RULED — tape methods are named after their grants". Direction of change: the struck sentence was the only text admitting the host methods wholesale; what it admitted beyond the typed tables is now refused, `E-STRING-METHOD-UNKNOWN` for a string, D.1 — S469 "more string methods admitted".)*
+
+### D.1 Strings — the typed method table (S469)
+
+> **Amendment S469 — a string counts code points, everywhere.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐
+> RULED — strings: code points everywhere, `.length` included" — *"Code points everywhere (Recommended)"* (*"A
+> string's `.length`, `slice`, `charAt`, index and iteration all count code points ("a😀".length → 2). It differs
+> from JS, and `.length` is O(n). Graphemes (combined emoji) are not addressed; a grapheme API may come later. Tape
+> `.length` is unaffected."*). **supersedes:** for strings, the sentence *"Instance methods on these types (`.map()`,
+> `.filter()`, `.has()`, `.get()`, `.set()`, `.push()`, `.slice()`, `.trim()`, `.startsWith()`, etc.) are available
+> on any value of the corresponding type"* (struck below), which handed every host string method through with
+> JavaScript's UTF-16 meaning; and §49.3.5's note *"`s.length` counts UTF-16 units"*, which the S469 string
+> iteration ruling had asked for and this ruling reverses. **Direction of change:** semantics-changed for every
+> string position and length (JavaScript counts UTF-16 units); newly-rejecting nothing by itself (see "Not in the
+> table"). The bootstrap implements it (`compiler/self-host-v2/analyze.scrml` `strMethodOp`, `methodSig`;
+> `compiler/self-host-v2/slice-m1/runtime/runtime.js` `strLength`, `strSlice`, `strCharAt`, `strIncludes`,
+> `strStartsWith`, `strEndsWith`, `strSplit`); impl#1 carries the divergence (§34.0) and still emits JavaScript's
+> UTF-16 methods.
+
+A `string` is a sequence of Unicode **code points**. Every position, length and match on a string counts code
+points: a surrogate pair is one position; a lone surrogate is a position of its own. A match (`includes`,
+`startsWith`, `endsWith`, a `split` separator) succeeds only where it starts and ends on a code-point boundary, so
+a lone-surrogate argument never matches half of a pair. Graphemes (a base character with combining marks, a
+multi-code-point emoji) are NOT a unit here: `"👍🏽".length` is `2`. A grapheme API may come later. A TAPE's
+`.length` counts its elements and is unaffected.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `s.length` | `int` | the number of code points (`"a😀".length` → `2`). Computing it is O(n). |
+| `s[i]` | `string` | the code point at position `i`; out of range it traps (§66.12.8 rule 6). |
+| `for (c of s)` | `c: string` | each code point in order (§49.3.5). |
+| `s.charAt(i)` | `(i: int) -> string` | the code point at position `i`, or `""` when there is none (a negative `i` included). Never traps. *(PA derivation: the ruling makes a negative position out of range, and `charAt` keeps its non-trapping `""` answer for every out-of-range position; aligning it with `at` — `string \| not` — is the alternative, not taken because `""` is already a defined, non-absent "no character" here.)* |
+| `s.slice(from)`, `s.slice(from, to)` | `(from: int, to: int) -> string` (`to` optional) | the code points from position `from` up to (not including) `to`, or to the end. ~~A negative position counts from the end; positions are clamped to `0 … s.length` (JavaScript's argument rules, counted in code points).~~ *(struck S469 — no negative positions.)* A position greater than `s.length` is clamped to `s.length`, and `to < from` gives `""`. A NEGATIVE position is out of range: a negative literal (`s.slice(-1)`) is compile error **`E-POSITION-NEGATIVE`**; a negative computed position traps with `E-INDEX-OUT-OF-RANGE-RT` (§19.17). Count from the end explicitly: `s.slice(s.length - 1)`. |
+| `s.includes(t)` | `(t: string) -> bool` | `t` occurs in `s` on code-point boundaries. |
+| `s.startsWith(t)`, `s.endsWith(t)` | `(t: string) -> bool` | `s` begins / ends with `t`, on a code-point boundary. |
+| `s.split(sep)` | `(sep: string) -> string[]` | `""` splits into code points; any other separator splits only at code-point boundaries. The result is a new tape with no grants (§66.12.6 rule 2). |
+| `s.toUpperCase()`, `s.toLowerCase()` | `() -> string` | Unicode default case mapping (the result may differ in length). |
+| `s.trim()` | `() -> string` | `s` without leading and trailing white space (JavaScript's set). |
+| `s.trimStart()`, `s.trimEnd()` *(S469)* | `() -> string` | `s` without leading / trailing white space. |
+| `s.indexOf(t)`, `s.lastIndexOf(t)` *(S469)* | `(t: string) -> int \| not` | the code-point position of the first / last occurrence of `t` on code-point boundaries, or `not` when there is none — never `-1`. *(The host's optional start-position argument is not admitted: PA reading of "a typed signature"; slice first, then search.)* |
+| `s.replace(find, with)`, `s.replaceAll(find, with)` *(S469)* | `(find: string, with: string) -> string` | `s` with the first / every occurrence of `find` (on code-point boundaries) replaced by `with`. Both are plain strings: no regular expression (until regex has a ruled type), and `with` is literal text — the host's `$&` / `$1` replacement patterns do not apply *(derived: "plain strings only")*. `replaceAll` with `find` `""` inserts `with` between code points *(derived: JavaScript's behaviour, counted in code points)*. |
+| `s.padStart(width, fill)`, `s.padEnd(width, fill)` *(S469)* | `(width: int, fill: string) -> string` (`fill` optional, default `" "`) | `s` with `fill` repeated before / after it until it is `width` code points long, the last repeat cut on a code-point boundary; `s` unchanged when already that long. A negative `width` is out of range: a negative literal is `E-POSITION-NEGATIVE`, a computed one traps (`E-INDEX-OUT-OF-RANGE-RT`) *(derived: the no-negatives ruling applied to a width, as for `repeat`)*. String padding lives here; `scrml:format` pads ints only (§41.22). |
+| `s.repeat(n)` *(S469)* | `(n: int) -> string` | `s` written `n` times. A negative `n` is out of range: a negative literal is `E-POSITION-NEGATIVE`, a computed one traps (`E-INDEX-OUT-OF-RANGE-RT`) *(derived: the no-negatives ruling applied to a count)*. |
+
+~~**Not in the table.** Other host string methods (`indexOf`, `lastIndexOf`, `replace`, `replaceAll`, `padStart`,
+`padEnd`, `repeat`, `codePointAt`, `normalize`, `localeCompare`, `match`, `search`, `substring`, `at`, …) are
+not specified as scrml string methods. ⚑ **OPEN (not ruled):** which of them the language admits, and with what
+type; any that takes or returns a position SHALL count code points when it is specified. Until then impl#1 passes
+them to JavaScript (an impl#1 note, not language — FORK RULE row 0) and the bootstrap refuses them
+(`E-BOOTSTRAP-UNSUPPORTED`). Padding is `scrml:format`'s `pad` / `padEnd` (§41.22).~~ *(RULED S469 — below.)*
+
+**Not in the table: refused (S469).** The table is the whole string surface. A call of any other method on a
+`string` (`codePointAt`, `normalize`, `localeCompare`, `match`, `search`, `substring`, `at`, `concat`, …) SHALL
+be compile error **`E-STRING-METHOD-UNKNOWN`** (§34), naming the nearest admitted form where there is one. A
+method may be admitted later, and an admitted one may be deprecated later (§63). ⚑ **INTERIM (S474, FORK RULE row C):** the refusal stands until each method is admitted. It is neither a proven exploit nor a semantic impossibility, so it is not PERMANENT. The capable forms owed are typed, code-point-counted signatures, admitted by ruling: `normalize` over a unit enum of the Unicode forms, a locale-aware comparison returning an ordering (a method or a `scrml:format` function; not ruled), and `codePointAt(i) -> int | not`. `match` / `search` wait on a ruled regex type. `substring` / `at` / `concat` already have admitted forms (`slice`, `s[i]`, a template), which the message names (`g-string-methods-off-table-capable-form-owed-s474`; capability ledger IN-44; the regex dependency is IN-15). impl#1 still passes these to
+JavaScript (an impl#1 note, not language — FORK RULE row 0); ~~the bootstrap refuses them today under
+`E-BOOTSTRAP-UNSUPPORTED`, and does not yet build the S469 additions.~~ the bootstrap builds the S469 additions and
+refuses every other method as `E-STRING-METHOD-UNKNOWN` (`compiler/self-host-v2/analyze.scrml`; status update,
+s469-boot-ruled-backlog).
+
+> **Amendment S469 — more string methods admitted; the rest refused; no negative positions.** **Provenance:**
+> ruling:user-voice-scrml.md S469 "⭐ RULED — more string methods admitted" — *"indexOf / lastIndexOf, replace / replaceAll, padStart / padEnd / repeat, trimStart / trimEnd, I suppose including them all is safe enough. things can be depped later."* (*"Each gets a typed signature counted in code points. `indexOf`/`lastIndexOf` return `int | not` (no -1). `replace`/`replaceAll` take plain strings only (no regex until regex has a ruled type). Anything not admitted is refused."*) · ruling:user-voice-scrml.md S469 "⭐ RULED — no negative positions anywhere" — *"No negatives anywhere (Recommended)"* (*"A negative position is out of range for every string and tape position: `slice(-1)` is refused (a literal at compile time; a computed one traps at run time, the PA reading), `s[-1]` / `xs[-1]` trap, `at(-1)` is `not`. Count from the end explicitly: `s.slice(s.length - 1)`."*) **supersedes:** the struck OPEN paragraph and the struck `slice` negative-position
+> sentence. **Direction of change:** newly-accepting (the eight admitted methods); newly-rejecting (every other
+> string method; a negative `slice` / `repeat` literal); semantics-changed (a negative computed `slice` position now
+> traps). ~~**Nominal / spec-ahead:** neither compiler builds the additions; the bootstrap's `slice` still counts a
+> negative from the end and is owed the change.~~ **Status (s469-boot-ruled-backlog):** the bootstrap builds the
+> additions, emits `E-STRING-METHOD-UNKNOWN` and `E-POSITION-NEGATIVE`, and its `slice` no longer counts a negative
+> from the end. **Nominal on impl#1** (impl#1 carries it, §34.0).
+
+**Normative statements:**
+
+- A string's `.length` SHALL be its number of code points.
+- Every string position (`s[i]`, `charAt`, `slice`, `indexOf`, `lastIndexOf`) and every width (`padStart`,
+  `padEnd`) SHALL count code points, and a string iteration SHALL step by code point.
+- A negative position SHALL be out of range for every string and tape position (S469). An index read (`s[i]`,
+  `xs[i]`) with a negative index SHALL trap (`E-INDEX-OUT-OF-RANGE-RT`), literal or computed. `xs.at(i)` SHALL be
+  `not` and `s.charAt(i)` SHALL be `""` for a negative `i`, literal or computed. A negative LITERAL `slice` position
+  SHALL be compile error `E-POSITION-NEGATIVE` (as ruled); a negative computed one SHALL trap. *(Derived, not
+  separately ruled:)* a negative `repeat` count or `padStart` / `padEnd` width follows `slice` — a literal is
+  `E-POSITION-NEGATIVE`, a computed one traps; a tape method position follows §66.12.8 rule 7.
+- A string method not in the table SHALL be compile error `E-STRING-METHOD-UNKNOWN`.
+- A string match (`includes`, `startsWith`, `endsWith`, `split`, `indexOf`, `lastIndexOf`, `replace`, `replaceAll`) SHALL succeed only on code-point boundaries.
+- A tape's `.length` SHALL be its element count (unchanged).
+
+---
+
+## Appendix E: `</>` Closer Migration Guide
+
+**Added:** 2026-04-09. Records the migration from bare `/` and trailing `content/` closer forms to `</>`.
+
+### Background
+
+Prior to S80, scrml supported three closer forms:
+1. Trailing-slash: `<tag>content/`
+2. Explicit: `</tagname>`
+3. Bare-slash (inferred): `/` on its own line or trailing content
+
+After debate (score 55/60 vs 24/60), the trailing-slash and bare-slash forms were unified into the `</>` inferred closer token. The bare `/` no longer has syntactic significance as a block delimiter.
+
+### Migration Rules
+
+| Old form | New form | Notes |
+|---|---|---|
+| `<tag>content/` | `<tag>content</>` | Trailing slash becomes `</>` |
+| `/` (bare, own line) | `</>` | Bare slash becomes `</>` |
+| `</tagname>` | `</tagname>` | No change |
+| `/>` | `/>` | No change — self-closing, not a closer |
+
+### What Does NOT Change
+
+- `/` inside `${ }`, `?{ }`, `#{ }`, `^{ }`, `~{ }` contexts — these are division operators, regex delimiters, or URL path components, not block closers
+- `//` comments — unchanged
+- `/>` self-closing void-element syntax — unchanged
+- `</tagname>` explicit closers — unchanged
+
+### Normative Basis
+
+The `</>` form is specified in §4.4.2. The removal of bare `/` as a closer is authoritative as of this amendment. Any source file using bare `/` or trailing content`/` closers SHALL be rejected by the compiler with a diagnostic pointing to §4.4. The diagnostic SHALL include a hint: "Did you mean `</>`?"
+
+The retired closer is the retired-forms ledger's row `closer-trailing-slash` (§63, "The retired-forms ledger (S482)"). The retired-forms gate reports zero hits of it in what it reads (§63: the `scrml` and untagged fences of the SPEC and the public markdown, and the corpus `.scrml` files; this Appendix is a migration region, not read) and fails on a new one (S482: the last sample and untagged-fence sites were migrated by `s482-retired-lint`).
 
 ---
 
@@ -47346,9 +47346,9 @@ The canonical decision rule for when to use an inline predicate vs a `<machine>`
 | `number(>0 && <10000)` | Stateless | Inline predicate |
 | `string(.length > 7 && .length < 255)` | Stateless | Inline predicate |
 | `string(email)` | Stateless | Inline predicate (named shape) |
-| `start < end` on a struct | Contextual (needs sibling) | `<machine for Struct>` |
-| `.Pending => .Processing` | Contextual (needs prior state) | `<machine>` |
-| `number(>=0 && <=@maxMana)` | Contextual (references reactive var) | `<machine>` |
+| `start < end` on a struct | Contextual (needs sibling) | ~~`<machine for Struct>`~~ ⚑ INTERIM (S482, #2101 r2): `<machine>` is removed; the mechanism is an OPEN OWNER QUESTION (gap `g-spec-contract-003-machine-advice-s482`) |
+| `.Pending => .Processing` | Contextual (needs prior state) | ~~`<machine>`~~ ⚑ INTERIM (S482, #2101 r2): `<machine>` is removed; the mechanism is an OPEN OWNER QUESTION (gap `g-spec-contract-003-machine-advice-s482`) |
+| `number(>=0 && <=@maxMana)` | Contextual (references reactive var) | ~~`<machine>`~~ ⚑ INTERIM (S482, #2101 r2): `<machine>` is removed; the mechanism is an OPEN OWNER QUESTION (gap `g-spec-contract-003-machine-advice-s482`) |
 
 The boundary case `number(>=0 && <=@maxMana)` SHALL be rejected with `E-CONTRACT-003` if
 written as an inline predicate, because `@maxMana` is an external reactive reference. ~~The
@@ -52018,34 +52018,52 @@ HARD form, migrate every SPEC example and every positive example in the corpus (
 positives, samples, examples, stdlib, the public docs) to the new form, or record each remaining site as dated
 `pending` debt; for a SOFT form, record the starting count per file. The retired-forms gate
 (`scripts/retired-forms-lint.ts`, CI `checks` and the pre-commit hook) enforces it. **What the gate checks —
-exactly this (S482, #2101 r1):**
+exactly this (S482, #2101 r1, r2):**
 - *What it reads:* every ledger row with a detector, over (a) the `.scrml` files under `conformance/cases`,
   `compiler/self-host-v2/acceptance`, `samples`, `examples`, `stdlib`, `docs/tutorial-snippets`,
-  `docs/readme-snippets`, `docs/website`; (b) in this SPEC, `NERDME.md`, `DESIGN.md`, `docs/**/*.md` and every
-  `README.md` — except the excluded paths the gate lists with a reason (change notes, the changelog, generated
-  files, hand-offs, dated audits, archived drafts, test fixtures, impl#1 internals, other frameworks'
-  benchmarks) — every fence tagged `scrml` and every UNTAGGED fence. Source is read once, in source order, by a
-  port of the bootstrap's readers: comments, strings, regular-expression literals, raw bodies (`<pre>`,
-  `<code>`, `<script>`, `<style>`, §4.17), `_{ }` / `?{ }` / `#{ }` bodies, and the free text of a closed HTML
-  element are never matched; a detector matches across line breaks and every match is one hit. The
-  trailing-`/` closer uses the bootstrap's candidate and hit rule; the legacy cell read `<x>` its operand-slot rule.
-- *What it allows:* a conformance / acceptance case whose expected codes name the row's code (for a row whose
-  code is generic — `E-SCOPE-001`, `E-PARSE-FN`, `E-PARSE-TYPE`, `E-GRANT-UNKNOWN` — only when the case id also
-  matches the row's `caseIdPattern`); a fence with `<!-- retired-neg: <row-id> — <reason> -->` on the line(s)
-  directly above it; a fence in a migration region of this SPEC (a heading `Appendix E…`, `63…` or `66.21…`, with
-  every deeper heading, to the next heading of its level or higher); a `retired-ok: <row-id> — <reason>` inside a
-  comment on the hit's line or the line before. A code named in prose or in a comment allows nothing.
+  `docs/readme-snippets`, `docs/website`; (b) in every `.md` file of the repository — except the paths the gate
+  lists with a reason (change and progress notes, the changelog, generated files, hand-offs, PA working notes
+  and task lists, dated audits, scoping notes and disposition records, archived drafts, test fixtures, an
+  untracked local playground, impl#1 internals and stage contracts, other frameworks' benchmarks, dependencies) and the directories it skips at any depth (`node_modules`, `dist`, dot-directories)
+  — every fence whose info string is empty or starts with `scrml` (`scrml`, `scrml{.example}`,
+  `scrml,ignore`), including a fence inside a blockquote (its `>` markers are stripped). Source is read once,
+  in source order, by a port of the bootstrap's readers: comments, strings, regular-expression literals, raw
+  bodies (`<pre>`, `<code>`, `<script>`, `<style>`, §4.17; an unclosed one runs only to the next closing tag),
+  `_{ }` / `?{ }` / `#{ }` bodies (a brace inside a string of the body is not counted), and the free text of a
+  closed HTML element are never matched; a detector matches across line breaks and every match is one hit.
+  The trailing-`/` closer uses the bootstrap's candidate and hit rule; the legacy cell read `<x>` its
+  operand-slot rule.
+- *What it allows:* a hit in a conformance / acceptance case's own file (its `case.scrml`, or a file the case
+  names) whose expected codes name the row's code — one hit per expected occurrence of that code (its
+  `codeCounts` entry, else 1; rows that share a code share the count), and for a row whose code is generic
+  (`E-SCOPE-001`, `E-PARSE-FN`, `E-PARSE-TYPE`, `E-GRANT-UNKNOWN`) only when the case id also matches the row's
+  `caseIdPattern`; a fence with `<!-- retired-neg: <row-id> — <reason> -->` on the line(s) directly above it; a
+  fence in a migration region of this SPEC — the ledger's `migrationRegions`: a region opens only at a heading
+  line exactly equal to one listed there (Appendix E, §63, §66.21; each must stand exactly once) and holds only
+  its own sub-headings (Appendix E's unnumbered ones, `63.x`, `66.21.x`), closing at any other heading; a
+  `retired-ok: <row-id> — <reason>` inside a comment on the hit's line or the line before. A code named in prose
+  or in a comment allows nothing.
 - *What fails:* any (row, file) count that differs from the baseline (`scripts/retired-forms-baseline.json`):
   a HARD hit outside the dated `pending` debt, a count above the baseline, and a count below it until the
-  baseline is lowered in the same change (`--update`). Against the base revision (`--base-ref`; CI: the PR's
-  base, the hook: the merge-base with `origin/main`): a baseline count above the base's, a key the base lacks
-  (except a new SOFT row's starting count), debt for a new HARD row, and a ledger row removed, downgraded
-  HARD → SOFT, or given a null detector.
+  baseline is lowered in the same change (`--update`); a migration-region heading that is missing or repeated.
+  Against the base revision (`--base-ref`; CI: the PR's base, the hook: the merge-base with `origin/main`; a
+  revision that does not resolve exits 2): a baseline count above the base's, a key the base lacks (except a new
+  SOFT row's starting count), debt for a new HARD row, a ledger row removed, downgraded HARD → SOFT, or given a
+  null detector; and the BASE ledger's own rules — each base row's detector, codes and `caseIdPattern`, and the
+  base's migration regions — run over the changed tree, finding a (row, file) count above the base baseline. So
+  a change cannot widen what a row allows (a code added, a widened `caseIdPattern`, a narrowed or never-matching
+  detector, a new region) to let a new hit through.
 - *Known limits:* counts are per (row, file), so swapping one hit for another of the same row in the same file
-  passes; a detector's pattern can be narrowed in a reviewed ledger diff; fences tagged as another language and
-  markdown prose are not read; text cannot tell a tape from a host array (`tape-js-method`) or a cell from an
-  element (`render-by-tag`, which the bootstrap enforces); rows marked `enforcedBy: "lint-only"` have no compiler
-  refusal, and `state-type-fn-overload` (§17.5) has neither a code nor a detector; the closer rule's path-word
+  passes; within a negative case's count, which hit is allowed is not tied to the line its diagnostic points
+  at; the readers and the builtin detectors are the changed tree's own script, so narrowing them is a reviewed
+  code diff, not a ledger diff the base rules catch (and a base ledger older than `migrationRegions` is read
+  with the changed tree's regions); fences tagged as another language, indented code blocks, HTML `<pre>`
+  blocks and markdown prose are not read; the hook reads the working tree, not the index (CI reads the commit);
+  text cannot tell a tape from a host array (`tape-js-method`) or a cell from an element (`render-by-tag`, which
+  the bootstrap enforces); rows marked `enforcedBy: "lint-only"` have no compiler refusal, and
+  `state-type-fn-overload` (§17.5) has neither a code nor a detector; `tape-js-method` sees a method by its dotted name only
+  (`xs["push"](1)` is not a hit) and a discarded `.sort()` only after `;` / `{` / `}` (not `if (a) xs.sort()`); a retired closer inside a
+  raw body left unclosed (`<code>x⏎<p>and/⏎more</>`) is raw text to the gate, while the bootstrap names it; the closer rule's path-word
   exemption is the bootstrap's INTERIM. A SPEC example outside §66 is written in
 the current language unless it is a labelled negative or a marked deprecated demonstration (S482). The ledger
 also feeds the bootstrap conformance report's legacy-dialect markers. A retirement banner ("all examples

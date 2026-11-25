@@ -7,7 +7,7 @@ import { describe, test, expect } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { rowLines, readFences, migrationHeading, scan, check, checkAgainstBase, lowered, markerAllows, posix, caseIsNegativeFor } from "../../../scripts/retired-forms-lint.ts";
+import { rowLines, readFences, regionErrors, readsInfo, scan, check, checkAgainstBase, baseRulesOnHead, lowered, markerAllows, posix, caseIsNegativeFor } from "../../../scripts/retired-forms-lint.ts";
 import { analyze, view } from "../../../scripts/retired-forms-walk.ts";
 
 const ROOT = resolve(import.meta.dir, "../../..");
@@ -76,6 +76,25 @@ describe("the source-order reader (#2101 r1 MED-2)", () => {
     expect(hits("while-loop", "<program>\n<p>Old form: <code>while (x) { }</code></p>\n</program>")).toBe(0);
     expect(hits("while-loop", "<program>\n<p>Please wait while (it loads) the page.</p>\n</program>")).toBe(0);
     expect(hits("throw-stmt", "<program>\n<p>Do not throw away your work.</p>\n</program>")).toBe(0);
+  });
+});
+
+describe("#2101 r2 LOW-1 / LOW-2 — walker extents", () => {
+  test("a brace inside a string of a `?{}` / `_{}` / `#{}` body does not extend it", () => {
+    expect(hits("while-loop", wrap("let r = ?{ SELECT '{' FROM t }\nwhile (x) { }"))).toBe(1);
+    expect(hits("while-loop", wrap('_{ const s = "{"; }\nwhile (x) { }'))).toBe(1);
+    expect(hits("while-loop", "<program>\n#{ .a::before { content: \"{\"; } }\n${ while (x) { } }\n</program>")).toBe(1);
+    expect(hits("while-loop", "<program>\n#{ .a { /* don't */ } }\n${ while (x) { } }\n</program>")).toBe(1);
+  });
+  test("an unclosed `<pre>` is raw only to the next closing tag", () => {
+    expect(hits("machine-element", "<program>\n<p>see <pre> below</p>\n< machine name=M for=number>\n</>\n</program>")).toBe(1);
+  });
+  test("`}` then `/` is a division, not a regular expression", () => {
+    expect(hits("while-loop", wrap("let a = {v: 1} / 2; while (x) { } let c = a / 3"))).toBe(1);
+  });
+  test("`1 < <n>` and `1 > <n>` are legacy reads", () => {
+    expect(hits("angle-cell-read", wrap("return 1 < <n>;"))).toBe(1);
+    expect(hits("angle-cell-read", wrap("return 1 > <n>;"))).toBe(1);
   });
 });
 
@@ -161,11 +180,28 @@ describe("allow markers (#2101 r1 MED-5)", () => {
 describe("markdown fences (#2101 r1 HIGH-1 / HIGH-2)", () => {
   test("```scrml AND untagged fences are read; another language is not; a migration region runs to the next heading of its level", () => {
     const md = "## 4.4 Closers\ntext\n```scrml\n<p>x/\n```\n```\nuntagged\n```\n```js\nawait x\n```\n## Appendix E: Migration\n### E.1 Sub\n```scrml\n<p>y/\n```\n## Appendix F\n```scrml\nz\n```\n";
-    const fs = readFences(md);
+    const fs = readFences(md, [{ heading: "## Appendix E: Migration", children: "^(?![0-9])" }]);
     expect(fs.map((f) => [f.startLine, f.info, f.migration])).toEqual([[4, "scrml", false], [7, "", false], [15, "scrml", true], [19, "scrml", false]]);
-    expect(migrationHeading("66.21 Legacy forms and migration")).toBe(true);
-    expect(migrationHeading("63.4 Stages")).toBe(true);
-    expect(migrationHeading("6.3 Cells")).toBe(false);
+  });
+  test("#2101 r2 MED-1: a region opens only at its exact heading line, holds only its own sub-headings; text alone opens nothing", () => {
+    const R = [{ heading: "## Appendix E: Migration", children: "^(?![0-9])" }, { heading: "## 63. Lifecycle", children: "^63\\.[0-9]" }];
+    const md = ["## Appendix E: Migration", "### Background", "```scrml", "a", "```", "### 19.15 Misplaced", "```scrml", "b", "```",
+      "## 4. Markup", "#### 63.99 Worked example", "```scrml", "c", "```", "#### Appendix E notes", "```scrml", "d", "```",
+      "## 63. Lifecycle", "### 63.4 Fix", "```scrml", "e", "```", "### 4.1 Stray", "```scrml", "f", "```", ""].join("\n");
+    expect(readFences(md, R).map((f) => [f.text, f.migration])).toEqual([["a", true], ["b", false], ["c", false], ["d", false], ["e", true], ["f", false]]);
+    expect(regionErrors(md, R)).toEqual([]);
+    expect(regionErrors(md + "\n## 63. Lifecycle\n", R).length).toBe(1);
+    expect(regionErrors("# x\n", R).length).toBe(2);
+    // the real SPEC: each ledger region heading stands exactly once
+    expect(regionErrors(readFileSync(join(ROOT, "compiler/SPEC.md"), "utf8"), LEDGER.migrationRegions)).toEqual([]);
+  });
+  test("#2101 r2 MED-2: blockquoted fences and `scrml…` info strings are read", () => {
+    const md = ["> ```scrml", "> while (x) { }", "> ```", ">   ```scrml", ">   b", ">   ```", "```scrml{.example}", "c", "```", "```scrml,ignore", "d", "```", "```js", "e", "```", ""].join("\n");
+    expect(readFences(md).map((f) => [f.startLine, f.text])).toEqual([[2, "while (x) { }"], [5, "  b"], [8, "c"], [11, "d"]]);
+    expect(readsInfo("scrml{.neg}")).toBe(true);
+    expect(readsInfo("javascript")).toBe(false);
+    const q = readFences("> <!-- retired-neg: while-loop — the contrast -->\n> ```scrml\n> while (x) { }\n> ```\n");
+    expect([...q[0].negIds]).toEqual(["while-loop"]);
   });
   test("a fence is a negative only by `<!-- retired-neg: <id> — reason -->` directly above it", () => {
     const md = "<!-- retired-neg: while-loop — the contrast -->\n```scrml\nwhile (x) {}\n```\n<!-- retired-neg: while-loop -->\n```scrml\nwhile (y) {}\n```\n";
@@ -196,7 +232,7 @@ describe("scan + check over a scratch tree", () => {
     mkdirSync(join(d, "conformance/cases/x/pos"), { recursive: true });
     return d;
   };
-  const ledger = { rows: [row("while-loop"), row("rhs-decl")] };
+  const ledger = { rows: [row("while-loop"), row("rhs-decl")], migrationRegions: [{ heading: "## Appendix E: Migration", children: "^(?![0-9])" }] };
 
   test("negatives by metadata / marker / region — never by a mention in prose or a comment", () => {
     const d = mk2();
@@ -214,6 +250,39 @@ describe("scan + check over a scratch tree", () => {
         "## Appendix E: Migration", "```scrml", "while (w) { }", "```", ""].join("\n"));
       const hs = scan(d, ledger);
       expect(hs.map((h) => `${h.file}:${h.line}`).sort()).toEqual(["compiler/SPEC.md:14", "compiler/SPEC.md:3", "compiler/SPEC.md:7", "conformance/cases/x/pos/case.scrml:1", "samples/a.scrml:3"]);
+    } finally { rmSync(d, { recursive: true, force: true }); }
+  });
+
+  test("#2101 r2 LOW-6: a negative allows one hit per expected occurrence; a helper the case never names allows none", () => {
+    const d = mk2();
+    try {
+      const W = (wh) => "${ " + wh + " }\n";
+      writeFileSync(join(d, "conformance/cases/x/neg/case.scrml"), W("while (a) { } while (b) { } while (c) { }"));
+      writeFileSync(join(d, "conformance/cases/x/neg/expected.json"), JSON.stringify({ id: "neg", expect: { codes: ["E-LOOP-WHILE-RETIRED"] } }));
+      writeFileSync(join(d, "conformance/cases/x/neg/helper.scrml"), W("while (h) { }"));
+      writeFileSync(join(d, "conformance/cases/x/pos/case.scrml"), "import { z } from './lib.scrml'\n" + W("while (a) { } while (b) { }"));
+      writeFileSync(join(d, "conformance/cases/x/pos/lib.scrml"), W("while (l) { }"));
+      writeFileSync(join(d, "conformance/cases/x/pos/expected.json"), JSON.stringify({ id: "pos", expect: { codeCounts: { "E-LOOP-WHILE-RETIRED": 3 } } }));
+      const hs = scan(d, ledger).map((h) => h.file).sort();
+      // neg: 3 loops, 1 expected -> 2 counted; its unnamed helper -> 1 counted; pos: 3 expected over case.scrml (2) + the named lib (1) -> 0
+      expect(hs).toEqual(["conformance/cases/x/neg/case.scrml", "conformance/cases/x/neg/case.scrml", "conformance/cases/x/neg/helper.scrml"]);
+    } finally { rmSync(d, { recursive: true, force: true }); }
+  });
+
+  test("#2101 r2 MED-3: the base ledger's rules run over the head tree catch a widened `codes`, a never-matching detector, a new region", () => {
+    const d = mk2();
+    try {
+      writeFileSync(join(d, "conformance/cases/x/neg/case.scrml"), "${ while (a) { } }\n");
+      writeFileSync(join(d, "conformance/cases/x/neg/expected.json"), JSON.stringify({ id: "neg", expect: { codes: ["E-OTHER"] } }));
+      writeFileSync(join(d, "compiler/SPEC.md"), "## 4. X\n```scrml\nwhile (s) { }\n```\n");
+      const base = { rows: [row("while-loop")], migrationRegions: [] };
+      const B = { soft: {}, pending: { "while-loop": { since: "d", why: "x", files: { "conformance/cases/x/neg/case.scrml": 1, "compiler/SPEC.md": 1 } } } };
+      expect(baseRulesOnHead(d, base, B)).toEqual([]);
+      // head adds a while to the case and widens codes to make the case a "negative": the base rule still counts 2
+      writeFileSync(join(d, "conformance/cases/x/neg/case.scrml"), "${ while (a) { } while (b) { } }\n");
+      expect(baseRulesOnHead(d, base, B).length).toBe(1);
+      const headWide = { rows: [{ ...row("while-loop"), codes: [...row("while-loop").codes, "E-OTHER"] }] };
+      expect(scan(d, headWide).filter((h) => h.file.startsWith("conformance")).length).toBe(1);   // head alone: 1 (budget 1)
     } finally { rmSync(d, { recursive: true, force: true }); }
   });
 

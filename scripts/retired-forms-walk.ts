@@ -133,13 +133,23 @@ export function analyze(src: string, htmlNames: Set<string>): Analysis {
     }
   };
 
-  /** The end (exclusive) of the balanced `{ … }` whose `{` is at `open` (a naive count, as the
-   *  bootstrap's sigil-block skip in retiredSlashesIn), or the text length. */
+  /** The end (exclusive) of the balanced `{ … }` whose `{` is at `open`, or the text length. String-aware
+   *  (#2101 r2 LOW-1): a brace inside a `'…'` / `"…"` / `` `…` `` string of the body (SQL, JS, CSS) is not
+   *  counted. A quote is a string only when it closes on the same line: an apostrophe in a comment
+   *  (`/* don't *\/ }`) stays a plain character, so it never hides a `}`. DIFFERS from the bootstrap's
+   *  sigil-block skip in retiredSlashesIn (a naive count). */
   const braceEnd = (open: number) => {
     let depth = 0;
     for (let i = open; i < n; i++) {
-      if (src[i] === "{") depth++;
-      else if (src[i] === "}") { depth--; if (depth === 0) return i + 1; }
+      const c = src[i];
+      if (c === '"' || c === "'" || c === "`") {
+        let j = i + 1;
+        for (; j < n && src[j] !== c && src[j] !== "\n"; j++) if (src[j] === "\\") j++;
+        if (j < n && src[j] === c) { i = j; continue; }
+        continue;     // unclosed on its line: a plain character
+      }
+      if (c === "{") depth++;
+      else if (c === "}") { depth--; if (depth === 0) return i + 1; }
     }
     return n;
   };
@@ -223,7 +233,8 @@ export function analyze(src: string, htmlNames: Set<string>): Analysis {
       if (c === '"' || c === "'") { i = lexString(i, c); sig(c); continue; }
       // a regular-expression literal where an operand is read (`isoDate: /^\d{4}$/`, `x = /a</`): its
       // body is STRING (a `{` / `<` / quote in it is not code). On a line break it was a division.
-      if (c === "/" && (regionHead || "(,=:[!&|?{};~^".includes(lastSig) || lastSig === EL || ["return", "typeof", "case", "in", "of"].includes(lastWord))) {
+      // (#2101 r2 LOW-1: not after `}` — `{v: 1} / 2` is a division)
+      if (c === "/" && (regionHead || "(,=:[!&|?{;~^".includes(lastSig) || lastSig === EL || ["return", "typeof", "case", "in", "of"].includes(lastWord))) {
         let j = i + 1, cls = false;
         for (; j < n && src[j] !== "\n"; j++) {
           if (src[j] === "\\") { j++; continue; }
@@ -247,7 +258,8 @@ export function analyze(src: string, htmlNames: Set<string>): Analysis {
           const gt = src.indexOf(">", i); i = gt < 0 ? n : gt + 1; sig(">"); continue;
         }
         if (opensTag(c1) && c1 !== "/" && c1 !== "!") {
-          const operand = "([,=?:!&|+-*/%~^>".includes(lastSig) && lastSig !== "" || ["return", "lift", "yield", "else", "in", "of", "case", "throw", "await", "let", "const", "export"].includes(lastWord);
+          // (#2101 r2 LOW-2: `<` too — `1 < <n>` is a read in an operand slot, as the bootstrap's binaryOpLast)
+          const operand = "([,=?:!&|+-*/%~^<>".includes(lastSig) && lastSig !== "" || ["return", "lift", "yield", "else", "in", "of", "case", "throw", "await", "let", "const", "export"].includes(lastWord);
           const statementStart = regionHead || lastSig === "{" || lastSig === "}" || lastSig === ";" || lastSig === EL || (codeDefault && lineStart);
           // lex.scrml markupValueAhead: at a region head / after `{`, only a legacy read is a value; in an
           // operand slot a legacy read is that one token, otherwise an element (#2101 r1 LOW-2: an
@@ -334,7 +346,16 @@ export function analyze(src: string, htmlNames: Set<string>): Analysis {
         const after = j + 2 + lower.length;
         if (src.slice(j + 2, after).toLowerCase() === lower && src[after] === ">") { close = j; break; }
       }
-      if (close < 0) { markKeepNl(i, n, K_RAW); return { end: n, closed: false }; }
+      // unclosed (#2101 r2 LOW-1): raw only to the next closing tag of any name (`<p>see <pre> below</p>`),
+      // which the enclosing element then reads — not to the end of the text. An anonymous `</>` there is
+      // taken as the raw element's own (the author's intent; the bootstrap's rawNameCloseAt accepts only
+      // `</name>`, so it refuses the file either way)
+      if (close < 0) {
+        const nc = src.indexOf("</", i);
+        const stop = nc < 0 ? n : nc;
+        markKeepNl(i, stop, K_RAW);
+        return { end: src.startsWith("</>", stop) ? stop + 3 : stop, closed: false };
+      }
       markKeepNl(i, close, K_RAW);
       return { end: close + lower.length + 3, closed: true };
     }
