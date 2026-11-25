@@ -148,4 +148,37 @@ let <seen:int=0/>
     expect(cured.said).not.toContain("W-DISPLAY-UNTRACKED");
     expect(await load(cured.out, ["d", "s"], ["#b"])).toEqual({ errors: [], texts: [["7", "0"], ["7", "7"]] });
   }, 120000);
+
+  // r2 of #2107 (F-A): the string fix-it is parenthesized, so applying it keeps the value — a newline, a tab /
+  // CR and `${` (the quoted opener form turns `\n` into `n`, g-boot-opener-string-escapes-s482; the reviewer's
+  // probes11 q1 → q2 LETTER-N, q3 NEWLINE)
+  test("a string fix-it, applied as printed, keeps the value (newline, tab / CR, `${`)", async () => {
+    if (skip()) return;
+    const cases = [
+      ['"a\\nb"', '"a" + "\\n" + "b"'],
+      ['"a\\tb\\r"', '"a" + "\\t" + "b" + "\\r"'],
+      ['"x${1}y"', '"x$" + "{1}y"'],
+    ];
+    for (const [lit, same] of cases) {
+      const orig = build(`<program>
+\${ let s: string = ${lit}; }
+<p id="d">\${s == ${same} ? "SAME" : "OTHER"}</p>
+<button id="b" onclick=\${ s = "z"; }>+</button>
+</program>
+`);
+      const m = orig.said.match(/with `(let <s:string=[^`]*\/>)`/);
+      expect(m).not.toBe(null);
+      expect(m[1]).toBe(`let <s:string=(${lit})/>`);
+      expect(await load(orig.out, ["d"])).toEqual({ errors: [], texts: [["SAME"]] });
+      // the fix-it exactly as printed
+      const cured = build(`<program>
+${m[1]}
+<p id="d">\${@s == ${same} ? "SAME" : "OTHER"}</p>
+<button id="b" onclick=\${ @s = "z"; }>+</button>
+</program>
+`);
+      expect(cured.said).not.toContain("W-DISPLAY-UNTRACKED");
+      expect(await load(cured.out, ["d"], ["#b"])).toEqual({ errors: [], texts: [["SAME"], ["OTHER"]] });
+    }
+  }, 120000);
 });

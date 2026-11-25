@@ -12213,6 +12213,9 @@ ${
     fn cellFixIt(cx: DuCx, sym: int) -> string {
         for (const c of cx.g.consts) {
             if (c.sym.id == sym) {
+                // r2 (#2107 F-E) — a write the cell form of `c` cannot take yet: no fix-it that does not compile
+                const refused: string = cellWriteRefused(cx.t, sym, c.name);
+                if (refused != "") return "A cell would update this display, but the cell form of `" + c.name + "` is not yet supported for this edit: this compiler does not yet build " + refused + " on a cell (E-BOOTSTRAP-UNSUPPORTED, INTERIM), so no cell fix-it is given for `" + c.name + "`";
                 const at: AType | not = writtenTypeOf(cx.g, c);
                 let written: string = "let " + c.name;
                 if (at is given) written = written + ": " + aTypeWritten(at, []);
@@ -12222,6 +12225,11 @@ ${
                 if (lit == "") {
                     wv = "…";
                     cv = "(…)";
+                } else if (isStrLit(c.init)) {
+                    // r2 (#2107 F-A) — a string is always parenthesized: the opener's quoted value is not
+                    // an expression string (it drops a `\n` escape to `n` and reads `${…}` as a reactive
+                    // template), so only `=("…")` keeps the value as written.
+                    cv = "(" + lit + ")";
                 }
                 let cell: string = "let <" + c.name;
                 let keep: string = "";
@@ -12230,22 +12238,11 @@ ${
                 if (ty is given) {
                     const el: Type | not = seqElem(unMaybe(ty));
                     if (el is given) {
-                        // a tape cell: no `let` (O3 — E-GRANT-LET-ON-SEQUENCE); its grants are in its type (§66.12)
-                        const need: string[] = writeGrantsOf(cx.t, sym);
-                        let have: string[] = [];
-                        if (at is given) have = aTypeGrants(at);
-                        let added: string[] = [];
-                        for (const gr of need) {
-                            if (have.indexOf(gr) < 0 && added.indexOf(gr) < 0) added = added.concat([gr]);
-                        }
-                        if (at is given) {
-                            cell = "<" + c.name + ":" + aTypeWritten(at, added);
-                        } else {
-                            cell = "<" + c.name + ":" + elemName(el) + "[" + added.join(", ") + "]";
-                        }
-                        keep = keep + " — a tape cell takes no `let` (§66.12, E-GRANT-LET-ON-SEQUENCE) and its write grants in its type";
-                        if (added.length > 0 && have.length > 0) keep = keep + ": the grants written, plus " + grantList(added) + " for the writes of `" + c.name + "`";
-                        if (added.length > 0 && have.length == 0) keep = keep + ": " + grantList(added) + " for the writes of `" + c.name + "`";
+                        // a tape cell: no `let` (O3 — E-GRANT-LET-ON-SEQUENCE); its grants are in its type (§66.12),
+                        // the written ones plus what its writes need (r2 #2107 F-C: computed in the reader)
+                        const tc: TapeCellText = tapeCellText(at, elemName(el), writeGrantsOf(cx.t, sym), c.name);
+                        cell = "<" + c.name + ":" + tc.ty;
+                        keep = keep + " — a tape cell takes no `let` (§66.12, E-GRANT-LET-ON-SEQUENCE) and its write grants in its type" + tc.note;
                     } else if (at is given) {
                         cell = cell + ":" + aTypeWritten(at, []);
                     } else {
@@ -12257,12 +12254,6 @@ ${
             }
         }
         return "Make it a cell";
-    }
-
-    fn grantList(gs: string[]) -> string {
-        let parts: string[] = [];
-        for (const g of gs) { parts = parts.concat(["`" + g + "`"]); }
-        return parts.join(", ");
     }
 
     // The type annotation of a file-scope binding as written (`not`: none).
@@ -12291,7 +12282,7 @@ ${
     fn writeGrantOf(f: EffectFact, sym: int) -> string {
         return match f {
             .EAssignLocal(sym: s, path: pa) :> (s.id != sym ? "" : (pa.length == 0 ? "replace" : stepGrant(pa[0]))),
-            .ELocalEdit(sym: s, op: o, path: pa) :> (s.id != sym || pa.length > 0 ? "" : editGrant(o)),
+            .ELocalEdit(sym: s, op: o, path: pa) :> (s.id != sym || pa.length > 0 ? "" : localEditMethodName(o)),
             // no-default-arm: one question of a write — does it write the `let`'s own tape
             _ :> ""
         };
@@ -12304,14 +12295,41 @@ ${
         };
     }
 
-    fn editGrant(o: LocalEdit) -> string {
-        return match o {
-            .LAppend :> "append",
-            .LPrepend :> "prepend",
-            .LPop :> "pop",
-            .LShift :> "shift",
-            .LRemoveAt :> "remove",
-            .LInsert :> "insert"
+    // r2 (#2107 F-E) — the first write of `let` `sym` whose cell form this compiler does not build yet
+    // ("" — none): `.remove(…)` / `.insert(…)` of a cell tape, an edit of a part (`b.xs.append(v)`,
+    // `g[i].pop()`), a write through a position (`m[i][j] = v`, `xs[i].a.b = v`) or a position of a
+    // sub-field tape (`p.xs[i] = v`) — each refused on a cell as E-BOOTSTRAP-UNSUPPORTED (INTERIM).
+    fn cellWriteRefused(t: Tables, sym: int, name: string) -> string {
+        for (const f of t.effects.facts) {
+            const k: EffectFact = f;
+            const why: string = match k {
+                .ELocalEdit(sym: s, op: o, path: pa) :> (s.id != sym ? "" : (pa.length > 0 ? "an edit of a part of `" + name + "` (a `." + localEditCall(o) + "` of one of its fields or positions)" : (o == LocalEdit.LRemoveAt || o == LocalEdit.LInsert ? "`" + name + "." + localEditCall(o) + "`" : ""))),
+                .EAssignLocal(sym: s, path: pa) :> (s.id != sym ? "" : pathRefusedOnCell(pa, name)),
+                // no-default-arm: one question of a write — does it write the `let` in a form its cell cannot take
+                _ :> ""
+            };
+            if (why != "") return why;
+        }
+        return "";
+    }
+
+    fn pathRefusedOnCell(pa: LStep[], name: string) -> string {
+        if (pa.length < 2) return "";
+        let deep: boolean = pa.length > 2 && isIndexStep(pa[0]);
+        let k: int = 1;
+        for (; k < pa.length; ) {
+            if (isIndexStep(pa[k])) deep = true;
+            k = k + 1;
+        }
+        if (!deep) return "";
+        if (isIndexStep(pa[0])) return "a write through a tape position of `" + name + "` (`" + name + "[i][j] = v`, `" + name + "[i].a.b = v`)";
+        return "a position write of a sub-field tape of `" + name + "` (`" + name + ".f[i] = v`)";
+    }
+
+    fn isIndexStep(s: LStep) -> boolean {
+        return match s {
+            .LIndex(index: x) :> true,
+            .LField(ref: x) :> false
         };
     }
 
@@ -12328,11 +12346,21 @@ ${
         };
     }
 
+    fn isStrLit(e: AExpr) -> boolean {
+        const k: AExprK = e.k;
+        return match k {
+            .Str(v: x) :> true,
+            // no-default-arm: one question — is it a string literal
+            _ :> false
+        };
+    }
+
     fn strEscaped(s: string) -> string {
         let out: string = "";
         let i: int = 0;
         for (; i < s.length; ) {
             const c: string = s.substring(i, i + 1);
+            const code: int = s.charCodeAt(i);
             if (c == "\\") {
                 out = out + "\\\\";
             } else if (c == "\"") {
@@ -12343,6 +12371,8 @@ ${
                 out = out + "\\r";
             } else if (c == "\t") {
                 out = out + "\\t";
+            } else if (code < 32 || code == 127) {
+                out = out + "\\x" + "0123456789abcdef".charAt(Math.floor(code / 16)) + "0123456789abcdef".charAt(code % 16);
             } else {
                 out = out + c;
             }
@@ -12420,14 +12450,38 @@ ${
 
     // Does a runtime `^{ }` body re-run? §22.5: "The dependencies are exactly the reads §22.5.1 and §22.9
     // name: `meta.get("x")` and a `meta.bindings` entry of a cell. A direct `@x` read in the body, or one
-    // in a function the body calls, is not a dependency." meta.scrml respells both `^.get(@x)`; one in a
-    // function value of the body (a timer or cleanup callback) "subscribes nothing".
+    // in a function the body calls, is not a dependency. … They are dependencies only while the run is in
+    // progress. A `meta.get` in a timer or cleanup callback reads the cell and subscribes nothing."
+    // meta.scrml respells both `^.get(@x)`. r2 (#2107 F-B): only the function value handed DIRECTLY to
+    // `^.timeout` / `^.interval` / `^.cleanup` (or `^.subscribe`, whose callback runs on a later change)
+    // is such a callback; any other function value — one the body calls, or hands to a function that
+    // calls it — may run while the run is in progress, so its `^.get` counts (failing toward the warning).
     fn rerunsOnDeps(b: ABlock) -> boolean {
-        const late: ASpan[] = deferredSpansIn(b);
+        let late: ASpan[] = [];
+        for (const e of allExprsIn(b)) { late = late.concat(metaCallbackSpans(e)); }
         for (const e of allExprsIn(b)) {
             if (isMetaGetCall(e) && !spanInAny(e.span, late)) return true;
         }
         return false;
+    }
+
+    // The function values passed directly to a `^.timeout` / `^.interval` / `^.cleanup` / `^.subscribe`.
+    fn metaCallbackSpans(e: AExpr) -> ASpan[] {
+        const k: AExprK = e.k;
+        const args: AExpr[] = match k {
+            .Call(callee: f, args: xs) :> (isMetaCallbackOp(metaOpCallee(f)) ? xs : []),
+            // no-default-arm: one question of an expression — is it a meta callback call
+            _ :> []
+        };
+        let out: ASpan[] = [];
+        for (const a of args) {
+            if (isLambda(a)) out = out.concat([a.span]);
+        }
+        return out;
+    }
+
+    fn isMetaCallbackOp(op: string) -> boolean {
+        return op == "timeout" || op == "interval" || op == "cleanup" || op == "subscribe";
     }
 
     fn isMetaGetCall(e: AExpr) -> boolean {
@@ -19613,6 +19667,35 @@ ${
             // no-default-arm: only a tape carries grants
             _ :> []
         };
+    }
+
+    // s482 r2 (#2107 F-C, W-DISPLAY-UNTRACKED's fix-it) — a tape cell's type as source text: the grants
+    // written on `at` (none: the element `elem` with an empty bracket), plus the ones `need` (the grants
+    // its writes need, writeGrantsOf) adds — and `free` when an edit grows or shrinks the tape and no
+    // `free` is written (§66.12.1–§66.12.2, E-WRITE-INVARIANT). `note`: the message's account of the added.
+    type TapeCellText:struct = { ty: string, note: string }
+
+    fn tapeCellText(at: AType | not, elem: string, need: string[], name: string) -> TapeCellText {
+        let have: string[] = [];
+        if (at is given) have = aTypeGrants(at);
+        let added: string[] = [];
+        let resizes: boolean = false;
+        for (const gr of need) {
+            if (gr == "append" || gr == "prepend" || gr == "pop" || gr == "shift" || gr == "remove" || gr == "insert") resizes = true;
+        }
+        if (resizes && have.indexOf("free") < 0) added = ["free"];
+        for (const gr of need) {
+            if (have.indexOf(gr) < 0 && added.indexOf(gr) < 0) added = added.concat([gr]);
+        }
+        let ty: string = elem + "[" + added.join(", ") + "]";
+        if (at is given) ty = aTypeWritten(at, added);
+        let parts: string[] = [];
+        for (const gr of added) { parts = parts.concat(["`" + gr + "`"]); }
+        let note: string = "";
+        if (added.length > 0 && have.length > 0) note = ": the grants written, plus " + parts.join(", ") + " for the writes of `" + name + "`";
+        if (added.length > 0 && have.length == 0) note = ": " + parts.join(", ") + " for the writes of `" + name + "`";
+        if (added.indexOf("free") >= 0) note = note + " (`free`: an edit that grows or shrinks a tape needs it, §66.12.2)";
+        return { ty: ty, note: note };
     }
 
     // ---- END OF THE TAPE GRANT READER (tape-write-forms.test.js: no grant is read outside it) ----

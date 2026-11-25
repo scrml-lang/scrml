@@ -65,3 +65,18 @@ Ruling (scrml-support/user-voice-scrml.md:22552-22555, pulled 2026-11-25), cited
       components/component-scope-by-value-local-shadows); 0 verdict / byte / other-warning diffs vs base.
 - Known residual (not a ruled writer kind, not built): spine code inside a construct mounted LATER by an event
   (an `if=` toggled by a handler) runs in a later turn; it is treated as spine and not reported.
+
+## r2 (fix round 2 — #2107 r1 re-review F-A..F-E)
+
+- [x] F-A (MED): a string initializer's fix-it is always parenthesized (`let <s:string=("a\nb")/>`), and a
+      control character other than `\n` / `\r` / `\t` is re-escaped `\xHH`. Applied as printed it keeps the value
+      (Chromium: newline, tab / CR, `${`, `\x01`). Pre-existing opener-escape bug filed:
+      g-boot-opener-string-escapes-s482 (HIGH — silent wrong value in ordinary code; not fixed here).
+- [x] F-B (LOW): `rerunsOnDeps` exempts only a function value passed DIRECTLY to `^.timeout` / `^.interval` /
+      `^.cleanup` / `^.subscribe` (§22.5 quoted); seen-lam / seen-arg warn; a cleanup / timeout callback does not.
+- [x] F-C (LOW): need-minus-have (and the `free` addition) computed in THE TAPE GRANT READER (`tapeCellText`);
+      `grantList` moved in; `editGrant` removed for `localEditMethodName`.
+- [x] F-D (LOW): INTERIM sentence in §6.15 + §34 row; gap g-boot-display-untracked-later-mount-spine-s482.
+- [x] F-E (info): `free` added for a growing / shrinking edit with none written (y6 cured); `.remove` / `.insert`,
+      a part edit, a write through a position or a sub-field tape position → "the cell form is not yet supported
+      for this edit … no cell fix-it is given" (y8 / y10 / y11).

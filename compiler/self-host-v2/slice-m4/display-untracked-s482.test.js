@@ -95,6 +95,18 @@ describe("W-DISPLAY-UNTRACKED — a display of a `let` that a later writer write
     expect(w[0].message).toContain("(through `inc() → n`)");
   }, 120000);
 
+  // r2 of #2107 (F-B): §22.5 exempts only "a `meta.get` in a timer or cleanup callback"; a function value the
+  // body calls, or hands to a function that calls it, runs while the run is in progress (the reviewer's
+  // seen-lam / seen-arg: Chromium shows the block re-run and the display stale)
+  test("a re-running `^{ }` whose `meta.get` is in a function value the body calls (r2 F-B)", async () => {
+    const CALLIT = "${ function callIt(g: () => int) -> int { return g(); } }\n";
+    for (const body of ['const f = () => meta.get("a"); n = f() + 10;', 'n = callIt(() => meta.get("a")) + 10;']) {
+      const w = await warns(`<program>\n${L}let <a:int=0/>\n${CALLIT}<div>^{ ${body} }</div>\n<p>\${n}</p>\n<button onclick=\${ @a = 1; }>+</button>\n</program>\n`);
+      expect(w.map((x) => x.code)).toEqual([W]);
+      expect(w[0].message).toContain("it re-runs when a cell it reads through `meta.get`");
+    }
+  }, 120000);
+
   test("a runtime `^{ }` block that re-runs", async () => {
     const w = await warns(`<program>\n${L}let <a:int=0/>\n<div>^{ n = meta.get("a"); }</div>\n<p>\${n}</p>\n</program>\n`);
     expect(w.map((x) => x.code)).toEqual([W]);
@@ -139,9 +151,28 @@ describe("W-DISPLAY-UNTRACKED — a display of a `let` that a later writer write
     expect(w[0].message).toContain("replace `let m: int = …;` with `let <m:int=(…)/>` (the same initializer, in the parentheses)");
   }, 120000);
 
-  test("the fix-it quotes a string literal re-escaped (r1 F4)", async () => {
+  // r2 of #2107 (F-A): a string is always parenthesized — the opener's quoted value drops `\n` to `n` and
+  // reads `${…}` as a reactive template (g-boot-opener-string-escapes-s482), so only `=("…")` keeps the value
+  // (the reviewer's q1 → q3, x2p; Chromium: display-untracked-chromium-s482.browser.test.js)
+  test("the fix-it quotes a string literal re-escaped, parenthesized (r1 F4, r2 F-A)", async () => {
     const w = await warns(`<program>\n\${ let s: string = "a\\"b\\\\c"; }\n<p>\${s}</p>\n<button onclick=\${ s = "z"; }>+</button>\n</program>\n`);
-    expect(w[0].message).toContain('replace `let s: string = "a\\"b\\\\c";` with `let <s:string="a\\"b\\\\c"/>`');
+    expect(w[0].message).toContain('replace `let s: string = "a\\"b\\\\c";` with `let <s:string=("a\\"b\\\\c")/>`');
+  }, 120000);
+
+  test("a string with a newline, a tab / CR, `${`, or another control character keeps its value (r2 F-A)", async () => {
+    const fix = async (lit) => (await warns(`<program>\n\${ let s: string = ${lit}; }\n<p>\${s}</p>\n<button onclick=\${ s = "z"; }>+</button>\n</program>\n`))[0].message;
+    expect(await fix('"a\\nb"')).toContain('with `let <s:string=("a\\nb")/>`');
+    expect(await fix('"a\\tb\\r"')).toContain('with `let <s:string=("a\\tb\\r")/>`');
+    expect(await fix('"x${1}y"')).toContain('with `let <s:string=("x${1}y")/>`');
+    expect(await fix('"a\\x01b"')).toContain('with `let <s:string=("a\\x01b")/>`');
+    // the fix-it never prints the quoted opener form for a string
+    expect(await fix('"a\\nb"')).not.toContain('<s:string="');
+  }, 120000);
+
+  test("the parenthesized string fix-it, applied, compiles (the reviewer's q3 / x2p)", async () => {
+    for (const lit of ['"a\\nb"', '"a\\tb\\r"', '"x${1}y"', '"a\\x01b"']) {
+      expect(await warns(`<program>\nlet <s:string=(${lit})/>\n<p>\${@s}</p>\n<button onclick=\${ @s = "z"; }>+</button>\n</program>\n`)).toEqual([]);
+    }
   }, 120000);
 
   test("a tape fix-it keeps the written grants and adds what the writes need (r1 F4)", async () => {
@@ -149,6 +180,38 @@ describe("W-DISPLAY-UNTRACKED — a display of a `let` that a later writer write
     const w = await warns(`<program>\n\${ let o: int[free, write] = [1]; }\n<p>\${o[0]}</p>\n<button onclick=\${ o[0] = 5; }>+</button>\n</program>\n`);
     expect(w[0].message).toContain("replace `let o: int[free, write] = …;` with `<o:int[free, write]=(…)/>`");
     expect(w[0].message).not.toContain("replace]");
+  }, 120000);
+
+  // r2 of #2107 (F-E): an edit that grows or shrinks a tape needs `free` as well (E-WRITE-INVARIANT
+  // otherwise — the reviewer's y6), so a grant-less tape's fix-it adds it
+  test("a tape fix-it adds `free` for an edit that grows or shrinks the tape (r2 F-E)", async () => {
+    const r = await result(`<program>\n\${ let xs: int[] = [1, 2]; }\n<p>\${xs.length}</p>\n<button onclick=\${ xs.append(3); }>+</button>\n</program>\n`);
+    const w = r.diagnostics.filter((d) => d.code === W);
+    expect(w.length).toBeGreaterThan(0);
+    expect(w[0].message).toContain("replace `let xs: int[] = …;` with `<xs:int[free, append]=(…)/>`");
+    expect(w[0].message).toContain("`free`: an edit that grows or shrinks a tape needs it");
+    // the fix-it applied compiles
+    expect(await warns(`<program>\n<xs:int[free, append]=([1, 2])/>\n<p>\${@xs.length}</p>\n<button onclick=\${ @xs.append(3); }>+</button>\n</program>\n`)).toEqual([]);
+    // a written `free` is not added twice
+    const w2 = await warns(`<program>\n\${ let ys: int[free, append] = [1]; }\n<p>\${ys.length}</p>\n<button onclick=\${ ys.append(3); }>+</button>\n</program>\n`);
+    expect(w2[0].message).toContain("with `<ys:int[free, append]=(…)/>`");
+  }, 120000);
+
+  // r2 of #2107 (F-E): where this compiler refuses the cell form of the edit (E-BOOTSTRAP-UNSUPPORTED,
+  // INTERIM — the reviewer's y8, y10, y11), the message says so and prints no cell fix-it that does not compile
+  test("no cell fix-it for an edit the cell form does not build yet (r2 F-E)", async () => {
+    const cases = [
+      ["${ let xs: int[free, remove, write] = [1, 2]; }", "${xs[0]}", "xs.remove(0);", "`xs.remove(…)`"],
+      ["${ let m: int[write][write] = [[1, 2]]; }", "${m[0][1]}", "m[0][1] = 9;", "a write through a tape position of `m`"],
+      ["${ type P:struct = { xs: int[write] } }\n${ let q: P = { xs: [1] }; }", "${q.xs[0]}", "q.xs[0] = 9;", "a position write of a sub-field tape of `q`"],
+    ];
+    for (const [decl, disp, write, what] of cases) {
+      const w = await warns(`<program>\n${decl}\n<p>${disp}</p>\n<button onclick=\${ ${write} }>+</button>\n</program>\n`);
+      expect(w.length).toBeGreaterThan(0);
+      expect(w[0].message).toContain("is not yet supported for this edit: this compiler does not yet build " + what);
+      expect(w[0].message).toContain("on a cell (E-BOOTSTRAP-UNSUPPORTED, INTERIM), so no cell fix-it is given");
+      expect(w[0].message).not.toContain("Make `");
+    }
   }, 120000);
 });
 
@@ -195,6 +258,13 @@ describe("W-DISPLAY-UNTRACKED — no warning (negatives)", () => {
 
   // r1 of #2107 (F2): §22.5 — "A direct `@x` read in the body, or one in a function the body calls, is not
   // a dependency": such a block runs once, at its place (the reviewer's rr01)
+  // r2 of #2107 (F-B): "A `meta.get` in a timer or cleanup callback reads the cell and subscribes nothing" (§22.5)
+  test("a `^{ }` whose only `meta.get` is in a function passed directly to `^.cleanup` / `^.timeout` does not re-run", async () => {
+    for (const cb of ['meta.cleanup(() => { const v: int = meta.get("a"); });', 'meta.timeout(10, () => { const v: int = meta.get("a"); });']) {
+      expect(await warns(`<program>\n${L}let <a:int=0/>\n<div>^{ ${cb} n = 11; }</div>\n<p>\${n}</p>\n<button onclick=\${ @a = 1; }>+</button>\n</program>\n`)).toEqual([]);
+    }
+  }, 120000);
+
   test("a `^{ }` that reads a cell directly (not a §22.5 dependency) does not re-run", async () => {
     expect(await warns(`<program>\n${L}let <a:int=0/>\n<div>^{ n = @a + 10; }</div>\n<p>\${n}</p>\n<button onclick=\${ @a = 1; }>+</button>\n</program>\n`)).toEqual([]);
   }, 120000);
