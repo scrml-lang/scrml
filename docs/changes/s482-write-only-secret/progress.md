@@ -36,3 +36,20 @@ Probes: o9 (outer cell, p/x/o9-write-only), o9-let (plain let, p/r2/o9-let).
 - [tests] slice-m4/write-only-secret-s482.test.js (9; 5 red on base 153bd0334 — the 4 green are controls + the body-cell
   pin); compiler/tests/browser/write-only-secret-chromium-s482.browser.test.js (4, Chromium; writes to a shell run —
   a statement after the write still runs).
+- [SPEC/gap] §7.6 rule (b): "A write is not a read" sentence + "Provenance (S482, a write is not a read)" with the
+  direction-of-change note (no observable change except the secret leaving the client; 180 probes + corpus as proof).
+  Shell seed = `not`: SPEC has no unseeded plain `let`, so PA reading (§42's absence value; never observable).
+  g-boot-body-unread-cell-server-only-s482 narrowed (write-only half built), stays ruling-gated for BODY cells.
+
+## Decisions
+- Item 3 body cells: NOT included. §7.6 rule (b)'s classification is of file-scope bindings/initializers; a body cell
+  is a field of the program declaration, and whether rule (b) reaches it is the gap's open owner fork (a)/(b)/(c).
+  Probe n31 (body cell written, never read) still leaks — pinned in the slice test as today's behaviour.
+- Effect writes: a plain `let` written in an `<effect>` compiles and is fixed (n02); a CELL written in an effect is
+  E-EFFECT-WRITES-STATE on base and lane (n22). A `<request>` body holds one `@var = …` — the let is written by a
+  function the request calls (n04); a request writing an outer cell is E-BOOTSTRAP-UNSUPPORTED on both (n24).
+- Write-only bindings with a literal / non-acting initializer are shells too (`let lit = null;`): §7.6 rule (b)
+  "An initializer that does nothing observable … and that no code reads MAY be left out". Corpus: 0 such files.
+- sread (server reads) unchanged (with writes): rule (c) E-FILE-SCOPE-LET-SERVER-WRITE means server code never
+  writes a file-scope `let`, so there is nothing to split there. reachedOnlyByServer / reachOf / server closures
+  keep the write-following closure (conservative: fewer server-only functions, earlier runs as before).
