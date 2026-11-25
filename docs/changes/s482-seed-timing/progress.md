@@ -42,12 +42,42 @@ cell after `n = 5`, before `n = 7`) 11 (ruling: 6, its place); z09 6; z10 (prop 
 
 ## Steps
 
-- [ ] A. constant locked fields / prop defaults seeded at the instance's mount (print + runtime);
-      locked program cells seeded at their place (lower View.Init + print held + analyze judgment)
-- [ ] B. cells declared outside the body seeded before the body, in link order
-- [ ] C. lift construct refusals that existed only because outside-cell seeds were lazy
-- [ ] D. gaps resolved / INTERIMs recorded
-- [ ] E. bwAny message (LOW-A)
-- [ ] F. E-SCOPE-001 sentence check
-- [ ] SPEC §6.15 / §7.6 / §66.6.4 / §66.9 / §66.7.6
-- [ ] gates
+- [x] A. Q13 (e82ba6ffb): print.scrml `constSeedField` / `readsCellReach` (fail closed) → `rt.seeded`
+      (attribute default `rt.propSeed`), held to the mount (`liveSeedDecl` / `rt.seedAll`); locked program
+      cell placed at its declaration (lower `initView` unless it names `@x`; `heldFields`); analyze
+      `bodyCells` derived = `lockedDerived`. Chromium head: z01/z02/z03/z10 2, z06 `2 11`, z08 6, z04 11, z07 11.
+      seed-reach-s482.test.js: `<d:int=(k + 0)/>` before `k` is now a constant seed at its place →
+      E-SCOPE-001 at the seed (was: at the read); derived twins read `@m`.
+- [x] B. Q12 (6a5ce45e1): CoreProgram.outer (lower `outerCells`, place by node id); print
+      `constsWithOuter` / `outerLive` / `liveDecls`; every outer declaration printed ahead of the file-scope
+      section. Chromium head: b1 1 (base 5), b2 trap at load (base none), b3 1 (5), b5 1 (5).
+- [x] C. Nothing left to lift: #2096 deleted the construct seed enumeration; every #2082 r3 `xf/` probe
+      (21 + ctl) is refused at the library's writing seed (E-VALUE-WRITES-STATE) on base and head alike
+      (x-base.txt / x-head.txt identical); non-writing twins c1/c2 compile (z 5 → 1, k 5).
+- [x] D. gaps: g-spec-imported-cell-seed-time-s482, g-spec-locked-field-acting-init-place-s482 resolved;
+      new g-boot-use-site-value-seed-s482 (LOW, INTERIM, capable alternative stated);
+      new g-boot-instance-mount-reach-later-binding-s482 (MED, pre-existing silent wrong value on base,
+      probes y03/y04 — out of scope here, filed).
+- [x] E. LOW-A: the fail-closed E-FILE-SCOPE-INIT-IN-CONSTRUCT message ("holds … whose reads the bootstrap
+      does not follow here, and a `<request>` inside … writes state before it — so the bootstrap fails
+      closed"); refusal kept. value-no-write-s482.test.js updated.
+- [x] F. Not seed timing: the E-SCOPE-001 sentence "an `<effect>` / `<request>` (they run after the mount)"
+      is about when effects/requests run (Q6 settle) — left for the Q6 lane.
+- [x] SPEC: §7.6 rule (b) Open struck → outside-cell sentence; §7.6 R1; §6.15 item 1; §66.6.4 exception;
+      §66.9 rules 1 and 3; §66.7.6 rule 5 Open struck. Direction-of-change notes in place.
+
+## Gates (head 6a5ce45e1 code; base 52eb72585)
+
+- pre-commit (full hook incl. slices): PASS on each commit (58303 pass / 0 fail)
+- pretest: exit 0
+- bootstrap-conformance --json: PASS 850 / FAIL 3 / CRASH 0 on both; 0 per-case bucket/emitted diffs
+- corpus differential (2976 files): 0 newly rejected, 0 newly accepted, 0 code moves, 1 output diff
+  (conformance/cases/own-value-type/unproven-annotation-pos: `<v:int=(mk())/>` / `<w:int=(six() + 1)/>`
+  locked program cells now seeds at their place — values 5 / 7 unchanged, case PASS on both)
+- probe re-run, 461 probes (s482-value-no-write 389 set + #2096 r2rev p/ + q/): 386 same refusal,
+  75 same value, 0 changes; lane probes: value changes listed in the PR body
+- Chromium: seed-timing-chromium-s482 13/13; construct-init-place, effect-deps-mount, rcdata-holes,
+  rcdata-init-place: all pass (46 total)
+- s34-census --check-new --base 52eb72585 PASS; types-gate --check OK (182 unchanged); snippet-gate
+  120/0/9 spec-ahead; e2e-render-map 259/0; host-global-scan --check 1/2 exit 0, 2/2 exit 0;
+  claim-gate 0 failed; delta-lint PASS; retired-forms gate: not on main (N/A)
