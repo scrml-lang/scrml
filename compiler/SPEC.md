@@ -47214,12 +47214,13 @@ This is the **route-admission × row-selection** axis of §52.15.4; it stacks wi
 scrml distinguishes two categories of value constraint:
 
 **Contextual constraints** — the validity of a mutation depends on prior state, sibling fields,
-or external reactive references. These are ~~governed by `<machine>` (§51)~~ not type rules: a type's rule checks
-only its own value, so such a constraint is a derived check (e.g. `<overBudget=(@spent > @maxMana)/>`) used in
-markup or the handler that changes the value (ruling:user-voice-scrml.md-S482-contract-003-derived-check; `<machine>` was removed S305/S307). Examples:
-- Enum transition rules (depends on current variant)
-- Cross-field struct invariants (depends on sibling field values)
-- Constraints referencing reactive variables (`<=@maxMana`)
+or external reactive references. These are ~~governed by `<machine>` (§51)~~ not inline predicates; each kind has its
+own mechanism (the §53.3.2 table; `<machine>` was removed S305/S307). Examples:
+- Enum transition rules (depends on current variant) — the value's transition graph, `rule=` state-children (§66.13.2)
+- Cross-field struct invariants (depends on sibling field values) — an `<engine for=Struct>` guard (§53.8.1)
+- Constraints referencing reactive variables (`<=@maxMana`) — a type's rule checks only its own value; to compare
+  against another cell, write a derived check (e.g. `<overBudget=(@spent > @maxMana)/>`) and use it in markup or the
+  handler that changes the value (ruling:user-voice-scrml.md-S482-contract-003-derived-check)
 
 **Stateless constraints** — the validity of a value can be determined from the incoming value
 alone. No prior state, no sibling fields, no reactive references need to be consulted. These
@@ -47230,7 +47231,7 @@ are governed by **inline type predicates** (this section). Examples:
 
 The semantic distinction is clean and binary. Developers apply the **stateless test** at
 declaration time: "Can I validate this incoming value without knowing what the variable held
-before, or what any sibling field currently holds?" If yes — inline predicate. If no — ~~machine~~ a derived check.
+before, or what any sibling field currently holds?" If yes — inline predicate. If no — ~~machine~~ the mechanism for its kind (the §53.3.2 table).
 
 This separation is motivated by two concrete requirements:
 
@@ -47338,7 +47339,7 @@ and reject the program.
 
 ### §53.3.2 The Stateless Test
 
-The canonical decision rule for when to use an inline predicate vs ~~a `<machine>`~~ a derived check (ruling:user-voice-scrml.md-S482-contract-003-derived-check):
+The canonical decision rule for when to use an inline predicate vs ~~a `<machine>`~~ a contextual mechanism (the table's last column; `<machine>` was removed S305/S307):
 
 > A constraint is **stateless** if its validity can be determined from the incoming value alone,
 > without consulting the variable's prior value, any sibling field, or any reactive reference.
@@ -47348,8 +47349,8 @@ The canonical decision rule for when to use an inline predicate vs ~~a `<machine
 | `number(>0 && <10000)` | Stateless | Inline predicate |
 | `string(.length > 7 && .length < 255)` | Stateless | Inline predicate |
 | `string(email)` | Stateless | Inline predicate (named shape) |
-| `start < end` on a struct | Contextual (needs sibling) | ~~`<machine for Struct>`~~ a derived check: `<badDates=(@booking.start >= @booking.end)/>`, used in markup or the handler that changes the value (ruling:user-voice-scrml.md-S482-contract-003-derived-check) |
-| `.Pending => .Processing` | Contextual (needs prior state) | ~~`<machine>`~~ a derived check: `<canProcess=(@status is .Pending)/>`, used by the handler that changes the value (ruling:user-voice-scrml.md-S482-contract-003-derived-check) |
+| `start < end` on a struct | Contextual (needs sibling) | ~~`<machine for Struct>`~~ an `<engine for=Struct>` guard, `* => * given (self.start < self.end)` (§53.8.1; the `<engine for=T>` element is §66.21 Stage-1 soft-deprecated, `W-ENGINE-ELEMENT-DEPRECATED` — it parses and is not removed) |
+| `.Pending => .Processing` | Contextual (needs prior state) | ~~`<machine>`~~ the value's transition graph: `rule=` state-children on the enum value (§66.13.2; ruling:user-voice-scrml.md S435 Q6 — *"Every field's permitted changes are declared on its type: fixed, a lifecycle, a transition graph, or `let`/`replace`."*) |
 | `number(>=0 && <=@maxMana)` | Contextual (references reactive var) | ~~`<machine>`~~ a derived check: `<overBudget=(@spent > @maxMana)/>`, used in markup or the handler that changes the value (ruling:user-voice-scrml.md-S482-contract-003-derived-check) |
 
 The boundary case `number(>=0 && <=@maxMana)` SHALL be rejected with `E-CONTRACT-003` if

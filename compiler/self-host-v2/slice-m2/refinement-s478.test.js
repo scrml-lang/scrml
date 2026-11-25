@@ -76,7 +76,7 @@ describe("judged where declared, any zone (§53.11)", () => {
         expect(d.message).not.toContain("machine");
       }
     }
-    expect(run(cell("<m:number=100/>\n<x:number(>=0 && <=@m)=1/>")).find((d) => d.code === "E-CONTRACT-003").message).toContain("<overBudget=(@spent > @m)/>");
+    expect(run(cell("<m:number=100/>\n<x:number(>=0 && <=@m)=1/>")).find((d) => d.code === "E-CONTRACT-003").message).toContain("<over=(@cell > @m)/>`, where `@cell` is the refined cell");
   });
   test("a union with a refined member and a map of refined entries is E-CONTRACT-002 (no runtime test)", () => {
     expect(errs(cell("<x:number(>0) | [string: number(>0)]=1/>"))).toEqual(["E-CONTRACT-002"]);

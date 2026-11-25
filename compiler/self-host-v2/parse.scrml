@@ -7922,7 +7922,8 @@ ${
     // the grammar or impl#1 reads that the bootstrap does not judge).
     // E-CONTRACT-003's advice (S482, ruling:user-voice-scrml.md-S482-contract-003-derived-check): a
     // type's rule checks only its own value; another cell is compared in a derived check, not in the type
-    // (`<machine>`, the old advice, was removed S305/S307).
+    // (`<machine>`, the old advice, was removed S305/S307). The example names the cell it is compared against
+    // but not the refined cell: a type is read before its cell's name is known here, so `@cell` stands for it.
     fn judgeRefine(base: string, pred: string) -> RefJudge {
         const shown: string = base + "(" + pred + ")";
         const ts: RefTok[] = refToks(pred);
@@ -7930,11 +7931,11 @@ ${
         if (r.code == "" && r.i < ts.length) r = refErr(r.i, "E-CONTRACT-002", "text is left over after the predicate, at `" + refAt(ts, r.i).v + "`");
         if (r.code == "E-CONTRACT-003" && r.msg.substring(0, 6) == "IDENT:") {
             const nm2: string = r.msg.substring(6);
-            return { code: r.code, p: r.p, msg: "the inline predicate `" + shown + "` references the name `" + nm2 + "` — an inline predicate is stateless: its only subject is the incoming value (§53.2.1: \"No external identifiers MAY appear — if they do, the compiler SHALL emit `E-CONTRACT-003`\"; §53.3.1: it SHALL NOT access \"Any function parameter or outer binding\"). Write the bound as a number literal (`" + base + "(<=100)`). A type's rule checks only its own value; to compare against another cell, write a derived check (e.g. `<overBudget=(@spent > @maxMana)/>`) and use it in markup or the handler that changes the value" };
+            return { code: r.code, p: r.p, msg: "the inline predicate `" + shown + "` references the name `" + nm2 + "` — an inline predicate is stateless: its only subject is the incoming value (§53.2.1: \"No external identifiers MAY appear — if they do, the compiler SHALL emit `E-CONTRACT-003`\"; §53.3.1: it SHALL NOT access \"Any function parameter or outer binding\"). Write the bound as a number literal (`" + base + "(<=100)`). A type's rule checks only its own value; to compare against another cell, write a derived check (e.g. `<over=(@cell > @limit)/>`, where `@cell` is the refined cell and `@limit` the cell it is compared against) and use it in markup or the handler that changes the value" };
         }
         if (r.code == "E-CONTRACT-003") {
             const nm: string = r.msg.substring(4);
-            return { code: r.code, p: r.p, msg: "the inline predicate `" + shown + "` references `@" + nm + "` — an inline predicate is stateless: it may reference only the incoming value and its properties, not a reactive variable, a sibling field or an outer binding (§53.3.1, §53.11 E-CONTRACT-003). A type's rule checks only its own value; to compare against another cell, write a derived check (e.g. `<overBudget=(@spent > @" + nm + ")/>`) and use it in markup or the handler that changes the value" };
+            return { code: r.code, p: r.p, msg: "the inline predicate `" + shown + "` references `@" + nm + "` — an inline predicate is stateless: it may reference only the incoming value and its properties, not a reactive variable, a sibling field or an outer binding (§53.3.1, §53.11 E-CONTRACT-003). A type's rule checks only its own value; to compare against another cell, write a derived check (e.g. `<over=(@cell > @" + nm + ")/>`, where `@cell` is the refined cell) and use it in markup or the handler that changes the value" };
         }
         if (r.code == "E-CONTRACT-002" && r.msg.substring(0, 6) == "SHAPE:") {
             return { code: r.code, p: r.p, msg: "the named shape `" + r.msg.substring(6) + "` in `" + shown + "` is not in the shape registry (§53.6.3: \"If a named shape identifier does not match any entry in the built-in or extended registry, the compiler SHALL emit E-CONTRACT-002\"). Built-in shapes: email, url, uuid, phone, date, time, color" };
