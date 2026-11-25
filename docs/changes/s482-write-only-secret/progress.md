@@ -27,3 +27,12 @@ Probes: o9 (outer cell, p/x/o9-write-only), o9-let (plain let, p/r2/o9-let).
   through a fn reading the secret), n21 (outer cell via fn), n32 (body-placed let). Unchanged (client-read — must
   stay): n03/n23/n33 display, n05/n25 compound write, n26 later read, n27 bind:value. Body cell n31 unchanged
   (left — see item 3). Chromium values identical on all 21 compiling probes.
+- [code 1 r] hook caught outer-cell-place t10 (a dead fn READING the moved cell made a shell print its name): a shell
+  declaration is kept only when code WRITES the cell whole (overwrittenSharedOf). Committed f2838d373.
+- [under-inclusion] 180 probes (u61 ×63 #2061/#2105 families, fix/, r0/, e/, w/, x/, r2/, n/) base vs head in
+  Chromium: every value identical; only the leak column changed (10 probes, all closed). Artifacts byte-identical
+  except the 11 n/-family + o9/o9-let probes (the shells). Corpus differential (2977 files): 0 newly rejected/accepted,
+  0 code changes, 0 client diffs, 0 server diffs.
+- [tests] slice-m4/write-only-secret-s482.test.js (9; 5 red on base 153bd0334 — the 4 green are controls + the body-cell
+  pin); compiler/tests/browser/write-only-secret-chromium-s482.browser.test.js (4, Chromium; writes to a shell run —
+  a statement after the write still runs).
