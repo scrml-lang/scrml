@@ -41,3 +41,27 @@ Ruling (scrml-support/user-voice-scrml.md:22552-22555, pulled 2026-11-25), cited
   By the brief that is a positive (the display keeps the in-place value); the case exists to pin that value.
 - Displays in a declaration's markup ignore spine writes (no single place) — a possible false negative.
 - Over-report kept (fail toward the warning): a function value in spine code that runs only at its place.
+
+## r1 (review of #2107, fix round 1) — the above "Refinements" and "Open for the PA" are superseded
+
+- [x] item 1 (decision iv): spine code is never a writer, before or after the display's place — S481
+      ruling:user-voice-scrml.md-S481-body-run-order, *"A display of a `free` value reads it where it stands."*
+      Writers = handlers, effects, `when … changes`, requests (incl. held runs); re-running `^{}` and function
+      values in spine code kept as PA reading (prov=pa-ruled). Declaration-markup statements (they run at the
+      instance's place) are spine too. free-display-reads-in-place: no W-DISPLAY-UNTRACKED.
+- [x] F1: `writesShown` suppression dropped (conditional / other-branch / same-value cell writes re-render
+      nothing: fn27 / fn30 / fn29 pinned as warning). Accepted over-report: fn26 (unconditional changing cell
+      write in the same writer — display not stale, warned).
+- [x] F2: a `^{}` re-runs only when its body (outside a function value) holds `^.get(@x)` — meta.scrml's
+      respelling of `meta.get("x")` and a cell's `meta.bindings.x` (§22.5). rr01 no warning; rr04 warns.
+- [x] F3: request fix-it half cites E-BOOTSTRAP-UNSUPPORTED Core C-R1 INTERIM, labelled PA reading; effect half
+      labelled as following from §6.7.4.
+- [x] F4: fix-it quotes the `let` as written (string literal re-escaped; written annotation incl. grants); a tape
+      cell keeps its written grants and adds `replace` / `write` / edit grants derived from every write of the
+      `let` (effect facts). Grant-text helpers live inside THE TAPE GRANT READER (grant-scan R7).
+- [x] F5: fn25 (component display, body-top write after the use) is no longer a warning case (item 1). §34 row
+      now carries the decision (ii) lane-reading label.
+- [x] Corpus (3046): 2 warnings, both true positives (module/file-scope-let-foreign-write-neg,
+      components/component-scope-by-value-local-shadows); 0 verdict / byte / other-warning diffs vs base.
+- Known residual (not a ruled writer kind, not built): spine code inside a construct mounted LATER by an event
+  (an `if=` toggled by a handler) runs in a later turn; it is treated as spine and not reported.
