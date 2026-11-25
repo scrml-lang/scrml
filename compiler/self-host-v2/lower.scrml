@@ -33,7 +33,7 @@ ${
              GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, HostFn, CoreProgram, Validator, SurfaceProp, ValidityOf, Persist, Timing,
              ServerFn, SqlMode, Db, SqlQuery, SqlKind, SqlTables, SqlColumns, Failable, OkArm, ErrArm, VariantDef,
              LoopHead, EachHead, RangeHead, HostCall, CssUnit, CssDecl, CoreCss, CssVar, Gather, Lifted, GatherRow, PathStep,
-             CoreConst, CoreHead, CoreMeta, HeadTitle, ForeignSlice, TypeNote, block, litStr, mkSym, typeDefSym, readField, mountedInstances, declScopeKey } from "./core.scrml";
+             CoreConst, CoreHead, CoreMeta, HeadTitle, ForeignSlice, TypeNote, OuterCell, block, litStr, mkSym, typeDefSym, readField, mountedInstances, declScopeKey } from "./core.scrml";
     import { partsText } from "./css.scrml";
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, IfForm, AEffect, ARequest, AType, AParam, AFn,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, AConst, FileAst, Diag, ASql, ASqlMode,
@@ -817,6 +817,27 @@ ${
     // constant read only by server code reaches only the server artifact.
     // (Review #1617 MED-1: inlining each read re-lowered the initializer
     // recursively — output and compile time exponential in constant depth.)
+    // s482 (lane s482-seed-timing; ruling:user-voice-scrml.md-S482-outside-cell-seed-time — "before
+    // the body, in link order") — the cells declared outside the program body: each user declaration
+    // whose one field is its own value (analyze ownValued: no attribute, no child field; the field
+    // carries the declaration's nid). A declaration nested in the body is a component (it has an
+    // attribute, a `renders` or the `:struct` marker — analyze isNestedUserDecl), never one of these.
+    // `at`: how many admitted constants (coreConsts) come before it — node ids run in link order,
+    // then source order.
+    fn outerCells(t: Tables) -> OuterCell[] {
+        let out: OuterCell[] = [];
+        for (const d of t.decls) {
+            if (d.kind == DeclKind.User && d.sym.id != t.program.id && d.fields.length == 1 && d.fields[0].nid == d.nid) {
+                let at: int = 0;
+                for (const k of t.consts) {
+                    if (k.ok && k.nid < d.nid) at = at + 1;
+                }
+                out = out.concat([{ decl: d.sym, at: at }]);
+            }
+        }
+        return out;
+    }
+
     fn coreConsts(t: Tables) -> CoreConst[] {
         let out: CoreConst[] = [];
         for (const k of t.consts) {
@@ -3170,13 +3191,25 @@ ${
         // whether the seed is held for it). Only a writable cell (`let`: a seed, §66.9) whose
         // initializer is not a literal has one: a literal seed computes the same value wherever
         // it runs, and a locked cell is derived — computed when it is read.
+        // s482 (lane s482-seed-timing; ruling:user-voice-scrml.md-S482-locked-field-derived): a locked
+        // cell is derived only when its initializer reads a cell; otherwise it is a constant, "whose
+        // initializer is a seed computed at its place" — so it has a place too (print.scrml
+        // constSeedField decides which locked cell is such a seed; the printer drops any other place).
         const pi: DeclInfo | not = declInfo(c.t, c.t.program);
         if (pi is given) {
             for (const f of pi.fields) {
-                if (f.nid == nid && f.wcap is given && !literalInit(f.init)) return [View.Init(f.sym)];
+                if (f.nid == nid && !literalInit(f.init) && (f.wcap is given || !readsAtCell(f.reads))) return [View.Init(f.sym)];
             }
         }
         return [];
+    }
+
+    // A locked initializer that names a cell (`@x`, analyze's `reads`) is derived (§66.9 rule 3): no place.
+    fn readsAtCell(reads: string[]) -> boolean {
+        for (const r of reads) {
+            if (r.substring(0, 1) == "@") return true;
+        }
+        return false;
     }
 
     fn literalInit(v: AAttrValue) -> boolean {
@@ -5233,8 +5266,8 @@ ${
         const consts: CoreConst[] = coreConsts(t);
         const top: AProgram | not = topProgramOf(tp.files, t);
         const head: CoreHead = headOf(top);
-        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, envelopes: t.server.envelopes, head: head, tool: t.server.tool, endpoints: t.server.endpoints, channels: t.server.channels, typed: typedNotes(t) };
-        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, envelopes: t.server.envelopes, head: head, tool: t.server.tool, endpoints: t.server.endpoints, channels: t.server.channels, typed: typedNotes(t) };
+        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, envelopes: t.server.envelopes, head: head, tool: t.server.tool, endpoints: t.server.endpoints, channels: t.server.channels, typed: typedNotes(t), outer: outerCells(t) };
+        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError, serverCallError: serverCallError, css: css, consts: consts, loads: t.server.loads, envelopes: t.server.envelopes, head: head, tool: t.server.tool, endpoints: t.server.endpoints, channels: t.server.channels, typed: typedNotes(t), outer: outerCells(t) };
         return { core: core, diags: tp.diags };
     }
 

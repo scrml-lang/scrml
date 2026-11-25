@@ -5574,7 +5574,7 @@ ${
             // E-DERIVED-ENGINE-NO-RULES ("Transitions are determined by the
             // source, not authored"); `let` is the seeded, writable form.
             mode = FieldMode.Derived;
-            if (rg.graph is given) st = derivedRules(te.file, body, st);
+            if (rg.graph is given) st = derivedRules(te.file, body, cellReads(init), st);
         }
         // s475 (s475-boot-lifecycle-type): which DECLARATION may carry the lifecycle type it was given
         // (a lifecycle other than `(not to T)` was refused where it was read: no second report)
@@ -6281,7 +6281,13 @@ ${
     }
 
     // §51.0.J: every `rule=` on a state-child of a DERIVED value.
-    fn derivedRules(file: string, body: ADeclChild[], st0: AS) -> AS {
+    // s482 r1 (#2105 review LOW-2; ruling:user-voice-scrml.md-S482-locked-field-derived — "derived
+    // only when it reads a cell", §66.9 rule 1): `named` — the initializer names a cell itself, so
+    // the value is derived for certain; otherwise it reads bindings through what it calls, and is
+    // derived only if that reaches a cell (lockedWhat's question, which this pass — before the
+    // tables — cannot ask): a CONSTANT otherwise, seeded once at its place. Either way nothing
+    // authors its transitions, so the refusal stands; the message no longer calls a constant derived.
+    fn derivedRules(file: string, body: ADeclChild[], named: boolean, st0: AS) -> AS {
         let st: AS = st0;
         for (const c of body) {
             // s478: §51.0.R "`<onIdle>` is permitted on derived engines … the watchdog can
@@ -6290,7 +6296,8 @@ ${
             for (const x of idleOf(c)) { st = addDiag(st, file, x.span, "E-BOOTSTRAP-UNSUPPORTED", "`<onIdle>` on a derived value is not in the bootstrap yet — a derived engine's watchdog fires only when its source reaches the `to=` target (§51.0.R), which is not built; use `let` for a value the watchdog writes"); }
             for (const sc of stateChildOf(c)) {
                 for (const a of sc.attrs) {
-                    if (a.name == "rule") st = addDiag(st, file, a.span, "E-DERIVED-ENGINE-NO-RULES", "`rule=` on the state-child `<" + sc.name + ">` of a derived value — a locked declaration whose initializer reads cells is derived (§66.9 rule 3), and a derived value's transitions are determined by its source, not authored (§51.0.J). Remove `rule=`, or write `let` before the `<` for a value seeded once from its initializer and then moved along its rules");
+                    if (a.name == "rule" && named) st = addDiag(st, file, a.span, "E-DERIVED-ENGINE-NO-RULES", "`rule=` on the state-child `<" + sc.name + ">` of a derived value — a locked declaration whose initializer reads a cell is derived (§66.9 rule 3), and a derived value's transitions are determined by its source, not authored (§51.0.J). Remove `rule=`, or write `let` before the `<` for a value seeded once from its initializer and then moved along its rules");
+                    else if (a.name == "rule") st = addDiag(st, file, a.span, "E-DERIVED-ENGINE-NO-RULES", "`rule=` on the state-child `<" + sc.name + ">` of a locked value — its initializer is computed, not written: derived if it reads a cell through what it calls (§66.9 rule 3, a derived value's transitions are determined by its source, §51.0.J), and otherwise a constant, seeded once at its place and never moved (§66.9 rule 1, S482). Either way no transition of it is authored. Remove `rule=`, or write `let` before the `<` for a value seeded once from its initializer and then moved along its rules");
                 }
             }
         }
@@ -11693,7 +11700,12 @@ ${
             if (c.ok) binds = binds.concat([c.sym.id]);
             if (c.ok && c.mutable) lets = lets.concat([c.sym.id]);
         }
-        if (binds.length == 0) return out;
+        // s482 r2 (#2105 r1 review MED-A) — a program with no file-scope binding still has its outside
+        // cells' seeds judged (outerSeedReachDiags: a seed reading a program cell, probes e12 / e12f
+        // hold no binding); only that judgment runs then — the rest of this pass judges bindings
+        const out0: Diag[] = out;
+        const noBinds: boolean = binds.length == 0;
+        if (noBinds && !anyOuterCell(g)) return out;
         // each callable's own facts: the file-scope `let`s its body writes (LetW, in order), and
         // every file-scope binding its body reads or writes
         let ownW: FxAtom[][] = [];
@@ -11717,6 +11729,7 @@ ${
         let ownBR: FxAtom[][] = [];
         let fnER: int[][] = [];
         const pfields: FieldInfo[] = programCells(g);
+        const ocells: DeclInfo[] = outerCellDecls(g);
         let i: int = 0;
         const six: SymIx = nodeSymIx(sum.nodes);
         for (const c of sum.nodes) {
@@ -11756,7 +11769,7 @@ ${
                 }
                 // s482 (lane s482-seed-reach) — the program cells the body uses: a read or a write runs
                 // the cell's seed when it has not run yet (bodyReachDiags judges what that seed reaches)
-                for (const cid of cellUsesDirect(t, fsrc.f.body, g.program.id, pfields, held)) {
+                for (const cid of cellUsesDirect(t, fsrc.f.body, g.program.id, pfields, held, ocells)) {
                     br = br.concat([ownAtom("c:" + cid, i, kr)]);
                     kr = kr + 1;
                 }
@@ -11849,7 +11862,30 @@ ${
         out = out.concat(derivedUntrackedDiags(g, t, sum, reads, lets));
         // s482 (lane s482-display-untracked) — §6.15 A5, W-DISPLAY-UNTRACKED, on the same closures
         out = out.concat(displayUntrackedDiags(g, t, sum, writes, sites, reads, lets));
-        return out.concat(bodyReachDiags(g, t, sum, usesR, binds));
+        if (noBinds) return out0.concat(outerSeedReachDiags(g, t, sum, usesR, binds));
+        return out.concat(bodyReachDiags(g, t, sum, usesR, binds)).concat(outerSeedReachDiags(g, t, sum, usesR, binds));
+    }
+
+    // s482 r2 (MED-A) — does the program declare a cell outside its body (a top-level declaration
+    // item that is one own-value field, as outerSeedReachDiags lists them)?
+    fn anyOuterCell(g: Globals) -> boolean {
+        for (const f of g.files) {
+            for (const it of f.items) {
+                const k: AItemK = it.k;
+                const ad: ADecl | not = match k {
+                    .DeclItem(d: x) :> x,
+                    // no-default-arm: a cell outside the body is a top-level declaration item
+                    _ :> not
+                };
+                if (ad is given) {
+                    for (const gd of g.decls) {
+                        const di: DeclInfo = gd.info;
+                        if (di.nid == ad.nid && di.sym.id != g.program.id && di.fields.length == 1 && di.fields[0].nid == di.nid) return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     // =========================================================================
@@ -12815,7 +12851,7 @@ ${
                 };
                 const places: BodyPlace[] = bodyPlaces(g, f.path, ps);
                 if (places.length > 0) {
-                    const cx: BodyCx = { g: g, t: t, sum: sum, usesD: usesD, binds: binds, file: f.path, places: places, cells: bodyCells(g, ps), prog: g.program.id, pfields: programCells(g) };
+                    const cx: BodyCx = { g: g, t: t, sum: sum, usesD: usesD, binds: binds, file: f.path, places: places, cells: bodyCells(g, t, ps), prog: g.program.id, pfields: programCells(g) };
                     for (const pi of ps) {
                         const n: ANode | not = markupOfItem(pi);
                         if (n is given) out = out.concat(bodyNodeReach(cx, n));
@@ -12835,9 +12871,136 @@ ${
         return out;
     }
 
+    // s482 r1 (#2105 review MED-1 / MED-2; §7.6 R1 — a cell declared outside the body is Load code:
+    // "before the body, in link order, then source order", ruling:user-voice-scrml.md-S482-outside-
+    // cell-seed-time; §7.6 R2 — "Code that runs at place p … may reach … only bindings whose place is
+    // before p. Otherwise E-SCOPE-001"). The seed of such a cell (in an imported file, or in the
+    // entry file before or after `<program>`) runs at its place among the file-scope bindings outside
+    // the body — after those before it in link order, then source order, and before the program
+    // body. One that reaches a binding declared after it there, or ANY binding of the program body
+    // (the body runs after every outside seed — a cell written after `</program>` too), directly,
+    // through a function it calls or hands on, or through a cell it reads whose seed has not run, is
+    // E-SCOPE-001 — at compile time, not a load-time ReferenceError (probes c05b / c05c / c06 / y16 /
+    // y23 / y24 / y26) nor a value from the wrong order (y20). The same judgment as a body seed
+    // (cellReach / codeReach), on places in that order: a binding outside the body at 2i+1 (its
+    // index i among the file-scope bindings, link order), the cell at 2a (a = the bindings before
+    // it), a body binding after them all. Not judged at its own place: a derived locked cell
+    // (computed when read, §66.9 rule 3 — listed as a hop, judged where a seed reads it, r3), a persisted one (its seed is its stored value's default, computed at
+    // construction — g-boot-persist-seed-at-construction-s482).
+    fn outerSeedReachDiags(g: Globals, t: Tables, sum: Summary, usesD: FxAtom[][], binds: int[]) -> Diag[] {
+        const late: int = 2000000000;
+        let body: int[] = [];
+        for (const f0 of g.files) {
+            for (const it0 of f0.items) {
+                const k0: AItemK = it0.k;
+                const ps0: AItem[] = match k0 {
+                    .ProgramItem(p: p) :> p.items,
+                    // no-default-arm: only the program holds body bindings
+                    _ :> []
+                };
+                for (const bp0 of bodyPlaces(g, f0.path, ps0)) { body = body.concat([bp0.sym]); }
+            }
+        }
+        let places: BodyPlace[] = [];
+        let i: int = 0;
+        for (const kc of g.consts) {
+            if (kc.ok) {
+                let pos: int = 2 * i + 1;
+                if (body.indexOf(kc.sym.id) >= 0) pos = late;
+                places = places.concat([{ sym: kc.sym.id, name: kc.name, pos: pos }]);
+            }
+            i = i + 1;
+        }
+        // s482 r2 (#2105 r1 review MED-A) — the program's own cells (`<program> let <n/>`) are bindings
+        // of the program body too: the program instance is built when the body runs, after every
+        // outside seed, so a seed outside the body that reads one (directly, through a function, or
+        // through another outside cell) reads it before it exists — E-SCOPE-001, not a load-time TDZ
+        // on the program declaration (probes e12 / e12c / e12e / e12f). codeReach finds them here.
+        for (const pf of programCells(g)) {
+            places = places.concat([{ sym: pf.sym.id, name: "@" + pf.sym.hint, pos: late }]);
+        }
+        // every such cell, with its file (a seed reading one placed later constructs it on demand —
+        // its seed runs at the reader's place, so it is judged there too: codeReach / outerCellOf)
+        let cells: BodyCell[] = [];
+        let files: string[] = [];
+        for (const f of g.files) {
+            for (const it of f.items) {
+                const k: AItemK = it.k;
+                const ad: ADecl | not = match k {
+                    .DeclItem(d: x) :> x,
+                    // no-default-arm: a cell outside the body is a top-level declaration item
+                    _ :> not
+                };
+                if (ad is given && attrNamed(ad.mods, "persist") is not) {
+                    for (const gd of g.decls) {
+                        const di: DeclInfo = gd.info;
+                        if (di.nid == ad.nid && di.sym.id != g.program.id && di.fields.length == 1 && di.fields[0].nid == di.nid) {
+                            const fi: FieldInfo = di.fields[0];
+                            // s482 r3 (#2105 r2 review MED-B) — a DERIVED outer cell is listed too, as a
+                            // hop (derived: true): it is never judged at its own place (it has none — it
+                            // is computed when read, §66.9 rule 3), but a seed that reads it runs its
+                            // formula THERE, so cellReach follows the formula at the READER's place
+                            // (cellRunsAt / cellHop) — directly, through a function, to a program cell
+                            // (probes m01 / m06 / m09 / m10). Unlisted, the hop was invisible and the
+                            // page died at load on the program declaration's TDZ.
+                            const isDerived: boolean = fi.wcap is not && lockedDerived(g, t, [], fi.init);
+                            let a: int = 0;
+                            for (const kc2 of g.consts) { if (kc2.nid < di.nid) a = a + 1; }
+                            cells = cells.concat([{ sym: fi.sym.id, name: ad.name, pos: 2 * a, init: fi.init, derived: isDerived }]);
+                            files = files.concat([f.path]);
+                        }
+                    }
+                }
+            }
+        }
+        let out: Diag[] = [];
+        let ci: int = 0;
+        for (const c of cells) {
+            if (!c.derived) {
+                const cx: BodyCx = { g: g, t: t, sum: sum, usesD: usesD, binds: binds, file: files[ci], places: places, cells: cells, prog: g.program.id, pfields: programCells(g) };
+                const r: SeedReach | not = cellReach(cx, c, c.pos, [c.sym]);
+                if (r is given) out = out.concat([outerLaterDiag(r, c.name, r.bp.pos == late)]);
+            }
+            ci = ci + 1;
+        }
+        return out;
+    }
+
+    // s482 r1 — a read `@x` of a cell declared outside the body (its one own-value field), as the
+    // field's Sym id, when it is one of cx.cells (only outerSeedReachDiags lists such cells); else -1.
+    fn outerCellOf(cx: BodyCx, e: AExpr) -> int {
+        const f: NameFact | not = nameFact(cx.t.names, e.nid);
+        const did: int = match f {
+            .NField(decl: d, inst: x, idx: i) :> (i == 0 ? d.id : -1),
+            // no-default-arm: one question — is it a read of a declaration field
+            _ :> -1
+        };
+        if (did < 0) return -1;
+        for (const gd of cx.g.decls) {
+            const di: DeclInfo = gd.info;
+            if (di.sym.id == did && di.fields.length == 1) {
+                const sid: int = di.fields[0].sym.id;
+                for (const c of cx.cells) { if (c.sym == sid) return sid; }
+            }
+        }
+        return -1;
+    }
+
+    fn outerLaterDiag(r: SeedReach, cell: string, inBody: boolean) -> Diag {
+        const n: string = r.bp.name;
+        let where: string = "`" + n + "` is declared after `@" + cell + "` (in link order — each imported file before the file that imports it — then source order)";
+        if (inBody) where = "`" + n + "` is declared in the program body, which runs after every cell declared outside it is seeded";
+        return newDiag("E-SCOPE-001", "`" + n + "` is used before it is initialized — the seed of `@" + cell + "` (a cell declared outside the program body: its seed runs before the body, in link order, §7.6 R1 S482)" + r.how + " and " + where + ", so `" + n + "` is not initialized when that seed runs (§7.6 R2). Declare `" + n + "` before `@" + cell + "`, or declare the cell where the value is ready", r.file, r.span);
+    }
+
     // The program body's cells (BodyCell): each declaration item of the body that is a field of
     // the program, with its place (the item's source start) — a persisted one left out.
-    fn bodyCells(g: Globals, items: AItem[]) -> BodyCell[] {
+    // s482 (lane s482-seed-timing; ruling:user-voice-scrml.md-S482-locked-field-derived — "a locked
+    // field is derived exactly when its initializer reads a cell, directly or through any function it
+    // calls, at any depth. Otherwise it's a constant, whose initializer is a seed computed at its
+    // place"): a locked cell is DERIVED only when lockedDerived says so; a constant one is a seed at
+    // its place, judged as a `let` seed is.
+    fn bodyCells(g: Globals, t: Tables, items: AItem[]) -> BodyCell[] {
         const fields: FieldInfo[] = programCells(g);
         let out: BodyCell[] = [];
         for (const it of items) {
@@ -12853,7 +13016,7 @@ ${
             };
             if (d is given && attrNamed(d.mods, "persist") is not) {
                 for (const fi of fields) {
-                    if (fi.nid == d.nid) out = out.concat([{ sym: fi.sym.id, name: d.name, pos: it.span.start, init: fi.init, derived: fi.wcap is not }]);
+                    if (fi.nid == d.nid) out = out.concat([{ sym: fi.sym.id, name: d.name, pos: it.span.start, init: fi.init, derived: fi.wcap is not && lockedDerived(g, t, [], fi.init) }]);
                 }
             }
         }
@@ -12936,13 +13099,61 @@ ${
     }
 
     // The program cells a function body uses (their Sym ids), outside the spans `held`.
-    fn cellUsesDirect(t: Tables, b: ABlock, prog: int, fields: FieldInfo[], held: ASpan[]) -> int[] {
+    fn cellUsesDirect(t: Tables, b: ABlock, prog: int, fields: FieldInfo[], held: ASpan[], outer: DeclInfo[]) -> int[] {
         let out: int[] = [];
         for (const e of atUsesIn(t, b)) {
-            const id: int = progCellOf(t, e, prog, fields);
+            let id: int = progCellOf(t, e, prog, fields);
+            if (id < 0) id = outerCellUseOf(t, e, outer);
             if (id >= 0 && out.indexOf(id) < 0 && !spanInAny(e.span, held)) out = out.concat([id]);
         }
         return out;
+    }
+
+    // s482 r3 (#2105 r2 review MED-B, probe m10) — the cells declared outside the program body (a
+    // top-level declaration whose one field is its own value), so a function's `c:` atoms name them
+    // too: a seed outside the body that calls a function reading one runs that cell's seed — or, a
+    // derived one, its formula — at the seed's place (outerSeedReachDiags; in the body's judgment
+    // such an atom matches no body cell and no body place, so it changes nothing there).
+    fn outerCellDecls(g: Globals) -> DeclInfo[] {
+        let out: DeclInfo[] = [];
+        for (const f of g.files) {
+            for (const it of f.items) {
+                const k: AItemK = it.k;
+                const ad: ADecl | not = match k {
+                    .DeclItem(d: x) :> x,
+                    // no-default-arm: a cell outside the body is a top-level declaration item
+                    _ :> not
+                };
+                if (ad is given) {
+                    for (const gd of g.decls) {
+                        const di: DeclInfo = gd.info;
+                        if (di.nid == ad.nid && di.sym.id != g.program.id && di.fields.length == 1 && di.fields[0].nid == di.nid) out = out.concat([di]);
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    // The outside cell (outerCellDecls) a `@name` node reads or writes, as its field's Sym id, else -1.
+    fn outerCellUseOf(t: Tables, e: AExpr, outer: DeclInfo[]) -> int {
+        if (outer.length == 0) return -1;
+        const f: NameFact | not = nameFact(t.names, e.nid);
+        const did: int = match f {
+            .NField(decl: d, inst: x, idx: i) :> (i == 0 ? d.id : -1),
+            // no-default-arm: one question — is it a read of a declaration field
+            _ :> -1
+        };
+        for (const di of outer) {
+            if (did >= 0 && di.sym.id == did) return di.fields[0].sym.id;
+        }
+        const cap: int = writeCapOf(effectFact(t.effects, e.nid));
+        if (cap < 0) return -1;
+        for (const di of outer) {
+            const wc: Sym | not = di.fields[0].wcap;
+            if (wc is given && wc.id == cap) return di.fields[0].sym.id;
+        }
+        return -1;
     }
 
     // s482 (lane s482-seed-reach, item (a); ruling:user-voice-scrml.md-S482-seed-read-early) —
@@ -13004,10 +13215,18 @@ ${
         }
         for (const a of ats) {
             if (!spanInAny(a.span, defer)) {
-                const c: BodyCell | not = cellOfSym(cx.cells, progCellOf(cx.t, a, cx.prog, cx.pfields));
+                let cid: int = progCellOf(cx.t, a, cx.prog, cx.pfields);
+                if (cid < 0) cid = outerCellOf(cx, a);     // s482 r1: a cell declared outside the body (outerSeedReachDiags)
+                const c: BodyCell | not = cellOfSym(cx.cells, cid);
                 if (c is given && seen.indexOf(c.sym) < 0 && cellRunsAt(c, pos)) {
                     const inner: SeedReach | not = cellReach(cx, c, pos, seen.concat([c.sym]));
                     if (inner is given) return { bp: inner.bp, how: cellHop(c, inner), file: cx.file, span: a.span };
+                }
+                // s482 r2 (#2105 r1 review MED-A) — a cell placed as a binding (outerSeedReachDiags
+                // places the program's own cells, after every outside seed)
+                if (c is not && cid >= 0) {
+                    const cp: BodyPlace | not = placeOfBinding(cx.places, cid);
+                    if (cp is given && cp.pos > pos) return { bp: cp, how: " reads `" + cp.name + "`,", file: cx.file, span: a.span };
                 }
             }
         }
@@ -13026,6 +13245,11 @@ ${
                         if (c is given && seen.indexOf(c.sym) < 0 && cellRunsAt(c, pos)) {
                             const inner: SeedReach | not = cellReach(cx, c, pos, seen.concat([c.sym]));
                             if (inner is given) return { bp: inner.bp, how: via + " which" + cellHop(c, inner), file: r.file, span: r.span };
+                        }
+                        // s482 r2 (MED-A) — a program cell placed as a binding (outerSeedReachDiags)
+                        if (c is not) {
+                            const cp: BodyPlace | not = placeOfBinding(cx.places, atomBinding(ua.key));
+                            if (cp is given && cp.pos > pos) return { bp: cp, how: via + " which uses `" + cp.name + "`,", file: r.file, span: r.span };
                         }
                     } else {
                         const bp: BodyPlace | not = placeOfBinding(cx.places, atomBinding(ua.key));
@@ -45397,7 +45621,7 @@ ${
     fn typesProgram(g: Globals) -> CoreProgram {
         let defs: TypeDef[] = [];
         for (const t of g.types) { defs = defs.concat([t.def]); }
-        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [], loads: [], envelopes: [], head: plainHead(), tool: not, endpoints: [], channels: [], typed: [] };
+        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [], loads: [], envelopes: [], head: plainHead(), tool: not, endpoints: [], channels: [], typed: [], outer: [] };
     }
 
     fn storeOf(v: AAttrValue) -> PersistStore | not {

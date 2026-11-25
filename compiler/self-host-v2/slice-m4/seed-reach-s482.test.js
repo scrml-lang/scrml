@@ -121,8 +121,18 @@ let <c:int=(@d + 0)/>
 let <d:int=(k + 0)/>`), ["uses `@c` before its place", "uses `@d` before its place", "reads `k`"]);
   }, 120000);
 
-  test("a derived cell read before the binding (computed when it is read)", async () => {
+  // s482 (lane s482-seed-timing, ruling:user-voice-scrml.md-S482-locked-field-derived): a locked cell
+  // that reads no cell is a CONSTANT — a seed at its place — so a read before that place computes its
+  // seed there; one that reads a cell is derived, computed when it is read.
+  test("a locked constant cell read before the binding (its seed is computed at the read)", async () => {
     await refusedNaming(P(`<d:int=(k + 0)/>
+<p id="r">\${@d}</p>
+\${ const k: int = n + 0; }`), ["the seed of `@d` (computed at its place", "reads `k`"]);
+  }, 120000);
+
+  test("a derived cell read before the binding (computed when it is read)", async () => {
+    await refusedNaming(P(`let <m:int=0/>
+<d:int=(@m + k)/>
 <p id="r">\${@d}</p>
 \${ const k: int = n + 0; }`), ["reads `@d`, a derived value computed when it is read, and its formula reads `k`"]);
   }, 120000);
@@ -171,8 +181,9 @@ let <c:int=(k + 0)/>
   }, 120000);
 
   test("a gather reading a derived cell (u-gather-derived)", async () => {
-    await refusedNaming(P(`<ul>\${ for (const x of [1]) { lift <li>\${@d + x}</li>; } }</ul>
-<d:int=(k + 0)/>
+    await refusedNaming(P(`let <m:int=0/>
+<ul>\${ for (const x of [1]) { lift <li>\${@d + x}</li>; } }</ul>
+<d:int=(@m + k)/>
 \${ const k: int = n + 0; }
 <p id="s">\${k}</p>`), ["this display reads `@d`, a derived value computed when it is read, and its formula reads `k`"]);
   }, 120000);
@@ -314,8 +325,11 @@ let <b:int=(@a + 1)/>
 `, ["r", "s"])).toEqual(["4", "4"]);
   }, 120000);
 
+  // s482 (lane s482-seed-timing): `<d:int=(k + 0)/>` before `k` is now a constant whose seed runs at
+  // its place, before `k` — E-SCOPE-001 (pinned above); the derived twin reads a cell.
   test("a derived cell read after the binding (5 | 5)", async () => {
-    expect(await texts(P(`<d:int=(k + 0)/>
+    expect(await texts(P(`let <m:int=0/>
+<d:int=(@m + k)/>
 \${ const k: int = n + 0; }
 <p id="r">\${@d}</p>
 <p id="s">\${k}</p>`), ["r", "s"])).toEqual(["5", "5"]);

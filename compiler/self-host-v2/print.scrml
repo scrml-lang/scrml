@@ -26,14 +26,14 @@
 // by #1119; Stmt.Write / View.Each are bound in one arm again, S440.)
 // =============================================================================
 ${
-    import { Sym, Type, DeclKind, TypeDef, FieldDef, VariantDef, TransitionGraph, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm,
+    import { OuterCell, Sym, Type, DeclKind, TypeDef, FieldDef, VariantDef, TransitionGraph, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm,
              HostCall, SeqFn, BindKind,
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, RequestState, ReqClass, FieldRole, Field,
              Decl, Fn, HostFn, HostBind, HostSrc, HostArg, HostProp, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator, Persist, PersistStore, Timing, IdleWatch,
              Failable, OkArm, ErrArm, ServerFn, SqlQuery, SqlMode, Param, LoopHead, EachHead, RangeHead, CssUnit, CoreCss, CssVar,
              Gather, Lifted, GatherRow, PathStep, CoreConst, HeadTitle, CoreMeta, ForeignSlice, CoreChannel, DbLoad,
              findDecl, findTypeDef, typeDefSym, capOwner, findFn, findServerFn, mountedInstances, block, mkSym } from "./core.scrml";
-    import { Node, nodeKids, allNodes, sharedRefs, boundSyms, assignedSyms, requestHandles } from "./walk.scrml";
+    import { Node, nodeKids, allNodes, sharedRefs, sharedRefOf, boundSyms, assignedSyms, requestHandles } from "./walk.scrml";
     import { JsOp, JsUnOp, JsExpr, JsProp, JsStmt, JsLoopHead, JsForInit,
              jid, jstr, jnum, jmember, jcall, jmcall, jthunk, sexpr, printModule } from "./js.scrml";
     import { HAttr, HNode, Page, printPage, isVoid, dropsLeadingLf, cutNewline } from "./html.scrml";
@@ -177,6 +177,13 @@ ${
         for (const n of allNodes(root)) {
             let id: int = localReadOf(n);
             if (id < 0) id = assignedLocalOf(n);
+            // s482 r1 (#2105 review HIGH-1): a reference to the shared instance of a cell declared
+            // outside the body that outerPlaced classifies as a binding (its id is then a constant's
+            // — never otherwise: a declaration's Sym is not a constant's) reads that binding
+            if (id < 0) {
+                const sr: Sym | not = sharedRefOf(n);
+                if (sr is given) id = sr.id;
+            }
             if (id >= 0 && !hasInt(out, id) && isConstSym(p, id)) out = out.concat([id]);
         }
         return out;
@@ -270,6 +277,111 @@ ${
 
     // s481 — `seq`: the bindings whose initializer runs in its PLACE in the program body
     // (§7.6 S481; bodyInits): declared here, assigned where their `${ }` stood.
+    // s482 (lane s482-seed-timing; ruling:user-voice-scrml.md-S482-outside-cell-seed-time: *"before the
+    // body, in link order"* — the same as the library's plain `let` / `const` initializers, even when
+    // nothing reads the cell) — the file-scope section (seqConstStmts) with each cell declared outside
+    // the body (`outs`, outerLive) printed at its place among the constants (OuterCell.at): its
+    // declaration, then `shared_<decl>()`, which constructs its shared instance and runs its seed there.
+    // A cell nothing reads is constructed all the same.
+    // The declarations of the cells declared outside the body (every one, live or not) are printed
+    // AHEAD of the section (a seed may read a cell declared after it in link order — its shared
+    // instance is then constructed on demand, which needs its declaration), except one carrying a
+    // validator, whose arguments may read a file-scope constant: that one is printed at its place.
+    fn constsWithOuter(ctx: Ctx, ks: CoreConst[], seq: int[], outs: OuterCell[], sharedUsed: Sym[], uses: DeclNs[]) -> JsStmt[] {
+        let ahead: JsStmt[] = [];
+        let atPlace: int[] = [];
+        for (const oc0 of ctx.p.outer) {
+            const d0: Decl | not = findDecl(ctx.p, oc0.decl);
+            if (d0 is given) {
+                if (declHasValidators(d0)) {
+                    atPlace = atPlace.concat([d0.sym.id]);
+                } else {
+                    ahead = ahead.concat(declJs(ctx, d0, sharedUsed, uses).stmts);
+                }
+            }
+        }
+        if (outs.length == 0 && atPlace.length == 0) return ahead.concat(seqConstStmts(ctx, ks, seq));
+        let out: JsStmt[] = seqConstStmts(ctx, ks, seq);
+        if (out.length == 0) out = [JsStmt.SBlank, JsStmt.SComment("file-scope bindings (§7.6)")];
+        // out = [blank, comment, one statement per constant of `ks`, in order]
+        let res: JsStmt[] = ahead.concat(out.slice(0, 2));
+        // a validator-carrying outer cell that is not live: its declaration at its place too
+        let places: OuterCell[] = outs;
+        for (const oc3 of ctx.p.outer) {
+            if (hasInt(atPlace, oc3.decl.id) && !outerIn(outs, oc3.decl.id)) places = places.concat([{ decl: oc3.decl, at: oc3.at }]);
+        }
+        let done: int[] = [];
+        let i: int = 0;
+        for (const k of ks) {
+            const j: int = constIndex(ctx.p, k.sym.id);
+            for (const oc of places) {
+                if (oc.at <= j && !hasInt(done, oc.decl.id)) {
+                    done = done.concat([oc.decl.id]);
+                    res = res.concat(outerCellJs(ctx, oc, sharedUsed, uses, hasInt(atPlace, oc.decl.id), outerIn(outs, oc.decl.id)));
+                }
+            }
+            res = res.concat([out[2 + i]]);
+            i = i + 1;
+        }
+        for (const oc2 of places) {
+            if (!hasInt(done, oc2.decl.id)) res = res.concat(outerCellJs(ctx, oc2, sharedUsed, uses, hasInt(atPlace, oc2.decl.id), outerIn(outs, oc2.decl.id)));
+        }
+        return res;
+    }
+
+    fn outerIn(xs: OuterCell[], id: int) -> boolean {
+        for (const x of xs) { if (x.decl.id == id) return true; }
+        return false;
+    }
+
+    fn declHasValidators(d: Decl) -> boolean {
+        for (const f of d.fields) { if (f.vals.length > 0) return true; }
+        return false;
+    }
+
+    fn constIndex(p: CoreProgram, id: int) -> int {
+        let j: int = 0;
+        for (const k of p.consts) {
+            if (k.sym.id == id) return j;
+            j = j + 1;
+        }
+        return -1;
+    }
+
+    fn outerCellJs(ctx: Ctx, oc: OuterCell, sharedUsed: Sym[], uses: DeclNs[], withDecl: boolean, live: boolean) -> JsStmt[] {
+        const d: Decl | not = findDecl(ctx.p, oc.decl);
+        if (d is not) return [];
+        let pre: JsStmt[] = [];
+        if (withDecl) pre = declJs(ctx, d, sharedUsed, uses).stmts;
+        if (!live) return pre;
+        return pre.concat([
+            JsStmt.SComment("a cell declared outside the program body: its seed runs here, before the body, in link order (§7.6 R1 Load, S482)"),
+            sexpr(jcall(jid(nameOf(ctx.names, NameKey.SharedGet(d.sym.id))), [])),
+        ]);
+    }
+
+    // s482 (lane s482-seed-timing, Q12) — the cells declared outside the body (CoreProgram.outer) whose
+    // seed is live (it calls something or reads a binding or a cell, so where it runs can be observed):
+    // a writable cell's seed, or a locked constant's (constSeedField). Any other runs as before, at its
+    // first reference — a literal computes the same value wherever it runs, a derived cell when read.
+    fn outerLive(p: CoreProgram) -> OuterCell[] {
+        let out: OuterCell[] = [];
+        for (const oc of p.outer) {
+            const d: Decl | not = findDecl(p, oc.decl);
+            if (d is given && outerSeeded(p, d)) out = out.concat([oc]);
+        }
+        return out;
+    }
+
+    fn outerSeeded(p: CoreProgram, d: Decl) -> boolean {
+        if (d.renders is given || d.fields.length != 1) return false;
+        const f: Field = d.fields[0];
+        const init: Expr | not = f.init;
+        if (init is not) return false;
+        if (f.wcap is given) return f.persist is not && seedLive(init);
+        return constSeedField(p, f);
+    }
+
     fn seqConstStmts(ctx: Ctx, ks: CoreConst[], seq: int[]) -> JsStmt[] {
         if (ks.length == 0) return [];
         let note: string = "file-scope bindings (§7.6) — evaluated once, at module initialization, in this artifact";
@@ -3947,7 +4059,10 @@ ${
     // (clientRegistryIds; r1: by identity, never by name), set by printProgramExposing (withReg);
     // the only types a runtime `reflect` registry prints (regArgs). Empty elsewhere: no other
     // context prints one.
-    type PrintIx:struct = { constructed: string[], reinits: string[], reg: int[] }
+    // s482 r1 (#2105 review LOW-1): `gseeds` — the field of every LOCKED attribute some use site gives
+    // a CONSTANT seed (givenSeedExpr) — §66.7.6 rule 5: a use-site value is a seed computed at the
+    // instance's mount (fieldCtorGiven, createJs).
+    type PrintIx:struct = { constructed: string[], reinits: string[], reg: int[], gseeds: string[] }
 
     fn fieldKey(d: Sym, idx: int) -> string {
         return d.id + ":" + idx;
@@ -3956,11 +4071,49 @@ ${
     fn printIx(p: CoreProgram) -> PrintIx {
         let constructed: string[] = [];
         let reinits: string[] = [];
+        let gseeds: string[] = [];
         for (const n of allNodes(Node.NProgram(p))) {
             constructed = constructed.concat(nodeConstructs(n));
             reinits = reinits.concat(nodeInitOfs(n));
+            gseeds = gseeds.concat(nodeGivenSeeds(p, n));
         }
-        return { constructed: constructed, reinits: reinits, reg: [] };
+        return { constructed: constructed, reinits: reinits, reg: [], gseeds: gseeds };
+    }
+
+    // s482 r1 (#2105 review LOW-1; §66.7.6 rule 5 — a use-site value is a seed computed at the
+    // instance's mount; ruling:user-voice-scrml.md-S482-locked-field-derived — derived only when it
+    // reads a cell): the fields a use site (View.Instance) gives a CONSTANT seed — one that reads
+    // no cell (readsCellReach, fail closed) and whose place can be observed (seedLive). A literal is
+    // the same value wherever it runs; one that reads a cell stays derived.
+    fn nodeGivenSeeds(p: CoreProgram, n: Node) -> string[] {
+        const v: View | not = match n {
+            .NView(v: x) :> x,
+            // no-default-arm: one question — is it a view
+            _ :> not
+        };
+        if (v is not) return [];
+        const pair: GivenAt | not = match v {
+            .Instance(decl: d, attrs: attrs) :> { decl: d, attrs: attrs },
+            // no-default-arm: only an instance is given values
+            _ :> not
+        };
+        if (pair is not) return [];
+        let out: string[] = [];
+        for (const a of pair.attrs) {
+            if (givenSeedExpr(p, a.value)) out = out.concat([fieldKey(pair.decl, a.field)]);
+        }
+        return out;
+    }
+
+    type GivenAt:struct = { decl: Sym, attrs: ConstructAttr[] }
+
+    fn givenSeedExpr(p: CoreProgram, e: Expr) -> boolean {
+        return seedLive(e) && !readsCellReach(p, e);
+    }
+
+    // A locked attribute some use site gives a constant seed (PrintIx.gseeds).
+    fn givenSeedField(ix: PrintIx, d: Decl, i: int, f: Field) -> boolean {
+        return f.wcap is not && f.persist is not && f.init is given && ix.gseeds.indexOf(fieldKey(d.sym, i)) >= 0;
     }
 
     fn nodeConstructs(n: Node) -> string[] {
@@ -4069,7 +4222,10 @@ ${
         for (const f of d.fields) {
             if (isParam(ctx.pix, d, k, f)) {
                 const v: Expr | not = constructValue(attrs, k);
-                if (v is given) {
+                if (v is given && givenSeedField(ctx.pix, d, k, f) && givenSeedExpr(ctx.p, v)) {
+                    // s482 r1 (#2105 review LOW-1): a constant use-site value — a seed at the mount
+                    args = args.concat([rtCall(ctx, "givenSeed", [jthunk(exprJs(ctx, v))])]);
+                } else if (v is given) {
                     args = args.concat([jthunk(exprJs(ctx, v))]);
                 } else {
                     args = args.concat([JsExpr.JUndefined]);
@@ -4098,7 +4254,7 @@ ${
             stmts = [JsStmt.SConst(iv, kidSlot(ctx, kid, dsym.hint))];
             // s482: an instance the program body mounts, holding a live seed (held by the
             // program's factory, holdJs): its seeds run here, at its place in the body's run
-            if (isProgramTid(ctx.p, tid) && liveSeedDecl(ctx.p, d)) stmts = stmts.concat([sexpr(rtCall(ctx, "seedAll", [jid(iv)]))]);
+            if (isProgramTid(ctx.p, tid) && liveSeedDecl(ctx.p, ctx.pix, d)) stmts = stmts.concat([sexpr(rtCall(ctx, "seedAll", [jid(iv)]))]);
         } else {
             stmts = [JsStmt.SConst(iv, createJs(ctx, d, attrs, scopeVar()))];
             if (alias is given) {
@@ -4297,10 +4453,12 @@ ${
         let i = 0;
         for (const f of d.fields) {
             let init: JsExpr = defaultThunk(fctx, d, f);
+            let usePn: string = "";
             if (isParam(ctx.pix, d, i, f)) {
                 const pn: string = f.sym.hint.replaceAll("$", "_") + "$";
                 params = params.concat([pn]);
                 init = JsExpr.JBin(JsOp.Nullish, jid(pn), init);
+                usePn = pn;
             }
             // D15: an initializer something re-evaluates (`InitOf`, a reset) is
             // kept on the record, so the instance's OWN initializer is re-run.
@@ -4309,7 +4467,7 @@ ${
                 body = body.concat([JsStmt.SAssign(slot, init)]);
                 init = slot;
             }
-            body = body.concat([JsStmt.SAssign(fieldCell(jid("inst$"), d, i), fieldCtor(fctx, d, f, i, init))]);
+            body = body.concat([JsStmt.SAssign(fieldCell(jid("inst$"), d, i), fieldCtorGiven(fctx, d, f, i, init, usePn, givenSeedField(ctx.pix, d, i, f)))]);
             body = body.concat(idleWatchJs(fctx, d, f, i));
             i = i + 1;
         }
@@ -4345,7 +4503,7 @@ ${
         let k: int = 0;
         for (const v of mountedInstances(views)) {
             const kd: Decl | not = kidDeclOf(fctx.p, v);
-            if (kd is given && liveSeedDecl(fctx.p, kd)) {
+            if (kd is given && liveSeedDecl(fctx.p, fctx.pix, kd)) {
                 out = out.concat([sexpr(rtCall(fctx, "hold", [JsExpr.JIndex(jmember(jid("inst$"), "kids"), JsExpr.JAnnot(jnum(k), kd.sym.hint))]))]);
             }
             k = k + 1;
@@ -4477,7 +4635,26 @@ ${
         const ps: Persist | not = f.persist;
         if (ps is given && f.wcap is given) return persistedJs(ctx, f, ps, init);
         if (f.wcap is given) return rtCall(ctx, "seeded", [init]);
+        // s482 (lane s482-seed-timing, Q13): a constant with a live seed is a seed (constSeedField)
+        if (constSeedField(ctx.p, f)) return rtCall(ctx, "seeded", [init]);
         return rtCall(ctx, "derived", [jmember(jid("inst$"), "scope"), init]);
+    }
+
+    // s482 (lane s482-seed-timing, Q13) — fieldCtor, for a field that may be given a use-site value
+    // (`given`, its factory parameter; "" when it is not a parameter). A locked attribute whose
+    // DEFAULT is a constant seed (constSeedField) is that seed when the use site gives no value; a
+    // given value is computed when it is read (`rt.propSeed(scope, <given>, <init>)`:
+    // `<given> === undefined ? rt.seeded(<init>) : rt.derived(scope, <init>)`), unless it is marked
+    // a constant seed — ~~⚑ INTERIM (g-boot-use-site-value-seed-s482)~~ resolved s482 r1, below.
+    // s482 r1 (#2105 review LOW-1 → built; §66.7.6 rule 5): a given value the use site marks a
+    // constant seed (`rt.givenSeed(<thunk>)`, createJs) is that seed too — computed at the mount
+    // (`given.$seed`); `useSeed`: some use site gives this field one, so a field whose default is
+    // derived or a literal takes the same path (`rt.propSeed(scope, <given>, <init>, false)`: no given
+    // value → derived, as before).
+    fn fieldCtorGiven(ctx: Ctx, d: Decl, f: Field, i: int, init: JsExpr, usePn: string, useSeed: boolean) -> JsExpr {
+        if (usePn != "" && constSeedField(ctx.p, f)) return rtCall(ctx, "propSeed", [jmember(jid("inst$"), "scope"), jid(usePn), init]);
+        if (usePn != "" && useSeed) return rtCall(ctx, "propSeed", [jmember(jid("inst$"), "scope"), jid(usePn), init, JsExpr.JBool(false)]);
+        return fieldCtor(ctx, d, f, i, init);
     }
 
     // s451 — a `persist=` field (§6.14.2):
@@ -5760,7 +5937,7 @@ ${
         }
         return { program: p.program, decls: ds, types: p.types, fns: p.fns, server: p.server, dbs: p.dbs, reset: p.reset, sqlError: p.sqlError,
                  serverCallError: p.serverCallError, css: p.css, consts: p.consts, loads: p.loads, envelopes: p.envelopes, head: p.head,
-                 tool: p.tool, endpoints: p.endpoints, channels: p.channels, typed: p.typed };
+                 tool: p.tool, endpoints: p.endpoints, channels: p.channels, typed: p.typed, outer: p.outer };
     }
 
     // The file-scope bindings code under `roots` reaches when it runs: read directly, read
@@ -5902,11 +6079,16 @@ ${
         // held (a persisted cell's default), and the §25.7 CSS bridges; and a READ of a seed, or
         // of a lazy derived value, before its place runs its initializer then (reachOf follows
         // cell reads into their initializers, and instances into their declarations).
-        const held: int[] = heldFields(pd, marked);
+        const held: int[] = heldFields(p0, pd, marked);
         const insts: View[] = programInstances(pd);
         let pre: Node[] = [];
         for (const f of pd.fields) {
-            if (f.wcap is given && f.init is given && !hasInt(held, f.sym.id)) pre = pre.concat([Node.NField(f)]);
+            if ((f.wcap is given || constSeedField(p0, f)) && f.init is given && !hasInt(held, f.sym.id)) pre = pre.concat([Node.NField(f)]);
+        }
+        // s482 (lane s482-seed-timing, Q12): a cell declared outside the body runs its seed before it
+        for (const oc of outerLive(p0)) {
+            const od: Decl | not = findDecl(p0, oc.decl);
+            if (od is given) pre = pre.concat([Node.NField(od.fields[0])]);
         }
         const elsewhere: int[] = constructedElsewhere(p0);
         for (const d1 of p0.decls) { if (hasInt(elsewhere, d1.sym.id)) pre = pre.concat([Node.NDecl(d1)]); }
@@ -6045,7 +6227,16 @@ ${
         const serverOnly: int[] = serverOnlyFns(p).concat(reachedOnlyByServer(p));
         let croots: Node[] = [];
         for (const d of p.decls) { croots = croots.concat([Node.NDecl(d)]); }
-        croots = croots.concat(clientFnRoots(p, serverOnly, keep, prev));     // s482: the reached ones (§12.2 Trigger 6)
+        // s482 r1 (#2105 review HIGH-1; ruling:user-voice-scrml.md-S482-circular-server-only — "the
+        // largest set consistent with these rules"): "the client reads" is judged from the client's
+        // OWN code — its declarations and the functions they reach (§12.2 Trigger 6) — never from the
+        // initializer of a binding no code reads (every binding counted server-only here, `allK`):
+        // whether such an initializer runs in the client is what this decides. Counting them as
+        // client code (the round-one `prev` = [] before) made a binding they reach through a
+        // function "client-read", so a binding no code reads whose initializer calls a client
+        // function that reads a server-only binding stayed in the client and shipped it (probes
+        // t6 / t6c — the smaller fixed point, not the largest).
+        croots = croots.concat(clientFnRoots(p, serverOnly, keep, allConstIds(p)));     // s482: the reached ones (§12.2 Trigger 6)
         let cread: int[] = [];
         for (const k0 of constsReadIn(p, croots)) { cread = cread.concat([k0.sym.id]); }
         const sread: int[] = constsReached(p, serverRoots(p, serverOnly, prev));
@@ -6058,7 +6249,7 @@ ${
             changed = false;
             for (const k of p.consts) {
                 const id: int = k.sym.id;
-                if (!hasInt(out, id) && !hasInt(cread, id) && !hasInt(sread, id) && initActs(k.init)) {
+                if (!hasInt(out, id) && !hasInt(cread, id) && !hasInt(sread, id) && runsK(p, k)) {
                     let hit: boolean = callsServerOnly(p, k, serverOnly);
                     if (!hit) {
                         for (const r of constsReached(p, [Node.NExpr(k.init)])) {
@@ -6076,6 +6267,22 @@ ${
         let ordered: int[] = [];
         for (const k2 of p.consts) { if (hasInt(out, k2.sym.id)) ordered = ordered.concat([k2.sym.id]); }
         return ordered;
+    }
+
+    fn allConstIds(p: CoreProgram) -> int[] {
+        let out: int[] = [];
+        for (const k of p.consts) { out = out.concat([k.sym.id]); }
+        return out;
+    }
+
+    // An initializer the classification places (serverInitsRound): one that may act (initActs),
+    // or the seed of a cell declared outside the body that outerPlaced classifies as a binding —
+    // Q12 runs it "even when nothing reads the cell", and a seed that only reads a server-only
+    // binding must be judged too (probe t11), not left to the client as one that does nothing.
+    fn runsK(p: CoreProgram, k: CoreConst) -> boolean {
+        if (initActs(k.init)) return true;
+        for (const oc of p.outer) { if (oc.decl.id == k.sym.id) return true; }
+        return false;
     }
 
     fn withoutInits(rs: View[]) -> View[] {
@@ -6132,11 +6339,14 @@ ${
     // value's default — computed at construction, as before (INTERIM, stated in §7.6 rule (b) S482 r1:
     // g-boot-persist-seed-at-construction-s482). Any other seed computes the same
     // value wherever it runs.
-    fn heldFields(pd: Decl, marked: int[]) -> int[] {
+    // s482 (lane s482-seed-timing, Q13): and a locked program cell whose initializer is a constant
+    // with a live seed (constSeedField) — its place is its declaration too.
+    fn heldFields(p: CoreProgram, pd: Decl, marked: int[]) -> int[] {
         let out: int[] = [];
         for (const f of pd.fields) {
             const init: Expr | not = f.init;
             if (f.wcap is given && f.persist is not && init is given && hasInt(marked, f.sym.id) && seedLive(init)) out = out.concat([f.sym.id]);
+            else if (hasInt(marked, f.sym.id) && constSeedField(p, f)) out = out.concat([f.sym.id]);
         }
         return out;
     }
@@ -6157,25 +6367,166 @@ ${
         };
     }
 
+    // s482 (lane s482-seed-timing; ruling:user-voice-scrml.md-S482-locked-field-derived: "a locked
+    // field is derived exactly when its initializer reads a cell, directly or through any function it
+    // calls, at any depth. Otherwise it's a constant, whose initializer is a seed computed at its
+    // place, meaning the instance's mount.") — a LOCKED field (no write capability) whose initializer
+    // is a CONSTANT with a live seed (seedLive: it calls something or reads a binding, so where it
+    // runs can be observed): printed as a seed (`rt.seeded`), held to its place like a `let` seed —
+    // an instance's at its mount, a program cell's at its declaration — and never recomputed. One
+    // whose initializer may read a cell (readsCellReach, fail closed) stays derived (`rt.derived`,
+    // computed when it is read, §66.9 rule 3); a literal one computes the same value wherever it runs.
+    export fn constSeedField(p: CoreProgram, f: Field) -> boolean {
+        const init: Expr | not = f.init;
+        if (f.wcap is given || f.persist is given || init is not) return false;
+        return seedLive(init) && !readsCellReach(p, init);
+    }
+
+    // Does `e` read a cell — directly, through a function it calls or names as a value, or through a
+    // file-scope binding it reads (a function value it holds), at any depth? FAIL CLOSED: what the
+    // walk cannot follow counts as a read (a call through a function value, a server call, a callee
+    // whose body Core does not hold), and so does every read of reactive state that is not a field
+    // read (an instance handle, a validity surface, a request refetch, a re-run initializer).
+    //
+    // s482 r2 (#2105 r1 review HIGH-A; ruling:user-voice-scrml.md-S482-locked-field-derived — "derived
+    // exactly when its initializer reads a cell, directly or through any function it calls, at any
+    // depth"): in an EXPRESSION root — the value itself, or a file-scope constant's initializer it
+    // reaches — a `Local` that is not a file-scope binding (findConst / a `<db>` load's value misses)
+    // counts as a cell read, FAIL CLOSED. At a use site such a Local is a markup binding: an `<each>`
+    // row item (`as it`), a `<match>` arm payload, a for-lift variable — a reactive projection of a
+    // cell's element — and it is never a constant. A name bound INSIDE the root (a lambda parameter,
+    // a block-lambda local, an expression `match` binder) is not free and is not counted (r3, #2105
+    // r2 review LOW-1: Q13 — derived only when it reads a cell). A function body's own
+    // parameters and locals are not judged so: they are bound by the function, from arguments the
+    // walk already judges at the call.
+    fn readsCellReach(p: CoreProgram, e: Expr) -> boolean {
+        let todo: Node[] = [Node.NExpr(e)];
+        let seenFn: int[] = [];
+        let seenK: int[] = [];
+        for (; todo.length > 0; ) {
+            let next: Node[] = [];
+            for (const r of todo) {
+                const exprRoot: boolean = !isCoreFnNode(r);
+                // s482 r3 (#2105 r2 review LOW-1) — names bound INSIDE the root (a lambda's or block
+                // lambda's parameters, its own locals, an expression `match` arm's binders) are not
+                // free: they read no cell by themselves, and whatever feeds them a cell's value is a
+                // read the walk already judges at its source (`@xs.map(x => …)` reads `@xs`)
+                let inner: int[] = [];
+                if (exprRoot) { for (const bs of boundSyms(r)) { inner = inner.concat([bs.id]); } }
+                for (const n of allNodes(r)) {
+                    if (exprRoot && freeLocalRead(p, n) && !hasInt(inner, localReadOf(n))) return true;
+                    if (cellReadOf(n) is given || nodeReadsState(n)) return true;
+                    const fid: int = namedFnOf(n);
+                    if (fid >= 0 && !hasInt(seenFn, fid)) {
+                        seenFn = seenFn.concat([fid]);
+                        let found: boolean = false;
+                        for (const f of p.fns) {
+                            if (f.sym.id == fid) {
+                                found = true;
+                                next = next.concat([Node.NFn(f)]);
+                            }
+                        }
+                        if (!found) return true;
+                    }
+                    const kid: int = localReadOf(n);
+                    if (kid >= 0 && !hasInt(seenK, kid)) {
+                        seenK = seenK.concat([kid]);
+                        const k: CoreConst | not = findConst(p, kid);
+                        if (k is given) next = next.concat([Node.NExpr(k.init)]);
+                    }
+                }
+            }
+            todo = next;
+        }
+        return false;
+    }
+
+    fn isCoreFnNode(r: Node) -> boolean {
+        return match r {
+            .NFn(f: x) :> true,
+            // no-default-arm: one question — is it a function (its own bindings are its own)
+            _ :> false
+        };
+    }
+
+    // s482 r2 (#2105 r1 review HIGH-A) — a read of a `Local` (a whole local or a path into one)
+    // that is not a file-scope binding: no file-scope constant / `let` (findConst) and no `<db>`
+    // load's module-level value (DbLoad.val).
+    fn freeLocalRead(p: CoreProgram, n: Node) -> boolean {
+        const id: int = localReadOf(n);
+        if (id < 0) return false;
+        if (findConst(p, id) is given) return false;
+        for (const l of p.loads) { if (l.val.id == id) return false; }
+        return true;
+    }
+
+    // A scrml function an expression node calls or names as a value (its Sym id), else -1.
+    fn namedFnOf(n: Node) -> int {
+        return match n {
+            .NExpr(e: e) :> exprNamedFn(e),
+            // no-default-arm: one question — is it a call or a function value
+            _ :> -1
+        };
+    }
+
+    fn exprNamedFn(e: Expr) -> int {
+        return match e {
+            .Call(callee: c) :> c.id,
+            .FnRef(fn: f) :> f.id,
+            // no-default-arm: one question — does it name a function
+            _ :> -1
+        };
+    }
+
+    // Reactive state read other than through a cell place, and what the walk cannot follow.
+    fn nodeReadsState(n: Node) -> boolean {
+        return match n {
+            .NExpr(e: e) :> exprReadsState(e),
+            // no-default-arm: one question — an expression that reads state the place walk does not see
+            _ :> false
+        };
+    }
+
+    fn exprReadsState(e: Expr) -> boolean {
+        return match e {
+            .Handle(inst: x) :> true,
+            .InitOf(decl: x) :> true,
+            .Validity(of: x) :> true,
+            .Refetch(req: x) :> true,
+            .CallV(f: x) :> true,
+            .ServerCall(fn: x) :> true,
+            .Query(q: x) :> true,
+            .Foreign(slice: x) :> true,
+            // no-default-arm: one question — does it read state, or call what the walk cannot follow
+            _ :> false
+        };
+    }
+
     // s482 — does a declaration's record hold a seed whose place matters (seedLive), itself or in
     // a record it mounts unconditionally, at any depth? Such an instance, mounted unconditionally
     // by the program body, is HELD (`rt.hold`) and seeded at its mount (`rt.seedAll`).
-    export fn liveSeedDecl(p: CoreProgram, d: Decl) -> boolean {
-        return liveSeedIn(p, d, []);
+    // s482 r1 (#2105 review LOW-1): `ix` — and a locked attribute some use site gives a constant
+    // seed (givenSeedField): it is seeded at the mount too.
+    export fn liveSeedDecl(p: CoreProgram, ix: PrintIx, d: Decl) -> boolean {
+        return liveSeedIn(p, ix, d, []);
     }
 
-    fn liveSeedIn(p: CoreProgram, d: Decl, seen: int[]) -> boolean {
+    fn liveSeedIn(p: CoreProgram, ix: PrintIx, d: Decl, seen: int[]) -> boolean {
         if (hasInt(seen, d.sym.id)) return false;
+        let fi: int = 0;
         for (const f of d.fields) {
             const init: Expr | not = f.init;
             if (f.wcap is given && f.persist is not && init is given && seedLive(init)) return true;
+            if (constSeedField(p, f)) return true;     // s482 (lane s482-seed-timing, Q13)
+            if (givenSeedField(ix, d, fi, f)) return true;
+            fi = fi + 1;
         }
         const views: View[] | not = d.renders;
         if (views is not) return false;
         for (const v of mountedInstances(views)) {
             const kd: int = viewInstanced(v);
             for (const d2 of p.decls) {
-                if (d2.sym.id == kd && liveSeedIn(p, d2, seen.concat([d.sym.id]))) return true;
+                if (d2.sym.id == kd && liveSeedIn(p, ix, d2, seen.concat([d.sym.id]))) return true;
             }
         }
         return false;
@@ -6450,6 +6801,8 @@ ${
         // printed from (shakeProgram; print-server.scrml shakes the same way, so both artifacts
         // judge one program)
         const ps: CoreProgram = shakeProgram(p1, keep);
+        const orf: string[] = outerRefusal(ps);
+        if (orf.length > 0) return { js: "", html: "", refused: orf, routes: [] };
         const si: int[] = serverInitsExposing(ps, keep);
         const plan: InitPlan = bodyInits(ps, si, keep);
         const p: CoreProgram = plan.p;
@@ -6463,7 +6816,15 @@ ${
         const names: NameTable = planNames(p);
         const ctx0: Ctx = baseCtx(p, names);
         const rt: string = rtName(ctx0);
-        const sharedUsed: Sym[] = dedupe(sharedRefs(Node.NProgram(p)).concat([p.program]));
+        // s482 (lane s482-seed-timing, Q12): the cells declared outside the body with a live seed —
+        // each constructed in the file-scope section, at its place in link order (constsWithOuter)
+        const outs: OuterCell[] = outerLive(p);
+        let liveSyms: Sym[] = [];
+        for (const oc of outs) { liveSyms = liveSyms.concat([oc.decl]); }
+        // every outer cell's declaration is printed by constsWithOuter (outerPrinted), not below
+        let outSyms: Sym[] = [];
+        for (const oc1 of p.outer) { if (findDecl(p, oc1.decl) is given) outSyms = outSyms.concat([oc1.decl]); }
+        const sharedUsed: Sym[] = dedupe(sharedRefs(Node.NProgram(p)).concat([p.program]).concat(liveSyms));
         let body: JsStmt[] = [
             JsStmt.SComment(jsFile + " — generated by the scrml bootstrap printer (self-host-v2, slice M1). Do not edit."),
             JsStmt.SImportAll(rt, "./" + runtimeFile),
@@ -6484,13 +6845,15 @@ ${
         let regRoots: Node[] = clientRoots;
         for (const k0 of cconsts) { regRoots = regRoots.concat([Node.NExpr(k0.init)]); }
         const ctx: Ctx = withReg(ctx0, clientRegistryIds(p, regRoots, calledServerFnsWith(p, keep, si)));
-        body = body.concat(seqConstStmts(ctx, cconsts, plan.seq));
-        body = body.concat(requestSlotStmts(ctx, p));          // s475 (S3b)
         const uses: DeclNs[] = declNsUses(p);
+        body = body.concat(constsWithOuter(ctx, cconsts, plan.seq, outs, sharedUsed, uses));
+        body = body.concat(requestSlotStmts(ctx, p));          // s475 (S3b)
         for (const d of p.decls) {
-            const r: Rendered = declJs(ctx, d, sharedUsed, uses);
-            body = body.concat(r.stmts);
-            templates = templates.concat(r.templates);
+            if (!symIn(outSyms, d.sym)) {
+                const r: Rendered = declJs(ctx, d, sharedUsed, uses);
+                body = body.concat(r.stmts);
+                templates = templates.concat(r.templates);
+            }
         }
         // s454 (U1b): the routes of the server functions the client calls
         // s482 r1 (#2061 review M3): those the client CAN call (calledServerFnsWith)
@@ -7185,7 +7548,7 @@ ${
     }
 
     fn withReg(ctx: Ctx, reg: int[]) -> Ctx {
-        const ix: PrintIx = { constructed: ctx.pix.constructed, reinits: ctx.pix.reinits, reg: reg };
+        const ix: PrintIx = { constructed: ctx.pix.constructed, reinits: ctx.pix.reinits, reg: reg, gseeds: ctx.pix.gseeds };
         return { p: ctx.p, pix: ix, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
                  rows: ctx.rows, slot: ctx.slot, prebuilt: ctx.prebuilt, ret: ctx.ret, server: ctx.server, tier0: ctx.tier0, cycles: ctx.cycles, ns: ctx.ns, owned: ctx.owned };
     }
@@ -7203,8 +7566,16 @@ ${
     // print-server.scrml printServerBuild), so the two artifacts judge one program. A tool is
     // returned as it is (printTool prints every function; nothing here judges it).
     // =========================================================================
+    //
+    // s482 r1 (#2105 review HIGH-1): and the cells declared outside the body placed as the
+    // library's plain initializers are (outerPlaced) — the last step, so both artifacts judge
+    // the one result.
     export fn shakeProgram(p: CoreProgram, keep: int[]) -> CoreProgram {
         if (p.tool is given) return p;
+        return outerPlaced(shakeDecls(p, keep), keep);
+    }
+
+    fn shakeDecls(p: CoreProgram, keep: int[]) -> CoreProgram {
         let fs: Fn[] = [];
         for (const f of p.fns) { fs = fs.concat([prunedFn(f)]); }
         const p1: CoreProgram = withDeclsFns(p, p.decls, fs, p.loads);
@@ -7225,10 +7596,93 @@ ${
         return withDeclsFns(p1, ds, p1.fns, lds);
     }
 
+    // =========================================================================
+    // s482 r1 (#2105 review HIGH-1; ruling:user-voice-scrml.md-S482-outside-cell-seed-time — "before
+    // the body, in link order" — the same as the library's plain `let` / `const` initializers, even
+    // when nothing reads the cell; §7.6 rule (b) / R6 and the S481 server-only classification;
+    // ruling:user-voice-scrml.md-S482-circular-server-only — the largest set). A cell declared
+    // outside the body whose seed runs before the body (outerLive) is classified as a plain
+    // file-scope binding is — by serverInits itself, not by a second rule: each such cell is
+    // judged as a binding whose initializer is its seed (outerAsConsts; constReads counts a
+    // reference to its shared instance as a read of it). One that classification makes
+    // SERVER-ONLY (no client code reads the cell, and its seed reaches server-only code — a
+    // function the client does not hold, or a binding only server code reads, directly, through a
+    // function, or through another such cell) is not a cell of the client at all: it is that
+    // binding in the program both printers print — the client artifact holds none of it (nor what
+    // only it reaches), and the server artifact runs its seed at module initialization, in link
+    // order (print-server.scrml serverConsts), as it runs a server-only `const`. Any other stays
+    // a cell, constructed before the body as before. (A server-only seed that reads a cell, or
+    // calls through what the walk cannot follow, can run in neither artifact: outerRefusal.)
+    // A program with no such cell is returned as it is.
+    // =========================================================================
+    fn outerPlaced(p: CoreProgram, keep: int[]) -> CoreProgram {
+        const outs: OuterCell[] = outerLive(p);
+        if (outs.length == 0) return p;
+        const si: int[] = serverInitsExposing(outerAsConsts(p, outs), keep);
+        let moved: OuterCell[] = [];
+        for (const oc of outs) { if (hasInt(si, oc.decl.id)) moved = moved.concat([oc]); }
+        if (moved.length == 0) return p;
+        return outerAsConsts(p, moved);
+    }
+
+    // `p` with each cell of `cs` (cells declared outside the body, CoreProgram.outer) as a
+    // file-scope binding: its declaration dropped, and a binding of the declaration's Sym whose
+    // initializer is the cell's seed put among the constants at its place in link order
+    // (OuterCell.at). It stays in `outer` (runsK: its seed is placed even when it does nothing);
+    // each later outer cell's place moves past the bindings put before it.
+    fn outerAsConsts(p: CoreProgram, cs: OuterCell[]) -> CoreProgram {
+        let ds: Decl[] = [];
+        for (const d of p.decls) { if (!outerIn(cs, d.sym.id)) ds = ds.concat([d]); }
+        let ks: CoreConst[] = [];
+        let i: int = 0;
+        for (const k of p.consts) {
+            for (const c of cs) { if (c.at == i) ks = ks.concat(seedConst(p, c)); }
+            ks = ks.concat([k]);
+            i = i + 1;
+        }
+        for (const c2 of cs) { if (c2.at >= p.consts.length) ks = ks.concat(seedConst(p, c2)); }
+        let os: OuterCell[] = [];
+        let n: int = 0;
+        for (const o of p.outer) {
+            os = os.concat([{ decl: o.decl, at: o.at + n }]);
+            if (outerIn(cs, o.decl.id)) n = n + 1;
+        }
+        return { program: p.program, decls: ds, types: p.types, fns: p.fns, server: p.server, dbs: p.dbs, reset: p.reset, sqlError: p.sqlError,
+                 serverCallError: p.serverCallError, css: p.css, consts: ks, loads: p.loads, envelopes: p.envelopes, head: p.head,
+                 tool: p.tool, endpoints: p.endpoints, channels: p.channels, typed: p.typed, outer: os };
+    }
+
+    fn seedConst(p: CoreProgram, c: OuterCell) -> CoreConst[] {
+        const d: Decl | not = findDecl(p, c.decl);
+        if (d is not) return [];
+        const f: Field = d.fields[0];
+        const init: Expr | not = f.init;
+        if (init is not) return [];
+        return [{ sym: d.sym, init: init, mutable: f.wcap is given }];
+    }
+
+    // s482 r1 (#2105 review HIGH-1) — a server-only outer cell (outerPlaced) whose seed reads a
+    // cell, or calls through what the walk cannot follow (readsCellReach, fail closed): the server
+    // artifact holds no cell, and the client must not run it (its seed reaches server-only code).
+    // ⚑ INTERIM (g-boot-outer-cell-server-seed-reads-cell-s482): refused by name, never printed
+    // into either artifact.
+    export fn outerRefusal(p: CoreProgram) -> string[] {
+        let out: string[] = [];
+        for (const oc of p.outer) {
+            if (findDecl(p, oc.decl) is not) {
+                const k: CoreConst | not = findConst(p, oc.decl.id);
+                if (k is given && readsCellReach(p, k.init)) {
+                    out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: the seed of `@" + oc.decl.hint + "`, a cell declared outside the program body that nothing on the client reads, reaches server-only code, so it runs in the server artifact (§7.6 rule (b), S481/S482) — but it also reads a cell (or calls through what the bootstrap cannot follow), which the server artifact does not hold. The bootstrap does not run such a seed yet (⚑ INTERIM, g-boot-outer-cell-server-seed-reads-cell-s482). Read the cell in the page, or seed it from bindings and functions only"]);
+                }
+            }
+        }
+        return out;
+    }
+
     fn withDeclsFns(p: CoreProgram, ds: Decl[], fs: Fn[], lds: DbLoad[]) -> CoreProgram {
         return { program: p.program, decls: ds, types: p.types, fns: fs, server: p.server, dbs: p.dbs, reset: p.reset, sqlError: p.sqlError,
                  serverCallError: p.serverCallError, css: p.css, consts: p.consts, loads: lds, envelopes: p.envelopes, head: p.head,
-                 tool: p.tool, endpoints: p.endpoints, channels: p.channels, typed: p.typed };
+                 tool: p.tool, endpoints: p.endpoints, channels: p.channels, typed: p.typed, outer: p.outer };
     }
 
     // The declarations live code can construct, a fixed point from the program and every
@@ -7243,6 +7697,9 @@ ${
     // and a component holding a `<db>` cell some load fills is kept.
     fn liveDecls(p: CoreProgram, keep: int[]) -> int[] {
         let live: int[] = [p.program.id];
+        // s482 (lane s482-seed-timing, Q12): a cell declared outside the body with a live seed runs
+        // before the body even when nothing reads it
+        for (const oc of outerLive(p)) { if (!hasInt(live, oc.decl.id)) live = live.concat([oc.decl.id]); }
         for (const d of p.decls) {
             if (d.kind != DeclKind.User && !hasInt(live, d.sym.id)) live = live.concat([d.sym.id]);
         }
