@@ -6,8 +6,9 @@
 import { describe, test, expect } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
-import { rowLines, readFences, regionErrors, readsInfo, scan, check, checkAgainstBase, baseRulesOnHead, lowered, markerAllows, posix, caseIsNegativeFor, mdFiles, isExcluded } from "../../../scripts/retired-forms-lint.ts";
+import { rowLines, readFences, mdBlocks, PlacementError, readsInfo, scan, check, checkAgainstBase, baseRulesOnHead, lowered, markerAllows, posix, caseIsNegativeFor, mdFiles, isExcluded } from "../../../scripts/retired-forms-lint.ts";
 import { Lexer } from "marked";
 import { analyze, view } from "../../../scripts/retired-forms-walk.ts";
 
@@ -179,22 +180,11 @@ describe("allow markers (#2101 r1 MED-5)", () => {
 });
 
 describe("markdown fences (#2101 r1 HIGH-1 / HIGH-2)", () => {
-  test("```scrml AND untagged fences are read; another language is not; a migration region runs to the next heading of its level", () => {
-    const md = "## 4.4 Closers\ntext\n```scrml\n<p>x/\n```\n```\nuntagged\n```\n```js\nawait x\n```\n## Appendix E: Migration\n### E.1 Sub\n```scrml\n<p>y/\n```\n## Appendix F\n```scrml\nz\n```\n";
-    const fs = readFences(md, [{ heading: "## Appendix E: Migration", children: "^(?![0-9])" }]);
-    expect(fs.map((f) => [f.startLine, f.info, f.migration])).toEqual([[4, "scrml", false], [7, "", false], [15, "scrml", true], [19, "scrml", false]]);
-  });
-  test("#2101 r2 MED-1: a region opens only at its exact heading line, holds only its own sub-headings; text alone opens nothing", () => {
-    const R = [{ heading: "## Appendix E: Migration", children: "^(?![0-9])" }, { heading: "## 63. Lifecycle", children: "^63\\.[0-9]" }];
-    const md = ["## Appendix E: Migration", "### Background", "```scrml", "a", "```", "### 19.15 Misplaced", "```scrml", "b", "```",
-      "## 4. Markup", "#### 63.99 Worked example", "```scrml", "c", "```", "#### Appendix E notes", "```scrml", "d", "```",
-      "## 63. Lifecycle", "### 63.4 Fix", "```scrml", "e", "```", "### 4.1 Stray", "```scrml", "f", "```", ""].join("\n");
-    expect(readFences(md, R).map((f) => [f.text, f.migration])).toEqual([["a", true], ["b", false], ["c", false], ["d", false], ["e", true], ["f", false]]);
-    expect(regionErrors(md, R)).toEqual([]);
-    expect(regionErrors(md + "\n## 63. Lifecycle\n", R).length).toBe(1);
-    expect(regionErrors("# x\n", R).length).toBe(2);
-    // the real SPEC: each ledger region heading stands exactly once
-    expect(regionErrors(readFileSync(join(ROOT, "compiler/SPEC.md"), "utf8"), LEDGER.migrationRegions)).toEqual([]);
+  test("```scrml AND untagged fences are read; another language is not; no heading makes a region (#2101 r4 F2)", () => {
+    const md = "## 4.4 Closers\ntext\n```scrml\n<p>x/\n```\n```\nuntagged\n```\n```js\nawait x\n```\n## Appendix E: Migration\n### E.1 Sub\n```scrml\n<p>y/\n```\n## 63. Deprecation Lifecycle — the stage machine\n```scrml\nz\n```\n";
+    const fs = readFences(md);
+    expect(fs.map((f) => [f.startLine, f.info])).toEqual([[4, "scrml"], [7, ""], [15, "scrml"], [19, "scrml"]]);
+    expect(fs.every((f) => !("migration" in f))).toBe(true);
   });
   test("#2101 r2 MED-2: blockquoted fences and `scrml…` info strings are read", () => {
     const md = ["> ```scrml", "> while (x) { }", "> ```", ">   ```scrml", ">   b", ">   ```", "```scrml{.example}", "c", "```", "```scrml,ignore", "d", "```", "```js", "e", "```", ""].join("\n");
@@ -250,12 +240,6 @@ describe("markdown is read as CommonMark reads it — marked's lexer (#2101 r3 F
     expect([...readFences([neg, "> ```scrml", "> " + W, "> ```", ""].join("\n"))[0].negIds]).toEqual([]);
     expect([...readFences(["> " + neg, "> ```scrml", "> " + W, "> ```", ""].join("\n"))[0].negIds]).toEqual(["while-loop"]);
   });
-  test("a migration region opens only at a top-level heading (not one in a blockquote)", () => {
-    const R = [{ heading: "## 63. Lifecycle", children: "^63\\.[0-9]" }];
-    expect(readFences(["> ## 63. Lifecycle", "```scrml", "a", "```", ""].join("\n"), R)[0].migration).toBe(false);
-    expect(readFences(["## 63. Lifecycle", "```scrml", "a", "```", ""].join("\n"), R)[0].migration).toBe(true);
-  });
-
   // PARITY: for every .md the gate reads, the lint's fence set equals marked's fenced code blocks (lang empty,
   // `scrml…` or `{.scrml}`) — and each fence's text stands on the source lines the lint maps it to.
   test("parity: the lint's fences == marked's code blocks over every read .md of the tree", () => {
@@ -287,19 +271,101 @@ describe("markdown is read as CommonMark reads it — marked's lexer (#2101 r3 F
   });
 });
 
-describe("migration regions are bound to their position (#2101 r3 F4)", () => {
-  const R = [{ heading: "## 63. Lifecycle", children: "^63\\.[0-9]", after: "## 62. ", before: "## 64. ", firstChild: "### 63.1 " }];
-  const ok = ["## 62. Versions", "x", "## 63. Lifecycle", "### 63.1 Stages", "```scrml", "a", "```", "## 64. Tools", ""];
-  test("in place: no error", () => { expect(regionErrors(ok.join("\n"), R)).toEqual([]); });
-  test("moved before §62, or with its first child gone: an error", () => {
-    const moved = ["## 4. Markup", "## 63. Lifecycle", "### 63.1 Stages", "## 5. X", "## 62. Versions", "## 64. Tools", ""];
-    expect(regionErrors(moved.join("\n"), R).length).toBe(2);
-    const noChild = ok.filter((l) => !l.startsWith("### 63.1"));
-    expect(regionErrors(noChild.join("\n"), R).length).toBe(1);
+describe("each fence's line is marked's own token position (#2101 r4 F1)", () => {
+  const W = "fn f() { while (x) { } }";
+  const NEG = "<!-- retired-neg: while-loop — the retired loop, shown for contrast -->";
+  const F = ["```scrml", W, "```"];
+  // the r3 re-review's decoys: an identical "fence" in text that is not a fenced block (an indented block, an
+  // HTML block, an invisible <script type=text/plain>) under a marker, then the real positive fence. A forward
+  // text search placed the real fence on the decoy and gave it the decoy's marker.
+  const decoys = {
+    a01_indented: ["# P", "", NEG, "    ```scrml", "    " + W, "    ```", "", "Prose.", "", ...F, ""],
+    a02_div: ["# P", "", "<div>", NEG, ...F, "</div>", "", "Prose.", "", ...F, ""],
+    a03_script: ["# P", "", '<script type="text/plain">', "", NEG, ...F, "", "</script>", "", "Prose.", "", ...F, ""],
+    a04_blockquote: ["# P", "", "> " + NEG, ">     ```scrml", ">     " + W, ">     ```", ">", "> Prose.", ">", "> ```scrml", "> " + W, "> ```", ""],
+    a25_tilde: ["# P", "", NEG, "    ~~~scrml", "    " + W, "    ~~~", "", "Prose.", "", "~~~scrml", W, "~~~", ""],
+  };
+  for (const [name, ls] of Object.entries(decoys)) {
+    test(`${name}: the real fence is placed on its own lines and carries no marker`, () => {
+      const md = ls.join("\n");
+      const fs = readFences(md);
+      expect(fs.length).toBe(1);
+      const real = ls.lastIndexOf(ls.find((l) => l.replace(/^> /, "") === W)) + 1;   // its body's 1-based line
+      expect(fs[0].startLine).toBe(real);
+      expect([...fs[0].negIds]).toEqual([]);
+    });
+  }
+  test("a09: CRLF line ends are read as marked reads them (the decoy still does not capture the fence)", () => {
+    const fs = readFences(decoys.a01_indented.join("\r\n"));
+    expect(fs.map((f) => [f.startLine, [...f.negIds]])).toEqual([[11, []]]);
+    expect(readFences("# P\r\r```scrml\r" + W + "\r```\r").map((f) => f.startLine)).toEqual([4]);   // lone CR
   });
-  test("the real SPEC: each ledger region stands in place; Appendix E is no longer a region", () => {
-    expect(LEDGER.migrationRegions.some((r) => r.heading.startsWith("## Appendix E"))).toBe(false);
-    expect(LEDGER.migrationRegions.every((r) => r.after && r.before)).toBe(true);
+  test("a marker directly above the REAL fence still marks it", () => {
+    const fs = readFences(["# P", "", "    ```scrml", "    " + W, "    ```", "", NEG, ...F, ""].join("\n"));
+    expect([...fs[0].negIds]).toEqual(["while-loop"]);
+  });
+  // marked re-joins a blockquote's lazy continuation after a nested list with an extra line, so at the end of
+  // the file its own cursor runs past the source: the fence after it is not where marked says
+  const UNPLACEABLE = "> - <div>\n    [a]: /u\n~~~";
+  test("a block marked places where the source does not hold it is a PlacementError, never a guess", () => {
+    expect(() => readFences(UNPLACEABLE)).toThrow(PlacementError);
+  });
+  test("the gate exits 2 with a clean message on an unplaceable block (#2101 r4 NIT)", () => {
+    const d = mkdtempSync(join(tmpdir(), "rfl-"));
+    try {
+      mkdirSync(join(d, "docs"), { recursive: true });
+      writeFileSync(join(d, "docs/x.md"), UNPLACEABLE);
+      writeFileSync(join(d, "baseline.json"), JSON.stringify({ soft: {}, pending: {} }));
+      const r = spawnSync(process.execPath, [join(ROOT, "scripts/retired-forms-lint.ts"), "--root", d, "--ledger", join(ROOT, "compiler/retired-forms.json"), "--baseline", join(d, "baseline.json")], { encoding: "utf8" });
+      expect(r.status).toBe(2);
+      expect(r.stderr).toContain("docs/x.md: cannot place a markdown fence");
+      expect(r.stderr).not.toContain("    at ");     // no stack trace
+    } finally { rmSync(d, { recursive: true, force: true }); }
+  });
+
+  // MAPCHECK (the r3 re-review's probe, as a test): over every read .md, top-level marked raws concatenate to the
+  // source, so each top-level token's line is known independently of the lint; every read fence's reported
+  // opener is EXACTLY its top-level fenced token's line, or lies inside the blockquote / list token that holds
+  // it, and its body stands on the reported lines.
+  test("mapcheck: every read fence's reported lines are its true lines, over every read .md of the tree", () => {
+    let files = 0, fences = 0;
+    const bad = [];
+    for (const rel of mdFiles(ROOT, LEDGER.corpus)) {
+      files++;
+      const md = readFileSync(join(ROOT, rel), "utf8").replace(/\r\n|\r/g, "\n");
+      const toks = Lexer.lex(md, { gfm: true });
+      if (toks.map((t) => t.raw).join("") !== md) { bad.push(`${rel}: top-level raws do not concatenate to the source`); continue; }
+      const spans = [];
+      let line = 0;
+      for (const t of toks) {
+        const n = (t.raw.match(/\n/g) ?? []).length;
+        spans.push({ s: line, e: line + Math.max(n, 1) - 1, t });
+        line += n;
+      }
+      const src = md.split("\n");
+      const key = (l) => l.replace(/^[\s>]*/, "").trimEnd();
+      for (const f of readFences(md)) {
+        fences++;
+        const open = f.startLine - 2;
+        const sp = spans.find((x) => open >= x.s && open <= x.e);
+        const ty = sp?.t.type;
+        if (ty === "code" && sp.t.codeBlockStyle !== "indented") { if (sp.s !== open) bad.push(`${rel}:${open + 1}: fenced token starts at ${sp.s + 1}`); }
+        else if (ty !== "blockquote" && ty !== "list") bad.push(`${rel}:${open + 1}: mapped into ${ty}`);
+        const body = f.text === "" ? [] : f.text.split("\n");
+        body.forEach((b, i) => { if (key(src[f.startLine - 1 + i] ?? "") !== key(b)) bad.push(`${rel}:${f.startLine + i}: body line differs`); });
+      }
+    }
+    expect(files).toBeGreaterThan(40);
+    expect(fences).toBeGreaterThan(1000);
+    expect(bad).toEqual([]);
+  });
+});
+
+describe("no region is exempt (#2101 r4 F2)", () => {
+  test("the ledger lists no `migrationRegions`; the script reads none", () => {
+    expect("migrationRegions" in LEDGER).toBe(false);
+    const src = readFileSync(join(ROOT, "scripts/retired-forms-lint.ts"), "utf8");
+    expect(/regionErrors|\.migrationRegions/.test(src)).toBe(false);
   });
 });
 
@@ -328,9 +394,9 @@ describe("scan + check over a scratch tree", () => {
     mkdirSync(join(d, "conformance/cases/x/pos"), { recursive: true });
     return d;
   };
-  const ledger = { rows: [row("while-loop"), row("rhs-decl")], migrationRegions: [{ heading: "## Appendix E: Migration", children: "^(?![0-9])" }], corpus: LEDGER.corpus };
+  const ledger = { rows: [row("while-loop"), row("rhs-decl")], corpus: LEDGER.corpus };
 
-  test("negatives by metadata / marker / region — never by a mention in prose or a comment", () => {
+  test("negatives by metadata / marker — never by a mention in prose or a comment, never by a heading (#2101 r4 F2)", () => {
     const d = mk2();
     try {
       writeFileSync(join(d, "conformance/cases/x/neg/case.scrml"), "${ while (a) { } }\n");
@@ -345,7 +411,7 @@ describe("scan + check over a scratch tree", () => {
         "```", "while (u) { }", "```",
         "## Appendix E: Migration", "```scrml", "while (w) { }", "```", ""].join("\n"));
       const hs = scan(d, ledger);
-      expect(hs.map((h) => `${h.file}:${h.line}`).sort()).toEqual(["compiler/SPEC.md:14", "compiler/SPEC.md:3", "compiler/SPEC.md:7", "conformance/cases/x/pos/case.scrml:1", "samples/a.scrml:3"]);
+      expect(hs.map((h) => `${h.file}:${h.line}`).sort()).toEqual(["compiler/SPEC.md:14", "compiler/SPEC.md:18", "compiler/SPEC.md:3", "compiler/SPEC.md:7", "conformance/cases/x/pos/case.scrml:1", "samples/a.scrml:3"]);
     } finally { rmSync(d, { recursive: true, force: true }); }
   });
 
@@ -365,13 +431,13 @@ describe("scan + check over a scratch tree", () => {
     } finally { rmSync(d, { recursive: true, force: true }); }
   });
 
-  test("#2101 r2 MED-3: the base ledger's rules run over the head tree catch a widened `codes`, a never-matching detector, a new region", () => {
+  test("#2101 r2 MED-3: the base ledger's rules run over the head tree catch a widened `codes`, a never-matching detector; a base's regions exempt nothing", () => {
     const d = mk2();
     try {
       writeFileSync(join(d, "conformance/cases/x/neg/case.scrml"), "${ while (a) { } }\n");
       writeFileSync(join(d, "conformance/cases/x/neg/expected.json"), JSON.stringify({ id: "neg", expect: { codes: ["E-OTHER"] } }));
       writeFileSync(join(d, "compiler/SPEC.md"), "## 4. X\n```scrml\nwhile (s) { }\n```\n");
-      const base = { rows: [row("while-loop")], migrationRegions: [], corpus: LEDGER.corpus };
+      const base = { rows: [row("while-loop")], corpus: LEDGER.corpus };
       const B = { soft: {}, pending: { "while-loop": { since: "d", why: "x", files: { "conformance/cases/x/neg/case.scrml": 1, "compiler/SPEC.md": 1 } } } };
       expect(baseRulesOnHead(d, base, B)).toEqual([]);
       // head adds a while to the case and widens codes to make the case a "negative": the base rule still counts 2
@@ -379,6 +445,10 @@ describe("scan + check over a scratch tree", () => {
       expect(baseRulesOnHead(d, base, B).length).toBe(1);
       const headWide = { rows: [{ ...row("while-loop"), codes: [...row("while-loop").codes, "E-OTHER"] }], corpus: LEDGER.corpus };
       expect(scan(d, headWide).filter((h) => h.file.startsWith("conformance")).length).toBe(1);   // head alone: 1 (budget 1)
+      // an r2/r3 base that listed a region holding the SPEC fence: it exempts nothing now (#2101 r4 F2)
+      writeFileSync(join(d, "compiler/SPEC.md"), "## 4. X\n```scrml\nwhile (s) { }\nwhile (t) { }\n```\n");
+      const regionBase = { ...base, migrationRegions: [{ heading: "## 4. X", children: "^4\\." }] };
+      expect(baseRulesOnHead(d, regionBase, B).some((e) => e.includes("compiler/SPEC.md"))).toBe(true);
     } finally { rmSync(d, { recursive: true, force: true }); }
   });
 
@@ -386,12 +456,12 @@ describe("scan + check over a scratch tree", () => {
     const d = mk2();
     try {
       writeFileSync(join(d, "samples/a.scrml"), "${ while (a) { } }\n");
-      const base = { rows: [row("while-loop")], migrationRegions: [], corpus: LEDGER.corpus };
+      const base = { rows: [row("while-loop")], corpus: LEDGER.corpus };
       const B = { soft: {}, pending: {} };
       expect(baseRulesOnHead(d, base, B).length).toBe(1);
       const headLedger = { ...base, corpus: { ...LEDGER.corpus, excluded: { ...LEDGER.corpus.excluded, "samples/a.scrml": "hidden" } } };
       expect(scan(d, headLedger)).toEqual([]);                 // the head alone sees nothing
-      expect(baseRulesOnHead(d, base, B, [], headLedger.corpus).length).toBe(1);   // the base corpus still sees it
+      expect(baseRulesOnHead(d, base, B, headLedger.corpus).length).toBe(1);   // the base corpus still sees it
     } finally { rmSync(d, { recursive: true, force: true }); }
   });
 

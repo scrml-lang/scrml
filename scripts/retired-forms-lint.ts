@@ -39,11 +39,9 @@
  *          shared by the rows that share the code;
  *        - a markdown fence is marked as a negative by `<!-- retired-neg: <row-id> — <reason> -->` on the
  *          line(s) directly above its opener, at the opener's blockquote depth (one marker per row;
- *          consecutive marker lines stack);
- *        - the fence lies in a SPEC migration region (the ledger's `migrationRegions`): opened ONLY by a
- *          top-level heading line exactly equal to a listed one (which must stand exactly once, between its
- *          `after` / `before` neighbours and followed by its `firstChild` — r3 F4), holding only its own
- *          sub-headings (`children`), closed by any other heading;
+ *          consecutive marker lines stack); each fence's line is marked's own token position (#2101 r4 F1);
+ *        - no region of any file is exempt (#2101 r4 F2: SPEC "migration regions" are retired; a ledger that
+ *          still lists `migrationRegions` fails);
  *        - `retired-ok: <row-id> — <reason>` stands in a COMMENT (`//`, `/* *\/`, `<!-- -->`) on the hit's
  *          line or the line before it (exact id, a non-empty reason).
  *      A code named in prose or in a comment allows nothing.
@@ -51,31 +49,32 @@
  *        - a HARD hit with no `pending` entry fails; a count above the baseline fails;
  *        - a count BELOW the baseline also fails until the baseline is lowered (`--update`), so slack is
  *          never left for a later PR to spend;
- *        - a migration-region heading missing, repeated or moved fails.
+ *        - a markdown block that cannot be placed exactly on its source lines exits 2 (never read at a guess).
  *   4. With `--base-ref <rev>` (CI: the PR's base; the pre-commit hook: the merge-base with origin/main; an
  *      unresolvable rev exits 2) the baseline and ledger themselves are checked against that revision's:
  *        - no (row, file) count above the base's, no (row, file) key the base lacks — except a SOFT row the
  *          base ledger lacks (a new deprecation records its starting count); a new HARD row brings no debt;
  *        - no ledger row removed, none downgraded HARD -> SOFT, no detector set to null;
- *        - the BASE ledger's rules (each base row's detector / codes / caseIdPattern, the base regions, the
- *          base corpus) run over this tree find no (row, file) count above the base baseline (#2101 r2 MED-3,
- *          r3 F5): a widened `codes` / `caseIdPattern`, a narrowed or never-matching detector, a new region, a
- *          newly excluded path cannot hide a hit.
+ *        - the BASE ledger's rules (each base row's detector / codes / caseIdPattern, the base corpus) run
+ *          over this tree find no (row, file) count above the base baseline (#2101 r2 MED-3, r3 F5): a widened
+ *          `codes` / `caseIdPattern`, a narrowed or never-matching detector, a newly excluded path cannot hide
+ *          a hit.
  *
  * KNOWN LIMITS (also in SPEC §63):
  *   - counts are per (row, file): removing one hit and adding another of the same row in the same file
  *     passes (a swap); in a negative case, which hit its budget allows is not tied to a diagnostic's line;
  *   - the source walker, the markdown reader and the builtin detectors are this tree's script: narrowing them
- *     is a reviewed code diff the base rules do not catch; a base ledger older than `migrationRegions` /
- *     `corpus` is read with this tree's;
+ *     is a reviewed code diff the base rules do not catch; a base ledger older than `corpus` is read with
+ *     this tree's;
  *   - text cannot tell a tape from a host array (tape-js-method) or a cell from an element (render-by-tag,
  *     detector null); rows with `enforcedBy: "lint-only"` have no compiler refusal, the lint alone holds
  *     them; tape-js-method sees no computed member (`xs["push"](1)`) and a discarded `.sort()` only after
  *     `;` / `{` / `}`;
  *   - a fence tagged as another language, an indented code block, an HTML `<pre>` block and prose are not
- *     read; a retired closer inside an unclosed raw body is raw text here (the bootstrap names it); an
- *     unterminated string or template literal in a fence (a stray ``` line inside it opens one) hides the
- *     rest of that fence;
+ *     read; a retired closer inside an unclosed raw body is raw text here (the bootstrap names it);
+ *   - INTERIM: an unterminated string or template literal in a fence (a stray ``` line inside it opens one)
+ *     hides the rest of that fence. The capable form: fail when a fence's text ends inside an unterminated
+ *     string / template literal (the compiler refuses that source anyway), so nothing after it is unread;
  *   - the pre-commit hook lints the working tree, not the index (CI lints the commit);
  *   - the path-word exemption of the closer rule (`a/b/`, `http://x.com/`) is the bootstrap's INTERIM.
  *
@@ -101,7 +100,7 @@ export type Row = {
   id: string; tier: "HARD" | "SOFT"; old: string; new: string; codes: string[]; spec: string; ruling: string;
   detector: Detector; keepStrings?: boolean; caseIdPattern?: string; enforcedBy?: string; note?: string;
 };
-export type Ledger = { rows: Row[]; migrationRegions?: Region[]; corpus?: Corpus };
+export type Ledger = { rows: Row[]; corpus?: Corpus };
 export type Hit = { row: string; file: string; line: number; text: string };
 export type Baseline = {
   $comment?: string;
@@ -396,18 +395,7 @@ export function caseIsNegativeFor(row: Row, c: { id: string; codes: string[] } |
   return caseCodesFor(row, c).length > 0;
 }
 
-export type Fence = { startLine: number; text: string; negIds: Set<string>; migration: boolean; info: string };
-
-/**
- * A SPEC migration region (#2101 r2 MED-1, r3 F4): opened ONLY by a heading line EXACTLY equal to `heading`
- * (the ledger's `migrationRegions`; the SPEC must hold it exactly once), and holding only its own sub-headings —
- * a deeper heading whose text does not match `children` (a `4.1` under §63) ends the region, as does any heading
- * of its level or higher. Heading TEXT alone never opens a region: `#### 63.99 Worked example` inside §4 is an
- * ordinary heading. The region is also bound to its POSITION (`regionErrors`, #2101 r3 F4): the nearest heading
- * of its level or higher before it starts `after`, the nearest after it starts `before`, and (when set) the
- * heading right after it starts `firstChild` — a moved heading fails the gate.
- */
-export type Region = { heading: string; children: string; after?: string; before?: string; firstChild?: string; why?: string };
+export type Fence = { startLine: number; text: string; negIds: Set<string>; info: string };
 
 /** A line's blockquote prefix (`> `, `> > `, `>   `) stripped, and how many `>` it held. */
 function unquote(line: string): { text: string; depth: number } {
@@ -440,81 +428,186 @@ export const readsInfo = (info: string) => {
 type MdCode = { open: number; text: string; info: string; depth: number };
 type MdHeading = { line: number; level: number; top: boolean };
 
+/** A markdown block the gate cannot place exactly on its source lines (#2101 r4): the gate exits 2, it never
+ *  reads a block at a guessed line. */
+export class PlacementError extends Error {}
+
+/** One `blockTokens` call of marked's lexer: the text it lexed (the whole file, a blockquote segment with its
+ *  `>` markers stripped, or a list item's de-indented text — each maps line for line onto its source lines). */
+type Frame = { src: string; nl?: Int32Array };
+/** Where a token starts: its frame and its offset in the frame's text (exact — marked's own position). */
+type At = { frame: Frame; off: number } | null;
+
+/** Newlines in `s` before offset `off`. */
+function nlBefore(s: string, off: number): number {
+  let n = 0;
+  for (let i = s.indexOf("\n"); i >= 0 && i < off; i = s.indexOf("\n", i + 1)) n++;
+  return n;
+}
+function frameLine(f: Frame, off: number): number {
+  if (!f.nl) {
+    const at: number[] = [];
+    for (let i = f.src.indexOf("\n"); i >= 0; i = f.src.indexOf("\n", i + 1)) at.push(i);
+    f.nl = Int32Array.from(at);
+  }
+  let lo = 0, hi = f.nl.length;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (f.nl[m] < off) lo = m + 1; else hi = m; }
+  return lo;
+}
+
 /**
- * The fenced code blocks and headings of a markdown text, as CommonMark (GFM) reads them — `marked`'s lexer
- * (#2101 r3 F1/F3: the gate no longer parses fences by hand; a hand reader missed the end of a blockquoted
- * fence at its blockquote's end and hid a positive SPEC fence). A fence inside a blockquote, a list item (`- ```scrml`
- * on the bullet line) or both is read with its container; an indented "closer" inside a fence is content.
- * Each block is placed back on its source lines (0-based `open`: the opener line) by finding, from the previous
- * block on, the opener and every body line in order; a block that cannot be placed throws (the gate fails —
- * it never reads a block at a guessed line).
+ * marked's tokens, each fence / heading / blockquote / list tagged with its exact source position (#2101 r4
+ * F1): every `blockTokens` call is a frame, and a tokenizer called from a frame starts at offset
+ * `frame.length - remaining.length` — marked's own cursor, not a text search. A blockquote / list records the
+ * frames its children were lexed in. A container marked re-reads with its lazy continuation (a blockquote's
+ * nested blockquote / list) keeps the position of the token it replaces.
  */
-function mdBlocks(md: string): { codes: MdCode[]; headings: MdHeading[] } {
+function lexPlaced(md: string): { tokens: any[]; top: Frame } {
+  const lexer: any = new Lexer({ gfm: true });
+  const tk: any = lexer.tokenizer;
+  const stack: (Frame | "tk")[] = [];
+  const ctxs: Frame[][] = [];
+  let top: Frame | null = null;
+  let last: any = null;
+  const blockTokens = lexer.blockTokens.bind(lexer);
+  lexer.blockTokens = (src: string, tokens?: any[], clipped?: boolean) => {
+    const frame: Frame = { src };
+    if (ctxs.length) ctxs[ctxs.length - 1].push(frame); else if (!top) top = frame;
+    stack.push(frame);
+    try { return blockTokens(src, tokens, clipped); } finally { stack.pop(); }
+  };
+  for (const name of ["fences", "heading", "lheading", "blockquote", "list"]) {
+    const orig = tk[name];
+    const container = name === "blockquote" || name === "list";
+    tk[name] = function (src: string) {
+      const caller = stack[stack.length - 1];
+      const prev = last;                       // the token a re-read replaces (tagged before this call)
+      const frames: Frame[] = [];
+      if (container) ctxs.push(frames);
+      stack.push("tk");
+      let t: any;
+      try { t = orig.call(this, src); } finally { stack.pop(); if (container) ctxs.pop(); }
+      if (!t) return t;
+      let at: At = null;
+      if (caller && caller !== "tk") at = { frame: caller, off: caller.src.length - src.length };
+      else if (prev?.__at && src.startsWith(prev.raw)) at = prev.__at;     // a re-read: same start as the token it replaces
+      t.__at = at;
+      t.__len = t.raw.length;                  // marked may later append a spacer `\n` to raw
+      if (container) t.__frames = frames;
+      last = t;
+      return t;
+    };
+  }
+  const tokens = lexer.lex(md);
+  if (!top) throw new PlacementError("marked lexed no frame");
+  return { tokens, top };
+}
+
+/**
+ * The fenced code blocks and headings of a markdown text (`\n` line ends — callers normalise `\r\n` / `\r`, as
+ * marked does), as CommonMark (GFM) reads them — `marked`'s lexer (#2101 r3 F1/F3). A fence inside a
+ * blockquote, a list item (`- ```scrml` on the bullet line) or both is read with its container; an indented
+ * "closer" inside a fence is content. Each block's line comes from marked's own token positions (#2101 r4 F1:
+ * never a forward text search, which an identical decoy — an indented block, an HTML block — could capture):
+ * a top-level token's line is its offset in the file; a blockquote child's is the blockquote's line plus the
+ * child's line in the blockquote's text; a list item's is the list's line plus the item's line in the list's
+ * raw. The placed line is then checked against the source (the opener there is a fence opener and every body
+ * line follows; a heading's line is that heading); a block that cannot be placed exactly throws
+ * `PlacementError`.
+ */
+export function mdBlocks(md: string): { codes: MdCode[]; headings: MdHeading[] } {
   const lines = md.split("\n");
   const codes: MdCode[] = [];
   const headings: MdHeading[] = [];
-  let cursor = 0;
-  const place = (what: string, ok: (k: number) => boolean): number => {
-    for (let k = cursor; k < lines.length; k++) if (ok(k)) { return k; }
-    throw new Error(`retired-forms-lint: cannot place a markdown ${what} on its source lines (after line ${cursor + 1})`);
+  const { tokens, top } = lexPlaced(md);
+  const base = new Map<Frame, number>([[top, 0]]);
+  const fail = (what: string, why: string): never => { throw new PlacementError(`cannot place a markdown ${what} on its source lines (${why})`); };
+  /** The token's 0-based line, or null when marked gave it no position or its frame got no line. */
+  const lineIf = (t: any): number | null => {
+    const at: At = t.__at;
+    const b = at ? base.get(at.frame) : undefined;
+    return at && b !== undefined ? b + frameLine(at.frame, at.off) : null;
   };
-  const visit = (toks: any[], top: boolean) => {
+  const lineOf = (t: any, what: string): number => lineIf(t) ?? fail(what, t.__at ? "its container could not be placed" : "marked gave it no position");
+  const visit = (toks: any[], isTop: boolean) => {
     for (const t of toks) {
       if (t.type === "code" && t.codeBlockStyle !== "indented") {
+        const what = `fence ${JSON.stringify(String(t.raw).split("\n")[0])}`;
+        const k = lineOf(t, what);
         const body = t.text === "" ? [] : String(t.text).split("\n");
-        const k = place(`fence ${JSON.stringify(String(t.raw).split("\n")[0])}`, (k) => {
-          const f = /^(`{3,}|~{3,})/.exec(containerless(lines[k]));
-          if (!f) return false;
-          for (let b = 0; b < body.length; b++) {
-            if (k + 1 + b >= lines.length || bodyKey(lines[k + 1 + b]) !== bodyKey(body[b])) return false;
-          }
-          return true;
-        });
+        if (k >= lines.length || !/^(`{3,}|~{3,})/.test(containerless(lines[k]))) fail(what, `line ${k + 1} is not its opener`);
+        for (let b = 0; b < body.length; b++) {
+          if (k + 1 + b >= lines.length || bodyKey(lines[k + 1 + b]) !== bodyKey(body[b])) fail(what, `line ${k + 2 + b} is not its body`);
+        }
         codes.push({ open: k, text: String(t.text), info: String(t.lang ?? ""), depth: unquote(lines[k]).depth });
-        cursor = k + 1 + body.length;
-        continue;
-      }
-      if (t.type === "heading") {
+      } else if (t.type === "heading") {
         const first = containerless(String(t.raw).split("\n")[0]).trimEnd();
-        const k = place(`heading ${JSON.stringify(first)}`, (k) => containerless(lines[k]).trimEnd() === first);
-        headings.push({ line: k, level: t.depth, top });
-        cursor = k + 1;
-        continue;
+        const what = `heading ${JSON.stringify(first)}`;
+        const k = lineOf(t, what);
+        if (k >= lines.length || containerless(lines[k]).trimEnd() !== first) fail(what, `line ${k + 1} is not that heading`);
+        headings.push({ line: k, level: t.depth, top: isTop });
+      } else if (t.type === "blockquote") {
+        // its text maps line for line onto its source lines; segment 1 starts it, and each later segment stands
+        // right after the previous one (or after a child marked re-read past it). A frame that does not stand
+        // exactly there — or a blockquote whose text and raw disagree in line count (marked re-joins a re-read
+        // with an extra line) — gets no line: a fence or heading in it then fails, nothing else does
+        const L = lineIf(t);
+        const text = String(t.text);
+        const lineCount = (x: string) => x.replace(/\n+$/, "").split("\n").length;
+        const exact = lineCount(text) === lineCount(String(t.raw));
+        const frames: Frame[] = t.__frames ?? [];
+        const starts: number[] = [];
+        for (let i = 0; i < frames.length; i++) {
+          let start = 0;
+          if (i > 0) {
+            let end = starts[i - 1] + frames[i - 1].src.length;
+            for (const c of t.tokens ?? []) {
+              const j = c.__at ? frames.indexOf(c.__at.frame) : -1;
+              if (j >= 0 && j < i) end = Math.max(end, starts[j] + c.__at.off + c.__len);
+            }
+            start = end + 1;
+          }
+          starts.push(start);
+          if (L !== null && (i === 0 || exact) && text.startsWith(frames[i].src, start)) base.set(frames[i], L + nlBefore(text, start));
+        }
+        visit(t.tokens ?? [], false);
+      } else if (t.type === "list") {
+        // each item's text maps line for line onto its source lines from the item's first line
+        const L = lineIf(t);
+        const frames: Frame[] = t.__frames ?? [];
+        let p = 0;
+        for (let i = 0; L !== null && i < t.items.length; i++) {
+          const it = t.items[i];
+          if (!String(t.raw).startsWith(it.raw, p)) break;
+          if (frames.length === t.items.length && frames[i].src === it.text) base.set(frames[i], L! + nlBefore(String(t.raw), p));
+          p += it.raw.length;
+        }
+        for (const it of t.items) visit(it.tokens ?? [], false);
       }
-      if (t.type === "blockquote" || t.type === "list_item") visit(t.tokens ?? [], false);
-      else if (t.type === "list") visit(t.items ?? [], false);
     }
   };
-  visit(Lexer.lex(md, { gfm: true }), true);
+  visit(tokens, true);
   return { codes, headings };
 }
 
 const NEG_MARKER = /^\s*<!--\s*retired-neg:\s*([\w-]+)(?:\s+(?:—|--|-)|\s*:)\s*[^\s>-][^>]*-->\s*$/;
 
+/** `\r\n` and `\r` line ends as `\n` — exactly as marked reads them, so source lines and tokens agree. */
+export const normalizeEol = (md: string) => md.replace(/\r\n|\r/g, "\n");
+
 /**
  * Every fenced code block of a markdown text that is read (`readsInfo`), as CommonMark reads it (`mdBlocks`).
- * `startLine`: the 1-based line of its first body line; `text`: its content. `negIds`: the row ids of
- * `<!-- retired-neg: <id> — reason -->` markers on the line(s) directly above the opener AT THE SAME BLOCKQUOTE
- * DEPTH (#2101 r3: a `> <!-- … -->` does not mark an unquoted fence). `migration`: the fence lies in one of
- * `regions` (only the SPEC is given any; a region opens only at a top-level heading).
+ * `startLine`: the 1-based line of its first body line (in the text with its line ends normalised); `text`: its
+ * content. `negIds`: the row ids of `<!-- retired-neg: <id> — reason -->` markers on the line(s) directly above
+ * the opener AT THE SAME BLOCKQUOTE DEPTH (#2101 r3: a `> <!-- … -->` does not mark an unquoted fence). No
+ * region of any file is exempt (#2101 r4 F2): a negative is a marked fence, a case, or a `retired-ok` comment.
  */
-export function readFences(md: string, regions: Region[] = []): Fence[] {
+export function readFences(md: string): Fence[] {
+  md = normalizeEol(md);
   const lines = md.split("\n");
-  const { codes, headings } = mdBlocks(md);
+  const { codes } = mdBlocks(md);
   const out: Fence[] = [];
-  let region: { level: number; children: RegExp } | null = null;
-  let h = 0;
   for (const c of codes) {
-    for (; h < headings.length && headings[h].line < c.open; h++) {
-      const hd = headings[h];
-      if (!hd.top) continue;
-      const text = lines[hd.line].replace(/^#{1,6}\s+/, "");
-      if (region && (hd.level <= region.level || !region.children.test(text))) region = null;
-      if (!region) {
-        const r = regions.find((x) => x.heading === lines[hd.line].trimEnd());
-        if (r) region = { level: hd.level, children: new RegExp(r.children) };
-      }
-    }
     if (!readsInfo(c.info)) continue;
     const negIds = new Set<string>();
     for (let k = c.open - 1; k >= 0; k--) {
@@ -524,39 +617,9 @@ export function readFences(md: string, regions: Region[] = []): Fence[] {
       if (!m) break;
       negIds.add(m[1]);
     }
-    out.push({ startLine: c.open + 2, text: c.text, negIds, migration: region !== null, info: c.info.trim().toLowerCase() });
+    out.push({ startLine: c.open + 2, text: c.text, negIds, info: c.info.trim().toLowerCase() });
   }
   return out;
-}
-
-/**
- * The SPEC's migration regions (#2101 r2 MED-1, r3 F4): each heading stands exactly once (any line equal to it,
- * in a fence or a comment too), as a top-level heading, between its neighbours (`after` / `before`: the nearest
- * heading of its level or higher on each side starts so), and followed by its first child (`firstChild`).
- */
-export function regionErrors(md: string, regions: Region[]): string[] {
-  const lines = md.split("\n").map((l) => l.trimEnd());
-  const errs: string[] = [];
-  let headings: MdHeading[] | null = null;
-  for (const r of regions) {
-    const n = lines.filter((l) => l === r.heading).length;
-    const name = JSON.stringify(r.heading);
-    if (n !== 1) { errs.push(`migration region heading ${name} stands ${n} times in ${SPEC_PATH} (must be exactly once)`); continue; }
-    if (!r.after && !r.before && !r.firstChild) continue;
-    headings ??= mdBlocks(md).headings.filter((x) => x.top);
-    const i = headings.findIndex((x) => lines[x.line] === r.heading);
-    if (i < 0) { errs.push(`migration region heading ${name} is not a heading in ${SPEC_PATH}`); continue; }
-    const level = headings[i].level;
-    const text = (x: MdHeading | undefined) => (x ? lines[x.line] : "(none)");
-    let p = i - 1;
-    while (p >= 0 && headings[p].level > level) p--;
-    let q = i + 1;
-    while (q < headings.length && headings[q].level > level) q++;
-    if (r.after && !text(headings[p]).startsWith(r.after)) errs.push(`migration region ${name} must follow a heading starting ${JSON.stringify(r.after)}; it follows ${JSON.stringify(text(headings[p]))}`);
-    if (r.before && !text(headings[q]).startsWith(r.before)) errs.push(`migration region ${name} must precede a heading starting ${JSON.stringify(r.before)}; it precedes ${JSON.stringify(text(headings[q]))}`);
-    if (r.firstChild && !text(headings[i + 1]).startsWith(r.firstChild)) errs.push(`migration region ${name} must be followed by ${JSON.stringify(r.firstChild)}; it is followed by ${JSON.stringify(text(headings[i + 1]))}`);
-  }
-  return errs;
 }
 
 export function scan(root: string, ledger: Ledger): Hit[] {
@@ -586,13 +649,15 @@ export function scan(root: string, ledger: Ledger): Hit[] {
     }
   }
   for (const rel of mdFiles(root, corpus)) {
-    const md = readFileSync(join(root, rel), "utf8");
+    const md = normalizeEol(readFileSync(join(root, rel), "utf8"));
     const mdLines = md.split("\n");
     let fences: Fence[];
-    try { fences = readFences(md, rel === SPEC_PATH ? ledger.migrationRegions ?? [] : []); }
-    catch (e) { throw new Error(`${rel}: ${(e as Error).message}`); }
+    try { fences = readFences(md); }
+    catch (e) {
+      if (e instanceof PlacementError) throw new PlacementError(`${rel}: ${e.message}`);
+      throw e;
+    }
     for (const f of fences) {
-      if (f.migration) continue;
       for (const row of rows) {
         if (f.negIds.has(row.id)) continue;
         for (const ln of rowLines(row, f.text, root)) {
@@ -695,16 +760,17 @@ export function checkAgainstBase(ledger: Ledger, base: Baseline, baseLedger: Led
 
 /**
  * The BASE ledger's rules over the HEAD tree (#2101 r2 MED-3): every base row — its detector, codes and
- * caseIdPattern — and the base's migration regions, scanned over this tree, must find no (row, file) count
+ * caseIdPattern — and the base's file set (`corpus`), scanned over this tree, must find no (row, file) count
  * above the base baseline. So a change that loosens what a row allows (a code added to `codes`, a widened
- * `caseIdPattern`, a detector replaced by a narrower or never-matching one, a new migration region) cannot
+ * `caseIdPattern`, a detector replaced by a narrower or never-matching one, a newly excluded path) cannot
  * hide a new hit: the base rule still sees it. Drops are fine here (a migration lowers counts). The readers
  * and builtin detectors are this tree's script (a change to them is a reviewed code diff).
  */
-export function baseRulesOnHead(root: string, baseLedger: Ledger, baseBaseline: Baseline, headRegions: Region[] = [], headCorpus?: Corpus): string[] {
+export function baseRulesOnHead(root: string, baseLedger: Ledger, baseBaseline: Baseline, headCorpus?: Corpus): string[] {
   let hits: Hit[];
-  // a base that predates `migrationRegions` (#2101 before r2) / `corpus` (before r3) is read with this tree's
-  const L: Ledger = { ...baseLedger, migrationRegions: baseLedger.migrationRegions ?? headRegions, corpus: baseLedger.corpus ?? headCorpus };
+  // a base that predates `corpus` (#2101 before r3) is read with this tree's; a base's `migrationRegions`
+  // (#2101 r2–r3) exempt nothing here (#2101 r4 F2: no region is exempt)
+  const L: Ledger = { rows: baseLedger.rows, corpus: baseLedger.corpus ?? headCorpus };
   try { hits = scan(root, L); }
   catch (e) { return [`the base ledger's rules cannot be run over this tree: ${(e as Error).message}`]; }
   const errs: string[] = [];
@@ -714,7 +780,7 @@ export function baseRulesOnHead(root: string, baseLedger: Ledger, baseBaseline: 
     const allowed: Record<string, number> = row.tier === "SOFT" ? baseBaseline.soft?.[row.id] ?? {} : baseBaseline.pending?.[row.id]?.files ?? {};
     for (const [f, n] of c.get(row.id) ?? new Map<string, number>()) {
       const a = allowed[f] ?? 0;
-      if (n > a) errs.push(`base rule ${row.id} (${row.tier}) finds ${n} hit(s) in ${f}, the base baseline allows ${a} (a loosened ledger row or region cannot hide it)`);
+      if (n > a) errs.push(`base rule ${row.id} (${row.tier}) finds ${n} hit(s) in ${f}, the base baseline allows ${a} (a loosened ledger row cannot hide it)`);
     }
   }
   return errs;
@@ -784,8 +850,8 @@ function main() {
     console.error(`retired-forms-lint: baseline lowered to the current counts (${relative(root, bpath)})`);
   }
   const res = check(ledger, hits, base);
-  const specAbs = join(root, SPEC_PATH);
-  const regErrs = existsSync(specAbs) ? regionErrors(readFileSync(specAbs, "utf8"), ledger.migrationRegions ?? []) : [];
+  // #2101 r4 F2: migration regions are retired — no region of any file is exempt
+  const regErrs = "migrationRegions" in ledger ? ["the ledger has `migrationRegions`: no region is exempt (#2101 r4) — mark each negative fence `<!-- retired-neg: <row-id> — reason -->`"] : [];
   if (regErrs.length) res.ok = false;
   // --base-ref: the baseline and the ledger may not be loosened in the same change (HIGH-3)
   const baseRef = arg("--base-ref");
@@ -804,7 +870,7 @@ function main() {
     const baseLedger: Ledger | null = bl ? JSON.parse(bl) : null;
     const baseBaseline: Baseline | null = bb ? JSON.parse(bb) : null;
     baseErrs = baseErrs.concat(checkAgainstBase(ledger, base, baseLedger, baseBaseline));
-    if (baseLedger && baseBaseline) baseErrs = baseErrs.concat(baseRulesOnHead(root, baseLedger, baseBaseline, ledger.migrationRegions ?? [], ledger.corpus));
+    if (baseLedger && baseBaseline) baseErrs = baseErrs.concat(baseRulesOnHead(root, baseLedger, baseBaseline, ledger.corpus));
     if (bb === null && bl === null) baseNote = ` (base ${baseRef} has no gate yet: this change introduces it)`;
   }
   const ok = res.ok && baseErrs.length === 0;
@@ -840,7 +906,7 @@ function main() {
       for (const f of r.rises) console.error(`  ${r.tier} ${r.id}: count rose — ${f}`);
       for (const f of r.drops) console.error(`  ${r.tier} ${r.id}: count fell — ${f}; lower the baseline: bun scripts/retired-forms-lint.ts --update`);
     }
-    for (const e of regErrs) console.error(`  REGION: ${e}`);
+    for (const e of regErrs) console.error(`  LEDGER: ${e}`);
     for (const e of baseErrs) console.error(`  BASELINE vs ${baseRef}: ${e}`);
     console.error("  List a row's hits: bun scripts/retired-forms-lint.ts --list <row-id>. A deliberate negative in markdown takes");
     console.error("  `<!-- retired-neg: <row-id> — reason -->` directly above its fence; in source, `// retired-ok: <row-id> — reason`");
@@ -851,4 +917,14 @@ function main() {
   return 0;
 }
 
-if (import.meta.main) process.exit(main());
+if (import.meta.main) {
+  let code: number;
+  try { code = main(); }
+  catch (e) {
+    // a markdown block the gate cannot place exactly (#2101 r4 NIT): a clean message, exit 2 — never a guess
+    if (!(e instanceof PlacementError)) throw e;
+    console.error(`retired-forms-lint: ${e.message} — the gate reads a block only at the line marked's lexer puts it; fix the markdown (or report a reader bug)`);
+    code = 2;
+  }
+  process.exit(code);
+}

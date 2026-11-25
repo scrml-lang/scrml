@@ -52032,7 +52032,7 @@ HARD form, migrate every SPEC example and every positive example in the corpus (
 positives, samples, examples, stdlib, the public docs) to the new form, or record each remaining site as dated
 `pending` debt; for a SOFT form, record the starting count per file. The retired-forms gate
 (`scripts/retired-forms-lint.ts`, CI `checks` and the pre-commit hook) enforces it. **What the gate checks —
-exactly this (S482, #2101 r1, r2):**
+exactly this (S482, #2101 r1–r4):**
 - *What it reads:* every ledger row with a detector, over (a) the `.scrml` files under `conformance/cases`,
   `compiler/self-host-v2/acceptance`, `samples`, `examples`, `stdlib`, `docs/tutorial-snippets`,
   `docs/readme-snippets`, `docs/website`; (b) in every `.md` file of the repository — except the paths the
@@ -52042,7 +52042,8 @@ exactly this (S482, #2101 r1, r2):**
   — every fenced code block, as CommonMark (GFM) reads it (the `marked` lexer, #2101 r3), whose info string is
   empty, starts with `scrml` (`scrml`, `scrml{.example}`, `scrml,ignore`) or is an attribute block with the
   class `.scrml` (`{.scrml}`), including a fence inside a blockquote or a list item (it ends where its container
-  ends). The file set — the `.scrml` roots, the excluded paths and the skipped directories — is the ledger's
+  ends); each fence is placed on its source lines by the lexer's own token positions, and a block that cannot be
+  placed exactly there exits 2 (it is never read at a guessed line). The file set — the `.scrml` roots, the excluded paths and the skipped directories — is the ledger's
   `corpus`, so it is checked against the base like the rows (below). Source is read once,
   in source order, by a port of the bootstrap's readers: comments, strings, regular-expression literals, raw
   bodies (`<pre>`, `<code>`, `<script>`, `<style>`, §4.17; an unclosed one runs only to the next closing tag),
@@ -52055,32 +52056,30 @@ exactly this (S482, #2101 r1, r2):**
   `codeCounts` entry, else 1; rows that share a code share the count), and for a row whose code is generic
   (`E-SCOPE-001`, `E-PARSE-FN`, `E-PARSE-TYPE`, `E-GRANT-UNKNOWN`) only when the case id also matches the row's
   `caseIdPattern`; a fence with `<!-- retired-neg: <row-id> — <reason> -->` on the line(s) directly above it, at the
-  fence's blockquote depth; a fence in a migration region of this SPEC — the ledger's `migrationRegions`: a region
-  opens only at a top-level heading line exactly equal to one listed there (§63, §66.21; each must stand exactly
-  once, between its neighbouring sections — §62 and §64, §66.20 and §66.22 — and §63 followed by `63.1`) and holds
-  only its own sub-headings (`63.x`, `66.21.x`), closing at any other heading; a
-  `retired-ok: <row-id> — <reason>` inside a comment on the hit's line or the line before. A code named in prose
-  or in a comment allows nothing.
+  fence's blockquote depth; a `retired-ok: <row-id> — <reason>` inside a comment on the hit's line or the line
+  before. No section or region of any file is exempt — not §63, not §66.21 (#2101 r4): a negative example anywhere,
+  this section included, is a fence marked `retired-neg`. A code named in prose or in a comment allows nothing.
 - *What fails:* any (row, file) count that differs from the baseline (`scripts/retired-forms-baseline.json`):
   a HARD hit outside the dated `pending` debt, a count above the baseline, and a count below it until the
-  baseline is lowered in the same change (`--update`); a migration-region heading that is missing, repeated or
-  moved.
+  baseline is lowered in the same change (`--update`); a ledger that lists `migrationRegions` (retired, #2101 r4).
   Against the base revision (`--base-ref`; CI: the PR's base, the hook: the merge-base with `origin/main`; a
   revision that does not resolve exits 2): a baseline count above the base's, a key the base lacks (except a new
   SOFT row's starting count), debt for a new HARD row, a ledger row removed, downgraded HARD → SOFT, or given a
-  null detector; and the BASE ledger's own rules — each base row's detector, codes and `caseIdPattern`, the
-  base's migration regions and the base's file set (`corpus`) — run over the changed tree, finding a (row, file)
-  count above the base baseline. So a change cannot widen what a row allows (a code added, a widened
-  `caseIdPattern`, a narrowed or never-matching detector, a new region, a newly excluded path) to let a new hit
-  through.
+  null detector; and the BASE ledger's own rules — each base row's detector, codes and `caseIdPattern`, and the
+  base's file set (`corpus`) — run over the changed tree, finding a (row, file) count above the base baseline. So
+  a change cannot widen what a row allows (a code added, a widened `caseIdPattern`, a narrowed or never-matching
+  detector, a newly excluded path) to let a new hit through.
 - *Known limits:* counts are per (row, file), so swapping one hit for another of the same row in the same file
   passes; within a negative case's count, which hit is allowed is not tied to the line its diagnostic points
   at; the source walker, the markdown reader and the builtin detectors are the changed tree's own script, so
   narrowing them is a reviewed code diff, not a ledger diff the base rules catch (and a base ledger older than
-  `migrationRegions` / `corpus` is read with the changed tree's); fences tagged as another language, indented code
-  blocks, HTML `<pre>` blocks and markdown prose are not read; an unterminated string or template literal in a
+  `corpus` is read with the changed tree's); fences tagged as another language, indented code
+  blocks, HTML `<pre>` blocks and markdown prose are not read; markdown the lexer itself mis-tracks (a lazy
+  continuation after a list nested in a blockquote can put its cursor past the source) exits 2 rather than be
+  read; **INTERIM:** an unterminated string or template literal in a
   fence (a stray ```` ``` ```` line inside it is a template-literal opener to scrml) hides the rest of that fence,
-  as it would in a source file the compiler then refuses; the hook reads the working tree, not the index (CI reads the commit);
+  as it would in a source file the compiler then refuses — the capable form fails the gate when a fence's text
+  ends inside an unterminated string or template literal, so nothing after it goes unread; the hook reads the working tree, not the index (CI reads the commit);
   text cannot tell a tape from a host array (`tape-js-method`) or a cell from an element (`render-by-tag`, which
   the bootstrap enforces); rows marked `enforcedBy: "lint-only"` have no compiler refusal, and
   `state-type-fn-overload` (§17.5) has neither a code nor a detector; `tape-js-method` sees a method by its dotted name only
