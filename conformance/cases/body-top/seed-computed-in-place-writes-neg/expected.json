@@ -1,0 +1,25 @@
+{
+  "id": "body-top-seed-computed-in-place-writes-neg",
+  "description": "§6.15 A1 (S482) — the cell `c`'s seed `k + note(\"c\")` calls `note`, which writes the file-scope `log`: a seed is a value position, so it is E-VALUE-WRITES-STATE (the shape body-top-seed-computed-in-place pinned before S482 model (c); split out by #2096 r1 review INFO).",
+  "language-version": "1.0",
+  "spec": "§6.15 (S482), §7.6 R3 (S482), §34",
+  "source-test": "compiler/self-host-v2/slice-m4/value-no-write-s482.test.js",
+  "rationale": "ruling:user-voice-scrml.md-S482-runorder-model-c A1 (PERMANENT): \"widen §6.15 from \\\"reactive cell\\\" to \\\"reactive cell or file-scope `let`\\\" (incl. a part/position of one and a tape edit, directly or through calls, §6.7.4 rules 1–6) … Diagnostic E-VALUE-WRITES-STATE naming the position, the `let`, the chain and the fix.\" (owner: \"yes, adopt (c) with the riders\").",
+  "expect": {
+    "codes": [
+      "E-VALUE-WRITES-STATE"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-value-writes-state-codes-unimplemented-s449",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-STATE-UNDECLARED=1",
+          "missing:E-VALUE-WRITES-STATE"
+        ]
+      }
+    }
+  }
+}

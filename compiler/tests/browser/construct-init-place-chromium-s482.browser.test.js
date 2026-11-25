@@ -134,6 +134,20 @@ describe("a non-acting initializer in a construct runs just before it (Chromium)
     expect(await load(out, ["o", "o2"])).toEqual({ errors: [], texts: ["5", "5"] });
   }, 120000);
 
+  test("#2096 r1 HIGH-1 positive twin: a `<request>` there writes `n`; the initializer calls a function reading `m` (not written) — 3", async () => {
+    if (skip()) return;
+    const out = build(`<program>
+\${ let n: int = 1; }
+\${ let m: int = 3; }
+\${ function bump() -> int { n = 5; return 0; } }
+\${ function rdm() -> int { return m; } }
+let <r:int=0/>
+<div if=(true)><request id="rq">\${ @r = bump(); }</request>\${ const k: int = rdm() + 0; }<p id="o">\${k}</p></div>
+</program>
+`);
+    expect(await load(out, ["o"])).toEqual({ errors: [], texts: ["3"] });
+  }, 120000);
+
   test("in a component's slot content", async () => {
     if (skip()) return;
     const out = build(`<card t:string="x">

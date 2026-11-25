@@ -1,16 +1,24 @@
 {
   "id": "body-top-seed-computed-in-place",
-  "description": "§7.6 rule (b) / §66.7.6 rule 5 (S482) — the cell `c`'s seed reads `k`, whose initializer reads `n` after the body-top write `n = 5`: `k` runs in its place (6), the seed at the cell's declaration (7), then `z` — the log is `kcz` and `@c` is 7. Before S482 construction ran the seed before the body, so `k` ran at module initialization (n still 1): `@c` was 3.",
+  "description": "§7.6 rule (b) / §66.7.6 rule 5 (S482) — the cell `c`'s seed reads `k` and `n`. `k`'s initializer runs in its place after the body-top write `n = 5` (6); the seed runs at the cell's declaration, where `n` is 5 (11) — not later, where the next statement sets `n` to 9 (15), and not before the body (`k` unset, `n` 1); then `z` — the log is `kz` and `@c` is 11. Before S482 construction ran the seed before the body. (s482-value-no-write r1, #2096 review INFO: the seed writes nothing — a seed is a value position, §6.15 A1 — and pins its place by what it reads; the spine initializers `k` and `z` still may write, A2. The writing seed is body-top-seed-computed-in-place-writes-neg.)",
   "language-version": "1.0",
   "spec": "§7.6 rule (b) (S482), §66.7.6 rule 5 (S482), §40.8",
   "source-test": "compiler/self-host-v2/slice-m4/runorder-followups-s482.test.js",
-  "rationale": "§7.6 rule (b) (S482): \"A cell's initializer (its seed) runs at the cell's place in the run — where its declaration stands in the program body\". ruling:user-voice-scrml.md-S481-run-order-followups item 1 — \"each seed is computed at its place in the sequence; records are still created at construction, so component identity (L12) is unchanged; a read of a seed before its place computes it early, on demand. Amends §66.7.6 rule 5.\" (owner: \"yes, adopt your recs on all three\").",
+  "rationale": "§7.6 rule (b) (S482): \"A cell's initializer (its seed) runs at the cell's place in the run — where its declaration stands in the program body\". ruling:user-voice-scrml.md-S481-run-order-followups item 1 — \"each seed is computed at its place in the sequence; records are still created at construction, so component identity (L12) is unchanged; a read of a seed before its place computes it early, on demand. Amends §66.7.6 rule 5.\" (owner: \"yes, adopt your recs on all three\"). s482-value-no-write: ruling:user-voice-scrml.md-S482-runorder-model-c A1/A2.",
   "expect": {
     "codes": [],
-    "notCodePrefixes": ["E-"],
+    "notCodePrefixes": [
+      "E-"
+    ],
     "domAnchored": [
-      { "selector": "#e", "text": "7" },
-      { "selector": "#r", "text": "kcz" }
+      {
+        "selector": "#e",
+        "text": "11"
+      },
+      {
+        "selector": "#r",
+        "text": "kz"
+      }
     ]
   },
   "xfail": {

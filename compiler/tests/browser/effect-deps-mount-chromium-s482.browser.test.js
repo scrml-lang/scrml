@@ -107,32 +107,36 @@ describe("an <effect>'s deps= are read at the mount (Chromium)", () => {
   test("x15 construct, deps=[@z]: refused (base: Chromium k = 1)", () => {
     const r = compile(X("z", `<div if=(true)><effect deps=[@z]>\${ let q: int = 0; }</>\${ const k: int = n + 0; }<p id="o">\${k}</p></div>`));
     expect(r.exit).not.toBe(0);
-    expect(r.codes).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect([...new Set(r.codes)].filter((c) => c !== "E-011")).toEqual(["E-VALUE-WRITES-STATE"]);
   }, 120000);
 
   test("x15 control (<div>): the deps read runs z's seed first, k = 5, source order", async () => {
-    if (skip()) return;
-    const out = build(X("z", `<div><effect deps=[@z]>\${ let q: int = 0; }</>\${ const k: int = n + 0; }<p id="o">\${k}</p></div>`));
-    expect(await load(out, ["o"])).toEqual({ errors: [], texts: ["5"] });
+    // s482 (lane s482-value-no-write; ruling:user-voice-scrml.md-S482-runorder-model-c A1): the seed / display that
+    // writes `n` is a value position — refused where it writes (~~E-FILE-SCOPE-INIT-IN-CONSTRUCT~~, ~~k = 5~~)
+    const r = compile(X("z", `<div><effect deps=[@z]>\${ let q: int = 0; }</>\${ const k: int = n + 0; }<p id="o">\${k}</p></div>`));
+    expect(r.exit).not.toBe(0);
+    expect([...new Set(r.codes)].filter((c) => c !== "E-011")).toEqual(["E-VALUE-WRITES-STATE"]);
   }, 120000);
 
   test("x16 construct, deps=[@zb]: refused (base: Chromium k = 1)", () => {
     const r = compile(X("zb", `<div if=(true)><effect deps=[@zb]>\${ let q: int = 0; }</>\${ const k: int = n + 0; }<p id="o">\${k}</p></div>`));
     expect(r.exit).not.toBe(0);
-    expect(r.codes).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect([...new Set(r.codes)].filter((c) => c !== "E-011")).toEqual(["E-VALUE-WRITES-STATE"]);
   }, 120000);
 
   test("x16 control (<div>): k = 5, source order", async () => {
-    if (skip()) return;
-    const out = build(X("zb", `<div><effect deps=[@zb]>\${ let q: int = 0; }</>\${ const k: int = n + 0; }<p id="o">\${k}</p></div>`));
-    expect(await load(out, ["o"])).toEqual({ errors: [], texts: ["5"] });
+    // s482 (lane s482-value-no-write; ruling:user-voice-scrml.md-S482-runorder-model-c A1): the seed / display that
+    // writes `n` is a value position — refused where it writes (~~E-FILE-SCOPE-INIT-IN-CONSTRUCT~~, ~~k = 5~~)
+    const r = compile(X("zb", `<div><effect deps=[@zb]>\${ let q: int = 0; }</>\${ const k: int = n + 0; }<p id="o">\${k}</p></div>`));
+    expect(r.exit).not.toBe(0);
+    expect([...new Set(r.codes)].filter((c) => c !== "E-011")).toEqual(["E-VALUE-WRITES-STATE"]);
   }, 120000);
 
   test("legal: the effect after the initializer, in the construct — k = 1, as its control", async () => {
-    if (skip()) return;
-    const a = build(X("z", `<div if=(true)>\${ const k: int = n + 0; }<p id="o">\${k}</p><effect deps=[@z]>\${ let q: int = 0; }</></div>`));
-    const c = build(X("z", `<div>\${ const k: int = n + 0; }<p id="o">\${k}</p><effect deps=[@z]>\${ let q: int = 0; }</></div>`));
-    expect(await load(a, ["o"])).toEqual({ errors: [], texts: ["1"] });
-    expect(await load(c, ["o"])).toEqual({ errors: [], texts: ["1"] });
+    // s482 (lane s482-value-no-write; ruling:user-voice-scrml.md-S482-runorder-model-c A1): the seed / display that
+    // writes `n` is a value position — refused where it writes (~~E-FILE-SCOPE-INIT-IN-CONSTRUCT~~, ~~k = 5~~)
+    const r = compile(X("z", `<div if=(true)>\${ const k: int = n + 0; }<p id="o">\${k}</p><effect deps=[@z]>\${ let q: int = 0; }</></div>`));
+    expect(r.exit).not.toBe(0);
+    expect([...new Set(r.codes)].filter((c) => c !== "E-011")).toEqual(["E-VALUE-WRITES-STATE"]);
   }, 120000);
 });
