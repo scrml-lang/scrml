@@ -80,3 +80,21 @@ the effect / request timing sentences.
       direction), E-SCOPE-001 sentence, the S481 provenance's INTERIM list clause struck; §6.7.4 "Held during the
       body"; §6.7.7 Mount behavior note; §34 E-FILE-SCOPE-INIT-IN-CONSTRUCT row. known-gaps: the three gaps
       resolved (resolved-by=s482-hold-body), the residue-s479 coupling note marked moot.
+
+## Gates (head d74ef972d; base origin/main 8511bd90c)
+
+| gate | result |
+|---|---|
+| pre-commit (both commits, SCRML_HOOK_SHARDS=8) | PASS — 58336 pass / 0 fail (first try of commit 1: a lowered-slice beforeAll timed out at 127 s under host memory pressure from other lanes; check.test.js alone passes in 41 s; retried clean) |
+| pretest | exit 0 |
+| bootstrap-conformance --json | base = head: PASS 851 / FAIL 3 / CRASH 0 / 1973 cases; 0 per-case bucket or emitted diffs |
+| new + changed slice tests | hold-body.runtime (9), hold-body-s482, handler-reach, value-no-write, effect-deps-mount: all pass; 36 effect/request slice files: 1513 pass, only the 3 intended pins failed before they were updated |
+| Chromium (SCRML_BROWSER_TESTS=1) | hold-body / construct-init-place / effect-deps-mount / rcdata-init-place / callref: 54 pass, 0 skipped |
+| probes, Chromium, head vs base | 752 (the 577-probe set's 389 unique + every s482-2096 a–f, r1rev h, r2rev p/q/w/z/lm list + 11 lane probes): 657 same, 95 changed — 34 refused → value, 27 refused → refused (only E-FILE-SCOPE-INIT-IN-CONSTRUCT dropped), 34 value → value (all Q6: a request's / effect's run moved after the body); 0 value → refused. ~/.cache/scrml/review/s482-hold-body/probe-cat.txt |
+| corpus differential + byte-compare | 2977 files: 0 newly rejected, 0 newly accepted, 0 code changes, 0 output diffs once the boot's `rt.runBody` wrap is normalized (317 client artifacts carry it) |
+| s34-census --check-new | PASS (1 changed row, well-formed) |
+| types-gate --check | OK, unchanged (182) |
+| host-global-scan --check 1/2, 2/2 | 0 violations both |
+| snippet-gate | 0 failures |
+| e2e-render-map | 259 pass |
+| retired-forms gate | not on main — n/a |
