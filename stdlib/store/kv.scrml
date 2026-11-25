@@ -127,7 +127,7 @@ ${
         }
         return safeCall(() => JSON.parse(row.value)) !{
             .Thrown(msg, name) :> {
-                fail KvError::ParseFailed(msg);
+                fail KvError.ParseFailed(msg);
             }
         };
     }

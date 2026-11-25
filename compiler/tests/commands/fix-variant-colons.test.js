@@ -106,6 +106,14 @@ describe("variant-colons — `::` → `.`", () => {
     expect(p.notes.some((n) => n.reason.includes("does not enter"))).toBe(true);
   });
 
+  test("a `::V` outside every code region the splitter hands out is reported, not passed over", () => {
+    // `< db …>` with an unterminated body: impl#1's splitter gives this file no code region.
+    const src = ["< db src=\"./x.db\" tables=\"t\">", "    <n> = 0", `    ${D}{`, "        function f() { g() !{", "            | ::SQLError e -> { return }", "        } }", "    }", ""].join("\n");
+    const p = planVariantColons("/tmp/fix-variant-colons-i/a.scrml", src);
+    if (p.sites.length === 0) expect(p.notes.some((n) => n.line === 5 && n.reason.includes("by hand"))).toBe(true);
+    else expect(p.sites.map((s) => s.line)).toEqual([5]);
+  });
+
   test("a file that does not compile is refused (§63.4)", () => {
     const src = MIXED.replace("function pick(k) { @c = k; }", "function pick(k) { @c = undeclaredThing; }");
     const r = fixVariantColons(src, { filePath: "/tmp/fix-variant-colons-f/a.scrml" });

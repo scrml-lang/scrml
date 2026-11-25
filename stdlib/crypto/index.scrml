@@ -84,14 +84,14 @@ ${
         }
         if (algorithm == "argon2") {
             return safeCall(() => Bun.password.verifySync(input, storedHash)) !{
-                ::Thrown(msg, name) -> {
-                    fail CryptoError::VerifyFailed(msg)
+                .Thrown(msg, name) -> {
+                    fail CryptoError.VerifyFailed(msg)
                 }
             }
         }
         const computed = safeCall(() => hash(algorithm, input)) !{
-            ::Thrown(msg, name) -> {
-                fail CryptoError::VerifyFailed(msg)
+            .Thrown(msg, name) -> {
+                fail CryptoError.VerifyFailed(msg)
             }
         }
         return computed == storedHash

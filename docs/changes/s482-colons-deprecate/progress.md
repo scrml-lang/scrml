@@ -32,6 +32,47 @@ row and migration") — this PR adds a SOFT ledger row and migrates.
 - Tests: compiler/tests/commands/fix-variant-colons.test.js 10/0 (mixed-spelling file, idempotence, CSS/SQL/URI
   not sites, spaced, `~{}`, refusal, wiring); fix-s66 rule-id list + fix-refuse-broken rule loop updated.
 
+## 1 — SPEC (commit 2)
+- §14.5: the VALID ALIAS sentence struck (kept, with cite); new normative text — `::` DEPRECATED (§63.1 Stage 1),
+  W-VARIANT-COLONS-LEGACY with fix-it, `scrml fix` rule, "E-VARIANT-COLONS-LEGACY only at a future MAJOR
+  language-version event (unscheduled per §63.7)" (the W-WHITESPACE-001 wording); provenance block quoting the
+  ruling; normative statements de-aliased; formatter-preference sentence struck.
+- §34: W-VARIANT-COLONS-LEGACY (Warning) + reserved E-VARIANT-COLONS-LEGACY, after E-IS-SOME-DEPRECATED.
+  s34-census found no prior row. §63.7 bullet added.
+- Examples: 59 fenced scrml lines migrated (the SQL `::jsonb` cast and CSS `&::before` kept). Prose inline examples
+  migrated on 33 lines; alias-teaching prose (§14.10 ×3, §18 ×3, §19.3, §19.4) re-worded "deprecated". Grammar
+  productions (§18.2 variant-pattern, §19.3.1 fail-stmt) annotated. NOT touched: verbatim ruling quotes /
+  provenance / struck history, the W-ARM-PIPE rows (describe `| ::V m` as the arm-pipe rule's input), and four
+  legacy §34 rows (E-PARSEVARIANT-* ×3, E-THROW-NOT-IN-SCRML) — editing them makes s34-census --check-new demand
+  a provenance note they never had; left for the R1 example sweep.
+
+## 2 — Bootstrap (commit 2)
+- parse.scrml `colonsLint` (one per site, deduped by start) at the four `::` sites: parsePattern `::V` / `E::V`,
+  parseFail `::V` / `E::V`. refusals.scrml: the `::`-in-expression named refusal's hint names the deprecation.
+- severity.scrml regenerated (W-VARIANT-COLONS-LEGACY → Warning).
+- slice-m4/variant-colons-s482.test.js 4/0 (count + Warning, message/span, identical artifacts vs `.` spelling,
+  expression refusal hint). Probe t2: out bytes identical before/after the lint.
+- bootstrap-conformance.ts: `variant-colons` excluded from TWIN_RULES (graded as written, like is-some).
+
+## 4 — Corpus (commit 2)
+Driver ~/.cache/scrml/review/s482-colons/migrate.ts (fixer locator; per file bootstrap compileSource before/after
+at the file's own path; same verdict + codes-minus-lint + html/js/server bytes, else impl#1 verify when both sides
+are rejected with only a code-set change from the `::` named refusal) and migrate2.ts (the sites the fixer reports
+"by hand": `~{}` blocks, regions the splitter does not hand out — admitted only if bootstrap AND impl#1 read the file
+identically). Reverted (listed, 4 files / 12 lines): samples/gauntlet-r11/rust-state-machine (5),
+gauntlet-r13/solid-reactive-signals (2), gauntlet-r14/solid-reactive-signals (3) — neither compiler compiles them
+and the bootstrap's code set changes (the `::`-in-expression named refusal drops a cascade); and
+compilation-tests/gauntlet-s20-error-test/test-fails-with-001 (2, `~{}` `assert.fails.with … ::V`; bootstrap code
+set changes, both sides rejected).
+- Hook round 1 found a real interplay: parse.scrml's `| ::V` arm lost its W-ARM-PIPE-LEGACY because the pipe lint
+  required "no diagnostic of its own" and counted the new lint. Fixed (`faultsSince` ignores W-VARIANT-COLONS-LEGACY);
+  after it blog-cms / contact-directory / gauntlet-r11-go-url-shortener migrated cleanly (15 sites). Bootstrap tests
+  that asserted a clean `::` program updated (error-model, match-s469, termination-rulings-s469, terminators-s469).
+- Conformance: new labelled case enum/variant-colons-deprecated-warn (DEPRECATED-DEMO; 5 lints; runtime half;
+  impl#1 xfail g-impl1-variant-colons-lint-s482). No existing case's PURPOSE was `::` — all migrated.
+
+## 5 — impl#1 gap: g-impl1-variant-colons-lint-s482 (LOW, carried) filed in docs/known-gaps.md.
+
 ## Next
 1 SPEC · 2 bootstrap lint + severity regen · 4 corpus migration (+ per-file bootstrap byte compare) · 5 impl#1 gap
 · ledger row (retired-lint PR #? not merged at start — row text in PR body).

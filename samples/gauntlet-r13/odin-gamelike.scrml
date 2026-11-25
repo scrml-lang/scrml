@@ -8,7 +8,7 @@
         type Direction:enum = { North, South, East, West }
         type GameState:enum = { Menu, Playing, Paused, GameOver }
 
-        @state = GameState::Menu;
+        @state = GameState.Menu;
         @isMenu = true;
         @isPlaying = false;
         @x = 0;
@@ -19,15 +19,15 @@
             function applyDelta(pos, delta) {
                 return pos + delta;
             }
-            if (dir == Direction::North) { @y = applyDelta(@y, -1); }
-            if (dir == Direction::South) { @y = applyDelta(@y, 1); }
-            if (dir == Direction::East)  { @x = applyDelta(@x, 1); }
-            if (dir == Direction::West)  { @x = applyDelta(@x, -1); }
+            if (dir == Direction.North) { @y = applyDelta(@y, -1); }
+            if (dir == Direction.South) { @y = applyDelta(@y, 1); }
+            if (dir == Direction.East)  { @x = applyDelta(@x, 1); }
+            if (dir == Direction.West)  { @x = applyDelta(@x, -1); }
             @score = @score + 1;
         }
 
         function startGame() {
-            @state = GameState::Playing;
+            @state = GameState.Playing;
             @isMenu = false;
             @isPlaying = true;
             @x = 0;
@@ -42,10 +42,10 @@
     <div if=@isPlaying>
         <p>Position: (${@x}, ${@y}) Score: ${@score}</>
         <div class="controls">
-            <button onclick=move(Direction::North)>N</>
-            <button onclick=move(Direction::South)>S</>
-            <button onclick=move(Direction::East)>E</>
-            <button onclick=move(Direction::West)>W</>
+            <button onclick=move(Direction.North)>N</>
+            <button onclick=move(Direction.South)>S</>
+            <button onclick=move(Direction.East)>E</>
+            <button onclick=move(Direction.West)>W</>
         </div>
     </div>
 </div>

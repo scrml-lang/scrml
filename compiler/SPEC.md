@@ -8533,7 +8533,7 @@ c = stepped(c);
 > | JS-style `match` arms (§18) and `!{}` arms (§19) | ~~arms are newline-separated (§18.2, unchanged)~~ arms are a comma list, trailing `,` optional (S469, dpa-073 F2 — §18.2 amendment; newline-separated lists are still read during the F5 migration). See "Arm heads" below |
 > | `?{ … }` SQL (§8), `_{ … }` foreign code (§23.2.3), `#{ … }` CSS | **exempt** — a foreign grammar; its own newlines and `;` are its own. The block itself is an expression inside a scrml statement and takes this rule after its closing `}` |
 >
-> **Arm heads — the `.Variant :>` line (structural, not a lookahead).** Directly inside a `match { … }` body or a `!{ … }` handler body (and, S452, in the leading message-arm region of an engine state-child, §51.0.S.2.3), the unit at depth 0 is the **arm**, not a statement (§18.2: ~~arms are juxtaposed, one per line~~ arms are a comma list, trailing `,` optional — S469 — dpa-073 F2, the §18.2 comma-list amendment). A line at that level begins an arm, so its first token is an arm pattern (`.Variant`, `::Variant`, `Type.Variant`, `| ::E` (the soft-deprecated `|`-led `!{}` arm, §19.4.5), `else`, `_`, a literal or `(` tuple pattern) — a leading `.` there is the arm's pattern, not a leading operator. Which reading applies is decided by **position** (arm level vs statement level), never by looking ahead for `:>`. Inside an arm's `{ … }` block body the level is statement level again, and a line starting with `.` there is `E-STMT-LEADING-OPERATOR`. A single-expression arm body (`.A :> expr`) ends at its line break unless the line ends in a continuation token (rule 2); a following line that starts with `.` at arm level is read as an arm head, and if it does not form an arm (`.map(f)` with no `:>`) it is a parse error whose message SHOULD carry the rule-3 suggestion.
+> **Arm heads — the `.Variant :>` line (structural, not a lookahead).** Directly inside a `match { … }` body or a `!{ … }` handler body (and, S452, in the leading message-arm region of an engine state-child, §51.0.S.2.3), the unit at depth 0 is the **arm**, not a statement (§18.2: ~~arms are juxtaposed, one per line~~ arms are a comma list, trailing `,` optional — S469 — dpa-073 F2, the §18.2 comma-list amendment). A line at that level begins an arm, so its first token is an arm pattern (`.Variant`, `::Variant` (deprecated, §14.5), `Type.Variant`, `| .E` (the soft-deprecated `|`-led `!{}` arm, §19.4.5), `else`, `_`, a literal or `(` tuple pattern) — a leading `.` there is the arm's pattern, not a leading operator. Which reading applies is decided by **position** (arm level vs statement level), never by looking ahead for `:>`. Inside an arm's `{ … }` block body the level is statement level again, and a line starting with `.` there is `E-STMT-LEADING-OPERATOR`. A single-expression arm body (`.A :> expr`) ends at its line break unless the line ends in a continuation token (rule 2); a following line that starts with `.` at arm level is read as an arm head, and if it does not form an arm (`.map(f)` with no `:>`) it is a parse error whose message SHOULD carry the rule-3 suggestion.
 >
 > > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 6, ACCEPTED: *"arm heads by position"* — position, never a `:>` lookahead, decides arm head vs statement; S446 Call 4a (i) already ruled out a `.Variant`-arm vs chain lookahead).
 >
@@ -10326,7 +10326,7 @@ read/write distinction.
 At runtime, `?{}` queries can fail (connection lost, constraint violation, invalid query). The error type is the built-in `SqlError` enum (§19.8.1):
 
 - A `?{}` query is a **failable expression everywhere** (S451 R11): a failed query produces a `SqlError` variant, never a value.
-- Inside a `!` function: SQL errors are propagated via the error channel (§19.8.2, unchanged). Handle with `!{}` arms matching `::QueryFailed`, `::ConstraintViolation`, `::ConnectionLost`.
+- Inside a `!` function: SQL errors are propagated via the error channel (§19.8.2, unchanged). Handle with `!{}` arms matching `.QueryFailed`, `.ConstraintViolation`, `.ConnectionLost`.
 - Outside a `!` function: the query SHALL be handled at the site — a `!{}` handler or a `match` — exactly like a call to a `!` function; an unhandled `?{}` there is **E-ERROR-002** (§19.8.3).
 - "No row" is not a failure: `.get()` on zero rows returns `not` and `.all()` returns `[]`, in every context (§19.8.3).
 
@@ -10694,7 +10694,7 @@ When two or more `?{}` calls in a server handler are coalescing candidates, the 
 >
 >     function audit(id: int)! -> AuditError {
 >         ?{`INSERT INTO audit (order_id) VALUES (${id})`}.run() !{ _ e :> not };
->         fail AuditError::Full;
+>         fail AuditError.Full;
 >     }
 >
 >     function ship(id: int)! -> SqlError {
@@ -10790,7 +10790,7 @@ Outside `!`: coalescing is never applied with a transactional envelope (§8.9.2)
 > **Provenance:** ruling:user-voice-scrml.md S451 "your recs. R11 b" · supersedes: *"Each `?{}` retains §8.7 semantics — failed `.get()` → `not`, failed `.all()` → `[]`."* · Direction of change: newly-rejecting (follows §19.8.3).
 
 Inside `!`:
-- **Prepare-phase errors** (a SQL syntax error detected while preparing the batched statements) surface as a single variant `SqlError::BatchPrepareFailed { sites: [<?{} source locations>] }`. The variant lists source locations of all coalesced `?{}` blocks so that `!{}` arms can attribute the failure.
+- **Prepare-phase errors** (a SQL syntax error detected while preparing the batched statements) surface as a single variant `SqlError.BatchPrepareFailed { sites: [<?{} source locations>] }`. The variant lists source locations of all coalesced `?{}` blocks so that `!{}` arms can attribute the failure.
 - **Per-iteration runtime errors** (constraint violations, missing rows, etc.) are attributed to the original site per §8.7.
 
 This mode-split preserves §8.7 pointwise for misses while accepting bundled attribution for prepare-phase defects where per-site attribution is not implementable.
@@ -13257,22 +13257,43 @@ ${ @issues = ?{`SELECT * FROM issues`}.all().map(row => ({
   enum type. The shorthand form `.VariantName` is valid only where the enum type is inferable from
   context (e.g., inside a match arm for a known enum type, or in an assignment where the target has
   a declared enum type).
-- The `::` sigil is a VALID ALIAS for `.` in enum variant access. `TypeName::VariantName` and
+- ~~The `::` sigil is a VALID ALIAS for `.` in enum variant access. `TypeName::VariantName` and
   `::VariantName` are accepted as equivalent to `TypeName.VariantName` and `.VariantName`
   respectively. The canonical form is `.` (dot notation). The compiler preference setting
-  controls which form the formatter normalizes to.
+  controls which form the formatter normalizes to.~~ *(struck S482 — `::` is deprecated, below.)*
+- **`::` is the DEPRECATED spelling of `.` in enum variant access** (§63.1 Stage 1,
+  SOFT-DEPRECATED). `TypeName::VariantName` and `::VariantName` — in an expression, a match or
+  `!{}` arm pattern, and a `fail` operand alike — still compile, and mean exactly what
+  `TypeName.VariantName` and `.VariantName` mean (same AST, emitted code and run-time behaviour),
+  but each site emits **W-VARIANT-COLONS-LEGACY** with a fix-it to the `.` spelling, and `scrml fix`
+  rewrites it (its default `variant-colons` rule). The form becomes E-VARIANT-COLONS-LEGACY only at
+  a future MAJOR language-version event (unscheduled per §63.7). One spelling, consistent with
+  S452: write `.`.
+
+> **Provenance:** ruling:user-voice-scrml.md-S482-deprecate-colons — Rec as presented (PERMANENT):
+> *"deprecate `::`: put it in the §63 migration window … It keeps compiling with a warning
+> (W-VARIANT-COLONS-LEGACY) and a `scrml fix` rewrite to `.`. The corpus gets migrated … When the
+> window closes, it is refused. One spelling, consistent with S452."* · owner: *"yes, deprecate ::
+> with warning and fix"* · **supersedes:** the struck "VALID ALIAS" sentence above and the "(alias)"
+> wording of the normative statements below (the S452 ruling — *"multiple syntaxs in logic dosnt work
+> for me. yes, cononical version."* — had not re-ruled it). **Direction of change:** newly-warning
+> only — no program's acceptance or meaning moves (§63.1 Stage 1: the form parses identically);
+> removal is a later §62 MAJOR event, not this one. Ledger: `compiler/retired-forms.json` row
+> `variant-colons` (SOFT), per ruling:user-voice-scrml.md-S482-retirement-ledger-rule.
 
 **Normative statements:**
 
-- A fully qualified enum variant SHALL be written `TypeName.VariantName` (canonical) or
-  `TypeName::VariantName` (alias). The compiler SHALL resolve both `.` and `::` as variant
-  access when the left-hand operand is an enum type name.
-- A shorthand variant reference SHALL be written `.VariantName` (canonical) or `::VariantName`
-  (alias) and SHALL be valid only in positions where the enum type is determinable from context.
+- A fully qualified enum variant SHALL be written `TypeName.VariantName`. The deprecated
+  `TypeName::VariantName` SHALL be accepted during the §63 window and resolved as the same variant
+  access, with W-VARIANT-COLONS-LEGACY at the site.
+- A shorthand variant reference SHALL be written `.VariantName` (the deprecated `::VariantName` is
+  accepted during the window, with W-VARIANT-COLONS-LEGACY) and SHALL be valid only in positions
+  where the enum type is determinable from context.
   A shorthand variant reference in a position where the type cannot be inferred SHALL be a
   compile error (E-TYPE-061: cannot infer enum type for shorthand variant `.VariantName`).
-- The canonical forms are `.` for enum variant access. The compiler preference setting controls
-  which form the formatter normalizes to.
+- The canonical form of enum variant access is `.`. ~~The compiler preference setting controls
+  which form the formatter normalizes to.~~ *(struck S482 — with one spelling there is nothing to
+  normalize between; `scrml fix` rewrites `::` to `.`.)*
 
 ### 14.6 Pattern Matching
 
@@ -13280,9 +13301,9 @@ Pattern matching over enum types uses match arms. All variants must be covered o
 
 ```scrml
 match value {
-    ::Circle(r) :> ...,
-    ::Rectangle(w, h) :> ...,
-    ::Point :> ...
+    .Circle(r) :> ...,
+    .Rectangle(w, h) :> ...,
+    .Point :> ...
 }
 ```
 
@@ -13461,7 +13482,7 @@ the type is `T` alone.
 
 **`INTEGER` is `int` (S478).** A column whose declared type is `INTEGER` or `INT` (a §39.2 `integer` column included) maps to `int`, not `number`: SQLite stores an INTEGER-affinity value as an integer unless a non-integral REAL is written into the column, and that case is caught on the read (below). `REAL` stays `number`. Nullability is unchanged: a nullable column is `T | not` (the bullet above), so a `text` column without `not null` is `string | not`, and a program that wants `string` declares the column `not null` or narrows the value. The affinity fallback's rule 1 (a declared type containing `INT`, such as `BIGINT`) is not amended by this ruling and stays `number`; inside `<schema>` it never applies (E-SCHEMA-004, below). *(Provenance: S478 open-Qs ruling (user-voice) — ruling:user-voice-scrml.md S478 "⭐ RULED — open owner questions, PA recs adopted wholesale" item 20: *"(1) map `integer` to `int` (amend §14.8.3 — SQLite INTEGER values are integers unless a REAL is stored into the column; the §57 codec already traps a non-integer at an `int` wire position), keep `real` → `number`; (2) keep §14.8.3's nullability (a nullable column can hold NULL — reading it as `string` is the impl#1 hole), and fix the cases to declare `not null` or narrow."* · supersedes: `INTEGER`, `INT` → `number` · **Direction of change:** mostly newly-accepting on the bootstrap — an `INTEGER` row field now fits an `int` slot it did not fit before, and a `number` slot still takes an `int` — and newly-rejecting where a local typed from the field is later given a non-integer, and where `/` takes such a field as an operand (`r.n / 2`, `r.n / r.id`, `r.n * 100 / 3`): `/` between two `int`s is `E-INT-DIVISION` (§66.20), so a program that divided an INTEGER field as a `number` now declares the local `number` first (`const a: number = r.n;` then `a / 2`) — the corpus count of that shape is 0 (S478 #1944 review LOW-1); measured on the corpus (`docs/changes/s478-ruled-schema-sql/progress.md`). Built on the bootstrap (`compiler/self-host-v2/analyze.scrml` `colType`). impl#1 carries it (its introspected `ColumnDef` mapping is frozen; `g-boot-sql-row-field-types-owner-s478`).)*
 
-**A typed row is checked as it is read — INTERIM (S478).** Where the compiler types a query's rows from a `<schema>` table (§39.11), the server SHALL check each row value against its declared field type as the row is read, at the query boundary, before the value reaches the program: the same check the §57 decoder applies at a wire position (`int` an integer within ±(2^53−1), §21.3.1.1; `number` a finite number; `string` a string; `T | not` NULL or a `T`; a declared field the row lacks fails). A stored `INTEGER` outside ±(2^53−1) fails the check: the driver reads it as the nearest double, which is a different integer, and a rounded key selects a different row. A column the row carries that its declared type does not declare (a live table with a column `<schema>` does not list, read by `SELECT *`) is dropped from the row, not refused: a row with extra columns is still a row of the declared type, and the program sees only the declared fields. A row value that fails the check SHALL fail the query as `SqlError::QueryFailed` (§19.8.1), exactly as a driver error does — handled where the query is handled, propagated where it propagates — and the server SHALL log it, naming the field path and the stored value's storage class (NULL, integer, real, text, blob), never the stored value; the program never sees the value. This closes the non-STRICT hole: a non-STRICT SQLite table stores any storage class in any column (an `INTEGER` column holding `'abc'` or `1.5`, a `TEXT` column holding a blob), and a type read off the declaration would otherwise be a silent lie inside server code, where no wire codec runs. **INTERIM:** the capable form is option (a) of the ruling — rows typed from `STRICT` tables, whose storage SQLite itself checks — which becomes free once `<schema>` generates STRICT DDL; the storage-class part of the read check is then redundant for those tables, while the ±(2^53−1) range (a STRICT `INTEGER` is 64-bit), a declared column the live table lacks or names in another case, and the dropping of undeclared columns still apply. *(Provenance: S478 open-Qs ruling (user-voice) — ruling:user-voice-scrml.md S478 "⭐ RULED — open owner questions, PA recs adopted wholesale" item 20: *"**Recommendation: (b), INTERIM** — the §57 decoder already checks a value against its declared type at the wire; reuse it on the row read (cheap, one check per typed column, and it keeps every existing non-STRICT `<schema>` in the corpus typed); move to (a)'s guarantee for free once `<schema>` generates STRICT DDL."* Option (b) is *"validate each typed row value at the query boundary, server-side, as the row is read"*. The failure surface (`QueryFailed`) is the PA's reading of "validate … at the query boundary": the query's result is not what its type says, so the query has failed. · **Direction of change:** a query that returned a wrong-kind value now fails, and (S478 #1944 review fix r1) so does one that read a stored `INTEGER` beyond ±(2^53−1) lossily; a `SELECT *` over a live table with an undeclared column reads (the column is dropped) rather than failing. Built on the bootstrap (`compiler/self-host-v2/slice-m1/runtime/server-runtime.js` `query` / `checkRows`, given the row's wire table by `print.scrml` `queryJs`); impl#1 does not type `<schema>` rows this way and carries it.)*
+**A typed row is checked as it is read — INTERIM (S478).** Where the compiler types a query's rows from a `<schema>` table (§39.11), the server SHALL check each row value against its declared field type as the row is read, at the query boundary, before the value reaches the program: the same check the §57 decoder applies at a wire position (`int` an integer within ±(2^53−1), §21.3.1.1; `number` a finite number; `string` a string; `T | not` NULL or a `T`; a declared field the row lacks fails). A stored `INTEGER` outside ±(2^53−1) fails the check: the driver reads it as the nearest double, which is a different integer, and a rounded key selects a different row. A column the row carries that its declared type does not declare (a live table with a column `<schema>` does not list, read by `SELECT *`) is dropped from the row, not refused: a row with extra columns is still a row of the declared type, and the program sees only the declared fields. A row value that fails the check SHALL fail the query as `SqlError.QueryFailed` (§19.8.1), exactly as a driver error does — handled where the query is handled, propagated where it propagates — and the server SHALL log it, naming the field path and the stored value's storage class (NULL, integer, real, text, blob), never the stored value; the program never sees the value. This closes the non-STRICT hole: a non-STRICT SQLite table stores any storage class in any column (an `INTEGER` column holding `'abc'` or `1.5`, a `TEXT` column holding a blob), and a type read off the declaration would otherwise be a silent lie inside server code, where no wire codec runs. **INTERIM:** the capable form is option (a) of the ruling — rows typed from `STRICT` tables, whose storage SQLite itself checks — which becomes free once `<schema>` generates STRICT DDL; the storage-class part of the read check is then redundant for those tables, while the ±(2^53−1) range (a STRICT `INTEGER` is 64-bit), a declared column the live table lacks or names in another case, and the dropping of undeclared columns still apply. *(Provenance: S478 open-Qs ruling (user-voice) — ruling:user-voice-scrml.md S478 "⭐ RULED — open owner questions, PA recs adopted wholesale" item 20: *"**Recommendation: (b), INTERIM** — the §57 decoder already checks a value against its declared type at the wire; reuse it on the row read (cheap, one check per typed column, and it keeps every existing non-STRICT `<schema>` in the corpus typed); move to (a)'s guarantee for free once `<schema>` generates STRICT DDL."* Option (b) is *"validate each typed row value at the query boundary, server-side, as the row is read"*. The failure surface (`QueryFailed`) is the PA's reading of "validate … at the query boundary": the query's result is not what its type says, so the query has failed. · **Direction of change:** a query that returned a wrong-kind value now fails, and (S478 #1944 review fix r1) so does one that read a stored `INTEGER` beyond ±(2^53−1) lossily; a `SELECT *` over a live table with an undeclared column reads (the column is dropped) rather than failing. Built on the bootstrap (`compiler/self-host-v2/slice-m1/runtime/server-runtime.js` `query` / `checkRows`, given the row's wire table by `print.scrml` `queryJs`); impl#1 does not type `<schema>` rows this way and carries it.)*
 
 **Raw `CREATE TABLE` in a `<schema>` block (S478 ruling (user-voice)):** the affinity
 fallback above does not apply inside `<schema>`, because SQLite does not guarantee those
@@ -16008,12 +16029,12 @@ applyMushroom(.Small)                   // bare variant — parameter type fixes
 - A bare variant reference is the form `.VariantName` with no preceding type qualifier.
 - A bare variant reference SHALL be resolved by the compiler when the type at the position can be inferred from one of: a type annotation on the LHS (`<x>: T = .V`), a previously-declared cell or local with a known type (`@cell = .V` where `@cell: T`), a function parameter type (`fn(.V)` where the parameter is typed `T`), a function return type (`return .V` where the return is typed `T`), a `fail` target (`fail .V` where the enclosing function is declared `! T`, §19.3.3), a match on-expression type (`<match for=T> | .V => ...`), an engine `for=T` qualifier (`<engine for=T initial=.V>`), or any other position where the type is fixed by the surrounding declaration.
 - An enum-payload-variant CONSTRUCTOR argument is such a position. In `<x>: Mode = .OnePlayer(.Easy)` (where `Mode:enum = { OnePlayer(difficulty: Difficulty), ... }`), the argument `.Easy` resolves against the `OnePlayer` payload-field type (`Difficulty`) — NOT the outer enum `Mode`. The constructor callee may be bare (`.OnePlayer(...)`, resolved against the surrounding-declaration enum) or qualified (`Mode.OnePlayer(...)` / `Mode::OnePlayer(...)`, resolved directly). A wrong argument variant fails with `E-TYPE-063` naming the PAYLOAD enum (`Difficulty`), not the constructor's enum. (Added ss16 C5 — §14.10 position-3 for variant constructors.)
-- An unannotated cell DECLARATION whose initializer is a qualified variant of a known enum — `<col> = Col.Red` (or `Col::Red`), or a payload construction `<s> = Shape.Line(3)` — SHALL have that enum type (§66.3 rule 5: `E.V` is a literal of `E`; `E.V(…)` is a call whose declared type is `E`), so it is a previously-declared cell with a known type above: a bare variant written to it (`@col = .Blue`) resolves in function bodies and handlers alike, and a variant the enum does not declare is `E-TYPE-063`. A bare `.V` initializer (`<col> = .Red`) gives no type and stays `E-VARIANT-AMBIGUOUS`; a later reassignment (`@x = Col.Red`) never retypes a cell.
+- An unannotated cell DECLARATION whose initializer is a qualified variant of a known enum — `<col> = Col.Red` (or the deprecated `Col::Red`, §14.5), or a payload construction `<s> = Shape.Line(3)` — SHALL have that enum type (§66.3 rule 5: `E.V` is a literal of `E`; `E.V(…)` is a call whose declared type is `E`), so it is a previously-declared cell with a known type above: a bare variant written to it (`@col = .Blue`) resolves in function bodies and handlers alike, and a variant the enum does not declare is `E-TYPE-063`. A bare `.V` initializer (`<col> = .Red`) gives no type and stays `E-VARIANT-AMBIGUOUS`; a later reassignment (`@x = Col.Red`) never retypes a cell.
   > **Provenance:** ruling:user-voice-scrml.md S464 "(a) Infer from initializer" · **direction of change:** newly-accepting (E-VARIANT-AMBIGUOUS → compiles), and newly-rejecting only for a write of a variant the inferred enum does not declare (previously unchecked).
 - A bare variant reference SHALL fail with `E-VARIANT-AMBIGUOUS` when the position's type is a union or otherwise ambiguous (e.g., `let x = .Small` with no annotation; the compiler cannot pick which enum has a `.Small` variant).
 - A bare variant reference IS NOT supported in expression positions where no type context exists (top-level expressions, `let`/`const` without annotation in untyped contexts).
-- The fully-qualified form (`MarioState.Small`, `MarioState::Small`) remains legal everywhere bare variants are legal. Writers may always be explicit.
-- Bare variants and the `::` qualifier (cross-ref §18.5) are interchangeable in match arm patterns where the matched type is statically known: `.Small :> ...` and `MarioState::Small :> ...` are equivalent. *(Currency correction S452 — spec: §18.2 governs (a `match-arm` has no leading `|`; `:>` is the canonical separator). supersedes: `| .Small => ...` / `| MarioState::Small => ...`. Direction: inert — impl#1 already rejects a `|`-led single-scrutinee `match` arm (with the misleading E-TYPE-020, `g-impl1-match-leading-pipe-misleading-diagnostic-s452`).)*
+- The fully-qualified form (`MarioState.Small`; the deprecated `MarioState::Small`, §14.5) remains legal everywhere bare variants are legal. Writers may always be explicit.
+- Bare variants and the qualified form (cross-ref §18.5) are interchangeable in match arm patterns where the matched type is statically known: `.Small :> ...` and `MarioState.Small :> ...` are equivalent (the deprecated `MarioState::Small :>` too, with W-VARIANT-COLONS-LEGACY, §14.5). *(Currency correction S452 — spec: §18.2 governs (a `match-arm` has no leading `|`; `:>` is the canonical separator). supersedes: `| .Small => ...` / `| MarioState::Small => ...`. Direction: inert — impl#1 already rejects a `|`-led single-scrutinee `match` arm (with the misleading E-TYPE-020, `g-impl1-match-leading-pipe-misleading-diagnostic-s452`).)*
 
 **Cross-references:**
 - §6.2 — three RHS shapes (the `: T = .V` form composes with bare-variant inference).
@@ -16823,7 +16844,7 @@ const UserCard = <div class="card" props={ name: string, role: UserRole, size?: 
 </>;
 
 // Call site
-<UserCard name="Alice" role=::Admin>
+<UserCard name="Alice" role=.Admin>
 ```
 
 `size` is omitted; inside the body it is `not` (§42).
@@ -19941,7 +19962,7 @@ Per HU-1 Q3 RE-RATIFICATION, `<each>` introduces NO new body-shorthand mechanism
 
 > **Alias note:** Throughout §18, both canonical and alias syntax forms are valid. The
 > canonical forms are `.VariantName` (enum variant), `:>` (match arm separator), and `else`
-> (default arm). The aliases `::VariantName` and `_` are equally valid; `=>` and `->` are
+> (default arm). The alias `_` is equally valid (`::VariantName` is the deprecated spelling of `.VariantName`, W-VARIANT-COLONS-LEGACY, §14.5); `=>` and `->` are
 > DEPRECATED arm-separator aliases (surface `W-MATCH-ARROW-LEGACY`, §34, during the deprecation
 > window — all three forms still parse + emit identically). Examples in this section may use
 > either form. (S145 — `match-arrow-colon-canonical`.)
@@ -20249,7 +20270,7 @@ match-arm       ::= arm-pattern (':>' | '=>' | '->') arm-body
 arm-pattern     ::= variant-pattern | wildcard-arm | whole-error-arm | is-pattern
 whole-error-arm ::= '_' Identifier          // failable subjects only — §18.6.1 (S451)
 variant-pattern ::= ('.' | '::') VariantName ('(' binding-list ')')?
-                  | TypeName ('.' | '::') VariantName ('(' binding-list ')')?
+                  | TypeName ('.' | '::') VariantName ('(' binding-list ')')?   // S482: '::' is deprecated — W-VARIANT-COLONS-LEGACY, §14.5
 binding-list    ::= binding (',' binding)*
 binding         ::= Identifier
                   | FieldName ':' Identifier
@@ -21090,7 +21111,7 @@ exhaustive SHALL be a compile error (E-TYPE-020).
 
 **The canonical exhaustiveness check is variant-set coverage:** given the set of variants
 declared in the enum type `V = {V1, V2, ..., Vn}` and the set of variant arms in the
-match `A = {::V1, ::V3, ...}`, the match is exhaustive if and only if `V ⊆ A` or `else` is
+match `A = {.V1, .V3, ...}`, the match is exhaustive if and only if `V ⊆ A` or `else` is
 present.
 
 **Normative statements:**
@@ -21155,7 +21176,7 @@ enum is deferred — §53.15.7.)
 
 A `match` over a union type `A | B` (§14.3) is exhaustive when every member of the union
 has a corresponding arm, or a `_` arm is present. Union-member arms use the same
-`.VariantName` (or `::VariantName` alias) syntax when the member is an enum variant, and
+`.VariantName` (the deprecated `::VariantName` spelling too, §14.5) syntax when the member is an enum variant, and
 use `.Some(value)` / `.None` when the union contains `not` (optional match).
 
 **Optional match:** For a value of type `T | not`:
@@ -21419,9 +21440,9 @@ Two arms for the same variant in a single match expression:
 
 ```scrml
 match shape {
-    ::Circle(r) :> r * 2,
-    ::Circle(r) :> r * 3,  // Error E-TYPE-023
-    ::Point :> 0
+    .Circle(r) :> r * 2,
+    .Circle(r) :> r * 3,  // Error E-TYPE-023
+    .Point :> 0
 }
 ```
 
@@ -22141,7 +22162,7 @@ product-dispatch, reactive-runtime vehicle); §59.7 / §14.11 (no-tuple — the 
 
 > **Alias note:** Throughout §19, both canonical and alias syntax forms are valid. The
 > canonical forms are `.VariantName` (enum variant), `:>` (handler/match arm separator), and `else`
-> (default arm). The aliases `::VariantName` and `_` are equally valid; `=>` and `->` are
+> (default arm). The alias `_` is equally valid (`::VariantName` is the deprecated spelling of `.VariantName`, W-VARIANT-COLONS-LEGACY, §14.5); `=>` and `->` are
 > DEPRECATED arm-separator aliases (surface `W-MATCH-ARROW-LEGACY`, §34, during the deprecation
 > window — all three forms still parse + emit identically). The `!{}` error-handler arms share
 > the match arm-arrow rule (lockstep). Examples in this section may use either form. (S145 —
@@ -22208,7 +22229,7 @@ type PaymentError:enum = {
 #### 19.3.1 Syntax
 
 ```
-fail-stmt ::= 'fail' enum-type? ('.' | '::') variant-name ('(' arg-list ')')?
+fail-stmt ::= 'fail' enum-type? ('.' | '::') variant-name ('(' arg-list ')')?   // S482: '::' deprecated (W-VARIANT-COLONS-LEGACY, §14.5)
 ```
 
 The `enum-type` MAY be omitted (the bare form, §19.3.3); the variant then resolves against the function's declared error type.
@@ -22216,9 +22237,9 @@ The `enum-type` MAY be omitted (the bare form, §19.3.3); the variant then resol
 **Syntax:**
 
 ```scrml
-fail PaymentError::InvalidAmount("Amount must be positive");
-fail PaymentError::CustomerNotFound(customerId);
-fail PaymentError::ExpiredCard;
+fail PaymentError.InvalidAmount("Amount must be positive");
+fail PaymentError.CustomerNotFound(customerId);
+fail PaymentError.ExpiredCard;
 fail .ExpiredCard;                    // bare form — resolves against the declared `! PaymentError`
 ```
 
@@ -22226,13 +22247,13 @@ fail .ExpiredCard;                    // bare form — resolves against the decl
 
 `fail` produces an error value and returns it from the enclosing function. `fail` is NOT an exception. It does NOT throw. It does NOT unwind the call stack. The function returns the error variant value to its caller exactly as if a `return` statement had been used.
 
-`fail` is syntactic sugar for `return ErrorType::Variant(args)` with the additional constraint that the enclosing function MUST be declared with the `!` modifier (§19.4). Using `fail` in a function that is not declared with `!` is a compile error.
+`fail` is syntactic sugar for `return ErrorType.Variant(args)` with the additional constraint that the enclosing function MUST be declared with the `!` modifier (§19.4). Using `fail` in a function that is not declared with `!` is a compile error.
 
 #### 19.3.3 Normative Statements
 
 - `fail` SHALL be valid only inside a function body declared with the `!` modifier. Using `fail` in a function without `!` SHALL be a compile error: **E-ERROR-001** -- `'fail' used in function '{name}' which is not declared as failable. Add '!' to the function signature: 'function {name}(...)! -> {ErrorType}'.`
 - `fail` SHALL produce a value of the error enum type declared in the function's `!` signature. The variant specified in the `fail` statement SHALL be a valid variant of that error enum type. A variant that does not belong to the declared error type SHALL be a compile error: **E-ERROR-009** -- `'fail' names variant '{Variant}' which is not a valid variant of the declared error type '{ErrorType}' for function '{name}'. Valid variants: {list}.` This covers a variant undeclared by the declared enum, a `fail` naming a foreign enum entirely, and a `fail` target that is not an enum variant. For a bare-`!` function the declared error type is the built-in `Error` enum (§19.4.2), whose sole valid variant is `Generic`.
-- **Bare form.** A `fail` whose target omits the enum type — `fail .Variant` or `fail .Variant(args)` (also spelled `fail ::Variant`) — SHALL resolve the bare variant against the error type declared in the enclosing function's `!` signature: this is §14.10 bare-variant inference applied to the `fail` target, the declared error type being the position type. The resolved `fail .V` SHALL be equivalent in every respect to the qualified `fail ErrorType.V` — the same validity checks (E-ERROR-009 for a name that is not a variant of the declared type, E-TYPE-082 for a valid variant with the wrong payload arity) and the same produced error value. For a bare-`!` function the resolution target is the built-in `Error` enum, so `fail .Generic(msg)` is `fail Error.Generic(msg)`. An error enum imported from another scrml file resolves exactly as a local one.
+- **Bare form.** A `fail` whose target omits the enum type — `fail .Variant` or `fail .Variant(args)` (the deprecated spelling `fail ::Variant` too, §14.5) — SHALL resolve the bare variant against the error type declared in the enclosing function's `!` signature: this is §14.10 bare-variant inference applied to the `fail` target, the declared error type being the position type. The resolved `fail .V` SHALL be equivalent in every respect to the qualified `fail ErrorType.V` — the same validity checks (E-ERROR-009 for a name that is not a variant of the declared type, E-TYPE-082 for a valid variant with the wrong payload arity) and the same produced error value. For a bare-`!` function the resolution target is the built-in `Error` enum, so `fail .Generic(msg)` is `fail Error.Generic(msg)`. An error enum imported from another scrml file resolves exactly as a local one.
   - *Declared type not an enum.* A declared error type that is not an enum — undeclared, a non-enum type, or a type alias — is governed by §19.4.4.1 (**E-ERROR-011**, reserved). Until E-ERROR-011 has an emitter, impl#1 reports a bare `fail .V` against such a type as **E-ERROR-009**, because the bare variant has no variant set to resolve against. This is a carried interim, and E-ERROR-011 subsumes it when that code ships. The qualified `fail T.V` against the same type is not yet diagnosed (gap `g-qualified-fail-against-non-enum-error-type-undiagnosed`).
   - *Type alias.* A bare variant does not resolve through a type alias. `type A = E` is not a `:enum` declaration (§19.4.4.1), so in a function declared `! A`, `fail .V` falls under the preceding sub-bullet. Write the enum name in the signature (`! E`). Whether an alias of an enum is a legal `!` error type at all is **OPEN**: the SPEC has no normative alias construct beyond the `type A = Type` annotation position (§14.1.2). (One position is ruled: an alias of an enum IS accepted as `parseVariant`'s type argument, where it is that enum — §41.13, ruling:user-voice-scrml.md-S479-3A-6 (S479 "RULED — S478 hand-off §3.A and §3.B", item 6). That ruling does not decide the `!` error-type position, which stays OPEN.)
   - *Unverifiable import.* An error type imported from a module whose declaration the compiler cannot see is unverifiable, not invalid. Two cases qualify: a non-scrml (host) module, or single-file mode where the import is not loaded. A bare variant against such a type is accepted exactly as the qualified form is: it resolves to the declared name and is not checked. An imported type whose declaration *is* visible and is not an enum is not exempt.
@@ -22259,18 +22280,18 @@ failable-fn ::= 'function' identifier '(' param-list ')' '!' (('->' error-type) 
 ```scrml
 // Explicit error type — arrow form
 function processPayment(amount: number, customerId: string)! -> PaymentError {
-    if (amount <= 0) fail PaymentError::InvalidAmount("Must be positive");
+    if (amount <= 0) fail PaymentError.InvalidAmount("Must be positive");
     // ... success path
 }
 
 // Explicit error type — bare form (S137 ratification; equivalent to arrow form; §41.14 canon-shown)
 function processPayment(amount: number, customerId: string)! PaymentError {
-    if (amount <= 0) fail PaymentError::InvalidAmount("Must be positive");
+    if (amount <= 0) fail PaymentError.InvalidAmount("Must be positive");
 }
 
 // Default error type (uses built-in Error enum)
 function quickCheck(value: bool)! {
-    if (!value) fail Error::Generic("Check failed");
+    if (!value) fail Error.Generic("Check failed");
 }
 ```
 
@@ -22279,14 +22300,14 @@ function quickCheck(value: bool)! {
 The `!` modifier on a function signature declares that the function is **failable** -- it can produce either a success value or an error value.
 
 - `!` with `-> ErrorType` declares the specific error type that this function can produce — an error **enum** — see §19.4.4.1, which states the requirement normatively and records why it is load-bearing. The function's return type is implicitly `SuccessType | ErrorType`, where `SuccessType` is inferred from the function's return expressions.
-- `!` without `-> ErrorType` uses a built-in default error enum: `Error`, which has a single variant `Error::Generic(message: string)`.
+- `!` without `-> ErrorType` uses a built-in default error enum: `Error`, which has a single variant `Error.Generic(message: string)`.
 - The return type of a `!` function is a **tagged union** of the success type and the error type. The compiler tracks both branches.
 
 #### 19.4.3 Calling a `!` Function
 
 A call to a `!` function SHALL NOT be ignored. The caller MUST do one of the following:
 
-1. **Match** the result: `match riskyFunction() { ::Ok(val) -> ... ::ErrorVariant -> ... }`
+1. **Match** the result: `match riskyFunction() { .Ok(val) -> ... .ErrorVariant -> ... }`
 2. **Propagate** with `?`: `let x = riskyFunction()?`
 3. **Catch** with `!{}` inline handler: `let x = riskyFunction() !{ .ErrorVariant :> fallbackValue }`
 4. **Contain** inside `<errorBoundary>`: in markup context, an `<errorBoundary>` catches the error of a call made while RENDERING (§19.6.6). It does not contain a call in an event handler, which runs after render. A render-time call is a call to a CLIENT `!` function: a server call cannot be made while rendering (§13.7, E-VALUE-SERVER-CALL).
@@ -22340,7 +22361,7 @@ newly-accepting (a `!` function used as a value was E-ERROR-002 in the bootstrap
 
 > **Provenance:** ruling:user-voice-scrml.md S469 "Split + audit" — NOT callee-only as a language rule; the SPEC states the expressive rule and impl#1 refuses what it cannot verify, labelled as an impl#1 limitation. · **supersedes:** the carried-gaps clause "refusing every such read is a new rule, owed a ruling" (`g-failable-function-used-as-value-unchecked-s468`). · **Direction of change (pa-base §8):** the language — newly-accepting in principle (Nominal: no implementation accepts it yet); impl#1 — newly-rejecting, measured S469 by compiling every `.scrml` under `examples/ samples/ stdlib/ benchmarks/ conformance/` and the adopter repos `giti`, `flogence` one by one (2960 files): **0** real sites; **3** in conformance fixtures (the two callback props of `error/handler-failable-reference-component-prop-neg`, now an impl1-ts xfail pinning the clean compile, and one in `error/handler-failable-reference-via-component-prop-pos`, already E-ERROR-002 at that call site).
 
-**Carried impl#1 gaps (tracked in `docs/known-gaps.md`, not the language rule).** Since S467 impl#1 also checks a `!` call used as a value — a declaration initializer (`let v = risky()`), a write (`@r = risky()`), an argument, an operand, a ternary branch, a `return` operand, an array / object member, a template interpolation — with one structural rule: a call whose callee resolves to a failable function is E-ERROR-002 unless its value REACHES a handling form UNCHANGED. It reaches a `!{}` (statement- or expression-position), a `?`, a `<request>` body's right-hand side, or a render-time `<errorBoundary>` through parentheses, as an operand that `||` / `??` return as-is or the right operand of `&&`, or as a ternary arm; any transformation in between — a member access (`risky().toString() !{ … }`, `.ok`, `["variant"]`), an argument position, a coercing operator (`!`, `==`, `+`, a template), the left operand of `&&` — means the handler sees something else, so the call is unhandled. impl#1 handles a `match` subject only when the subject IS a call of a function that is PROVABLY failable — a `!` function by name or a `const` alias of one: its lowering reads every non-error value as `.Ok`, so a subject that may ALSO be a plain value has no correct lowering and the check refuses it — an operator (`match (a || risky())`, `match (c ? E::V : risky())`) or a callee that may be a plain function (`const g = c ? plain : risky; match g()`) (`g-match-failable-subject-through-operator-miscompiled-s467`). The direct form is discriminated in an event-handler attribute too, in every handler value form (since S469; before, a one-statement value compared the error object as a plain value — `g-match-failable-subject-in-handler-attribute-not-discriminated-s468`), except two forms impl#1 refuses (E-ERROR-002): a one-statement handler value inside a component body, and a block-bodied arrow handler. A statement-position `match` in a server function awaits its subject (since S469; `g-server-statement-match-failable-subject-unawaited-s468`). A member-target assignment `o.v = risky() !{ … }` is refused too: impl#1 assigns before the guard (`g-member-assign-guard-emitted-after-assign-s467`). The walk reaches every expression container: the bodies of functions written as values (expression- and block-bodied arrows, `function () { … }`), parameter defaults, `on mount` / `on dismount` / `when … changes` / `when message` / `<onchange>` bodies, `!{}` arm values and bodies, raw inline-`match` arms, C-style `for` parts, non-handler attribute values, the arguments of a handler call (`onclick=f(risky())`), and `const` aliases (`const g = risky; g()`); every other read of a failable function as a value — an operator alias (`c ? risky : plain`), a `let` alias, a `return risky`, an argument (`items.map(risky)`), a parameter or destructuring default, a closure write — is refused with E-IMPL1-FAILABLE-FN-VALUE ("A failable function used as a value", above; S469 — before, impl#1 followed a closed set of such flows and missed the rest, `g-failable-alias-through-operator-or-returned-fn-s467`, `g-failable-function-used-as-value-unchecked-s468`). Only a RENDER-time position is contained by `<errorBoundary>` (§19.6.6) — not a function body, an `on mount` body or a handler inside it; impl#1's boundary does not yet catch a render-time call's RETURNED error (`${ const ok = risky() }` reads the error as a value; `g-errorboundary-runtime-does-not-catch-returned-error-value-s467`). A parameter, lambda parameter or local that shadows the name is not the function (`g-unhandled-failable-call-in-value-position-s467`). It does not yet reach a body the front-end cannot re-parse. Note that §19.4.3's list is exhaustive, so `return risky()` inside a `!` function is reported (the remedy is `const v = risky()?` then `return v`; impl#1 does not parse `return risky()?`). An imported `!` function is failable in the importing file exactly as a local one is (since S469; read off the exporting file's declaration, through renames, named re-exports and `export *`; a body-split server function is CPS-implicitly failable). A `match` on its result is accepted only when the importing file reads its error enum (the same enum, imported under its name); otherwise impl#1 refuses that subject (E-ERROR-002), as the `match` lowering could not discriminate the error. A `!{}` written after an unbraced handler call (`onclick=risky() !{ … }`) is silently dropped, so that handler reports E-ERROR-002; it compiles when the handler is braced. Some arrow forms are not modelled: an arrow handler with more than one parameter, or with a non-simple parameter (a default `(e = 1)`, a rest `(...a)`, or a destructuring pattern with a default), and a `function (e) { … }` expression (which fails codegen with E-CODEGEN-INVALID-LOGIC). None of these is checked. Each is emitted exactly as before S440. A component prop that holds a function and is called with the bare `onclick=act()` form is not substituted (the handler emits `act()`), so that call is not checked either. A `!{}` guard inside a ONE-LINE single-statement `if`/`for` handler (`onclick={ if (c) { risky() !{ … } } }`) passes the check but fails the build with E-CODEGEN-INVALID-LOGIC (a raw `!{` is emitted; fails closed; `g-guard-in-one-line-if-for-emits-raw-bang-brace`) — the multi-line and multi-statement forms compile. A `?` in a handler (`onclick={ risky()?; @m = 1 }`) is not flagged: a handler is not a `!` function, so §19.5.4's E-ERROR-003 applies, but impl#1 checks `?` only in function bodies; at runtime the handler returns early and the error is discarded (`g-propagate-in-handler-silently-drops-error`). A handler reference or call through a `const` alias (`const h = risky` + `onclick=h` / `onclick=h()`) is checked like the function's own name (since S469); a `!` function reached through a cell (`onclick=@fnc`), a member (`onclick=o.m`) or a conditional (`${ c ? risky : plain }`) is refused where it is read as a value (E-IMPL1-FAILABLE-FN-VALUE; `g-failable-handler-indirect-reference-unchecked`, resolved).
+**Carried impl#1 gaps (tracked in `docs/known-gaps.md`, not the language rule).** Since S467 impl#1 also checks a `!` call used as a value — a declaration initializer (`let v = risky()`), a write (`@r = risky()`), an argument, an operand, a ternary branch, a `return` operand, an array / object member, a template interpolation — with one structural rule: a call whose callee resolves to a failable function is E-ERROR-002 unless its value REACHES a handling form UNCHANGED. It reaches a `!{}` (statement- or expression-position), a `?`, a `<request>` body's right-hand side, or a render-time `<errorBoundary>` through parentheses, as an operand that `||` / `??` return as-is or the right operand of `&&`, or as a ternary arm; any transformation in between — a member access (`risky().toString() !{ … }`, `.ok`, `["variant"]`), an argument position, a coercing operator (`!`, `==`, `+`, a template), the left operand of `&&` — means the handler sees something else, so the call is unhandled. impl#1 handles a `match` subject only when the subject IS a call of a function that is PROVABLY failable — a `!` function by name or a `const` alias of one: its lowering reads every non-error value as `.Ok`, so a subject that may ALSO be a plain value has no correct lowering and the check refuses it — an operator (`match (a || risky())`, `match (c ? E.V : risky())`) or a callee that may be a plain function (`const g = c ? plain : risky; match g()`) (`g-match-failable-subject-through-operator-miscompiled-s467`). The direct form is discriminated in an event-handler attribute too, in every handler value form (since S469; before, a one-statement value compared the error object as a plain value — `g-match-failable-subject-in-handler-attribute-not-discriminated-s468`), except two forms impl#1 refuses (E-ERROR-002): a one-statement handler value inside a component body, and a block-bodied arrow handler. A statement-position `match` in a server function awaits its subject (since S469; `g-server-statement-match-failable-subject-unawaited-s468`). A member-target assignment `o.v = risky() !{ … }` is refused too: impl#1 assigns before the guard (`g-member-assign-guard-emitted-after-assign-s467`). The walk reaches every expression container: the bodies of functions written as values (expression- and block-bodied arrows, `function () { … }`), parameter defaults, `on mount` / `on dismount` / `when … changes` / `when message` / `<onchange>` bodies, `!{}` arm values and bodies, raw inline-`match` arms, C-style `for` parts, non-handler attribute values, the arguments of a handler call (`onclick=f(risky())`), and `const` aliases (`const g = risky; g()`); every other read of a failable function as a value — an operator alias (`c ? risky : plain`), a `let` alias, a `return risky`, an argument (`items.map(risky)`), a parameter or destructuring default, a closure write — is refused with E-IMPL1-FAILABLE-FN-VALUE ("A failable function used as a value", above; S469 — before, impl#1 followed a closed set of such flows and missed the rest, `g-failable-alias-through-operator-or-returned-fn-s467`, `g-failable-function-used-as-value-unchecked-s468`). Only a RENDER-time position is contained by `<errorBoundary>` (§19.6.6) — not a function body, an `on mount` body or a handler inside it; impl#1's boundary does not yet catch a render-time call's RETURNED error (`${ const ok = risky() }` reads the error as a value; `g-errorboundary-runtime-does-not-catch-returned-error-value-s467`). A parameter, lambda parameter or local that shadows the name is not the function (`g-unhandled-failable-call-in-value-position-s467`). It does not yet reach a body the front-end cannot re-parse. Note that §19.4.3's list is exhaustive, so `return risky()` inside a `!` function is reported (the remedy is `const v = risky()?` then `return v`; impl#1 does not parse `return risky()?`). An imported `!` function is failable in the importing file exactly as a local one is (since S469; read off the exporting file's declaration, through renames, named re-exports and `export *`; a body-split server function is CPS-implicitly failable). A `match` on its result is accepted only when the importing file reads its error enum (the same enum, imported under its name); otherwise impl#1 refuses that subject (E-ERROR-002), as the `match` lowering could not discriminate the error. A `!{}` written after an unbraced handler call (`onclick=risky() !{ … }`) is silently dropped, so that handler reports E-ERROR-002; it compiles when the handler is braced. Some arrow forms are not modelled: an arrow handler with more than one parameter, or with a non-simple parameter (a default `(e = 1)`, a rest `(...a)`, or a destructuring pattern with a default), and a `function (e) { … }` expression (which fails codegen with E-CODEGEN-INVALID-LOGIC). None of these is checked. Each is emitted exactly as before S440. A component prop that holds a function and is called with the bare `onclick=act()` form is not substituted (the handler emits `act()`), so that call is not checked either. A `!{}` guard inside a ONE-LINE single-statement `if`/`for` handler (`onclick={ if (c) { risky() !{ … } } }`) passes the check but fails the build with E-CODEGEN-INVALID-LOGIC (a raw `!{` is emitted; fails closed; `g-guard-in-one-line-if-for-emits-raw-bang-brace`) — the multi-line and multi-statement forms compile. A `?` in a handler (`onclick={ risky()?; @m = 1 }`) is not flagged: a handler is not a `!` function, so §19.5.4's E-ERROR-003 applies, but impl#1 checks `?` only in function bodies; at runtime the handler returns early and the error is discarded (`g-propagate-in-handler-silently-drops-error`). A handler reference or call through a `const` alias (`const h = risky` + `onclick=h` / `onclick=h()`) is checked like the function's own name (since S469); a `!` function reached through a cell (`onclick=@fnc`), a member (`onclick=o.m`) or a conditional (`${ c ? risky : plain }`) is refused where it is read as a value (E-IMPL1-FAILABLE-FN-VALUE; `g-failable-handler-indirect-reference-unchecked`, resolved).
 > **Provenance:** spec:§19.4.3 ("Failing to handle the result of a `!` function call in any of these ways SHALL be a compile error: E-ERROR-002") + §19.4.4 ("An unhandled `!` function call SHALL be a compile error (E-ERROR-002).") · conformance restoration (S467, security: `const ok = check(p)` read the error object as truthy, so a wrong password logged in) · newly-rejecting · measured S467 by compiling `examples/ samples/ conformance/cases/ stdlib/` and the adopter repos `giti`, `flogence` (2951 files) on base `9d7a6cc2a` vs the fix: **0** files newly refused, net E-ERROR-002 delta 0 (one added W-CPS-NEEDS-FAILABLE in an already-refused gauntlet sample); `return f()` inside a `!` function: 0 corpus sites. The only code that relied on the gap was three `compiler/tests` fixtures (migrated). Re-measured S467 fix round 2 (the reaches-unchanged rule, every expression container, the render-time-only boundary carve-out) on base `179f9b346`, same 2951 files: **0** newly refused, net E-ERROR-002 delta 0.
 
 **Direction of change (pa-base §8): newly-rejecting. The migration was measured and has landed.** Before S440, impl#1 split on the statement count. `onclick={ risky(); @r = 1 }` was E-ERROR-002, while `onclick=risky()`, `onclick={ risky() }`, `onclick=${risky()}` and `onclick={ if (c) risky() }` compiled at exit 0. That split was impl#1's alone; the SPEC never granted it. Measured S439 by instrumenting the compiler over `examples/ samples/ conformance/ stdlib/ benchmarks/`, and re-measured S440 by compiling the same tree before and after: **6 attributes in 5 files** used an exempt form. All of them were bare `onX=fn()` calls, in `conformance/cases/defer/control-flow-neg`, `conformance/cases/error/propagate-in-non-failable-fn-neg`, `conformance/cases/error/propagate-non-failable-callee-neg`, `conformance/cases/error/propagate-non-failable-callee-pos` and `samples/compilation-tests/gauntlet-s20-error-test/server-failable-001.scrml`. Each was migrated so it still tests what it was written to test, either with an exhaustive `!{}` in the handler or through a non-failable wrapper. After the migration, every file's diagnostic set (errors and warnings) is identical to what it was before. Arrow-valued handlers (ruled S440) were measured in the same compile: none in the corpus has an unhandled `!` call in its body, so the arrow rule newly rejects nothing. Four `!{}` emission defects were closed in the same landing, because the ruling sends authors to the guard. A one-statement braced guard lost its arms at emission; a guard in a `<match>` arm lost its arms and every later statement; a guard in a component body emitted a raw `!{` (E-CODEGEN-INVALID-LOGIC); a guard in an arrow handler's body was dropped, and a block-bodied one failed codegen.
@@ -22544,7 +22565,7 @@ A handler arm's body is a §18.2 `arm-body`, so it MAY be a bare leave statement
 `.Bad(m) :> fail .Wrapped(m)`, §18.2 "Leaving arms", S462).
 
 So, in a `!{}` exactly as in a `match`: a variant arm is `.V`, or `.V(binding-list)` to bind its
-payload (§18.7; `::V` is the §18.2 alias); `_` / `else` is the catch-all; `_ <name>` binds the whole
+payload (§18.7; `::V` is its deprecated spelling, §14.5); `_` / `else` is the catch-all; `_ <name>` binds the whole
 error (§18.6.1); alternates are separated by `|` within one arm (`.A | .B :> …`, §18.2); ~~arms are
 written one per line with no separator between them (E-MATCH-ARM-SEPARATOR)~~ arms are separated by `,`, the
 trailing one optional (S469 — the §18.2 amendment, dpa-073 F2; ruling:user-voice-scrml.md S469 "⭐ RULED — dpa-073 F2 = (iii) \"Comma list (Recommended)\"" — *"one arm grammar for match arms, `!{}` handler arms and engine message arms"*; migration and `E-MATCH-ARM-SEPARATOR` as §18.2 states them); a bare name is not a
@@ -22709,8 +22730,8 @@ The `?` operator is postfix. When applied to the result of a `!` function call:
 
 ```scrml
 match riskyFunction() {
-    ::Ok(val) :> val,
-    ::ErrorVariant(args) :> { fail EnclosingErrorType::ErrorVariant(args); }
+    .Ok(val) :> val,
+    .ErrorVariant(args) :> { fail EnclosingErrorType.ErrorVariant(args); }
 }
 ```
 
@@ -22755,8 +22776,8 @@ ${
     }
     // A CLIENT `!` function: no server call, so it may be called while rendering.
     function checkCode(text: string)! -> CodeError {
-        if (text == "") fail CodeError::Empty;
-        if (text.length > 8) fail CodeError::TooLong(text);
+        if (text == "") fail CodeError.Empty;
+        if (text.length > 8) fail CodeError.TooLong(text);
         return text.toUpperCase();
     }
 }
@@ -22916,15 +22937,15 @@ In ADDITION to the typed path, the compiler SHALL emit the boundary's subtree re
 
 In logic context, matching the result of a `!` function call follows the existing exhaustive matching rules (§18.8). All variants -- both success and error -- MUST be covered.
 
-The success value is wrapped in an implicit `::Ok` variant. Error variants use their declared enum variant names.
+The success value is wrapped in an implicit `.Ok` variant. Error variants use their declared enum variant names.
 
 ```scrml
 match processPayment(100, 42) {
-    ::Ok(receipt) :> <div>Success: ${receipt.id}</>,
-    ::InvalidAmount(reason) :> <div class="error">${reason}</>,
-    ::CustomerNotFound(id) :> redirect("/customers"),
-    ::ExpiredCard :> <div>Please update payment method</>,
-    ::NetworkError(detail) :> <div>Network issue: ${detail}</>
+    .Ok(receipt) :> <div>Success: ${receipt.id}</>,
+    .InvalidAmount(reason) :> <div class="error">${reason}</>,
+    .CustomerNotFound(id) :> redirect("/customers"),
+    .ExpiredCard :> <div>Please update payment method</>,
+    .NetworkError(detail) :> <div>Network issue: ${detail}</>
 }
 ```
 
@@ -22934,7 +22955,7 @@ The error variants MAY be covered together, and the whole error bound, with the 
 
 ```scrml
 match processPayment(100, 42) {
-    ::Ok(receipt) :> <div>Success: ${receipt.id}</>,
+    .Ok(receipt) :> <div>Success: ${receipt.id}</>,
     _ err         :> <div class="error">${describe(err)}</>   // err: the declared error enum, whole
 }
 ```
@@ -22945,7 +22966,7 @@ no earlier arm names is **E-MATCH-ELSE-ABSORBS-ERROR**, not E-TYPE-020:
 
 ```scrml
 match processPayment(100, 42) {
-    ::InvalidAmount(reason) :> …,
+    .InvalidAmount(reason) :> …,
     else                    :> …     // E-MATCH-ELSE-ABSORBS-ERROR: would take CustomerNotFound, ExpiredCard, NetworkError
 }
 ```
@@ -22962,7 +22983,7 @@ Inside an `<errorBoundary>`, exhaustive matching is NOT required. The boundary h
 
 - In logic context, matching a `!` function result SHALL require exhaustive coverage of all variants (success and error). Missing variants SHALL trigger E-TYPE-020.
 - In markup context inside an `<errorBoundary>`, the boundary satisfies the error handling requirement. Exhaustive matching of error variants is NOT required.
-- The `::Ok` variant SHALL be the implicit wrapper for the success value of a `!` function. The developer SHALL match `::Ok(value)` to access the success case in logic context.
+- The `.Ok` variant SHALL be the implicit wrapper for the success value of a `!` function. The developer SHALL match `.Ok(value)` to access the success case in logic context.
 - ~~A `_` wildcard arm SHALL satisfy exhaustiveness for remaining unmatched variants, per existing §18.6 rules.~~ *(Superseded S474 for a `match`, ruling:user-voice-scrml.md S474 "`else` on a failable match" item 1, §18.6.)* In a `!{}` handler, a `_` / `else` wildcard arm SHALL satisfy exhaustiveness for the remaining unmatched error variants (§18.6). In a `match` on a failable result, a plain `_` / `else` arm SHALL cover `.Ok` only; the error variants SHALL be covered by arms that name them or by `_ e :>` (§18.6.1), and a `_` / `else` that would take one is **E-MATCH-ELSE-ABSORBS-ERROR** (PERMANENT — security).
 - In a value position (§19.4.3), every arm of a `match` on a `!` function result — the `.Ok` arm and every error arm — SHALL yield a value of ~~the call's success type~~ *(S475: the landing position's type, the call's success type where the position has none — §19.4.3 "Amendment (S475)"; RULED S475, bryan: "your recs on all of them", item 6)* or leave (`return` / `fail`); an arm that falls through SHALL be **E-ERROR-012**. In a statement position an arm MAY fall through. For a `match` on a failable result this is the answer §18.3 / §18.4 leave open for a mix of value and void arms; E-TYPE-001 still reports an arm whose value has the wrong type, and the two never fire for the same arm. *(Provenance: ruling:user-voice-scrml.md S451 "1a 2 yes 3 yes 4a" — item 1 (a), quoted in §19.4.3 · supersedes: nothing written — §19.7 was silent on arms that yield nothing · newly-rejecting; measured in §19.4.3.)*
 
@@ -22994,7 +23015,7 @@ When a `?{}` query is executed inside a `!` function, SQL errors are propagated 
 function loadUser(id: int)! -> UserError {
     let row = ?{`SELECT * FROM users WHERE id = ${id}`}.get();
     // If the query fails, SqlError is propagated via implicit ?
-    if (!row) fail UserError::NotFound(id);
+    if (!row) fail UserError.NotFound(id);
     return row;
 }
 ```
@@ -23022,12 +23043,12 @@ A `?{}` query is a **failable expression everywhere**. Outside a `!` function it
    }
    ```
    `.QueryFailed(m) :>` binds the variant's payload, the `message: string` (§18.7; §19.4.3, S451 ruling 2 — *"in `| ::V m :>`, `m` binds the variant's PAYLOAD (§19.8.3's own example)"* — this example was then written `| ::QueryFailed m :>`, the spelling S452 soft-deprecates, §19.4.5); `.ConstraintViolation(f) :>` binds the `field`. The handler is checked for exhaustiveness against `SqlError` like any other `!{}` handler. Because the compiler MAY add `SqlError` variants (§19.8.4) — §8.9.4's `BatchPrepareFailed` is one — a `_ :>` arm keeps a handler total as the enum grows.
-2. **A `match` on the result** — the success value arrives as `::Ok` (§19.7.1):
+2. **A `match` on the result** — the success value arrives as `.Ok` (§19.7.1):
    ```scrml
    function openOrders(customerId: string) {
        const rows = match ?{`SELECT * FROM orders WHERE customer_id = ${customerId} AND open = 1`}.all() {
-           ::Ok(found)       :> found,
-           ::QueryFailed(m)  :> { log(m); lift []; },
+           .Ok(found)       :> found,
+           .QueryFailed(m)  :> { log(m); lift []; },
            _ e               :> []    // S474: `_ e`, not `_` — on a failable result `_` covers `.Ok` only (§18.6)
        };
        return rows;
@@ -23097,7 +23118,7 @@ The compiler SHALL generate HTTP status codes for server `!` function error resp
 
 | Condition | HTTP Status |
 |-----------|-------------|
-| Success (`::Ok`) | 200 |
+| Success (`.Ok`) | 200 |
 | Validation / client input error | 400 |
 | Authentication / authorization error | 401 / 403 |
 | Not found | 404 |
@@ -23133,7 +23154,7 @@ If a server function is declared with `!`, the CPS-generated client wrapper SHAL
 // Developer writes:
 function loadUser(id: int)! -> UserError {
     const row = ?{`SELECT * FROM users WHERE id = ${id}`}.get();   // ?{} escalates to server
-    if (!row) fail UserError::NotFound(id);
+    if (!row) fail UserError.NotFound(id);
     return row;
 }
 
@@ -23946,7 +23967,7 @@ function transferFunds(from: int, to: int, amount: number)! -> TransferError {
     let fromBalance = ?{`SELECT balance FROM accounts WHERE id = ${from}`}.get();
     if (fromBalance.balance < amount) {
         ?{`ROLLBACK`}.run();
-        fail TransferError::InsufficientFunds(fromBalance.balance);
+        fail TransferError.InsufficientFunds(fromBalance.balance);
     }
     ?{`UPDATE accounts SET balance = balance - ${amount} WHERE id = ${from}`}.run();
     ?{`UPDATE accounts SET balance = balance + ${amount} WHERE id = ${to}`}.run();
@@ -23967,7 +23988,7 @@ function transferFunds(from: int, to: int, amount: number)! -> TransferError {
     transaction {
         let fromBalance = ?{`SELECT balance FROM accounts WHERE id = ${from}`}.get();
         if (fromBalance.balance < amount) {
-            fail TransferError::InsufficientFunds(fromBalance.balance);
+            fail TransferError.InsufficientFunds(fromBalance.balance);
             // transaction auto-rolls-back because fail exited the block
         }
         ?{`UPDATE accounts SET balance = balance - ${amount} WHERE id = ${from}`}.run();
@@ -24010,7 +24031,7 @@ function transferFunds(from: int, to: int, amount: number)! -> TransferError {
   > **Provenance:** ruling:user-voice-scrml.md S451 "your recs on all of them" — item 2(c): *"a manual `?{BEGIN}` (raw transaction SQL) inside a non-`!` function — use `transaction {}` inside a `!` function (the 4a partial-rollback hazard)."* · **supersedes:** the clause struck in the bullet above; §8.9.2's 4a provenance note *"A manual `?{BEGIN}` in a function NOT declared `!` has the same hazard but is outside the ruling's \"`!` function\" and is not covered here."* (now covered — by refusing the form); and W-BATCH-001's firing outside a `!` function (§8.6, §34 — the row's trigger is narrowed to `!` functions). *(Readings, flagged: (i) "raw transaction SQL" is read as every transaction-control statement — `COMMIT` / `ROLLBACK` / `SAVEPOINT` / `RELEASE` / `END` as well as `BEGIN`, since each opens, ends or rewinds a transaction the function does not own a failure path for; (ii) "inside a non-`!` function" is read as "where no enclosing function is declared `!`", which includes a body top — the §19.8.3 reading of "outside a `!` function".)* **Direction of change (pa-base §8): newly-rejecting.** impl#1 accepts it (measured on `dbb671c2d`: a `function plain()` holding `?{BEGIN}` / an `UPDATE` / `?{COMMIT}` compiles with no E-ERROR-015; `conformance/cases/sql/batch-warn-info` — a non-`!` `server function loadPair` with `?{BEGIN}` … `?{COMMIT}` — compiles with W-BATCH-001). **Corpus measured** (impl#1 AST, `sql` nodes whose statement is transaction control, plus a text scan): 4 statements in 2 files, both `conformance/cases/` — `error/implicit-tx-explicit-begin` (2, in a `!` function: valid, W-BATCH-001 stays) and `sql/batch-warn-info` (2, in a non-`!` function: newly E-ERROR-015, so that case's W-BATCH-001 pin becomes an E-ERROR-015 pin, or the function gains `!`); 0 in `examples/` and `samples/`. **Nominal / not yet emitted by impl#1** (frozen; `g-impl1-manual-tx-outside-failable-s451`).
 
 - A `transaction` block MAY appear in any statement position of a `!` function body — directly, or nested in an `if` / `else` or loop body. A `?` propagation (§19.5.2: sugar for `fail`) inside the block is a `fail` for the purposes of §19.10.3 and SHALL roll the transaction back before it returns. A `fail` or `?` inside a function declared within the block returns from that function, not from the block, and does not roll the block back.
-- **Interim limitation (S450 fix round, fail-closed).** Inside a `transaction` block in a function, a `fail` or `?` within an arm of a **statement-position** `match` — at any depth in the block, including inside a loop or `if` — SHALL be a compile error: **E-TRANSACTION-CONTROL-FLOW**. impl#1 lowers a statement-position `match` arm as a nested function, so such an exit would roll the transaction back yet return from the arm only, and the statements after the `match` would then run with no transaction open and persist (`g-stmt-match-block-return-falls-through`). An **expression-position** `match` (`let v = match x { .A :> fail E::Bad … }`), an `if` / `else if` chain, or moving the `fail` out of the arm is unaffected. Conversely, a `transaction` block placed **inside** an arm of a statement-position `match` in a function (at any depth within the arm) SHALL also be **E-TRANSACTION-CONTROL-FLOW**: its `fail` / `?` would roll the transaction back but return from the arm only, so the failure would be swallowed and the statements after the `match` would run. Move the `transaction` block outside the `match`, or select with an expression-position `match` or an `if` / `else if` chain. A `transaction` block in a function *declared* inside such an arm is that function's own and is unaffected. This sentence is withdrawn when that lowering returns from the enclosing function.
+- **Interim limitation (S450 fix round, fail-closed).** Inside a `transaction` block in a function, a `fail` or `?` within an arm of a **statement-position** `match` — at any depth in the block, including inside a loop or `if` — SHALL be a compile error: **E-TRANSACTION-CONTROL-FLOW**. impl#1 lowers a statement-position `match` arm as a nested function, so such an exit would roll the transaction back yet return from the arm only, and the statements after the `match` would then run with no transaction open and persist (`g-stmt-match-block-return-falls-through`). An **expression-position** `match` (`let v = match x { .A :> fail E.Bad … }`), an `if` / `else if` chain, or moving the `fail` out of the arm is unaffected. Conversely, a `transaction` block placed **inside** an arm of a statement-position `match` in a function (at any depth within the arm) SHALL also be **E-TRANSACTION-CONTROL-FLOW**: its `fail` / `?` would roll the transaction back but return from the arm only, so the failure would be swallowed and the statements after the `match` would run. Move the `transaction` block outside the `match`, or select with an expression-position `match` or an `if` / `else if` chain. A `transaction` block in a function *declared* inside such an arm is that function's own and is unaffected. This sentence is withdrawn when that lowering returns from the enclosing function.
 - **A `yield` out of the block is a compile error (fail-closed).** Inside a function, a `yield` within a `transaction` block SHALL be a compile error: **E-TRANSACTION-CONTROL-FLOW** -- `a 'transaction' block cannot be left by a \`yield\``. A `yield` SUSPENDS the block rather than leaving it, so neither of §19.10.3's endings applies: rolling back would discard work the block is about to continue, and committing would end a transaction that is still open (§19.10.4: no transaction is left open). Move the `yield` out of the block — let the block complete, then yield its result. *(S453 — supersedes the S450 interim sentence "Inside a function, a `return`, a `yield`, or a `break` / `continue` whose target is outside the `transaction` block SHALL be a compile error", which was fail-closed pending a ruling. The ruling (S449, B1a) decided `return` / `break` / `continue`: they ROLL BACK (§19.10.3). `yield` was NOT ruled and stays refused — flagged as a reading, not a ruling.)*
 - **An exit inside a `match` arm is a compile error (fail-closed).** Inside a function, a `return`, or a `break` / `continue` whose target is outside the `transaction` block, written inside an arm of a `match` — **statement- OR expression-position**, at any depth within the arm — SHALL be a compile error: **E-TRANSACTION-CONTROL-FLOW**. **Some** `match` arm lowerings are nested functions: impl#1's `emitMatchExpr` / `emitMultiScrutineeMatch` emit the arm set as an IIFE, and an exit inside one returns from the ARM only, so the block's rollback never runs and the statements after the `match` keep executing inside the open transaction (`g-stmt-match-block-return-falls-through`). Measured at S453 against an implementation without this limb: the shape compiled clean, the arm's `return` was swallowed, the post-`match` write ran, and every row persisted. ⛑ **The refusal is on the UNION of arm positions, and deliberately coarser than the defect.** A **DECL-position** `let v = match … { … }` lowers INLINE (impl#1 `emitMatchExprDecl`) with no function boundary, so an exit in one of ITS arms is refused although that lowering may be sound; the compiler does not distinguish arm lowerings at this point and fails closed on all of them rather than admit a shape whose soundness has not been proved by execution. Narrowing it is `g-transaction-exit-refused-in-a-decl-position-match-arm-whose-lowering-is-inline`, which names the runtime proof required. Move the exit out of the arm: let the `match` pick a VALUE and exit after it, or use an `if` / `else if` chain. An exit whose target is **inside** the arm (a `break` of a loop declared there) never crosses the arm boundary and is unaffected. This sentence is narrowed when the statement-arm lowering returns from the enclosing function.
 
@@ -24087,21 +24108,21 @@ Error values from `!` functions can be stored in reactive cells (§6):
 ${
     function handlePayment() {
         match processPayment(100, 42) {
-            ::Ok(receipt) :> @receipt = receipt,
-            ::InvalidAmount(reason) :> @error = PaymentError::InvalidAmount(reason),
-            ::CustomerNotFound(id) :> @error = PaymentError::CustomerNotFound(id),
-            ::ExpiredCard :> @error = PaymentError::ExpiredCard,
-            ::NetworkError(detail) :> @error = PaymentError::NetworkError(detail)
+            .Ok(receipt) :> @receipt = receipt,
+            .InvalidAmount(reason) :> @error = PaymentError.InvalidAmount(reason),
+            .CustomerNotFound(id) :> @error = PaymentError.CustomerNotFound(id),
+            .ExpiredCard :> @error = PaymentError.ExpiredCard,
+            .NetworkError(detail) :> @error = PaymentError.NetworkError(detail)
         }
     }
 }
 
 <div if=@error>
     ${match @error {
-        ::InvalidAmount(reason) :> lift <div class="validation-error">${reason}</>,
-        ::CustomerNotFound(_) :> lift <div class="error">Customer not found</>,
-        ::ExpiredCard :> lift <div class="error">Card expired</>,
-        ::NetworkError(detail) :> lift <div class="error">${detail}</>,
+        .InvalidAmount(reason) :> lift <div class="validation-error">${reason}</>,
+        .CustomerNotFound(_) :> lift <div class="error">Customer not found</>,
+        .ExpiredCard :> lift <div class="error">Card expired</>,
+        .NetworkError(detail) :> lift <div class="error">${detail}</>,
         _ :> lift <div></>
     }}
 </>
@@ -24172,12 +24193,12 @@ The `~{}` test context (test context draft) provides assertions for testing `!` 
     }
 
     test "rejects negative amount with specific variant" {
-        assert.fails.with processPayment(-1, 42) ::InvalidAmount;
+        assert.fails.with processPayment(-1, 42) .InvalidAmount;
     }
 
     test "succeeds for valid amount" {
         let result = processPayment(100, 42);
-        assert result is ::Ok;
+        assert result is .Ok;
     }
 }
 ```
@@ -24390,16 +24411,16 @@ type PaymentError:enum = {
 ```scrml
 ${
     function processPayment(amount: number, customerId: string)! -> PaymentError {
-        if (amount <= 0) fail PaymentError::InvalidAmount("Amount must be positive");
-        if (amount > 10000) fail PaymentError::InvalidAmount("Amount exceeds maximum");
+        if (amount <= 0) fail PaymentError.InvalidAmount("Amount must be positive");
+        if (amount > 10000) fail PaymentError.InvalidAmount("Amount exceeds maximum");
 
         let customer = ?{`SELECT * FROM customers WHERE id = ${customerId}`}.get();
-        if (!customer) fail PaymentError::CustomerNotFound(customerId);
-        if (customer.cardExpiry < now()) fail PaymentError::ExpiredCard;
+        if (!customer) fail PaymentError.CustomerNotFound(customerId);
+        if (customer.cardExpiry < now()) fail PaymentError.ExpiredCard;
 
         let balance = ?{`SELECT balance FROM accounts WHERE customerId = ${customerId}`}.get();
         if (balance.balance < amount) {
-            fail PaymentError::InsufficientFunds(balance.balance, amount);
+            fail PaymentError.InsufficientFunds(balance.balance, amount);
         }
 
         transaction {
@@ -24431,7 +24452,7 @@ ${
         </>
         <div if=@receipt>
             match @receipt {
-                ::Ok(txn) :> <div class="success">Payment ${txn.id} confirmed!</>
+                .Ok(txn) :> <div class="success">Payment ${txn.id} confirmed!</>
             }
         </>
     </>
@@ -24456,11 +24477,11 @@ type AuthError:enum = {
 
 ${
     function register(email: string, password: string)! -> AuthError {
-        if (!isValidEmail(email)) fail AuthError::InvalidEmail(email);
-        if (password.length < 8) fail AuthError::WeakPassword("Password must be at least 8 characters");
+        if (!isValidEmail(email)) fail AuthError.InvalidEmail(email);
+        if (password.length < 8) fail AuthError.WeakPassword("Password must be at least 8 characters");
 
         let existing = ?{`SELECT id FROM users WHERE email = ${email}`}.get();
-        if (existing) fail AuthError::EmailTaken(email);
+        if (existing) fail AuthError.EmailTaken(email);
 
         transaction {
             ?{`INSERT INTO users (email, passwordHash) VALUES (${email}, ${hashPassword(password)})`}.run();
@@ -24498,16 +24519,16 @@ ${
     function updateUserProfile(userId: string, updates: ProfileUpdate)! -> CrudError {
         transaction {
             let current = ?{`SELECT * FROM users WHERE id = ${userId}`}.get();
-            if (!current) fail CrudError::NotFound("User", userId);
+            if (!current) fail CrudError.NotFound("User", userId);
 
             let version = ?{`SELECT version FROM users WHERE id = ${userId}`}.get();
             if (version.version !== updates.expectedVersion) {
-                fail CrudError::ConcurrencyConflict;
+                fail CrudError.ConcurrencyConflict;
             }
 
             if (updates.email) {
                 let emailCheck = ?{`SELECT id FROM users WHERE email = ${updates.email} AND id != ${userId}`}.get();
-                if (emailCheck) fail CrudError::ConstraintFailed("email");
+                if (emailCheck) fail CrudError.ConstraintFailed("email");
             }
 
             ?{`UPDATE users SET
@@ -26154,7 +26175,7 @@ session.
 ${ server function authenticate(email: string, password: string) {
     let user = ?{`SELECT id, role FROM users WHERE email = ${email}`}.get();
     if (!user || !verifyPassword(password, user.password_hash))
-        fail AuthError::InvalidCredentials;
+        fail AuthError.InvalidCredentials;
     session.set("userId", user.id);   // mints scrml_sid + writes the record +
     session.set("role", user.role);   // one Set-Cookie: scrml_sid=…; HttpOnly
 } }
@@ -27350,7 +27371,7 @@ type Sighting:struct = { isIntersecting: bool, intersectionRatio: number }
 18. **`! HostError`.** A binding declared `! HostError` is failable (§19.4) with the `HostError` enum of
     `scrml:host`. When EVALUATING THE TARGET THROWS (a synchronous throw, including a missing intermediate member
     such as `navigator.clipboard` being `undefined`, or a call of a non-callable export), or the returned Promise
-    rejects, the call SHALL produce `HostError::Thrown(message, name)`, and a call left unhandled is `E-ERROR-002`.
+    rejects, the call SHALL produce `HostError.Thrown(message, name)`, and a call left unhandled is `E-ERROR-002`.
     A property read whose final member is absent does not throw: it reads `undefined`, which rule 13 decodes (`not`
     for a type that admits it, otherwise the trap `E-HOST-VALUE-MISMATCH-RT`). The payload SHALL be built without
     running a conversion of a host object:
@@ -27367,7 +27388,7 @@ type Sighting:struct = { isIntersecting: bool, intersectionRatio: number }
     raise the trap `E-HOST-THROW-RT` (§19.17). **A throw DURING the result decode (a getter or a Proxy trap that
     throws as rule 13 reads a field or an element) SHALL likewise be `E-HOST-THROW-RT`** — the host threw, so the
     value is never admitted (**S473 PA ruling, from the #1659 review**; a `! HostError` binding turns it into
-    `HostError::Thrown` as it does a target throw).
+    `HostError.Thrown` as it does a target throw).
 19. **Callbacks.** A parameter of function type `(x: T) => U` accepts a lambda whose parameters are inferred
     (§7.5, position 3). Host arguments beyond the declared parameters are ignored; a missing one decodes as `not`,
     which is a mismatch unless that parameter's type admits `not`. A lambda passed to a binding counts as handed to
@@ -31646,7 +31667,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-HOST-CALLBACK-WAITS | §21.3.3 | Raised when a lambda passed for a binding's callback parameter whose declared result is not `void` contains a waiting value (rule 19). **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
 | E-HOST-ERROR-TYPE | §21.3.3 | Raised when a binding's `!` names a type other than `HostError` (`scrml:host`) (rule 18). **Emitted by the bootstrap** at `compiler/self-host-v2/parse.scrml` (hostBindLine; `! HostError` itself is refused there as `E-BOOTSTRAP-UNSUPPORTED` — `scrml:host` is not built) (s473-boot-host-block-f3); **Nominal on impl#1** (S471 policy: impl#1 does not build §21.3.3; carried, §34.0). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-rejecting within a newly-accepting element. | Error |
 | W-HOST-UNTYPED-CALL | §21.3.3, App. D | Raised when client logic calls or reads through a bare `window` / `document` / `navigator` path, or calls a §21.3 `.js` / `.mjs` import, outside a `<host>` binding (rule 22; the dpa-075 F4 lint). Reversible; any escalation goes through §63. Also ruling:user-voice-scrml.md S471 "⭐ RULED — dpa-075 F4" — *"your rec"*. **Nominal / spec-ahead — not yet emitted** (DRAFT §21.3.3; the bootstrap builds it, `g-boot-host-block-f3-unbuilt-s473`). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: newly-warning. | Warning |
-| E-HOST-THROW-RT | §21.3.3, §19.17 | Runtime trap, raised when a `<host>` binding not declared `! HostError` has a target whose evaluation throws (including a missing intermediate member or a non-callable export), or returns a Promise that rejects (rule 18). An absent FINAL member of a property read does not throw; it is decoded (`E-HOST-VALUE-MISMATCH-RT` when the type has no `not`). A binding declared `! HostError` turns the same events into `HostError::Thrown(message, name)` instead. **Emitted by the bootstrap** at `compiler/self-host-v2/slice-m1/runtime/runtime.js` (hostCall / hostThrew; also a throw while the result is decoded — a getter, a Proxy trap) (s473-boot-host-block-f3); **Nominal on impl#1** (S471 policy: impl#1 does not build §21.3.3; carried, §34.0). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: semantics-defined. | Runtime |
+| E-HOST-THROW-RT | §21.3.3, §19.17 | Runtime trap, raised when a `<host>` binding not declared `! HostError` has a target whose evaluation throws (including a missing intermediate member or a non-callable export), or returns a Promise that rejects (rule 18). An absent FINAL member of a property read does not throw; it is decoded (`E-HOST-VALUE-MISMATCH-RT` when the type has no `not`). A binding declared `! HostError` turns the same events into `HostError.Thrown(message, name)` instead. **Emitted by the bootstrap** at `compiler/self-host-v2/slice-m1/runtime/runtime.js` (hostCall / hostThrew; also a throw while the result is decoded — a getter, a Proxy trap) (s473-boot-host-block-f3); **Nominal on impl#1** (S471 policy: impl#1 does not build §21.3.3; carried, §34.0). Provenance: ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4; design `scrml-support/docs/deep-dives/typed-host-binding-f3-design-2026-10-27.md` §7. Direction of change: semantics-defined. | Runtime |
 | W-TIMED-READ-MODIFY-WRITE | §6.13.6 | A write to a `debounced=` / `throttled=` cell whose right-hand side reads the same cell (`@x = @x + 1`, `@x += 1`). Reads see the timed value (§6.13.4), so writes made inside one window read the old value and are lost. Fix: a plain source cell for the read-modify-write, and a timed copy of it. Provenance: S478 open-Qs ruling (user-voice) item 32 ("a lint (W-) … Needs a SPEC line naming the lint"); code name confirmed by ruling:user-voice-scrml.md S479 "⭐ RULED — S478 hand-off §3.A and §3.B, PA recs adopted" item 2. Emitted by the bootstrap (`compiler/self-host-v2/analyze.scrml` resolveAssign → timedSelfRead); impl#1 Nominal. | Warning |
 | W-TOENUM-DEPRECATED | §14.4.1, §63.7 | `E.toEnum(s)` — the soft-deprecated spelling of `E.parse(s)` (§14.4.1); parses identically. One lint per call, naming `E.parse` and `scrml fix`. **Reserved — not yet emitted:** the §63 window opens only when this lint, `E-TOENUM-DEPRECATED` and a `scrml fix` rule co-land (§63.2). **Code name provisional (PA, S469).** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: parse spelling `T.parse(s)`" — *"T.parse(s) (Recommended)"*. | Info |
 | E-TOENUM-DEPRECATED | §14.4.1, §63.7 | **Reserved** (§63.2) end-of-window code for the `toEnum` spelling. Not scheduled; never fires before a §62 MAJOR event schedules it. **Code name provisional (PA, S469).** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: parse spelling `T.parse(s)`". | Error |
@@ -31782,6 +31803,8 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-ARM-PIPE-LEGACY | §19.4.5, §51.0.S.2.3, §63.7 | **Reserved** (§63.2) end-of-window code for the `\|`-led `!{}` arm (and its paren-free binder) and engine message arm. Not scheduled (§63.7 permanent-soft; gate-blocked until the `scrml fix` rule is verified-landed, §63.4). Never fires before a §62 MAJOR event schedules it. The `scrml fix` rule landed S452 in impl#1 (`arm-pipe`, commands/fix-arm-pipe.js `fixArmPipe`; a default rule, each rewritten file verified by an impl#1 compile before and after — byte-identical artifacts); whether that satisfies §63.4's verified-landed gate is a scheduling-time decision. **Provenance:** ruling:user-voice-scrml.md S452 "c looks right". **Nominal / not yet emitted.** | Error |
 | W-IS-SOME-DEPRECATED | §42.2.2a, §55.1, §63.7 | The presence spelling `is some` — the expression form `x is some` (§42.2.2a) or the §55.1 validator `<x is some>` — is SOFT-DEPRECATED (§63.1 Stage 1): it is the same-meaning spelling of `is given`, and it parses identically (same AST, emitted code, run-time behaviour, narrowing; the validator is the same predicate with the same `.NotSome` tag). One lint per site; the message names `is given`, `scrml fix`, and §42.2.2a (expression) or §55.1 (validator). Resolution: write `is given`, or run `scrml fix` (its default `is-some` rule, `compiler/src/commands/fix-is-some.js`: the word `some` after `is` becomes `given`; each rewritten file verified by an impl#1 compile before and after — identical artifacts). ONE code for both surfaces: one word, one replacement. A `some` in a comment, a string or markup prose is not a site. **Provenance:** ruling:user-voice-scrml.md S462 "a, validator too, go". **Emitted by impl#1** (S462, `s462-is-some-deprecate`) at stage TAB, `compiler/src/api.js` via `compiler/src/is-some-deprecation.ts` `isSomeDeprecationDiagnostics` — one per site of `ast-builder.js` `legacyIsSomeSites` (an `is` KEYWORD followed by the IDENT `some` in impl#1's own token streams) confirmed against the source by `confirmIsSomeSites`. Emitted by the bootstrap at `compiler/self-host-v2/parse.scrml` (the postfix presence test, s462). (S462; emitted at `compiler/src/api.js:1855` `isSomeDeprecationDiagnostics`.) | Info |
 | E-IS-SOME-DEPRECATED | §42.2.2a, §55.1, §63.7 | **Reserved** (§63.2) end-of-window code for the `is some` spelling (expression and validator). Not scheduled (§63.7 permanent-soft; gate-blocked until the `scrml fix` rule is verified-landed, §63.4). Never fires before a §62 MAJOR event schedules it. The `scrml fix` rule landed S462 in impl#1 (`is-some`, `compiler/src/commands/fix-is-some.js` `fixIsSome`); whether that satisfies §63.4's verified-landed gate is a scheduling-time decision. **Provenance:** ruling:user-voice-scrml.md S462 "a, validator too, go". **Nominal / not yet emitted.** | Error |
+| W-VARIANT-COLONS-LEGACY | §14.5, §63.7 | The `::` enum variant access — `TypeName::VariantName` / `::VariantName`, in an expression, a match or `!{}` arm pattern, or a `fail` operand — is SOFT-DEPRECATED (§63.1 Stage 1): it is the same-meaning spelling of `.` and parses identically (same AST, emitted code and run-time behaviour). One lint per site; the message names the `.` spelling of the site as written (the fix-it), `scrml fix` and §14.5. Becomes E-VARIANT-COLONS-LEGACY only at a future MAJOR language-version event (unscheduled per §63.7). Resolution: write `.`, or run `scrml fix` (its default `variant-colons` rule, `compiler/src/commands/fix-variant-colons.js`: the two characters `::` become `.`; each rewritten file verified by an impl#1 compile before and after — identical codes and artifacts). A `::` in a comment, a string, markup prose, CSS (`::before`) or SQL (`x::int`) is not a site. **Provenance:** ruling:user-voice-scrml.md-S482-deprecate-colons — *"It keeps compiling with a warning (W-VARIANT-COLONS-LEGACY) and a `scrml fix` rewrite to `.`."* · owner *"yes, deprecate :: with warning and fix"*. **Severity Warning**, as the ruling words it ("a warning") — the sibling §63 spelling lints (W-IS-SOME-DEPRECATED, W-ARM-PIPE-LEGACY, W-MATCH-ARROW-LEGACY) are Info; neither fails the compile (§34). Emitted by the bootstrap at `compiler/self-host-v2/parse.scrml` `colonsLint` (an arm pattern `::V` / `E::V` in parsePattern, a `fail ::V` / `fail E::V` operand in parseFail); `::` in an expression is the bootstrap's named refusal (E-BOOTSTRAP-UNSUPPORTED, `compiler/self-host-v2/refusals.scrml`, conformant per §63.5 S473 D5). **Not yet emitted by impl#1** (it accepts `::` silently — carried gap `g-impl1-variant-colons-lint-s482`). | Warning |
+| E-VARIANT-COLONS-LEGACY | §14.5, §63.7 | **Reserved** (§63.2) end-of-window code for the `::` enum variant access. Not scheduled (§63.7 permanent-soft; gate-blocked until the `scrml fix` rule is verified-landed, §63.4). Never fires before a §62 MAJOR event schedules it. The `scrml fix` rule landed S482 in impl#1 (`variant-colons`, `compiler/src/commands/fix-variant-colons.js` `fixVariantColons`); whether that satisfies §63.4's verified-landed gate is a scheduling-time decision. **Provenance:** ruling:user-voice-scrml.md-S482-deprecate-colons. **Nominal / not yet emitted.** | Error |
 | W-GIVEN-ARROW-LEGACY | §42.2.3 | A standalone `given` presence-guard uses the deprecated separator `=>` instead of the canonical `:>` (`given x => { ... }` → `given x :> { ... }`). The sibling of `W-MATCH-ARROW-LEGACY` for the standalone `given`-guard context. (Corrected S462: the earlier text said an in-`match` `given` arm "already fires `W-MATCH-ARROW-LEGACY`" — it does not; `match x { not :> 0  given x => 1 }` fired neither code at base `afe2e9212`. Since S462 that arm surfaces W-GIVEN-PRESENCE-DEPRECATED.) Both forms parse + resolve identically during the deprecation window; the canonical separator is `:>` (the same maps-to separator as a match arm). SCOPED to the `given`-guard separator only — the JS arrow-function `=>` is untouched. Resolution: rewrite as `given x :> { ... }`, or run `bun scrml migrate --fix` (AST-driven). The end-of-window timing promotes this to a reserved `E-GIVEN-ARROW-LEGACY` (not yet emitted). (Catalog addition S148 — Insight 33 extension; ratified via user AskUserQuestion; mirrors W-MATCH-ARROW-LEGACY.) **S462:** the in-place guard is itself soft-deprecated (W-GIVEN-PRESENCE-DEPRECATED, §42.2.3), so on an in-place guard written with `=>` that code is the site's ONE diagnostic and this one does not fire (its rewrite retires the separator with the guard); this code remains for the rebind head `given c = @h => { … }` only (emitted at `compiler/src/type-system.ts` `case "given-guard"`, gated on the node's `rebind` flag). | Info |
 | W-GIVEN-PRESENCE-DEPRECATED | §42.2.3, §63.7 | The in-place presence guard — `given x :> { … }`, the multi-name `given x, y :> { … }`, the same guard inside a markup `${ … }`, and the `given x :>` match arm — is SOFT-DEPRECATED (§63.1 Stage 1). It parses, lowers and runs as before; one diagnostic per site (a guard written with the legacy `=>` separator fires this code alone, not W-GIVEN-ARROW-LEGACY as well). The message names the canonical form — `if (x is given) { … }` / `if (x is given && y is given) { … }`; for the arm, `else :>` after the `not :>` arm — plus `scrml fix` and §42.2.3. NOT fired at the §66.7.5 rebind head `given c = @h :>`, at an engine transition guard `given (cond)` (§4.11.4), or at `given` used as an identifier. Resolution: `scrml fix` (its default `given-presence` rule, `compiler/src/commands/fix-given-presence.js`), which verifies each site by compiling and refuses a site impl#1 compiles differently today. **Provenance:** ruling:user-voice-scrml.md S462 "a, go" — *"the in-place presence guard `given x :> { … }` (incl. multi-variable `given x, y :>`, the markup-context form, and the `given x :>` match arm) is SOFT-DEPRECATED through the §63 lifecycle"* (code name: PA reading recorded with the ruling, bryan's veto window). Emitted at `compiler/src/type-system.ts:14266` (the `given-guard` case; message via `givenPresenceDeprecatedMessage`); not at a malformed head (E-SYNTAX-044 alone) nor at the empty node impl#1 leaves after a declaration ending in `is given`. Also emitted by the bootstrap for the logic-context guard (its in-place guard parser in `compiler/self-host-v2/parse.scrml`, which reads the guard as `if (x is given && …)`); the bootstrap parses neither the `given` arm nor a markup-`${}` guard, so it has no emit site for those. **Severity Info** (S462 fix round, PA call in bryan's veto window: matches the sibling W-IS-SOME-DEPRECATED and the §63 precedents W-ARM-PIPE-LEGACY / W-MATCH-ARROW-LEGACY; first landed as Warning). | Info |
 | E-GIVEN-PRESENCE-DEPRECATED | §42.2.3, §63.7 | **Reserved** (§63.2) end-of-window code for the in-place presence guard and the `given x :>` match arm. Not scheduled (§63.7 permanent-soft; gate-blocked until the `scrml fix` rule is verified-landed, §63.4). Never fires before a §62 MAJOR event schedules it. **Provenance:** ruling:user-voice-scrml.md S462 "a, go" (*"a reserved E-code in §34"*; the name is the PA reading recorded with the ruling). **Nominal / not yet emitted.** | Error |
@@ -35011,7 +35034,7 @@ The `<schema>` block is the authoritative source for table type generation. When
 - The compiler generates struct types for each table in `<schema>` before running the `<db>` type inference pass (§14.8).
 - If the database file is absent, the compiler uses `<schema>` alone to generate types (no introspection fallback needed).
 - If the database file exists and the schema is out of sync with `<schema>`, the compiler generates types from the `<schema>` declaration (desired state), not the actual database. The compiler SHALL emit W-SCHEMA-003 when types are generated from `<schema>` and the database is out of sync: "Schema and database differ. Types reflect desired schema. Run `scrml migrate` to sync."
-- The types generated from `<schema>` are a contract on what the database holds, not a guarantee of it: a non-STRICT table can store any value in any column. The server therefore checks each typed row value as the row is read and fails the query as `SqlError::QueryFailed` when one does not fit (§14.8.3 "A typed row is checked as it is read", S478, INTERIM until `<schema>` generates STRICT DDL).
+- The types generated from `<schema>` are a contract on what the database holds, not a guarantee of it: a non-STRICT table can store any value in any column. The server therefore checks each typed row value as the row is read and fails the query as `SqlError.QueryFailed` when one does not fit (§14.8.3 "A typed row is checked as it is read", S478, INTERIM until `<schema>` generates STRICT DDL).
 
 **Lifecycle-annotation cross-reference (S130 — HU-1 Q4=a).** Schema-field lifecycle annotation `(A to B)` semantics are governed by §14.12 (the canonical home for lifecycle annotation). §39 is a downstream consumer of the §14.12 rule for the schema locus; SQL-shape consequences are documented at §39.11.1 below.
 
@@ -36352,10 +36375,10 @@ type LoadError:enum  = { Malformed(reason: string), Network(msg: string) }
 function loadResult()! -> LoadError {
     const raw = fetch("https://api.example.com/results");
     const result = parseVariant(raw, LoadResult) !{
-        .MissingDiscriminator          :> { fail LoadError::Malformed("missing discriminator"); },
-        .UnknownVariant(tag)           :> { fail LoadError::Malformed("unknown variant: " + tag); },
-        .InvalidPayload(field, reason) :> { fail LoadError::Malformed(field + ": " + reason); },
-        .Malformed(reason)             :> { fail LoadError::Malformed(reason); }
+        .MissingDiscriminator          :> { fail LoadError.Malformed("missing discriminator"); },
+        .UnknownVariant(tag)           :> { fail LoadError.Malformed("unknown variant: " + tag); },
+        .InvalidPayload(field, reason) :> { fail LoadError.Malformed(field + ": " + reason); },
+        .Malformed(reason)             :> { fail LoadError.Malformed(reason); }
     };
     return result;    // typed as LoadResult; the handler matches the four ParseError variants exhaustively
 }
@@ -36367,7 +36390,7 @@ function loadResult()! -> LoadError {
 parseVariant(json: string | object, EnumType) -> EnumType
 ```
 
-The function lifts untyped JSON (a string to be `JSON.parse`d, or an already-parsed object) into a typed enum value via type-driven dispatch. `parseVariant` is **failable**; on parse failure it raises `::ParseError` (declared by `scrml:data`; see "Failure type" below) and the call site MUST install an `!{}` handler per §19 failable semantics.
+The function lifts untyped JSON (a string to be `JSON.parse`d, or an already-parsed object) into a typed enum value via type-driven dispatch. `parseVariant` is **failable**; on parse failure it raises `ParseError` (declared by `scrml:data`; see "Failure type" below) and the call site MUST install an `!{}` handler per §19 failable semantics.
 
 **Normative statements:**
 
@@ -36376,8 +36399,8 @@ The function lifts untyped JSON (a string to be `JSON.parse`d, or an already-par
 - A variant of the second-argument enum SHALL NOT have a payload field named `tag`: the `tag` key of the JSON object names the variant, so such a field could never carry a value of its own. Violations SHALL emit `E-PARSEVARIANT-TAG-FIELD` at the type-system stage (the same rule holds for an `<endpoint>` `accepts=` enum, §61.3). **Provenance:** ruling:user-voice-scrml.md-S478-open-Qs-item-40 (S478 open-Qs ruling (user-voice)) · **direction of change:** newly-rejecting (corpus count 0).
 - The discriminator key SHALL be the enum's own variant names. `parseVariant` does NOT accept a `discriminatorKey=`, `mapping=`, or any name-translation argument. Wire formats whose discriminator does not match the variant name (e.g., `{type: "SUCCESS"}` against an enum variant `Success`) SHALL be normalized in a server function before being passed to `parseVariant`.
 - `parseVariant` returns the constructed enum value typed as `EnumType`. Inside an `!{}` handler installed against the call, the handler's exhaustiveness check (cross-ref §19.7) sees the four `ParseError` variants and a non-exhaustive handler is `E-TYPE-080` (the §19.7 code for every non-exhaustive `!{}` handler; `E-MATCH-NOT-EXHAUSTIVE` is the `<match>` block's code, §18.0.1). **Provenance:** ruling:user-voice-scrml.md-S479-3A-6 (S479 "RULED — S478 hand-off §3.A and §3.B", item 6) (the code was previously written here as `E-MATCH-NOT-EXHAUSTIVE`, contradicting §19.7) · **direction of change:** none (a code name corrected to §19.7's; the bootstrap already emits E-TYPE-080).
-- **Strict keys (allow-list).** The decoded object's keys SHALL be exactly `tag` and payload fields of the variant `tag` names. A key that is neither is a decode failure — `::InvalidPayload` (the same refusal §57 makes of an undeclared key, and the rule §61.3 states for an `<endpoint>` request body, which is decoded via `parseVariant`). A foreign wire whose objects carry envelope keys declares them as payload fields of the variant, or is normalized in a server function first. **Provenance:** ruling:user-voice-scrml.md-S479-3A-6 (S479 "RULED — S478 hand-off §3.A and §3.B", item 6) (§61.3's strict-keys sentence, ruling:user-voice-scrml.md-S478-open-Qs-item-35, added here) · **direction of change:** newly-rejecting at run time for an object with an extra key (the bootstrap already refuses it; impl#1 ignores the key — impl#1-owed, S471 policy).
-- **A repeated key.** When the input is a string, a JSON text in which one object — the top-level object or any object nested in it — names the same key twice is a decode failure — `::Malformed` — exactly as §61.3 refuses such an `<endpoint>` request body; keys are compared after JSON string unescaping (`"tag"` and `"t\u0061g"` are one key). **Provenance:** ruling:user-voice-scrml.md-S479-1962-item-5 (S479 "RULED — #1962 file-scope questions 1–4 + `parseVariant` duplicate keys", item 5) · **direction of change:** newly-rejecting at run time for a string input with a repeated key (`JSON.parse` kept the last value; built in the bootstrap runtime, `compiler/self-host-v2/slice-m1/runtime/runtime.js` `parseVariant` via `jsonRepeatedKey`; impl#1 keeps the last value — impl#1-owed, S471 policy, g-impl1-parsevariant-repeated-key-s479).
+- **Strict keys (allow-list).** The decoded object's keys SHALL be exactly `tag` and payload fields of the variant `tag` names. A key that is neither is a decode failure — `.InvalidPayload` (the same refusal §57 makes of an undeclared key, and the rule §61.3 states for an `<endpoint>` request body, which is decoded via `parseVariant`). A foreign wire whose objects carry envelope keys declares them as payload fields of the variant, or is normalized in a server function first. **Provenance:** ruling:user-voice-scrml.md-S479-3A-6 (S479 "RULED — S478 hand-off §3.A and §3.B", item 6) (§61.3's strict-keys sentence, ruling:user-voice-scrml.md-S478-open-Qs-item-35, added here) · **direction of change:** newly-rejecting at run time for an object with an extra key (the bootstrap already refuses it; impl#1 ignores the key — impl#1-owed, S471 policy).
+- **A repeated key.** When the input is a string, a JSON text in which one object — the top-level object or any object nested in it — names the same key twice is a decode failure — `.Malformed` — exactly as §61.3 refuses such an `<endpoint>` request body; keys are compared after JSON string unescaping (`"tag"` and `"t\u0061g"` are one key). **Provenance:** ruling:user-voice-scrml.md-S479-1962-item-5 (S479 "RULED — #1962 file-scope questions 1–4 + `parseVariant` duplicate keys", item 5) · **direction of change:** newly-rejecting at run time for a string input with a repeated key (`JSON.parse` kept the last value; built in the bootstrap runtime, `compiler/self-host-v2/slice-m1/runtime/runtime.js` `parseVariant` via `jsonRepeatedKey`; impl#1 keeps the last value — impl#1-owed, S471 policy, g-impl1-parsevariant-repeated-key-s479).
 - `ParseError` is NOT ambient: a program that NAMES it — a qualified handler arm (`ParseError.Malformed(r) :>`, `ParseError::Malformed(r) :>`), a type annotation, or an expression — SHALL import it like every stdlib export (`import { ParseError } from 'scrml:data'`); without the import the name is undeclared (`E-SCOPE-001`; `E-TYPE-UNKNOWN-NAME` in a type annotation, §14.1.2). Bare-variant arms (`.Malformed(r) :>`) in the `!{}` handler of a `parseVariant` call name no type and need no import, and that handler's exhaustiveness is still checked against the four variants.
   > **Provenance:** ruling:user-voice-scrml.md S464 "(a) Import-only" · **direction of change:** newly-rejecting (an un-imported `ParseError` name previously resolved to a compiler built-in).
 - `parseVariant` does NOT auto-recurse into payload fields whose type is itself an enum. Each level of nested-enum payload SHALL be parsed by an explicit nested call. This forces composition discipline and matches the family's sliver-test minimalism.
@@ -42596,7 +42619,7 @@ transition**, co-located with the engine declaration exactly as Elm co-locates
   render-context catch (a `!`-call in markup, or a sub-component throwing during render).
   A boot effect's failable calls SHALL route their typed `!` failures through the effect's
   OWN `!{}` handler into the engine's error variant (the errors-as-states lift — the
-  `::Network msg :> { @phase = .ErrorState(msg) }` arm above is the canonical shape). A
+  `.Network msg :> { @phase = .ErrorState(msg) }` arm above is the canonical shape). A
   non-`!` host throw that escapes the boot effect routes to the §19.6.8 host-JS backstop
   (logged loudly to scrml's logging surface — the adopter-callable backing for which is the `log()` builtin, §20.6), NOT to an enclosing boundary's `fallback=`.
 - **(ii) Ordering vs `<onIdle>` (§51.0.R).** Both touch module-init. Order: the engine
@@ -50972,13 +50995,13 @@ ${ @name = <#profile>.data.name; }      // .data : User (decoded)
 
 **Normative statements:**
 - `<request api="endpointName" args=...>` SHALL resolve `endpointName` against the in-scope `<api>` endpoints (unknown → `E-API-ENDPOINT-UNKNOWN`, §60.9). The `args` value SHALL type-check against the endpoint's request shape (mismatch → `E-API-REQ-SHAPE-MISMATCH`).
-- The response SHALL be decoded via `parseVariant` (§41.13) against the endpoint's declared response type **automatically** — the author does not re-state the decode. A decode failure routes to `<#id>.error` (and the `::ParseError` arm where a consuming site matches on it), exactly as a manual `parseVariant` flow would.
+- The response SHALL be decoded via `parseVariant` (§41.13) against the endpoint's declared response type **automatically** — the author does not re-state the decode. A decode failure routes to `<#id>.error` (and the `ParseError` arm where a consuming site matches on it), exactly as a manual `parseVariant` flow would.
 - The §6.7.7 `loading` / `data` / `error` / `stale` state model applies unchanged; `<#id>.data` carries the decoded response type.
 - The `api=` mode is **automatic-but-visible**: the decode is driven by the endpoint's declared `: ResponseT` (no hidden inference), surfaced through the existing failable state surface. (The §6.7.7 `api=` attribute amendment lands with the impl wave; this section is its normative source.)
 
 ### 60.5 Response typing reuses `parseVariant` (§41.13)
 
-`<api>` adds **no** response-decoding machinery. The endpoint's `: ResponseT` is the type argument to `parseVariant` (§41.13): the boundary-parse is total and failable, a malformed/unexpected response surfaces as a `parseVariant` failure (→ `.error` / `::ParseError`), and refinement types (§53) on the response shape are enforced at the decode. This is the load-bearing reason A2's net-new surface is *only* the request/endpoint half.
+`<api>` adds **no** response-decoding machinery. The endpoint's `: ResponseT` is the type argument to `parseVariant` (§41.13): the boundary-parse is total and failable, a malformed/unexpected response surfaces as a `parseVariant` failure (→ `.error` / `ParseError`), and refinement types (§53) on the response shape are enforced at the decode. This is the load-bearing reason A2's net-new surface is *only* the request/endpoint half.
 
 **Variant vs non-variant `ResponseT` (S212 W4 amendment).** The §60.5 boundary-parse guarantee above holds for a **variant (`:enum`) `ResponseT`** — `parseVariant` (§41.13) is a *tagged-variant* decoder (it reads a discriminator → variant), so a variant response is decoded total-and-failable with §53 refinement enforcement. A **non-variant `ResponseT`** (a struct / primitive / refinement type) cannot be decoded by `parseVariant` and is **raw-passed** into the `<request>` `.data` surface — the boundary-parse guarantee does NOT apply (no total/failable decode, no §53 enforcement). Because silently trusting an unvalidated external response is exactly the must-not-lie footgun §60.3 exists to prevent, the typer fires **`W-API-RESPONSE-NOT-VARIANT`** (Info; §34) on a resolved non-variant `ResponseT` so the raw boundary is explicit at the declaration site rather than silent. The adopter declares a variant `ResponseT` to obtain the §60.5 guarantee, or accepts the raw boundary knowingly. (A future arc MAY extend total/failable decode to struct/refinement `ResponseT` via a `parse`-family sibling; until then, the boundary-parse promise is variant-scoped and the lint keeps it honest.)
 
@@ -51009,7 +51032,7 @@ The A2 implementation waves fired these (each carries a §34 catalog row); all a
 - (informational) `W-API-RESPONSE-NOT-VARIANT` — an endpoint's resolved `: ResponseT` is a non-variant type (struct / primitive / refinement), which `parseVariant` (§41.13, variant-only) cannot boundary-parse, so W4 raw-passes the response (the §60.5 guarantee does not apply). **(wired S212 W4 — typer; `checkApiDeclarations`. Keeps the raw boundary honest per §60.3, §60.5.)**
 - (informational) `W-API-A1-SRC-DEFERRED` — a `src=` form requesting A1 ingest, not yet implemented (§60.8). *(planned — A1.)*
 
-The A2 implementation waves wired the surface below; every code carries a §34 catalog row. **S210 W2** wired the four parse-time codes (`-BASE-MISSING`, `-METHOD-INVALID`, `-RESPONSE-TYPE-UNDECLARED`, `-ENDPOINT-MALFORMED`). **S210 W3** (the typer wave) wired the three type-system codes (`-PATH-PARAM-UNBOUND`, `-ENDPOINT-UNKNOWN`, `-REQ-SHAPE-MISMATCH`), resolved each endpoint's `reqShape`/`responseType` against the §53/§14 type surface (an undeclared type-ref reuses the §14.1.2 `E-TYPE-UNKNOWN-NAME` machinery — `<api>` adds no new type machinery, §60.2), recognized `<request api="X" args=…>` (reading the existing `api=`/`args=` markup attributes — no new parse production), and confirmed §60.6 client-only (an `<api>`-only app compiles to a pure client bundle; `<api>`/`<request api=>` add no §12.2 server-placement trigger). W3 fired NO codegen — a typed-and-checked `<api>` still emitted nothing runtime; the fetch callable + automatic `parseVariant` decode + the `<request>` runtime integration landed in **W4**. **S212 W4** wired the client codegen: a per-endpoint typed `fetch(base + path, { method, body? })` callable (path-params substituted from `args`), the automatic `parseVariant` decode for a variant `ResponseT` (→ `.data` / `::ParseError` → `.error`), the full `<request api=>` reactive surface (§6.7.7), client-only (no `.server.js`, §60.6) — plus the `W-API-RESPONSE-NOT-VARIANT` info-lint that keeps a non-variant `ResponseT`'s raw boundary honest (§60.5). **S213 W5** added the codegen tests + the worked example (`examples/32-external-api.scrml`, R26-verified end-to-end) + the BYOB adopter guide (`docs/adopter/byob-external-api.md`) and flipped the §60 banner Nominal → Implemented; W5 also corrected a deep-walk bug so the typer + codegen find an `<api>` wrapped in the canonical `<program>`/`<page>` shape (W4 assumed top-level only). The seven `E-API-*` Error codes and the `W-API-RESPONSE-NOT-VARIANT` Info code are LANDED + catalogued in §34. The one remaining informational code below — `W-API-A1-SRC-DEFERRED` — is genuinely **not yet fired**: it is A1-gated (§60.8), planned with that separate arc.
+The A2 implementation waves wired the surface below; every code carries a §34 catalog row. **S210 W2** wired the four parse-time codes (`-BASE-MISSING`, `-METHOD-INVALID`, `-RESPONSE-TYPE-UNDECLARED`, `-ENDPOINT-MALFORMED`). **S210 W3** (the typer wave) wired the three type-system codes (`-PATH-PARAM-UNBOUND`, `-ENDPOINT-UNKNOWN`, `-REQ-SHAPE-MISMATCH`), resolved each endpoint's `reqShape`/`responseType` against the §53/§14 type surface (an undeclared type-ref reuses the §14.1.2 `E-TYPE-UNKNOWN-NAME` machinery — `<api>` adds no new type machinery, §60.2), recognized `<request api="X" args=…>` (reading the existing `api=`/`args=` markup attributes — no new parse production), and confirmed §60.6 client-only (an `<api>`-only app compiles to a pure client bundle; `<api>`/`<request api=>` add no §12.2 server-placement trigger). W3 fired NO codegen — a typed-and-checked `<api>` still emitted nothing runtime; the fetch callable + automatic `parseVariant` decode + the `<request>` runtime integration landed in **W4**. **S212 W4** wired the client codegen: a per-endpoint typed `fetch(base + path, { method, body? })` callable (path-params substituted from `args`), the automatic `parseVariant` decode for a variant `ResponseT` (→ `.data` / `ParseError` → `.error`), the full `<request api=>` reactive surface (§6.7.7), client-only (no `.server.js`, §60.6) — plus the `W-API-RESPONSE-NOT-VARIANT` info-lint that keeps a non-variant `ResponseT`'s raw boundary honest (§60.5). **S213 W5** added the codegen tests + the worked example (`examples/32-external-api.scrml`, R26-verified end-to-end) + the BYOB adopter guide (`docs/adopter/byob-external-api.md`) and flipped the §60 banner Nominal → Implemented; W5 also corrected a deep-walk bug so the typer + codegen find an `<api>` wrapped in the canonical `<program>`/`<page>` shape (W4 assumed top-level only). The seven `E-API-*` Error codes and the `W-API-RESPONSE-NOT-VARIANT` Info code are LANDED + catalogued in §34. The one remaining informational code below — `W-API-A1-SRC-DEFERRED` — is genuinely **not yet fired**: it is A1-gated (§60.8), planned with that separate arc.
 
 ### 60.10 Out of scope / known limits
 - **SSR-of-external-data** — structurally gapped (§60.6); needs a BFF, which contradicts BYOB.
@@ -51100,10 +51123,10 @@ A **malformed or unknown-variant** request body — a missing discriminator, an 
 
 **Normative statements:**
 - The request body SHALL be decoded via `parseVariant` (§41.13) against the `accepts=` enum **automatically** — the author does not re-state the decode. [wired — W4.]
-- A `parseVariant` decode failure (the §41.13 `::ParseError` family — `::MissingDiscriminator`, `::UnknownVariant`, `::InvalidPayload`) SHALL surface as a compiler-owned structured error response (§61.5), NOT as an author arm. The author's arms are exhaustive over the enum's declared variants (§61.4), not over the decode-failure space.
+- A `parseVariant` decode failure (the §41.13 `ParseError` family — `.MissingDiscriminator`, `.UnknownVariant`, `.InvalidPayload`) SHALL surface as a compiler-owned structured error response (§61.5), NOT as an author arm. The author's arms are exhaustive over the enum's declared variants (§61.4), not over the decode-failure space.
 - Because `parseVariant` is a tagged-variant decoder, `accepts=` SHALL resolve to a `:enum` type (a non-enum is `E-ENDPOINT-ACCEPTS-NOT-ENUM`, §61.9) — the same variant-only constraint §60.5 records for the response half.
-- **Strict keys (allow-list).** The request body's keys SHALL be exactly `tag` and payload fields of the variant `tag` names. A key that is neither is a decode failure — `::InvalidPayload`, the 400 envelope of §61.5 — and no arm runs (the same refusal §57 makes of an undeclared key). A foreign contract whose requests carry envelope keys (JSON-RPC's `jsonrpc`, `id`) declares them as payload fields of the variant. **Provenance:** ruling:user-voice-scrml.md-S478-open-Qs-item-35 (S478 open-Qs ruling (user-voice), g-boot-endpoint-s478 Q3) · **direction of change:** newly-rejecting at run time for a request with an extra key (the bootstrap already refused it; impl#1 refuses it since S479 under the narrow impl#1 carve-out, ruling:user-voice-scrml.md-S479-impl1-415-carve-out — emitted at `compiler/src/codegen/emit-server.ts`, `_scrml_endpoint_foreign_key`).
-- **A repeated key.** A request body in which one JSON object — the body itself or any object nested in it — names the same key twice is a decode failure — `::Malformed`, the 400 envelope of §61.5 — and no arm runs. Keys are compared after JSON string unescaping, so `"tag"` and `"t\u0061g"` are the same key. (JSON leaves a repeated name's meaning unspecified, RFC 8259 §4, and decoders disagree: one that keeps the last value and a proxy or filter that keeps the first would read two different requests.) **Provenance:** ruling:user-voice-scrml.md-S479-3A-5 (S479 "RULED — S478 hand-off §3.A and §3.B", item 5) (review #1940 (4)) · **direction of change:** newly-rejecting at run time for a body with a repeated key (the bootstrap previously kept the last value; impl#1 keeps the last value — impl#1-owed, S471 policy).
+- **Strict keys (allow-list).** The request body's keys SHALL be exactly `tag` and payload fields of the variant `tag` names. A key that is neither is a decode failure — `.InvalidPayload`, the 400 envelope of §61.5 — and no arm runs (the same refusal §57 makes of an undeclared key). A foreign contract whose requests carry envelope keys (JSON-RPC's `jsonrpc`, `id`) declares them as payload fields of the variant. **Provenance:** ruling:user-voice-scrml.md-S478-open-Qs-item-35 (S478 open-Qs ruling (user-voice), g-boot-endpoint-s478 Q3) · **direction of change:** newly-rejecting at run time for a request with an extra key (the bootstrap already refused it; impl#1 refuses it since S479 under the narrow impl#1 carve-out, ruling:user-voice-scrml.md-S479-impl1-415-carve-out — emitted at `compiler/src/codegen/emit-server.ts`, `_scrml_endpoint_foreign_key`).
+- **A repeated key.** A request body in which one JSON object — the body itself or any object nested in it — names the same key twice is a decode failure — `.Malformed`, the 400 envelope of §61.5 — and no arm runs. Keys are compared after JSON string unescaping, so `"tag"` and `"t\u0061g"` are the same key. (JSON leaves a repeated name's meaning unspecified, RFC 8259 §4, and decoders disagree: one that keeps the last value and a proxy or filter that keeps the first would read two different requests.) **Provenance:** ruling:user-voice-scrml.md-S479-3A-5 (S479 "RULED — S478 hand-off §3.A and §3.B", item 5) (review #1940 (4)) · **direction of change:** newly-rejecting at run time for a body with a repeated key (the bootstrap previously kept the last value; impl#1 keeps the last value — impl#1-owed, S471 policy).
 - **A payload field named `tag`.** An `accepts=` enum (or a `parseVariant` type argument, §41.13) with a variant payload field named `tag` is `E-PARSEVARIANT-TAG-FIELD` (§41.13, §61.9): the wire's `tag` key names the variant, so the field could never carry a value of its own. Rename the field. **Provenance:** ruling:user-voice-scrml.md-S478-open-Qs-item-40 (S478 open-Qs ruling (user-voice), g-boot-endpoint-s478 Q8) · **direction of change:** newly-rejecting for an enum with a `tag` payload field used with `accepts=` / `parseVariant` (corpus count 0).
 
 ### 61.4 Exhaustiveness — the inbound-honesty guarantee
@@ -51121,16 +51144,16 @@ An `accepts=` enum variant with **no** matching arm is `E-ENDPOINT-NOT-EXHAUSTIV
 
 The compiler **envelopes** the typed arm-result as a JSON response. An arm's value-return is the typed result; the compiler serializes it into the response body and sets the JSON content type. The author returns a typed value; the wire shape is compiler-owned.
 
-**The default envelope (W4 — the concrete schema).** The default **success** envelope serializes the arm's typed value-return **directly** as the JSON response body — HTTP **200**, `Content-Type: application/json`. There is **no wrapper**: the author models the exact wire by returning the exact shape, so a JSON-RPC `{ jsonrpc, id, result }` response is expressed by an arm that returns that struct (a convention **via the return value**, NOT a baked-in `<endpoint>` mode, §61.1). A self-closing `<Variant/>` arm is a no-op handler that returns default-success with **no body** — HTTP **204 No Content**. The default **error** envelope is the §61.3 decode-failure path: a `parseVariant` `::ParseError` produces the compiler-owned structured error `{ error: { kind, message } }` — HTTP **400**, `Content-Type: application/json` — where `kind` is the `::ParseError` variant name (`MissingDiscriminator` / `UnknownVariant` / `InvalidPayload` / `Malformed`, §41.13) and `message` is a human-readable description. The compiler owns the decode-failure path; the author's arms never see it (§61.3). This minimal envelope is the §60.7 LIMIT-PRIMITIVES boundary applied to the inbound edge — no baked-in success-mode, no envelope versioning, no per-arm header control beyond the content type.
+**The default envelope (W4 — the concrete schema).** The default **success** envelope serializes the arm's typed value-return **directly** as the JSON response body — HTTP **200**, `Content-Type: application/json`. There is **no wrapper**: the author models the exact wire by returning the exact shape, so a JSON-RPC `{ jsonrpc, id, result }` response is expressed by an arm that returns that struct (a convention **via the return value**, NOT a baked-in `<endpoint>` mode, §61.1). A self-closing `<Variant/>` arm is a no-op handler that returns default-success with **no body** — HTTP **204 No Content**. The default **error** envelope is the §61.3 decode-failure path: a `parseVariant` `ParseError` produces the compiler-owned structured error `{ error: { kind, message } }` — HTTP **400**, `Content-Type: application/json` — where `kind` is the `ParseError` variant name (`MissingDiscriminator` / `UnknownVariant` / `InvalidPayload` / `Malformed`, §41.13) and `message` is a human-readable description. The compiler owns the decode-failure path; the author's arms never see it (§61.3). This minimal envelope is the §60.7 LIMIT-PRIMITIVES boundary applied to the inbound edge — no baked-in success-mode, no envelope versioning, no per-arm header control beyond the content type.
 
 **The author-override path (W4 — collapses to direct return).** Because the default success envelope serializes the arm's return value **directly** (no wrapper), the author **already owns the success wire**: returning a different shape from the arm **IS** the override — there is no separate default-wrap to detect, opt out of, or undo. A foreign contract that demands a specific success envelope (e.g. JSON-RPC's `{ jsonrpc, id, result }`) is met by returning exactly that value from the matching arm. The only compiler-owned, non-overridable envelope is the §61.3 **decode-failure** error: a malformed request never reaches an arm, so the author cannot model it — it stays the structured `{ error: { kind, message } }` 400 above. (This is the inbound dual of §60's "the author declares the exact boundary shape.")
 
 **Normative statements:**
 - The compiler SHALL serialize an arm's typed value-return **directly** as the JSON response body — HTTP 200, `Content-Type: application/json` — with no wrapper (the author owns the success wire by returning the exact shape). [wired — W4.]
 - A self-closing `<Variant/>` arm SHALL return default-success with no body — HTTP 204 No Content. [wired — W4.]
-- A §61.3 decode failure SHALL produce the compiler-owned structured error envelope `{ error: { kind, message } }` — HTTP 400, `Content-Type: application/json`, `kind` ∈ the §41.13 `::ParseError` family (`MissingDiscriminator` / `UnknownVariant` / `InvalidPayload` / `Malformed`) — distinct from the success envelope and never routed to an author arm. [wired — W4.]
+- A §61.3 decode failure SHALL produce the compiler-owned structured error envelope `{ error: { kind, message } }` — HTTP 400, `Content-Type: application/json`, `kind` ∈ the §41.13 `ParseError` family (`MissingDiscriminator` / `UnknownVariant` / `InvalidPayload` / `Malformed`) — distinct from the success envelope and never routed to an author arm. [wired — W4.]
 - Because success serializes the return value directly, the author-override path collapses to "return the desired shape": there is no separate default-wrap to override. JSON-RPC is one such expressible shape, NOT a baked-in mode.
-- **The request media type.** A request whose `Content-Type` media type is not `application/json` (compared case-insensitively, RFC 9110 §8.3.1; parameters such as `charset` allowed) SHALL be refused with HTTP **415** and the compiler-owned envelope `{ error: { kind: "UnsupportedMediaType", message } }`, `Content-Type: application/json`, before the body is read; no arm runs. `UnsupportedMediaType` is not a §41.13 `::ParseError` kind (the body is never decoded). This is what makes §61.7's CSRF exemption hold: a browser cannot send `application/json` cross-origin without a CORS preflight, and the preflight (`OPTIONS`) is answered 405 (§61.7) unless the endpoint opts in with its own `cors=` (§61.7; a program-level `cors=` never answers it, §39.2.1), so a page an operator visits cannot fire an arm as a CORS simple request (`text/plain`, a form, multipart) — the case that matters for an endpoint reachable only by network position (localhost, an intranet). **Provenance:** ruling:user-voice-scrml.md-S478-open-Qs-item-39 (S478 open-Qs ruling (user-voice), g-boot-endpoint-s478 Q7) · **direction of change:** newly-rejecting at run time for a non-JSON request (the bootstrap already refused it; impl#1 refuses it since S479 under the narrow impl#1 carve-out, ruling:user-voice-scrml.md-S479-impl1-415-carve-out — emitted at `compiler/src/codegen/emit-server.ts`, `_scrml_endpoint_is_json`; g-impl1-endpoint-415-strict-keys-s479).
+- **The request media type.** A request whose `Content-Type` media type is not `application/json` (compared case-insensitively, RFC 9110 §8.3.1; parameters such as `charset` allowed) SHALL be refused with HTTP **415** and the compiler-owned envelope `{ error: { kind: "UnsupportedMediaType", message } }`, `Content-Type: application/json`, before the body is read; no arm runs. `UnsupportedMediaType` is not a §41.13 `ParseError` kind (the body is never decoded). This is what makes §61.7's CSRF exemption hold: a browser cannot send `application/json` cross-origin without a CORS preflight, and the preflight (`OPTIONS`) is answered 405 (§61.7) unless the endpoint opts in with its own `cors=` (§61.7; a program-level `cors=` never answers it, §39.2.1), so a page an operator visits cannot fire an arm as a CORS simple request (`text/plain`, a form, multipart) — the case that matters for an endpoint reachable only by network position (localhost, an intranet). **Provenance:** ruling:user-voice-scrml.md-S478-open-Qs-item-39 (S478 open-Qs ruling (user-voice), g-boot-endpoint-s478 Q7) · **direction of change:** newly-rejecting at run time for a non-JSON request (the bootstrap already refused it; impl#1 refuses it since S479 under the narrow impl#1 carve-out, ruling:user-voice-scrml.md-S479-impl1-415-carve-out — emitted at `compiler/src/codegen/emit-server.ts`, `_scrml_endpoint_is_json`; g-impl1-endpoint-415-strict-keys-s479).
 
 ### 61.6 Client-codegen SKIP — server handler only
 
@@ -51872,6 +51895,16 @@ Applying the machine to the existing corpus:
   co-land (§63.2). Once open: SOFT, unscheduled, gate-blocked until the fix rule is verified-landed (§63.4); the
   rewrite is mechanical (the type name). The bootstrap accepts `integer` throughout the window. *(Provenance:
   ruling:user-voice-scrml.md S469 "⭐ RULED — three spec-follow-up opens" — "Deprecation window (Rec)".)*
+- **`W-VARIANT-COLONS-LEGACY` (`TypeName::V` / `::V` → `TypeName.V` / `.V`, §14.5) — added S482:** SOFT,
+  unscheduled; reserved `E-VARIANT-COLONS-LEGACY` named, unfired; **gate-blocked** until its `scrml fix` rule is
+  verified-landed (§63.4) — the rule LANDED with the lint (`compiler/src/commands/fix-variant-colons.js`, a default
+  rule of `scrml fix`); §63.4 verification is not claimed. W-VARIANT-COLONS-LEGACY is emitted by the bootstrap (arm
+  patterns and `fail` operands; `::` in an expression is its named refusal, §63.5 S473 D5); impl#1 accepts `::`
+  without the lint (`g-impl1-variant-colons-lint-s482`). The rule is mechanical (the two characters `::` become
+  `.`). The corpus was migrated in the same landing (`conformance/`, `samples/`, `stdlib/`, `examples/`,
+  `benchmarks/`, `docs/`); one labelled conformance case keeps `::` to exercise the lint. Recorded in the
+  retired-forms ledger as a SOFT row whose count may only go down (ruling:user-voice-scrml.md-S482-retirement-ledger-rule).
+  *(Provenance: ruling:user-voice-scrml.md-S482-deprecate-colons — "yes, deprecate :: with warning and fix".)*
 
 ### 63.8 What is NOT a lifecycle deprecation
 

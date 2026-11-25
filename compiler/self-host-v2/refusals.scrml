@@ -133,7 +133,7 @@ ${
             row("animationFrame()", "§6.7.9", U, ["animationFrame", "("], ""),
             rowOn("enum transitions block", "§14.4.0", U, ["transitions", "{"], [], false, "the engine form `<x:T=.V single>` with state-children carries the transition graph in the bootstrap (§66.13)"),
             rowOn("EnumType.variants", "§14.4.2", U, [".", "variants"], ["E-TYPE-VARIANT", "E-SCOPE-001"], false, ""),
-            rowOn("`::` in an expression", "§14.5", U, [":", ":", "!:"], ["E-PARSE-TRAILING", "E-PARSE-EXPR"], true, "write `.` (`Role.Admin`, `.Admin`); `::` is built in a match-arm pattern only"),
+            rowOn("`::` in an expression", "§14.5", U, [":", ":", "!:"], ["E-PARSE-TRAILING", "E-PARSE-EXPR"], true, "write `.` (`Role.Admin`, `.Admin`): `::` is the deprecated spelling of `.` (W-VARIANT-COLONS-LEGACY, §14.5; `scrml fix` rewrites it), and the bootstrap builds it only in a match-arm pattern and after `fail`"),
             rowOn("snippet type", "§14.9", U, ["snippet"], ["E-TYPE-UNKNOWN", "E-PARSE-TYPE", "E-SCOPE-001"], false, ""),
             row("render", "§16.3", U, ["render", "$w"], "named / parametric slots are OPEN O9 (§66.15.2)"),
             rowOn("renders on an enum variant", "§19.2", U, ["renders"], ["E-PARSE-TYPE"], false, "render the error in markup where it is handled (`!{}` / `match`)"),

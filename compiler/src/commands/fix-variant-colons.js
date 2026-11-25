@@ -230,7 +230,17 @@ export function planVariantColons(filePath, source) {
     const off = m.index;
     if (seen.has(off)) continue;
     const sk = inside(skipped, off);
-    if (sk) notes.push({ at: off, reason: `a \`::\` inside ${sk.what} — this rule does not enter it; rewrite it to \`.\` by hand if it is variant access (§14.5)` });
+    if (sk) { notes.push({ at: off, reason: `a \`::\` inside ${sk.what} — this rule does not enter it; rewrite it to \`.\` by hand if it is variant access (§14.5)` }); continue; }
+    if (inside(read, off)) continue;
+    // Outside every region this rule read. Markup text, CSS and SQL are not code — but a region
+    // impl#1's splitter did not hand out (a file it reads differently) would hide a real site here, so
+    // a variant-shaped `::V` (an upper-case name after it; CSS pseudo-elements are lower-case) on a
+    // line that is not a `//` comment is reported rather than passed over in silence.
+    const ls0 = source.lastIndexOf("\n", off - 1) + 1;
+    const before = source.slice(ls0, off);
+    if (/^[A-Z]/.test(source.slice(off + 2, off + 3)) && !before.includes("//") && !/^\s*\*/.test(before)) {
+      notes.push({ at: off, reason: "a `::` outside the code this rule reads (impl#1's block splitter gave it no code region) — rewrite it to `.` by hand if it is variant access (§14.5)" });
+    }
   }
   sites.sort((a, b) => a.start - b.start);
   const uniq = new Map();

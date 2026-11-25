@@ -199,7 +199,7 @@ describe("scrml:fs — the .scrml answers exactly as the shim (statSync checked 
   test("statSync (NOT run from source — scrml:host safeCall + `!{}`): a throwing stat maps to `not` as the shim's catch maps it to null, and the fields are the shim's", () => {
     const src = readFileSync(join(ROOT, "stdlib/fs/index.scrml"), "utf8");
     const body = src.slice(src.indexOf("export function statSync("), src.indexOf("export function rmSync("));
-    expect(body).toMatch(/safeCall\(\(\) => fs\.statSync\(path\)\) !\{\s*::Thrown\(message, name\) :> \{ return not \}/);
+    expect(body).toMatch(/safeCall\(\(\) => fs\.statSync\(path\)\) !\{\s*\.Thrown\(message, name\) :> \{ return not \}/);
     for (const f of ["isFile: s.isFile()", "isDirectory: s.isDirectory()", "size: s.size", "mtime: s.mtime"]) expect(body).toContain(f);
     expect(shim.statSync(join(dir, "missing"))).toBe(null);
   });
