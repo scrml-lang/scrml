@@ -291,3 +291,26 @@ export let <z:int=(n + 0)/>
     expect(await load(out, ["o", "o2"])).toEqual({ errors: [], texts: ["5", "1"] });
   }, 120000);
 });
+
+// r3 (#2105 r2 review MED-B) — an outside seed reading an outside DERIVED cell whose formula reads a
+// program cell: refused at compile time (E-SCOPE-001), never a page that dies at load. Red on 6049c6944:
+// it compiled and Chromium reported `Cannot access 'decl_program' before initialization` (main: 10).
+describe("MED-B — an outside seed reaching a program cell through an outside derived cell (Chromium)", () => {
+  test("m01: refused with E-SCOPE-001; e12d control (the derived cell read only in the body) renders 5, no page error", async () => {
+    if (skip()) return;
+    expect(() => build(`<d:int=(@n + 1)/>
+let <a:int=(@d * 2)/>
+<program>
+let <n:int=4/>
+<p id="o">\${@a}</p>
+</program>
+`)).toThrow("E-SCOPE-001");
+    const out = build(`<a:int=(@n + 1)/>
+<program>
+let <n:int=4/>
+<p id="o">\${@a}</p>
+</program>
+`);
+    expect(await load(out, ["o"])).toEqual({ errors: [], texts: ["5"] });
+  }, 120000);
+});

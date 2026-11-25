@@ -183,3 +183,25 @@ let <show:boolean=false/>
     expect(await load(out, ["o"], "b")).toEqual({ errors: [], texts: ["2"] });
   }, 120000);
 });
+
+// r3 (#2105 r2 review LOW-1) — a lambda's own parameter is bound inside the initializer and reads no
+// cell (Q13): the field is a constant seeded at the mount. 6049c6944 counted `x` as a free local and
+// made it derived (V12).
+describe("LOW-1 — a lambda parameter in a locked field is not a cell read (Chromium)", () => {
+  test("v14: `xs.map(x => x + rn())` over a const tape — V3 (the mount saw n = 1), not V12", async () => {
+    if (skip()) return;
+    const out = build(`<program>
+\${ let n: int = 1; }
+\${ function rn() -> int { return n; } }
+\${ const xs: int[] = [1, 2]; }
+let <show:boolean=false/>
+<cz t:string="x">
+<v:int=(xs.map(x => x + rn()).length + rn())/>
+</> renders <p if=(@show)>V\${v}</p>
+<p id="o"><cz/></p>
+<button id="b" onclick={ n = 10; @show = true; }>b</button>
+</program>
+`);
+    expect(await load(out, ["o"], "b")).toEqual({ errors: [], texts: ["V3"] });
+  }, 120000);
+});
