@@ -162,3 +162,16 @@ Brief: ~/.cache/scrml/review/s482-briefs/fix-2105-r3.md; review ~/.cache/scrml/r
 | corpus differential (2977) | vs base: 0 newly rejected / accepted / code changes; 1 client diff (own-value-type/unproven-annotation-pos, Q13 names); 0 server diffs; 0 files with any diagnostic-text change. vs r2 head: 0 diffs of any kind |
 | client identifier diff | 1 file (the same one): `seeded hold seed` + local temporaries |
 | s34-census --check-new --base 1e8a11758 | PASS |
+
+## sync — merge origin/main e78f8d123 into c18852e81 (S482)
+
+Brief: ~/.cache/scrml/review/s482-briefs/sync-2105.md. main gained #2107 (s482-display-untracked, W-DISPLAY-UNTRACKED §6.15 A5) + bot regens since the lane base.
+
+Conflicted hunks:
+
+| file | hunk | resolution |
+|---|---|---|
+| compiler/self-host-v2/analyze.scrml | `fileScopePass` tail (ours: `if (noBinds) return out0.concat(outerSeedReachDiags…)` / `return out.concat(bodyReachDiags…).concat(outerSeedReachDiags…)` + new fn `anyOuterCell`; main: `out = out.concat(displayUntrackedDiags(…))` then `return out.concat(bodyReachDiags…)`) | both: main's `displayUntrackedDiags` line kept after `derivedUntrackedDiags`, then ours' two returns, then `anyOuterCell`. The `noBinds` path still returns `out0` + the outer-seed judgment only; `displayUntrackedDiags` returns `[]` when `lets` is empty, and main returned before it when there was no binding, so neither side's behavior changes. |
+| docs/known-gaps.md | (generated-content) | `scrml-generated-merge` driver: 0 markers. Verified both sides' entries present: ours' 3 resolved (imported-cell-seed-time, locked-field-acting-init-place, use-site-value-seed) + open outer-cell-server-seed-reads-cell; main's opener-string-escapes (HIGH open) + display-untracked-later-mount-spine. Count block is bot-owned post-merge. |
+
+Auto-merged without conflict: compiler/SPEC.md (main's §6.15 A5 paragraph + §7.6 R5 note; ours §7.6 R1 note — disjoint), severity.scrml / SPEC-INDEX.md / FACTS.md / gap-counts.md / bootstrap-conformance.md (main-only; generated blocks bot-owned post-merge). Callers of the signatures this PR changed (`cellUsesDirect` +outer, `readsCellReach`) — main adds none.
