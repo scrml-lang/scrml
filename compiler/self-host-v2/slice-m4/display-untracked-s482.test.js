@@ -72,7 +72,9 @@ describe("W-DISPLAY-UNTRACKED — a display of a `let` that a later writer write
     const w = await warns(`<program>\n${L}${BUMP}let <r:int=0/>\n<request id="rq" deps=[]>\${ @r = bump(); }</request>\n<p>\${n}</p>\n</program>\n`);
     expect(w.map((x) => x.code)).toEqual([W]);
     expect(w[0].message).toContain("the `<request>` body at line 5 writes `n` (through `bump() → n`) after this display renders");
-    expect(w[0].message).toContain("A `<request>` body writes only its own cell (§6.7.7)");
+    // the cell fix-it alone is refused by this compiler (INTERIM, Core C-R1) — not a §6.7.7 rule
+    expect(w[0].message).toContain("This compiler refuses a `<request>` body that writes a cell other than its own (E-BOOTSTRAP-UNSUPPORTED — Core C-R1, INTERIM: a side-effecting request body is not ruled)");
+    expect(w[0].message).not.toContain("§6.7.7");
   }, 120000);
 
   test("a held run: an effect the body triggers before the display runs after the body (Q6)", async () => {
@@ -93,16 +95,26 @@ describe("W-DISPLAY-UNTRACKED — a display of a `let` that a later writer write
     expect(w[0].message).toContain("(through `inc() → n`)");
   }, 120000);
 
-  test("a body-top statement after the display's place", async () => {
-    const w = await warns(`<program>\n${L}<p>\${n}</p>\n\${ n = 5; }\n</program>\n`);
-    expect(w.map((x) => x.code)).toEqual([W]);
-    expect(w[0].message).toContain("the body-top statement at line 4 writes `n` later in the body, after this display renders");
-  }, 120000);
-
   test("a runtime `^{ }` block that re-runs", async () => {
     const w = await warns(`<program>\n${L}let <a:int=0/>\n<div>^{ n = meta.get("a"); }</div>\n<p>\${n}</p>\n</program>\n`);
     expect(w.map((x) => x.code)).toEqual([W]);
-    expect(w[0].message).toContain("the runtime `^{ }` block at line 4 (it re-runs when a cell it reads changes, §22.5) writes `n`");
+    expect(w[0].message).toContain("the runtime `^{ }` block at line 4 (it re-runs when a cell it reads through `meta.get` / `meta.bindings` changes, §22.5) writes `n`");
+  }, 120000);
+
+  // r1 of #2107 (F1): a cell write in the same writer re-renders nothing when it is conditional, in the
+  // other branch, or writes the same value — so it never suppresses the warning (the reviewer's
+  // fn27 / fn30 / fn29, each stale in Chromium)
+  test("a writer that also writes a cell the display reads still warns (conditional, other branch, same value)", async () => {
+    const T = "let <tick:int=0/>\n<p>${@tick + n}</p>\n";
+    for (const h of [
+      "n = n + 10; if (n > 1000) { @tick = @tick + 1; }",
+      "if (n > 100) { @tick = 1; } else { n = n + 10; }",
+      "n = n + 10; @tick = 0;",
+      "n = n + 1; @tick = @tick + 1;",
+    ]) {
+      const w = await warns(`<program>\n${L}${T}<button onclick=\${ ${h} }>+</button>\n</program>\n`);
+      expect(w.map((x) => x.code)).toEqual([W]);
+    }
   }, 120000);
 
   test("every display form: an attribute value, an `if=` condition, a read through a call", async () => {
@@ -125,6 +137,18 @@ describe("W-DISPLAY-UNTRACKED — a display of a `let` that a later writer write
   test("the fix-it of a non-literal initializer keeps it, parenthesized", async () => {
     const w = await warns(`<program>\n\${ let m: int = 2 + 3; }\n<p>\${m}</p>\n<button onclick=\${ m = m + 1; }>+</button>\n</program>\n`);
     expect(w[0].message).toContain("replace `let m: int = …;` with `let <m:int=(…)/>` (the same initializer, in the parentheses)");
+  }, 120000);
+
+  test("the fix-it quotes a string literal re-escaped (r1 F4)", async () => {
+    const w = await warns(`<program>\n\${ let s: string = "a\\"b\\\\c"; }\n<p>\${s}</p>\n<button onclick=\${ s = "z"; }>+</button>\n</program>\n`);
+    expect(w[0].message).toContain('replace `let s: string = "a\\"b\\\\c";` with `let <s:string="a\\"b\\\\c"/>`');
+  }, 120000);
+
+  test("a tape fix-it keeps the written grants and adds what the writes need (r1 F4)", async () => {
+    // a position write needs `write` (granted already); only the edit grants the writes add are added
+    const w = await warns(`<program>\n\${ let o: int[free, write] = [1]; }\n<p>\${o[0]}</p>\n<button onclick=\${ o[0] = 5; }>+</button>\n</program>\n`);
+    expect(w[0].message).toContain("replace `let o: int[free, write] = …;` with `<o:int[free, write]=(…)/>`");
+    expect(w[0].message).not.toContain("replace]");
   }, 120000);
 });
 
@@ -153,12 +177,26 @@ describe("W-DISPLAY-UNTRACKED — no warning (negatives)", () => {
     expect(await warns(`<program>\n${L}let <o:int=0/>\n<p>\${n}</p>\n<button onclick=\${ @o = n; }>+</button>\n</program>\n`)).toEqual([]);
   }, 120000);
 
-  test("a writer that also writes a cell the display reads (the display re-renders in the same turn)", async () => {
-    expect(await warns(`<program>\n${L}let <tick:int=0/>\n<p>\${@tick + n}</p>\n<button onclick=\${ n = n + 1; @tick = @tick + 1; }>+</button>\n</program>\n`)).toEqual([]);
+  // r1 of #2107 (item 1): spine code after the display's place is not a writer — S481, ruling:user-voice-
+  // scrml.md-S481-body-run-order: "A display of a `free` value reads it where it stands" (conformance
+  // body-top/free-display-reads-in-place pins the in-place value as the intended one)
+  test("a body-top statement after the display's place (the display reads the value where it stands, S481)", async () => {
+    expect(await warns(`<program>\n${L}<p>\${n}</p>\n\${ n = 5; }\n</program>\n`)).toEqual([]);
   }, 120000);
 
-  test("a `^{ }` that uses no cell (it runs once, at its place) before the display", async () => {
+  test("a component display, a body-top write after the component's use (fn25)", async () => {
+    expect(await warns(`${L}<cp t:int=0>\n</> renders <b>\${n}</b>\n<program>\n<cp/>\n\${ n = 5; }\n</program>\n`)).toEqual([]);
+  }, 120000);
+
+  test("a `^{ }` that runs once (no `meta.get`), before or after the display", async () => {
     expect(await warns(`<program>\n${L}<div>^{ n = 4; }</div>\n<p>\${n}</p>\n</program>\n`)).toEqual([]);
+    expect(await warns(`<program>\n${L}<p>\${n}</p>\n<div>^{ n = 4; }</div>\n</program>\n`)).toEqual([]);
+  }, 120000);
+
+  // r1 of #2107 (F2): §22.5 — "A direct `@x` read in the body, or one in a function the body calls, is not
+  // a dependency": such a block runs once, at its place (the reviewer's rr01)
+  test("a `^{ }` that reads a cell directly (not a §22.5 dependency) does not re-run", async () => {
+    expect(await warns(`<program>\n${L}let <a:int=0/>\n<div>^{ n = @a + 10; }</div>\n<p>\${n}</p>\n<button onclick=\${ @a = 1; }>+</button>\n</program>\n`)).toEqual([]);
   }, 120000);
 });
 
