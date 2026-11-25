@@ -195,3 +195,25 @@ Tests: `compiler/self-host-v2/slice-m4/retired-lint-s482.test.js` (+ closer-clea
 | harness2 (60) | 17 | 15 (§63.4 / §66.21 fences now caught) |
 | r0 harness (100) | 94 | 94 |
 | FP (20) | 1 | 1 |
+
+## Fix round r5 (S482)
+- **HIGH-1 — option (b), commonmark.js cross-check.** Importers of `marked`: scripts/retired-forms-lint.ts, its
+  unit test, and docs/build.ts (no inputs since S469 — the lint is the only live user). Option (a) was not
+  available: the first agreeing marked, 18.3.0, was published 2026-11-24 (one day old; no version ≥ 18.3.0
+  is two weeks old). So `commonmark` 0.31.2 (exact pin, published 2024-09-19) reads every markdown file too,
+  and `readFences` throws `PlacementError` (exit 2) when the multiset of READ fence texts (lines trimmed)
+  differs between the readers. §63's lazy-continuation sentence corrected; the exit-2 class is INTERIM, the
+  capable form a single CommonMark-agreeing reader (marked ≥ 18.3.0 once it is two weeks old).
+- **LOW-1.** §53.6.1 "Cross-field via predicate args" rewritten per S458 R4: no cross-cell argument in type
+  position (E-CONTRACT-003); the ruled derived check; the §55.11 state-cell validator keeps its cross-field
+  argument. ⚑ CONTRADICTED removed; g-spec-refinement-cross-cell-arg-s482 resolved. The duplicate §53.6.1
+  heading (S458 R5 renumber) is not touched.
+
+| measure (r4rev probes) | r4 | r5 |
+|---|---|---|
+| classify fuzz, seeds 11+23 (40,000) — fail-open (gate < commonmark) | 161 + 159 | 0 + 0 |
+| classify fuzz — exit 2 | 129 + 132 | 290 + 291 (= r4 exit 2 + r4 escapes; gate = commonmark unchanged 19,710 / 19,709) |
+| fuzz2 vs marked 18 (r4: 20,000; r5: 4,000) | 161 escaped | 0 escaped, 49 exit 2 |
+| b-set (34) | b04/b04b escape | b04/b04b exit 2; rest identical (b27 = probe construction error) |
+| r3rev a-set (24) | all exit 1 | all exit 1 |
+| corpus parity (53 files, 1,443 fences) | 0 differ | 0 differ; gate exit 0 |
