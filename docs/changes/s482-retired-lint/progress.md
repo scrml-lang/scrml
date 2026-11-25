@@ -171,3 +171,27 @@ Tests: `compiler/self-host-v2/slice-m4/retired-lint-s482.test.js` (+ closer-clea
 | FP (20) | 1 | 1 |
 | baseref (12 + badref) | all 1 / 2 | all 1 / 2 |
 | r2probe (34) + 6 new | 10 exit 0 that should fail (F1 ×2, F3 ×4, `{.scrml}`, bq marker, relocate E, EXCLUDED) | all caught except by-design (child in §63, retired-neg on a positive, codeCounts inflate, budget 2/2, shared x2) and the indented-``` case: CommonMark-correct now, but the stray ``` is an unterminated template literal to scrml (new §63 known limit) |
+
+## Fix round r4 (S482)
+- **F1.** Fence / heading lines come from marked's own cursor: every `blockTokens` call is a frame, a token
+  starts at `frame.length - remaining.length`; blockquote segments / list items map line for line; a re-read
+  container keeps the replaced token's start. The placed line is checked against the source; an unplaceable
+  block throws `PlacementError` → exit 2, clean message. Old vs new placement over the corpus: 1443 fences,
+  0 diffs. mapcheck is a unit test; decoys a01–a04, a09, a25 are unit tests.
+- **F2.** `migrationRegions` dropped from the ledger and the script; a ledger listing them fails; §63 says no
+  region is exempt.
+- **F3.** §53.1 bullet + §53.3.2 struct row ⚑ OPEN (g-spec-struct-invariant-form-s482, owner question);
+  §53.6.1 "Cross-field via predicate args" ⚑ CONTRADICTED (g-spec-refinement-cross-cell-arg-s482 — S458 R4
+  already ruled the example corrected; correction owed).
+- **NITs.** Transition row cites ruling:S435 (PA proposal text answered "a", L488); unplaceable → exit 2; the
+  stray-``` limit tagged INTERIM with the capable form.
+- No baseline count moved.
+
+| measure | r3 | r4 |
+|---|---|---|
+| r3rev line-mapping (24) | 7 escaped | 0 (all exit 1; a16/a17 now read, not fail-closed) |
+| f4 region (7) | 2 escaped | 0 fence escapes (heading-only edits exit 0: no region exists) |
+| r2probe (40) | 6 exit 0 by design | 5 by design + 2 heading-only (level_change, swap_63_child); child_in_63 now caught |
+| harness2 (60) | 17 | 15 (§63.4 / §66.21 fences now caught) |
+| r0 harness (100) | 94 | 94 |
+| FP (20) | 1 | 1 |
