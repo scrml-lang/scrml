@@ -1,12 +1,14 @@
 {
   "id": "body-top-acting-init-in-if-content-neg",
-  "description": "§7.6 rule (b) (S482) — `${ const a = note(\"a\"); }` written inside the content of an `if=` element: the initializer calls a function, and a file-scope initializer runs once — not when, or each time, the branch shows — so it is refused, naming the construct (E-FILE-SCOPE-INIT-IN-CONSTRUCT).",
+  "description": "§7.6 rule (b) (S482) — `${ const a = note(\"a\"); }` written inside the content of an `if=` element: the initializer calls a function, and a file-scope initializer runs once — not when, or each time, the branch shows — so it has no single place: a value position (§6.15 item 4, S482), and `note` writes the file-scope `log` — E-VALUE-WRITES-STATE, naming the construct.",
   "language-version": "1.0",
-  "spec": "§7.6 rule (b) (S482), §34",
+  "spec": "§6.15 (S482), §7.6 R3 (S482), §34",
   "source-test": "compiler/self-host-v2/slice-m4/runorder-followups-s482.test.js",
-  "rationale": "§7.6 rule (b) (S482): \"A file-scope initializer written there that acts — a call, a write, a `?{}` query, a foreign block — SHALL be a compile error, `E-FILE-SCOPE-INIT-IN-CONSTRUCT`, whose message names the construct.\" ruling:user-voice-scrml.md-S481-nested-init-chain-comments item 1 — \"make it a compile error naming the construct; refusing means nobody is surprised.\" (owner: \"aprove both, lets wrap\").",
+  "rationale": "§7.6 rule (b) (S482): \"A file-scope initializer written there that acts — a call, a write, a `?{}` query, a foreign block — SHALL be a compile error, `E-FILE-SCOPE-INIT-IN-CONSTRUCT`, whose message names the construct.\" ruling:user-voice-scrml.md-S481-nested-init-chain-comments item 1 — \"make it a compile error naming the construct; refusing means nobody is surprised.\" (owner: \"aprove both, lets wrap\"). s482 (lane s482-value-no-write): ruling:user-voice-scrml.md-S482-runorder-model-c A1 (\"yes, adopt (c) with the riders\") — such an initializer has no single place, so it is a value position (§6.15 item 4), and one that writes a file-scope `let` (`note` writes `log`) is E-VALUE-WRITES-STATE; a call of a function that writes nothing is no longer acting (~~E-FILE-SCOPE-INIT-IN-CONSTRUCT~~).",
   "expect": {
-    "codes": ["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]
+    "codes": [
+      "E-VALUE-WRITES-STATE"
+    ]
   },
   "xfail": {
     "impl1-ts": {
@@ -16,7 +18,7 @@
           "emitted:E-MARKUP-001=1",
           "emitted:E-SCOPE-001=1",
           "emitted:E-STATE-UNDECLARED=1",
-          "missing:E-FILE-SCOPE-INIT-IN-CONSTRUCT"
+          "missing:E-VALUE-WRITES-STATE"
         ]
       }
     }

@@ -1,0 +1,15 @@
+// §6.15 A1 (S482) — a cell's seed is a value position: one that calls a function writing a file-scope `let`
+// (`note` writes `log`) is E-VALUE-WRITES-STATE. (The shape seed-computed-in-place pinned before S482 model (c).)
+<program>
+${
+    let log: string = "";
+    function note(s: string) -> int { log = log + s; return 1; }
+    let n: int = 1;
+}
+${ n = 5; }
+${ const k: int = n + note("k"); }
+let <c:int=(k + note("c"))/>
+${ const z: int = note("z"); }
+<p id="e">${@c}</p>
+<p id="r">${log}</p>
+</program>

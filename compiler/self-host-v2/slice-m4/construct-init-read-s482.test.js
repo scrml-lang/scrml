@@ -46,30 +46,34 @@ async function texts(src, ids, steps = []) {
   return ids.map((id) => String(run.body.querySelector("#" + id)?.textContent ?? "<none>"));
 }
 
-describe("a write inside the construct, before the initializer, is refused", () => {
+describe("a write inside the construct, before the initializer, is refused — at the writer (s482-value-no-write)", () => {
   test("in the `if=` test (a function the test calls writes `n`)", async () => {
+    // s482 (lane s482-value-no-write; ruling:user-voice-scrml.md-S482-runorder-model-c A1): the writer is a value
+    // position (§6.15) — refused where it writes, E-VALUE-WRITES-STATE; ~~E-FILE-SCOPE-INIT-IN-CONSTRUCT~~ at the reader
     const d = await errors(`<program>
 \${ let n: int = 1; }
 \${ function bump() -> int { n = 5; return 1; } }
 <div if=(bump() > 0)>\${ const k: int = n + 0; }<p id="s">\${k}</p></div>
 </program>
 `);
-    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
-    expect(d[0].message).toContain("the initializer of `const k` reads `n`, which the program body writes inside that construct, before it");
-    expect(d[0].message).toContain("the content of an `if=` element (`<div if=…>`)");
+    expect(d.map((x) => x.code)).toEqual(["E-VALUE-WRITES-STATE"]);
   }, 120000);
 
   test("in a display of the content before it", async () => {
+    // s482 (lane s482-value-no-write; ruling:user-voice-scrml.md-S482-runorder-model-c A1): the writer is a value
+    // position (§6.15) — refused where it writes, E-VALUE-WRITES-STATE; ~~E-FILE-SCOPE-INIT-IN-CONSTRUCT~~ at the reader
     const d = await errors(`<program>
 \${ let n: int = 1; }
 \${ function bump() -> int { n = 5; return 0; } }
 <div if=(true)><p>\${bump()}</p>\${ const k: int = n + 0; }<p id="s">\${k}</p></div>
 </program>
 `);
-    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(d.map((x) => x.code)).toEqual(["E-VALUE-WRITES-STATE"]);
   }, 120000);
 
   test("in the test of an earlier member of the if-chain (the place is before the chain)", async () => {
+    // s482 (lane s482-value-no-write; ruling:user-voice-scrml.md-S482-runorder-model-c A1): the writer is a value
+    // position (§6.15) — refused where it writes, E-VALUE-WRITES-STATE; ~~E-FILE-SCOPE-INIT-IN-CONSTRUCT~~ at the reader
     const d = await errors(`<program>
 \${ let n: int = 1; }
 \${ function bump() -> int { n = 5; return 1; } }
@@ -77,11 +81,12 @@ describe("a write inside the construct, before the initializer, is refused", () 
 <div else>\${ const k: int = n + 0; }<p id="s">\${k}</p></div>
 </program>
 `);
-    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
-    expect(d[0].message).toContain("the content of an `else` element");
+    expect(d.map((x) => x.code)).toEqual(["E-VALUE-WRITES-STATE"]);
   }, 120000);
 
   test("in the renders of the component whose slot content holds it", async () => {
+    // s482 (lane s482-value-no-write; ruling:user-voice-scrml.md-S482-runorder-model-c A1): the writer is a value
+    // position (§6.15) — refused where it writes, E-VALUE-WRITES-STATE; ~~E-FILE-SCOPE-INIT-IN-CONSTRUCT~~ at the reader
     const d = await errors(`\${ let n: int = 1; }
 \${ function bump() -> int { n = 5; return 0; } }
 <card t:string="x">
@@ -90,8 +95,7 @@ describe("a write inside the construct, before the initializer, is refused", () 
 <card><b>\${ const k: int = n * 2; }</b><p id="s">\${k}</p></card>
 </program>
 `);
-    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
-    expect(d[0].message).toContain("slot content of `<card>`");
+    expect(d.map((x) => x.code)).toEqual(["E-VALUE-WRITES-STATE"]);
   }, 120000);
 });
 
@@ -147,8 +151,10 @@ describe("legal: the place is just before the construct — the source-order val
 <div if=(true)>\${ const k: int = n + 0; }<p id="s">\${k}</p><p>\${bump()}</p></div>
 </program>
 `;
-    expect(await errors(inside)).toEqual([]);
-    expect(await texts(inside, ["s"])).toEqual(["5"]);
+    // s482 (lane s482-value-no-write, A1): the display after the initializer writes `n` — a render
+    // expression that writes a file-scope `let` is refused where it writes
+    // ~~expect(await errors(inside)).toEqual([]); expect(await texts(inside, ["s"])).toEqual(["5"]);~~
+    expect((await errors(inside)).map((x) => x.code)).toEqual(["E-VALUE-WRITES-STATE"]);
   }, 120000);
 
   test("in an `else` member, read through a const", async () => {

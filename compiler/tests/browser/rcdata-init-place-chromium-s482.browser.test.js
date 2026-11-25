@@ -130,28 +130,30 @@ describe("an initializer in `<textarea>` / `<title>` runs just before the elemen
     if (skip()) return;
     const out = build(`<program>
 \${ let n: int = 1; }
-\${ function bump() -> int { n = n + 1; return n; } }
+\${ function inc(x: int) -> int { return x + 1; } }
 \${ n = 5; }
 \${ const m: int = n; }
 <p id="o">\${m}</p>
-<title>\${ const k: int = bump(); }\${k}</title>
+<title>\${ const k: int = inc(n); }\${k}</title>
 <p id="o2">\${n}</p>
 </program>
 `);
-    expect(await load(out, ["o", "title", "o2"])).toEqual({ errors: [], texts: ["5", "6", "6"] });
+    // s482-value-no-write: the initializer calls a function that writes nothing (a writer is refused, A1)
+    expect(await load(out, ["o", "title", "o2"])).toEqual({ errors: [], texts: ["5", "6", "5"] });
   }, 120000);
 
   test("textarea: an acting initializer first, then a display of what it wrote", async () => {
     if (skip()) return;
     const out = build(`<program>
 \${ let n: int = 1; }
-\${ function bump() -> int { n = n + 1; return 7; } }
+\${ function inc(x: int) -> int { return x + 2; } }
 \${ n = 5; }
-<textarea id="o2">\${ const k: int = bump(); }\${k} \${n}</textarea>
+<textarea id="o2">\${ const k: int = inc(n); }\${k} \${n}</textarea>
 <p id="o">\${n}</p>
 </program>
 `);
-    expect(await load(out, ["o", "o2"])).toEqual({ errors: [], texts: ["6", "7 6"] });
+    // s482-value-no-write: the initializer calls a function that writes nothing (a writer is refused, A1)
+    expect(await load(out, ["o", "o2"])).toEqual({ errors: [], texts: ["5", "7 5"] });
   }, 120000);
 });
 
@@ -169,16 +171,18 @@ let <s:string=(bumps())/>
 </program>
 `);
     expect(r.exit).not.toBe(0);
-    expect(r.codes).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect([...new Set(r.codes)].filter((c) => c !== "E-011")).toEqual(["E-VALUE-WRITES-STATE"]);
   }, 120000);
 
   test("construct control (no construct): k = 5, source order", async () => {
-    if (skip()) return;
-    const out = build(PRE + `<input bind:value=@s/>\${ const k: int = n + 0; }<p id="o">\${k}</p>
+    // s482 (lane s482-value-no-write; ruling:user-voice-scrml.md-S482-runorder-model-c A1): the seed / display that
+    // writes `n` is a value position — refused where it writes (~~E-FILE-SCOPE-INIT-IN-CONSTRUCT~~, ~~k = 5~~)
+    const r = refused(PRE + `<input bind:value=@s/>\${ const k: int = n + 0; }<p id="o">\${k}</p>
 let <s:string=(bumps())/>
 </program>
 `);
-    expect(await load(out, ["o"])).toEqual({ errors: [], texts: ["5"] });
+    expect(r.exit).not.toBe(0);
+    expect([...new Set(r.codes)].filter((c) => c !== "E-011")).toEqual(["E-VALUE-WRITES-STATE"]);
   }, 120000);
 
   test("textarea: refused (head r0: Chromium k = 1; base 5)", () => {
@@ -187,16 +191,18 @@ let <s:string=(bumps())/>
 </program>
 `);
     expect(r.exit).not.toBe(0);
-    expect(r.codes).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect([...new Set(r.codes)].filter((c) => c !== "E-011")).toEqual(["E-VALUE-WRITES-STATE"]);
   }, 120000);
 
   test("textarea control (initializer after it): k = 5, source order", async () => {
-    if (skip()) return;
-    const out = build(PRE + `<textarea id="o2" bind:value=@s></textarea>\${ const k: int = n + 0; }<p id="o">\${k}</p>
+    // s482 (lane s482-value-no-write; ruling:user-voice-scrml.md-S482-runorder-model-c A1): the seed / display that
+    // writes `n` is a value position — refused where it writes (~~E-FILE-SCOPE-INIT-IN-CONSTRUCT~~, ~~k = 5~~)
+    const r = refused(PRE + `<textarea id="o2" bind:value=@s></textarea>\${ const k: int = n + 0; }<p id="o">\${k}</p>
 let <s:string=(bumps())/>
 </program>
 `);
-    expect(await load(out, ["o", "o2"])).toEqual({ errors: [], texts: ["5", "s"] });
+    expect(r.exit).not.toBe(0);
+    expect([...new Set(r.codes)].filter((c) => c !== "E-011")).toEqual(["E-VALUE-WRITES-STATE"]);
   }, 120000);
 });
 
@@ -206,13 +212,14 @@ describe("an acting initializer after a literal attribute (Chromium, #2082 LOW-1
   test("rows=3: bump() runs first, the textarea then shows n = 5", async () => {
     if (skip()) return;
     const out = build(`\${ let n: int = 1; }
-\${ function bump() -> int { n = 5; return 0; } }
+\${ function inc(x: int) -> int { return x + 2; } }
 <program>
-<textarea id="o2" rows=3>\${ const k: int = bump(); }\${n}</textarea>
+<textarea id="o2" rows=3>\${ const k: int = inc(n); }\${n}</textarea>
 <p id="o">\${k}</p>
 </program>
 `);
-    expect(await load(out, ["o", "o2"])).toEqual({ errors: [], texts: ["0", "5"] });
+    // s482-value-no-write: a calling (non-writing) initializer; a writer there is refused (A1)
+    expect(await load(out, ["o", "o2"])).toEqual({ errors: [], texts: ["3", "1"] });
   }, 120000);
 });
 
@@ -241,28 +248,32 @@ describe("a `<*x/>` view's state bodies before the initializer (Chromium, #2082 
     const r = refused(PRE + `    <div if=(true)><span><*phase/></span>\${ const k: int = n + 0; }<p id="o">\${k}</p></div>
 ` + PHASE("<b>${@s}</b>") + S);
     expect(r.exit).not.toBe(0);
-    expect(r.codes).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect([...new Set(r.codes)].filter((c) => c !== "E-011")).toEqual(["E-VALUE-WRITES-STATE"]);
   }, 120000);
 
   test("h07 construct, body binds `@s`: refused (head r1: Chromium k = 1)", () => {
     const r = refused(PRE + `    <div if=(true)><span><*phase/></span>\${ const k: int = n + 0; }<p id="o">\${k}</p></div>
 ` + PHASE("<input bind:value=@s/>") + S);
     expect(r.exit).not.toBe(0);
-    expect(r.codes).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect([...new Set(r.codes)].filter((c) => c !== "E-011")).toEqual(["E-VALUE-WRITES-STATE"]);
   }, 120000);
 
   test("h04 control (no construct), body reads `@s`: k = 5, source order", async () => {
-    if (skip()) return;
-    const out = build(PRE + `    <span><*phase/></span>\${ const k: int = n + 0; }<p id="o">\${k}</p>
+    // s482 (lane s482-value-no-write; ruling:user-voice-scrml.md-S482-runorder-model-c A1): the seed / display that
+    // writes `n` is a value position — refused where it writes (~~E-FILE-SCOPE-INIT-IN-CONSTRUCT~~, ~~k = 5~~)
+    const r = refused(PRE + `    <span><*phase/></span>\${ const k: int = n + 0; }<p id="o">\${k}</p>
 ` + PHASE("<b>${@s}</b>") + S);
-    expect(await load(out, ["o"])).toEqual({ errors: [], texts: ["5"] });
+    expect(r.exit).not.toBe(0);
+    expect([...new Set(r.codes)].filter((c) => c !== "E-011")).toEqual(["E-VALUE-WRITES-STATE"]);
   }, 120000);
 
   test("h08 control (no construct), body binds `@s`: k = 5, source order", async () => {
-    if (skip()) return;
-    const out = build(PRE + `    <span><*phase/></span>\${ const k: int = n + 0; }<p id="o">\${k}</p>
+    // s482 (lane s482-value-no-write; ruling:user-voice-scrml.md-S482-runorder-model-c A1): the seed / display that
+    // writes `n` is a value position — refused where it writes (~~E-FILE-SCOPE-INIT-IN-CONSTRUCT~~, ~~k = 5~~)
+    const r = refused(PRE + `    <span><*phase/></span>\${ const k: int = n + 0; }<p id="o">\${k}</p>
 ` + PHASE("<input bind:value=@s/>") + S);
-    expect(await load(out, ["o"])).toEqual({ errors: [], texts: ["5"] });
+    expect(r.exit).not.toBe(0);
+    expect([...new Set(r.codes)].filter((c) => c !== "E-011")).toEqual(["E-VALUE-WRITES-STATE"]);
   }, 120000);
 });
 
@@ -294,25 +305,29 @@ ${where}
   test("s01a construct, `<*phase/>` whose seed writes: refused (head r2: Chromium k = 1)", () => {
     const r = refused(S01A(`    <div if=(true)><span><*phase/></span>\${ const k: int = n + 0; }<p id="o">\${k}</p></div>`));
     expect(r.exit).not.toBe(0);
-    expect(r.codes).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect([...new Set(r.codes)].filter((c) => c !== "E-011")).toEqual(["E-VALUE-WRITES-STATE"]);
   }, 120000);
 
   test("s01a control (no construct): k = 5, source order", async () => {
-    if (skip()) return;
-    const out = build(S01A(`    <span><*phase/></span>\${ const k: int = n + 0; }<p id="o">\${k}</p>`));
-    expect(await load(out, ["o"])).toEqual({ errors: [], texts: ["5"] });
+    // s482 (lane s482-value-no-write; ruling:user-voice-scrml.md-S482-runorder-model-c A1): the seed / display that
+    // writes `n` is a value position — refused where it writes (~~E-FILE-SCOPE-INIT-IN-CONSTRUCT~~, ~~k = 5~~)
+    const r = refused(S01A(`    <span><*phase/></span>\${ const k: int = n + 0; }<p id="o">\${k}</p>`));
+    expect(r.exit).not.toBe(0);
+    expect([...new Set(r.codes)].filter((c) => c !== "E-011")).toEqual(["E-VALUE-WRITES-STATE"]);
   }, 120000);
 
   test("r02 construct, `<request>` body reads a later cell: refused (head r2: Chromium k = 1)", () => {
     const r = refused(R02(`    <div if=(true)><request id="rq" deps=[]>\${ @r = @s; }</>\${ const k: int = n + 0; }<p id="o">\${k}</p></div>`));
     expect(r.exit).not.toBe(0);
     // the `refused` scan also matches the tail of W-LIFECYCLE-011 (`@r` is never read) as "E-011"
-    expect(r.codes.filter((c) => c !== "E-011")).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect([...new Set(r.codes)].filter((c) => c !== "E-011")).toEqual(["E-VALUE-WRITES-STATE"]);
   }, 120000);
 
   test("r02 control (no construct): the request runs at the mount, k = 5, source order", async () => {
-    if (skip()) return;
-    const out = build(R02(`    <request id="rq" deps=[]>\${ @r = @s; }</>\${ const k: int = n + 0; }<p id="o">\${k}</p>`));
-    expect(await load(out, ["o"])).toEqual({ errors: [], texts: ["5"] });
+    // s482 (lane s482-value-no-write; ruling:user-voice-scrml.md-S482-runorder-model-c A1): the seed / display that
+    // writes `n` is a value position — refused where it writes (~~E-FILE-SCOPE-INIT-IN-CONSTRUCT~~, ~~k = 5~~)
+    const r = refused(R02(`    <request id="rq" deps=[]>\${ @r = @s; }</>\${ const k: int = n + 0; }<p id="o">\${k}</p>`));
+    expect(r.exit).not.toBe(0);
+    expect([...new Set(r.codes)].filter((c) => c !== "E-011")).toEqual(["E-VALUE-WRITES-STATE"]);
   }, 120000);
 });
