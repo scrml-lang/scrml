@@ -10923,14 +10923,36 @@ ${
         return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.slice(0, k).concat(ds), file: tp.file, ns: tp.ns, inFn: tp.inFn };
     }
 
+    // s482-opener-escapes — INTERIM (fail closed; gap
+    // g-boot-opener-string-escapes-s482): what a backslash means inside a
+    // quoted attribute value or a declaration's quoted own value
+    // (`title="…"`, `let <s:string="…"/>`) is NOT RULED (SPEC §5.2 / §66.2.4).
+    // `\"` and `\\` keep the one meaning every candidate reading gives them
+    // here (the §4.18.3 catalog's `"` and `\`); `\${` is read as the catalog's
+    // literal `${`, which the quoted-`${…}` refusal then refuses. A `\` + any
+    // other character used to drop the `\` and keep the character (`\n` became
+    // the letter `n` — a silent wrong value); it is now E-PARSE-001, against
+    // the backslash and the character after it, and on recovery both
+    // characters are kept as content so the value's extent never moves.
+    // After a live `${` the rest of the value is an interpolation's own
+    // grammar (the whole value is refused as a quoted template, §5.5.3), so
+    // no escape there is judged.
     fn parseQuoted(mp: MP, q: string) -> RValue {
         let m: MP = mAdv(mp, 1);
         let text: string = "";
+        let live: boolean = false;
         for (; !mEof(m) && chAt(m, 0) != q; ) {
             if (chAt(m, 0) == "\\" && !mEof(mAdv(m, 1))) {
-                text = text + chAt(m, 1);
+                const n: string = chAt(m, 1);
+                if (live || n == "\"" || n == "\\" || (n == "$" && chAt(m, 2) == "{")) {
+                    text = text + n;
+                } else {
+                    m = mDiag(m, "E-PARSE-001", quotedEscMsg(n), m.pos, m.pos + 2);
+                    text = text + "\\" + n;
+                }
                 m = mAdv(m, 2);
             } else {
+                if (chAt(m, 0) == "$" && chAt(m, 1) == "{") live = true;
                 text = text + chAt(m, 0);
                 m = mAdv(m, 1);
             }
@@ -10940,6 +10962,12 @@ ${
             return { v: AAttrValue.Quoted(text, q == "'"), mp: d };
         }
         return { v: AAttrValue.Quoted(text, q == "'"), mp: mAdv(m, 1) };
+    }
+
+    fn quotedEscMsg(n: string) -> string {
+        let shown: string = n;
+        if (n == "\n") shown = "⏎";
+        return "`\\" + shown + "` in a quoted value: what a backslash means in a quoted attribute or declaration value is not decided yet (SPEC §5.2, §66.2.4), so only `\\\"` and `\\\\` are read — write `\\\\` for a literal backslash, or write the value as an expression, `name=(\"…\")`, where a string has the ordinary escapes (`\\n` is a newline)";
     }
 
     // ---- opener types (char level): Name, Name[g, …][…], Name | not -------------
