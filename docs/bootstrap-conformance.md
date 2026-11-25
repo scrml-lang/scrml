@@ -837,7 +837,7 @@ none
 - `module/e-scope-010-filescope-duplicate-reject` — PASS · TWIN
 - `module/file-scope-let-foreign-write-alias-pos` — PASS · TWIN
 - `module/file-scope-let-foreign-write-named-pos` — PASS · TWIN
-- `module/file-scope-let-foreign-write-neg` — PASS · TWIN
+- `module/file-scope-let-foreign-write-neg` — PASS · TWIN (also emitted, unasserted: W-DISPLAY-UNTRACKED)
 - `own-value-type/base-type-neg` — PASS
 - `own-value-type/base-type-pos` — PASS
 - `own-value-type/boundary-export-neg` — PASS
