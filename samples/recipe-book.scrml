@@ -216,7 +216,7 @@ ${
             FROM recipes
             ORDER BY title ASC
         `}.all() !{
-            | ::SQLError e -> { @loadError = e; [] }
+            | .SQLError e -> { @loadError = e; [] }
         }
         @recipes = rows.map(r => ({
             id: r.id,
@@ -278,7 +278,7 @@ ${
             INSERT INTO recipes (title, category, ingredients, is_faved)
             VALUES (${@formTitle}, ${@formCategory}, ${ingredientsJson}, 0)
         `}.run() !{
-            | ::SQLError e -> { @saveError = e; return }
+            | .SQLError e -> { @saveError = e; return }
         }
         @saveError = not
         resetForm()
@@ -294,7 +294,7 @@ ${
                 ingredients = ${ingredientsJson}
             WHERE id = ${@editingId}
         `}.run() !{
-            | ::SQLError e -> { @saveError = e; return }
+            | .SQLError e -> { @saveError = e; return }
         }
         @saveError = not
         resetForm()
@@ -303,7 +303,7 @@ ${
 
     server function deleteRecipe(id) {
         ?{`DELETE FROM recipes WHERE id = ${id}`}.run() !{
-            | ::SQLError e -> { @loadError = e; return }
+            | .SQLError e -> { @loadError = e; return }
         }
         loadRecipes()
     }
@@ -313,7 +313,7 @@ ${
         if (!recipe) { return }
         let newFaved = recipe.isFaved ? 0 : 1
         ?{`UPDATE recipes SET is_faved = ${newFaved} WHERE id = ${id}`}.run() !{
-            | ::SQLError e -> { @loadError = e; return }
+            | .SQLError e -> { @loadError = e; return }
         }
         loadRecipes()
     }

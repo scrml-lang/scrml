@@ -13,8 +13,8 @@ ${
 
     function go() {
         @result = risky(0) !{
-            ::NotFound(reason) :> "recovered: " + reason,
-            ::Empty            :> "was-empty"
+            .NotFound(reason) :> "recovered: " + reason,
+            .Empty            :> "was-empty"
         };
     }
 }

@@ -90,12 +90,12 @@
                 return
             }
             ?{`INSERT INTO urls (short_code, long_url, clicks) VALUES (${@shortCode}, ${@longUrl}, 0)`}.run() !{
-                | ::ConflictError _ -> {
+                | .ConflictError _ -> {
                     @errorMsg = "Short code already in use. Choose another."
                     @successMsg = ""
                     return
                 }
-                | ::SQLError e -> {
+                | .SQLError e -> {
                     @errorMsg = "Database error. Please try again."
                     @successMsg = ""
                     return
@@ -113,7 +113,7 @@
         // Here: no explicit error return type — !{} handles it.
         server function loadUrls() {
             @urls = ?{`SELECT short_code, long_url, clicks FROM urls ORDER BY clicks DESC`}.all() !{
-                | ::SQLError e -> {
+                | .SQLError e -> {
                     @errorMsg = "Failed to load URLs"
                     []
                 }
@@ -125,7 +125,7 @@
         // Here: navigate() with .Hard infers a server 302.
         server function redirectUrl(code) {
             let row = ?{`SELECT long_url FROM urls WHERE short_code = ${code}`}.first() !{
-                | ::SQLError e -> {
+                | .SQLError e -> {
                     @errorMsg = "Lookup failed"
                     return
                 }
@@ -135,7 +135,7 @@
                 return
             }
             ?{`UPDATE urls SET clicks = clicks + 1 WHERE short_code = ${code}`}.run() !{
-                | ::SQLError _ -> {
+                | .SQLError _ -> {
                     // Non-fatal: click count update failure doesn't block redirect.
                     // In Go: log.Printf("click increment failed: %v", err)
                 }
@@ -147,7 +147,7 @@
         // In Go: func (s *Store) Delete(code string) error
         server function deleteUrl(code) {
             ?{`DELETE FROM urls WHERE short_code = ${code}`}.run() !{
-                | ::SQLError e -> {
+                | .SQLError e -> {
                     @errorMsg = "Delete failed"
                     @successMsg = ""
                     return

@@ -12,10 +12,10 @@ ${
 
     function decode() {
         @result = parseVariant('{"tag":"Empty"}', LoadResult) !{
-            ::MissingDiscriminator          :> { @parseError = "missing-discriminator"; return; },
-            ::UnknownVariant(_)             :> { @parseError = "unknown-variant"; return; },
-            ::InvalidPayload(field, _)      :> { @parseError = "invalid-payload:" + field; return; },
-            ::Malformed(_)                  :> { @parseError = "malformed"; return; }
+            .MissingDiscriminator          :> { @parseError = "missing-discriminator"; return; },
+            .UnknownVariant(_)             :> { @parseError = "unknown-variant"; return; },
+            .InvalidPayload(field, _)      :> { @parseError = "invalid-payload:" + field; return; },
+            .Malformed(_)                  :> { @parseError = "malformed"; return; }
         };
     }
 }

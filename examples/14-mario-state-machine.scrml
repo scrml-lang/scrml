@@ -68,7 +68,7 @@
             .Mushroom(n) :> {
                 @coins = @coins + n;
                 @marioState = match @marioState {
-                    .Small => MarioState::Big,
+                    .Small => MarioState.Big,
                     else   => @marioState
                 };
             },
@@ -85,7 +85,7 @@
 
     function getHurt() {
         if (@gameOver) { return; }
-        let wasSmall = @marioState == MarioState::Small;
+        let wasSmall = @marioState == MarioState.Small;
         @marioState = .Small;
         if (wasSmall) {
             @lives = @lives - 1;
@@ -156,15 +156,15 @@
                 <span class="text-sm mt-3 text-yellow-400">${@marioName}</>
             </>
 
-            <div class="bg-red-900 border border-red-700 text-red-400 px-4 py-2 rounded-lg text-center text-xs mb-4" if=(@healthRisk == HealthRisk::AtRisk && !@gameOver)>${riskBanner(@healthRisk)}</>
+            <div class="bg-red-900 border border-red-700 text-red-400 px-4 py-2 rounded-lg text-center text-xs mb-4" if=(@healthRisk == HealthRisk.AtRisk && !@gameOver)>${riskBanner(@healthRisk)}</>
 
             <p class="text-xl text-red-500 my-6 text-center font-bold" if=(@gameOver)>GAME OVER</>
 
             <div if=(!@gameOver)>
                 <div class="grid grid-cols-3 gap-2 mb-3">
-                    <button class="py-3 px-2 bg-green-600 text-white text-xs rounded-lg cursor-pointer border-0" onclick=eatPowerUp(PowerUp::Mushroom(1))>MUSHROOM +1</>
-                    <button class="py-3 px-2 bg-yellow-500 text-gray-800 text-xs rounded-lg cursor-pointer border-0" onclick=eatPowerUp(PowerUp::Flower(3))>FLOWER +3</>
-                    <button class="py-3 px-2 bg-blue-500 text-white text-xs rounded-lg cursor-pointer border-0" onclick=eatPowerUp(PowerUp::Feather(5))>FEATHER +5</>
+                    <button class="py-3 px-2 bg-green-600 text-white text-xs rounded-lg cursor-pointer border-0" onclick=eatPowerUp(PowerUp.Mushroom(1))>MUSHROOM +1</>
+                    <button class="py-3 px-2 bg-yellow-500 text-gray-800 text-xs rounded-lg cursor-pointer border-0" onclick=eatPowerUp(PowerUp.Flower(3))>FLOWER +3</>
+                    <button class="py-3 px-2 bg-blue-500 text-white text-xs rounded-lg cursor-pointer border-0" onclick=eatPowerUp(PowerUp.Feather(5))>FEATHER +5</>
                 </>
                 <button class="w-full mt-2 py-3 bg-red-600 text-white text-sm rounded-lg cursor-pointer border-0" onclick=getHurt()>GET HURT</>
             </>

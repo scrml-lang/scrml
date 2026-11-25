@@ -15,14 +15,14 @@ ${
 ${
     function computeOk() {
         match safeDiv(10, 2) {
-            ::Ok(v)     :> @okOut = `ok: ${v}`,
-            ::DivByZero :> @okOut = "ERR"
+            .Ok(v)     :> @okOut = `ok: ${v}`,
+            .DivByZero :> @okOut = "ERR"
         }
     }
     function computeErr() {
         match safeDiv(10, 0) {
-            ::Ok(v)     :> @errOut = `ok: ${v}`,
-            ::DivByZero :> @errOut = "ERR: divide by zero"
+            .Ok(v)     :> @errOut = `ok: ${v}`,
+            .DivByZero :> @errOut = "ERR: divide by zero"
         }
     }
 }

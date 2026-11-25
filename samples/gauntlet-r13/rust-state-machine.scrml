@@ -7,7 +7,7 @@
     ${
         type AppState:enum = { Loading, Ready, Error, Saving }
 
-        @state = AppState::Loading;
+        @state = AppState.Loading;
         @data = not;
         @errorMsg = "";
         @isLoading = true;
@@ -15,7 +15,7 @@
         @isError = false;
 
         function loadData() {
-            @state = AppState::Ready;
+            @state = AppState.Ready;
             @isLoading = false;
             @isReady = true;
         }
@@ -30,12 +30,12 @@
         }
 
         function saveData() {
-            @state = AppState::Saving;
-            @state = AppState::Ready;
+            @state = AppState.Saving;
+            @state = AppState.Ready;
         }
 
         function retryLoad() {
-            @state = AppState::Loading;
+            @state = AppState.Loading;
             @isError = false;
             @isLoading = true;
             loadData();

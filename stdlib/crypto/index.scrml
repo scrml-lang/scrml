@@ -75,7 +75,7 @@ ${
      * For other algorithms: rehashes the input and compares hex strings.
      *
      * Returns true if the input matches the stored hash.
-     * Fails with CryptoError::VerifyFailed if the verification call throws
+     * Fails with CryptoError.VerifyFailed if the verification call throws
      * (e.g., malformed or incompatible hash string).
      */
     export function verifyHash(algorithm, input, storedHash) ! -> CryptoError {
@@ -84,14 +84,14 @@ ${
         }
         if (algorithm == "argon2") {
             return safeCall(() => Bun.password.verifySync(input, storedHash)) !{
-                ::Thrown(msg, name) -> {
-                    fail CryptoError::VerifyFailed(msg)
+                .Thrown(msg, name) -> {
+                    fail CryptoError.VerifyFailed(msg)
                 }
             }
         }
         const computed = safeCall(() => hash(algorithm, input)) !{
-            ::Thrown(msg, name) -> {
-                fail CryptoError::VerifyFailed(msg)
+            .Thrown(msg, name) -> {
+                fail CryptoError.VerifyFailed(msg)
             }
         }
         return computed == storedHash

@@ -220,7 +220,7 @@
         let isGoal = nx == @goalX && ny == @goalY;
         if (!isGoal) {
             let t = terrainAtCell(@seed, nx, ny, @cols, @rows, @nonce);
-            if (t != Terrain::Floor) { return; }
+            if (t != Terrain.Floor) { return; }
         }
         @nonce = bumpLeftVision(@nonce, @px, @py, nx, ny, @vision, @cols, @rows);
         @px = nx;

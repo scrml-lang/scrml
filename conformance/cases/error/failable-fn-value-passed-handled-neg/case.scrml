@@ -1,7 +1,7 @@
 ${
     type LoadError:enum = { Empty }
     function risky(n: int)! -> LoadError {
-        if (n < 1) fail LoadError::Empty;
+        if (n < 1) fail LoadError.Empty;
         return n;
     }
     function applyOr(f, n: int) {

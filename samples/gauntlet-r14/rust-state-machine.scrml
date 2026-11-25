@@ -7,7 +7,7 @@
     ${
         type AppState:enum = { Loading, Ready, Error, Saving }
 
-        @state = AppState::Loading;
+        @state = AppState.Loading;
         @data = not;
         @errorMsg = "";
         @isLoading = true;
@@ -17,7 +17,7 @@
         statusLabel = "System Status";
 
         function loadData() {
-            @state = AppState::Ready;
+            @state = AppState.Ready;
             @isLoading = false;
             @isReady = true;
             @data = [{ id: 1, value: "loaded" }];
@@ -37,19 +37,19 @@
                 return d;
             }
             const prepared = prepareSave(@data);
-            @state = AppState::Saving;
-            @state = AppState::Ready;
+            @state = AppState.Saving;
+            @state = AppState.Ready;
         }
 
         function retryLoad() {
-            @state = AppState::Loading;
+            @state = AppState.Loading;
             @isError = false;
             @isLoading = true;
             loadData();
         }
 
         function triggerError(msg) {
-            @state = AppState::Error;
+            @state = AppState.Error;
             @errorMsg = msg;
             @isError = true;
             @isReady = false;

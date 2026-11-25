@@ -11,8 +11,8 @@ ${
 
     function decode() {
         parseVariant('{"tag":"Empty"}', LoadResult) !{
-            ::MissingDiscriminator          :> { @parseError = "missing-discriminator"; return; },
-            ::Malformed(reason)             :> { @parseError = "malformed"; return; }
+            .MissingDiscriminator          :> { @parseError = "missing-discriminator"; return; },
+            .Malformed(reason)             :> { @parseError = "malformed"; return; }
         };
     }
 }
