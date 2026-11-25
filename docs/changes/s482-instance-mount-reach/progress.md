@@ -35,3 +35,26 @@ Artefacts: ~/.cache/scrml/review/s482-instance-mount-reach/ (base tree `base/`, 
 | host-global-scan 1/2, 2/2 | 0 violations each |
 | e2e-render-map | 259 pass / 0 fail |
 | retired-forms-lint --base-ref 153bd0334 | OK, counts equal baseline |
+
+## Fix round r1 (review ~/.cache/scrml/review/s482-2112/review.md, verdict FIX)
+
+Brief: ~/.cache/scrml/review/s482-briefs/fix-2112-r1.md. Branch verified at 47648f0bf before work.
+
+### Reproduction on 47648f0bf (Chromium, review probe.mjs)
+
+| probe | observed | finding |
+|---|---|---|
+| d/a18-field-renders | `{"o":"1","o2":"1"}` — compiles, silent wrong | MED-1 reproduces |
+| a/a03-state-child | `{"o":"1","o2":"1"}` — compiles, silent wrong | MED-2 reproduces |
+| d/a03b-state-child-display | `{"o":"1","o2":"1"}` — compiles, silent wrong | MED-2 (plain display) reproduces |
+| d/a03c-state-child-in-decl | REFUSED E-COMPONENT-ENGINE-SCOPE, E-SCOPE-001 | (control) |
+| a/a14-shared-instance-read | `{"o":"1","o2":"1"}` — compiles, silent wrong | MED-4 reproduces |
+| a/a11-outer-derived-to-inner-attr | REFUSED E-SCOPE-001 ("a attribute value") | NIT-1 reproduces |
+
+- [ ] item 1 MED-1 field renders
+- [ ] item 2 MED-2 body engine state child
+- [ ] item 3 MED-3 SPEC INTERIM + gap
+- [ ] item 4 MED-4 shared instance read
+- [ ] item 5 NIT-1 message
+- [ ] item 6 known-gaps resolved marker
+- [ ] gates
