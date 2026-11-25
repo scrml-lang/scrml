@@ -51998,7 +51998,10 @@ Applying the machine to the existing corpus:
   patterns and `fail` operands; `::` in an expression is its named refusal, §63.5 S473 D5); impl#1 accepts `::`
   without the lint (`g-impl1-variant-colons-lint-s482`). The rule is mechanical (the two characters `::` become
   `.`). The corpus was migrated in the same landing (`conformance/`, `samples/`, `stdlib/`, `examples/`,
-  `benchmarks/`, `docs/`); one labelled conformance case keeps `::` to exercise the lint. Recorded in the
+  `benchmarks/`); one labelled conformance case keeps `::` to exercise the lint. `docs/` is not migrated: its
+  `::` occurrences are displayed sample text, not compiled code — the website articles
+  `server-boundary-disappears`, `tier-ladder-promotion`, `roadmap-2026-05-14` and `npm-myth`, the reference page
+  `elements/onTimeout`, and the `docs/articles/` markdown. Recorded in the
   retired-forms ledger as a SOFT row whose count may only go down (ruling:user-voice-scrml.md-S482-retirement-ledger-rule).
   *(Provenance: ruling:user-voice-scrml.md-S482-deprecate-colons — "yes, deprecate :: with warning and fix".)*
 
