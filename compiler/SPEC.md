@@ -8274,7 +8274,10 @@ recomputed only when a cell it reads changes (§6.6); a write of a plain `let` m
 formula would show a stale value by construction. The message names the formula, the `let` and the chain, and the
 fix: *"make `n` a cell, or compute this value in the handler that writes `n`"*. A `let` that nothing writes is a
 constant in effect, and a formula may read it. *(A display that reads such a `let` — W-DISPLAY-UNTRACKED, the
-study's A5 — is not ruled: INTERIM/optional, to be decided after A1.)*
+study's A5 — is RULED S482 to be built (ruling:user-voice-scrml.md-S482-display-untracked-warning — *"build it — a
+warning when a plain `let` that is displayed is written by a later effect, request or handler, with a fix-it to make
+it a cell"*; owner: *"yes, your recommendations on all four"*): a warning, not an error, whose fix-it is to make the
+`let` a cell. Not yet built (bootstrap or impl#1).)*
 
 **What counts as a write, and the analysis — §6.7.4's, unchanged.** The write list (assignment, sequence edit,
 `reset(@x)`, engine write / `.advance`, `<#id>.refetch()`) and the write summary (per function, transitive over the
