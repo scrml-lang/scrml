@@ -52078,7 +52078,9 @@ exactly this (S482, #2101 r1, r2):**
   at; the source walker, the markdown reader and the builtin detectors are the changed tree's own script, so
   narrowing them is a reviewed code diff, not a ledger diff the base rules catch (and a base ledger older than
   `migrationRegions` / `corpus` is read with the changed tree's); fences tagged as another language, indented code
-  blocks, HTML `<pre>` blocks and markdown prose are not read; the hook reads the working tree, not the index (CI reads the commit);
+  blocks, HTML `<pre>` blocks and markdown prose are not read; an unterminated string or template literal in a
+  fence (a stray ```` ``` ```` line inside it is a template-literal opener to scrml) hides the rest of that fence,
+  as it would in a source file the compiler then refuses; the hook reads the working tree, not the index (CI reads the commit);
   text cannot tell a tape from a host array (`tape-js-method`) or a cell from an element (`render-by-tag`, which
   the bootstrap enforces); rows marked `enforcedBy: "lint-only"` have no compiler refusal, and
   `state-type-fn-overload` (§17.5) has neither a code nor a detector; `tape-js-method` sees a method by its dotted name only

@@ -143,3 +143,31 @@ Tests: `compiler/self-host-v2/slice-m4/retired-lint-s482.test.js` (+ closer-clea
 | snippet-gate / claim-gate / types-gate | 120/0 (9 spec-ahead) · 26/0 · OK 182 unchanged |
 | host-global-scan 1/2, 2/2 | 0 violations each |
 | e2e-render-map | 259/0 |
+
+## Fix round r3 (review ~/.cache/scrml/review/s482-2101-r2rev/review.md)
+
+- **F1 (HIGH) + F3.** The hand fence parser is gone: markdown is read by `marked`'s lexer (a declared
+  devDependency, ^14.1.3) — fenced blocks with lang empty / `scrml…` / `{.scrml}`, blockquoted, list-item and
+  quoted-list fences included, each ending where CommonMark ends it. Each block is placed back on its source
+  lines (opener + every body line, in order); an unplaceable block throws (fail closed). `retired-neg`
+  markers count only at the fence's blockquote depth (kept "directly above", not "after blank lines").
+  Parity unit test over every read .md (fence set == marked's; mapped lines verified). Both F1 reproducers
+  (SPEC `let <series…/>` + `while`; synthetic `> ```scrml` lazy end) exit 1.
+- **F2.** Ruled derived-check advice scoped to the cross-cell case: §53.3.2 transition row -> §66.13.2
+  `rule=` (S435 Q6); struct row -> §53.8.1 `<engine for=Struct>` guard (§53.8.1's `<engine>` is §66.21
+  Stage-1 soft, not removed, so the row is made consistent, not struck); §53.1 "not type rules" -> "not inline
+  predicates", one mechanism per example; stateless test / §53.3.2 intro point at the table.
+- **F4.** Appendix E region dropped (0 hits exempted); §63 / §66.21 bound to `after` / `before` neighbours,
+  §63 to its `firstChild`.
+- **F5.** `corpus` (scrmlRoots / excluded / skipDirs) in the ledger; `--base-ref` runs the base corpus.
+- **NITs.** caseOwns = case.scrml + its in-code imports, exact paths; bootstrap example `<over=(@cell > @m)/>`
+  (the type is read before its cell's name is known).
+- No baseline count moved (`--update` not run).
+
+| measure | r2 | r3 |
+|---|---|---|
+| harness2 (60) escaped | 17 | 17 (identical rows) |
+| r0 harness (100) | 94 caught | 94 caught (same 6) |
+| FP (20) | 1 | 1 |
+| baseref (12 + badref) | all 1 / 2 | all 1 / 2 |
+| r2probe (34) + 6 new | 10 exit 0 that should fail (F1 ×2, F3 ×4, `{.scrml}`, bq marker, relocate E, EXCLUDED) | all caught except by-design (child in §63, retired-neg on a positive, codeCounts inflate, budget 2/2, shared x2) and the indented-``` case: CommonMark-correct now, but the stray ``` is an unterminated template literal to scrml (new §63 known limit) |

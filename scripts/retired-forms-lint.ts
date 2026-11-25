@@ -73,7 +73,9 @@
  *     them; tape-js-method sees no computed member (`xs["push"](1)`) and a discarded `.sort()` only after
  *     `;` / `{` / `}`;
  *   - a fence tagged as another language, an indented code block, an HTML `<pre>` block and prose are not
- *     read; a retired closer inside an unclosed raw body is raw text here (the bootstrap names it);
+ *     read; a retired closer inside an unclosed raw body is raw text here (the bootstrap names it); an
+ *     unterminated string or template literal in a fence (a stray ``` line inside it opens one) hides the
+ *     rest of that fence;
  *   - the pre-commit hook lints the working tree, not the index (CI lints the commit);
  *   - the path-word exemption of the closer rule (`a/b/`, `http://x.com/`) is the bootstrap's INTERIM.
  *
