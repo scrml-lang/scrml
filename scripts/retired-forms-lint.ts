@@ -22,7 +22,7 @@
  *        - .scrml files under `corpus.scrmlRoots`, minus `corpus.excluded` / `corpus.skipDirs`;
  *        - every .md file of the tree minus `corpus.excluded` (each with its reason) and `corpus.skipDirs` /
  *          dot-directories: every fenced code block as CommonMark (GFM) reads it — `marked`'s lexer (#2101 r3
- *          F1/F3), never a hand parser — whose info string is empty, STARTS `scrml` (`scrml{.example}`,
+ *          F1/F3), never a hand parser, cross-checked by commonmark.js (#2101 r5: a read-fence disagreement exits 2) — whose info string is empty, STARTS `scrml` (`scrml{.example}`,
  *          `scrml,ignore`) or is an attribute block with the class `.scrml` (`{.scrml}`); fences in
  *          blockquotes and list items included, each ending where CommonMark ends it. Fences tagged another
  *          language, indented code blocks, HTML `<pre>` blocks and prose are not read.
@@ -71,7 +71,11 @@
  *     them; tape-js-method sees no computed member (`xs["push"](1)`) and a discarded `.sort()` only after
  *     `;` / `{` / `}`;
  *   - a fence tagged as another language, an indented code block, an HTML `<pre>` block and prose are not
- *     read; a retired closer inside an unclosed raw body is raw text here (the bootstrap names it);
+ *     read;
+ *   - INTERIM (#2101 r5 HIGH-1): markdown marked 14 reads differently from CommonMark (a fence after a lazy
+ *     continuation inside a list in a blockquote) exits 2 via the commonmark.js cross-check, asking the author to
+ *     reshape valid CommonMark. The capable form: one reader that agrees with CommonMark (marked >= 18.3.0, once
+ *     it is two weeks old); a retired closer inside an unclosed raw body is raw text here (the bootstrap names it);
  *   - INTERIM: an unterminated string or template literal in a fence (a stray ``` line inside it opens one)
  *     hides the rest of that fence. The capable form: fail when a fence's text ends inside an unterminated
  *     string / template literal (the compiler refuses that source anyway), so nothing after it is unread;
@@ -93,6 +97,7 @@ import { dirname, join, relative, resolve, posix as posixPath } from "node:path"
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { Lexer } from "marked";
+import { Parser as CommonmarkParser } from "commonmark";
 import { analyze, view, K_CODE, K_COMMENT, type Analysis } from "./retired-forms-walk.ts";
 
 export type Detector = { kind: "regex"; pattern: string; flags: string } | { kind: "builtin"; name: string } | null;
@@ -619,7 +624,43 @@ export function readFences(md: string): Fence[] {
     }
     out.push({ startLine: c.open + 2, text: c.text, negIds, info: c.info.trim().toLowerCase() });
   }
+  crossCheck(md, out);
   return out;
+}
+
+/** A fence's text compared across the two readers: line ends, a final line break and each line's leading /
+ *  trailing blanks are not content here (the readers differ only in how they expand a tab under a container). */
+const fenceKey = (text: string) => text.split("\n").map((l) => l.trim()).join("\n").replace(/\n+$/, "");
+
+/**
+ * The second reader (#2101 r5 HIGH-1). marked 14 mis-reads some valid CommonMark — a fence after a lazy
+ * continuation line inside a list in a blockquote (`> - a⏎b⏎> ```scrml…`) is lexed as paragraph text — and the
+ * fence GitHub renders would go unread. commonmark.js, the reference implementation, reads the same text; when
+ * the multiset of READ fence texts (`readsInfo`) of the two readers differs, the gate throws `PlacementError`
+ * (exit 2): a fence one reader reads and the other does not is never silently passed. INTERIM: the capable form
+ * is one reader that agrees with CommonMark (marked ≥ 18.3.0 agreed with commonmark.js on all 40,000 r4 fuzz
+ * documents; it was published 2026-11-24, under the two-week age a pinned dependency needs) — then this check
+ * keeps only its own failure mode.
+ */
+function crossCheck(md: string, read: Fence[]): void {
+  const want = new Map<string, number>();
+  const walker = new CommonmarkParser().parse(md).walker();
+  for (let e = walker.next(); e; e = walker.next()) {
+    const n = e.node;
+    if (e.entering && n.type === "code_block" && n.info !== null && readsInfo(n.info)) {
+      const k = fenceKey(n.literal ?? "");
+      want.set(k, (want.get(k) ?? 0) + 1);
+    }
+  }
+  for (const f of read) {
+    const k = fenceKey(f.text);
+    const n = want.get(k) ?? 0;
+    if (n === 0) throw new PlacementError(`markdown fence at line ${f.startLine - 1} is read by marked but not by commonmark.js (the two CommonMark readers disagree)`);
+    want.set(k, n - 1);
+  }
+  for (const [k, n] of want) {
+    if (n > 0) throw new PlacementError(`markdown fence ${JSON.stringify(k.split("\n")[0].slice(0, 60))} is read by commonmark.js but not by marked (the two CommonMark readers disagree)`);
+  }
 }
 
 export function scan(root: string, ledger: Ledger): Hit[] {
@@ -923,7 +964,7 @@ if (import.meta.main) {
   catch (e) {
     // a markdown block the gate cannot place exactly (#2101 r4 NIT): a clean message, exit 2 — never a guess
     if (!(e instanceof PlacementError)) throw e;
-    console.error(`retired-forms-lint: ${e.message} — the gate reads a block only at the line marked's lexer puts it; fix the markdown (or report a reader bug)`);
+    console.error(`retired-forms-lint: ${e.message} — the gate reads a block only at the line marked's lexer puts it, and only when commonmark.js reads the same fences; fix the markdown (or report a reader bug)`);
     code = 2;
   }
   process.exit(code);

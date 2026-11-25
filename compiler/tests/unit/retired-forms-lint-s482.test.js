@@ -323,6 +323,35 @@ describe("each fence's line is marked's own token position (#2101 r4 F1)", () =>
     } finally { rmSync(d, { recursive: true, force: true }); }
   });
 
+  // #2101 r5 HIGH-1: marked 14 reads a fence after a lazy continuation inside a list in a blockquote as
+  // paragraph text, while CommonMark (commonmark.js; GitHub) renders it. The second reader turns that into exit 2.
+  const LAZY = {
+    "> - a / b / > fence": "# P\n\n> - a\nb\n> ```scrml\n> " + W + "\n> ```\n",
+    "- > a / > fence": "- > a\n> ```scrml\n> " + W + "\n> ```\n",
+    "> - a / > > fence": "> - a\n> > ```scrml\n> > " + W + "\n> > ```\n",
+    "> - > d / > > fence": "> - > d\n> > ```scrml\n> > " + W + "\n> > ```\n",
+  };
+  for (const [name, md] of Object.entries(LAZY)) {
+    test(`r5 HIGH-1 ${name}: a fence the two CommonMark readers read differently is a PlacementError, never passed`, () => {
+      expect(() => readFences(md)).toThrow(PlacementError);
+    });
+  }
+  test("r5 HIGH-1: the reproducer exits 2 through the gate, not 0", () => {
+    const d = mkdtempSync(join(tmpdir(), "rfl-"));
+    try {
+      mkdirSync(join(d, "docs"), { recursive: true });
+      writeFileSync(join(d, "docs/x.md"), LAZY["> - a / b / > fence"]);
+      writeFileSync(join(d, "baseline.json"), JSON.stringify({ soft: {}, pending: {} }));
+      const r = spawnSync(process.execPath, [join(ROOT, "scripts/retired-forms-lint.ts"), "--root", d, "--ledger", join(ROOT, "compiler/retired-forms.json"), "--baseline", join(d, "baseline.json")], { encoding: "utf8" });
+      expect(r.status).toBe(2);
+      expect(r.stderr).toContain("the two CommonMark readers disagree");
+    } finally { rmSync(d, { recursive: true, force: true }); }
+  });
+  test("r5 HIGH-1: fences both readers agree on (containers, a tab under a list) are read with no exit 2", () => {
+    const md = "# P\n\n```scrml\nx\n```\n\n> - a\n>   ```scrml\n>   y\n>   ```\n\n-\t```scrml\n\tz\n\t```\n";
+    expect(readFences(md).map((f) => f.text.trim())).toEqual(["x", "y", "z"]);
+  });
+
   // MAPCHECK (the r3 re-review's probe, as a test): over every read .md, top-level marked raws concatenate to the
   // source, so each top-level token's line is known independently of the lint; every read fence's reported
   // opener is EXACTLY its top-level fenced token's line, or lies inside the blockquote / list token that holds

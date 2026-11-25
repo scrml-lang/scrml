@@ -52034,14 +52034,15 @@ HARD form, migrate every SPEC example and every positive example in the corpus (
 positives, samples, examples, stdlib, the public docs) to the new form, or record each remaining site as dated
 `pending` debt; for a SOFT form, record the starting count per file. The retired-forms gate
 (`scripts/retired-forms-lint.ts`, CI `checks` and the pre-commit hook) enforces it. **What the gate checks —
-exactly this (S482, #2101 r1–r4):**
+exactly this (S482, #2101 r1–r5):**
 - *What it reads:* every ledger row with a detector, over (a) the `.scrml` files under `conformance/cases`,
   `compiler/self-host-v2/acceptance`, `samples`, `examples`, `stdlib`, `docs/tutorial-snippets`,
   `docs/readme-snippets`, `docs/website`; (b) in every `.md` file of the repository — except the paths the
   ledger lists with a reason (change and progress notes, the changelog, generated files, hand-offs, PA working notes
   and task lists, dated audits, scoping notes and disposition records, archived drafts, test fixtures, an
   untracked local playground, impl#1 internals and stage contracts, other frameworks' benchmarks, dependencies) and the directories it skips at any depth (`node_modules`, `dist`, dot-directories)
-  — every fenced code block, as CommonMark (GFM) reads it (the `marked` lexer, #2101 r3), whose info string is
+  — every fenced code block, as CommonMark (GFM) reads it (the `marked` lexer, #2101 r3, cross-checked by
+  commonmark.js, #2101 r5), whose info string is
   empty, starts with `scrml` (`scrml`, `scrml{.example}`, `scrml,ignore`) or is an attribute block with the
   class `.scrml` (`{.scrml}`), including a fence inside a blockquote or a list item (it ends where its container
   ends); each fence is placed on its source lines by the lexer's own token positions, and a block that cannot be
@@ -52076,9 +52077,14 @@ exactly this (S482, #2101 r1–r4):**
   at; the source walker, the markdown reader and the builtin detectors are the changed tree's own script, so
   narrowing them is a reviewed code diff, not a ledger diff the base rules catch (and a base ledger older than
   `corpus` is read with the changed tree's); fences tagged as another language, indented code
-  blocks, HTML `<pre>` blocks and markdown prose are not read; markdown the lexer itself mis-tracks (a lazy
-  continuation after a list nested in a blockquote can put its cursor past the source) exits 2 rather than be
-  read; **INTERIM:** an unterminated string or template literal in a
+  blocks, HTML `<pre>` blocks and markdown prose are not read; markdown the lexer mis-reads exits 2 rather
+  than be read or passed — both when its cursor runs past the source and when it reads a fence differently from
+  CommonMark: marked 14 reads a fence after a lazy continuation line inside a list in a blockquote
+  (`> - a⏎b⏎> ```scrml…`) as paragraph text, so every markdown file is also read by commonmark.js, the reference
+  implementation, and the gate exits 2 when the two readers' read fence texts differ (#2101 r5); **INTERIM:**
+  that exit 2 asks the author to reshape valid CommonMark marked mis-reads — the capable form is one reader that
+  agrees with CommonMark (marked ≥ 18.3.0 agreed with commonmark.js on all 40,000 r4 fuzz documents; it is not
+  yet two weeks old), after which the cross-check only guards against a regression; **INTERIM:** an unterminated string or template literal in a
   fence (a stray ```` ``` ```` line inside it is a template-literal opener to scrml) hides the rest of that fence,
   as it would in a source file the compiler then refuses — the capable form fails the gate when a fence's text
   ends inside an unterminated string or template literal, so nothing after it goes unread; the hook reads the working tree, not the index (CI reads the commit);
