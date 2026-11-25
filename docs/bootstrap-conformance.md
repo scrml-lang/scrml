@@ -7,11 +7,11 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1970 of 1970 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1971 of 1971 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 848 | 43.0% |
+| PASS | 849 | 43.1% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 3 | 0.2% |
 | LEGACY | 0 | 0.0% |
@@ -20,9 +20,9 @@ Scope: **1970 of 1970 cases attempted** — every attempted case reached the pur
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 851; of those, 848 hold (99.6%). Runtime half executed on the bootstrap for 288 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 852; of those, 849 hold (99.6%). Runtime half executed on the bootstrap for 288 case(s).
 
-- **Vacuous** passes: 15 of 848 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **833**.
+- **Vacuous** passes: 15 of 849 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **834**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 1 of 3; the other 2 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
@@ -123,7 +123,7 @@ NOT-TWINNED by reason (628 cases; a case counts once per distinct reason):
 | apply | 7 | · | · | · | · | · | 7 | · | · |
 | attr-executable-sink | 28 | 12 | · | · | · | 11 | 5 | · | · |
 | auth | 65 | 12 | · | · | · | 15 | 38 | · | · |
-| block-grammar | 14 | 11 | · | · | · | 1 | 2 | · | · |
+| block-grammar | 15 | 12 | · | · | · | 1 | 2 | · | · |
 | body-top | 35 | 28 | · | · | · | 1 | 6 | · | · |
 | capability | 12 | 7 | · | · | · | · | 5 | · | · |
 | channel | 49 | 11 | · | · | · | 37 | 1 | · | · |
@@ -207,7 +207,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (848)
+### PASS / CODES-ONLY (849)
 
 - `attr-executable-sink/base-href-data-neg` — PASS · TWIN
 - `attr-executable-sink/base-href-static-pos` — PASS · TWIN
@@ -236,6 +236,7 @@ none
 - `block-grammar/block-028-leading-equals-text-pos` — PASS · TWIN
 - `block-grammar/block-029-leading-equals-quote-prose-pos` — PASS · TWIN
 - `block-grammar/block-047-closed-brace-neg` — PASS · TWIN · VACUOUS
+- `block-grammar/block-050-value-slash-brace-neg` — PASS
 - `block-grammar/block-ctx-001-closed-raw-content-neg` — PASS · TWIN
 - `block-grammar/s469-statement-needs-semicolon-neg` — PASS · TWIN
 - `block-grammar/script-001-bound-src-pos` — PASS
@@ -1208,7 +1209,7 @@ none
 - `error-boundary/no-renders-falls-to-fallback` — twin · bootstrap-unsupported: markup as an attribute value (`fallback={<tag …>…</>}`, a markup value §7.4.1) is not in the bootstrap yet (`fallback=` is `<errorBoundary>`'s markup value, §19.6, which the bootstrap does not build);
 - `error-boundary/renders-multifield-payload` — twin · bootstrap-unsupported: markup as an attribute value (`fallback={<tag …>…</>}`, a markup value §7.4.1) is not in the bootstrap yet (`fallback=` is `<errorBoundary>`'s markup value, §19.6, which the bootstrap does not build);
 - `error-boundary/success-transparent` — twin · bootstrap-unsupported: markup as an attribute value (`fallback={<tag …>…</>}`, a markup value §7.4.1) is not in the bootstrap yet (`fallback=` is `<errorBoundary>`'s markup value, §19.6, which the bootstrap does not build);
-- `error-boundary/terse-fallback-closer` — twin · bootstrap-unsupported: markup as an attribute value (`fallback={<tag …>…</>}`, a markup value §7.4.1) is not in the bootstrap yet (`fallback=` is `<errorBoundary>`'s markup value, §19.6, which the bootstrap does not build);
+- `error-boundary/terse-fallback-closer-neg` — twin · bootstrap-unsupported: `renders on an enum variant` (§19.2) is not in the bootstrap yet; it is refused here by name rather than misread — render the error in markup where it is handled (`!{}` / `match`)
 - `error-boundary/variant-renders` — twin · bootstrap-unsupported: markup as an attribute value (`fallback={<tag …>…</>}`, a markup value §7.4.1) is not in the bootstrap yet (`fallback=` is `<errorBoundary>`'s markup value, §19.6, which the bootstrap does not build);
 - `error/failable-fn-value-passed-handled-neg` — twin · bootstrap-unsupported: only a declared scrml function is callable in the bootstrap — `f` names a value (a local, a parameter, a field), and calling a function VALUE is not in the bootstrap
 - `error/handler-exhaustive-neg` — twin · bootstrap-unsupported: `log(…)` is a language built-in (§20.6: "`log(...args)` SHALL be a compiler-managed built-in") that the bootstrap does not build yet — the location-transparent dev logger arrives with the §20 built-in
