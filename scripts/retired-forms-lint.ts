@@ -74,8 +74,10 @@
  *     read;
  *   - INTERIM (#2101 r5 HIGH-1): markdown marked 14 reads differently from CommonMark (a fence after a lazy
  *     continuation inside a list in a blockquote) exits 2 via the commonmark.js cross-check, asking the author to
- *     reshape valid CommonMark. The capable form: one reader that agrees with CommonMark (marked >= 18.3.0, once
- *     it is two weeks old); a retired closer inside an unclosed raw body is raw text here (the bootstrap names it);
+ *     reshape valid CommonMark. The capable form: one reader that agrees with CommonMark — marked >= 18.0.0
+ *     (2026-04-07) agrees on the r4 fuzz and the lazy reproducers, but the placement wrappers below hook marked
+ *     internals and must be re-proven on it first (g-tool-retired-lint-marked-bump-s482);
+ *   - a retired closer inside an unclosed raw body is raw text here (the bootstrap names it);
  *   - INTERIM: an unterminated string or template literal in a fence (a stray ``` line inside it opens one)
  *     hides the rest of that fence. The capable form: fail when a fence's text ends inside an unterminated
  *     string / template literal (the compiler refuses that source anyway), so nothing after it is unread;
@@ -597,8 +599,10 @@ export function mdBlocks(md: string): { codes: MdCode[]; headings: MdHeading[] }
 
 const NEG_MARKER = /^\s*<!--\s*retired-neg:\s*([\w-]+)(?:\s+(?:—|--|-)|\s*:)\s*[^\s>-][^>]*-->\s*$/;
 
-/** `\r\n` and `\r` line ends as `\n` — exactly as marked reads them, so source lines and tokens agree. */
-export const normalizeEol = (md: string) => md.replace(/\r\n|\r/g, "\n");
+/** `\r\n` and `\r` line ends as `\n` — exactly as marked reads them, so source lines and tokens agree — and a
+ *  leading U+FEFF dropped, as cmark / GitHub drop it (#2101 r5rev LOW-1: neither marked nor commonmark.js does,
+ *  so a BOM-prefixed fence went unread by both). */
+export const normalizeEol = (md: string) => md.replace(/^\uFEFF/, "").replace(/\r\n|\r/g, "\n");
 
 /**
  * Every fenced code block of a markdown text that is read (`readsInfo`), as CommonMark reads it (`mdBlocks`).
@@ -638,9 +642,10 @@ const fenceKey = (text: string) => text.split("\n").map((l) => l.trim()).join("\
  * fence GitHub renders would go unread. commonmark.js, the reference implementation, reads the same text; when
  * the multiset of READ fence texts (`readsInfo`) of the two readers differs, the gate throws `PlacementError`
  * (exit 2): a fence one reader reads and the other does not is never silently passed. INTERIM: the capable form
- * is one reader that agrees with CommonMark (marked ≥ 18.3.0 agreed with commonmark.js on all 40,000 r4 fuzz
- * documents; it was published 2026-11-24, under the two-week age a pinned dependency needs) — then this check
- * keeps only its own failure mode.
+ * is one reader that agrees with CommonMark. marked ≥ 18.0.0 (published 2026-04-07; 17.x and earlier do not)
+ * agrees with commonmark.js on the 40,000 r4 fuzz documents and the lazy reproducers, but the placement wrappers
+ * in `readFences` hook marked internals (`blockTokens`, tokenizer methods) and must be re-proven on marked ≥
+ * 18.0.0 before the bump (g-tool-retired-lint-marked-bump-s482) — then this check only guards a regression.
  */
 function crossCheck(md: string, read: Fence[]): void {
   const want = new Map<string, number>();

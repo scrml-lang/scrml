@@ -52078,13 +52078,16 @@ exactly this (S482, #2101 r1–r5):**
   narrowing them is a reviewed code diff, not a ledger diff the base rules catch (and a base ledger older than
   `corpus` is read with the changed tree's); fences tagged as another language, indented code
   blocks, HTML `<pre>` blocks and markdown prose are not read; markdown the lexer mis-reads exits 2 rather
-  than be read or passed — both when its cursor runs past the source and when it reads a fence differently from
-  CommonMark: marked 14 reads a fence after a lazy continuation line inside a list in a blockquote
+  than be read or passed — both when its cursor runs past the source and when the fence texts it reads differ from
+  CommonMark's: marked 14 reads a fence after a lazy continuation line inside a list in a blockquote
   (`> - a⏎b⏎> ```scrml…`) as paragraph text, so every markdown file is also read by commonmark.js, the reference
-  implementation, and the gate exits 2 when the two readers' read fence texts differ (#2101 r5); **INTERIM:**
-  that exit 2 asks the author to reshape valid CommonMark marked mis-reads — the capable form is one reader that
-  agrees with CommonMark (marked ≥ 18.3.0 agreed with commonmark.js on all 40,000 r4 fuzz documents; it is not
-  yet two weeks old), after which the cross-check only guards against a regression; **INTERIM:** an unterminated string or template literal in a
+  implementation, and the gate exits 2 when the two readers' multisets of read fence texts (each line trimmed)
+  differ (#2101 r5); **INTERIM:** that exit 2 asks the author to reshape valid CommonMark marked 14 mis-reads —
+  the capable form is one reader that agrees with CommonMark: marked 18.0.0 (published 2026-04-07) and later
+  agree with commonmark.js on the 40,000 r4 fuzz documents and the lazy-continuation reproducers (17.x and
+  earlier do not), but the gate's placement wrappers hook marked internals (`blockTokens`, tokenizer methods)
+  and must be re-proven on marked ≥ 18.0.0 before the bump (g-tool-retired-lint-marked-bump-s482); after it the
+  cross-check only guards against a regression; **INTERIM:** an unterminated string or template literal in a
   fence (a stray ```` ``` ```` line inside it is a template-literal opener to scrml) hides the rest of that fence,
   as it would in a source file the compiler then refuses — the capable form fails the gate when a fence's text
   ends inside an unterminated string or template literal, so nothing after it goes unread; the hook reads the working tree, not the index (CI reads the commit);

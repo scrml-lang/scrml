@@ -198,12 +198,14 @@ Tests: `compiler/self-host-v2/slice-m4/retired-lint-s482.test.js` (+ closer-clea
 
 ## Fix round r5 (S482)
 - **HIGH-1 — option (b), commonmark.js cross-check.** Importers of `marked`: scripts/retired-forms-lint.ts, its
-  unit test, and docs/build.ts (no inputs since S469 — the lint is the only live user). Option (a) was not
+  unit test, and docs/build.ts (no inputs since S469 — the lint is the only live user). ~~Option (a) was not
   available: the first agreeing marked, 18.3.0, was published 2026-11-24 (one day old; no version ≥ 18.3.0
-  is two weeks old). So `commonmark` 0.31.2 (exact pin, published 2024-09-19) reads every markdown file too,
+  is two weeks old).~~ *(r6: false — marked 18.0.0, published 2026-04-07, already agrees; see Fix round r6.)*
+  Option (b) taken. So `commonmark` 0.31.2 (exact pin, published 2024-09-19) reads every markdown file too,
   and `readFences` throws `PlacementError` (exit 2) when the multiset of READ fence texts (lines trimmed)
   differs between the readers. §63's lazy-continuation sentence corrected; the exit-2 class is INTERIM, the
-  capable form a single CommonMark-agreeing reader (marked ≥ 18.3.0 once it is two weeks old).
+  capable form a single CommonMark-agreeing reader (~~marked ≥ 18.3.0 once it is two weeks old~~ r6: marked ≥ 18.0.0
+  once the placement wrappers are re-proven on it).
 - **LOW-1.** §53.6.1 "Cross-field via predicate args" rewritten per S458 R4: no cross-cell argument in type
   position (E-CONTRACT-003); the ruled derived check; the §55.11 state-cell validator keeps its cross-field
   argument. ⚑ CONTRADICTED removed; g-spec-refinement-cross-cell-arg-s482 resolved. The duplicate §53.6.1
@@ -217,3 +219,18 @@ Tests: `compiler/self-host-v2/slice-m4/retired-lint-s482.test.js` (+ closer-clea
 | b-set (34) | b04/b04b escape | b04/b04b exit 2; rest identical (b27 = probe construction error) |
 | r3rev a-set (24) | all exit 1 | all exit 1 |
 | corpus parity (53 files, 1,443 fences) | 0 differ | 0 differ; gate exit 0 |
+
+## Fix round r6 (S482)
+- **MED-1 — the INTERIM's reason corrected.** marked 18.0.0 (2026-04-07) through 18.1.3 already agree with
+  commonmark.js on the 40,000 r4 fuzz documents and the lazy reproducers (17.x and earlier do not; r5rev
+  `probe/mver2.out`). Option (b) stays in this PR. The single-reader form is not used yet because the placement
+  wrappers hook marked internals (`blockTokens`, tokenizer methods) and must be re-proven on marked ≥ 18.0.0.
+  Corrected: §63, the script header, the `crossCheck` doc comment, the r5 entry above. Filed
+  g-tool-retired-lint-marked-bump-s482 (INTERIM; capable form: bump + re-prove with the unit suite, a-set,
+  b-set, fuzz).
+- **LOW-1 — BOM.** `normalizeEol` drops a leading U+FEFF, so both readers (it runs before marked and
+  commonmark.js) read a BOM-prefixed file's fences as cmark / GitHub do. Unit test: a BOM-prefixed .md with a
+  retired fence is read by `readFences` and exits 1 through the gate (fails without the fix).
+- **NIT-1.** §63: "exits 2 when the two readers' multisets of read fence texts (each line trimmed) differ";
+  no claim about info strings or positions.
+- **INFO-1.** PR body: run `bun install` in the main checkout after merge (new devDependency `commonmark`).

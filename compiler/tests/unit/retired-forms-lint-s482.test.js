@@ -347,6 +347,19 @@ describe("each fence's line is marked's own token position (#2101 r4 F1)", () =>
       expect(r.stderr).toContain("the two CommonMark readers disagree");
     } finally { rmSync(d, { recursive: true, force: true }); }
   });
+  test("r5rev LOW-1: a BOM-prefixed .md's retired fence is read (readFences, and the gate exits 1)", () => {
+    const fence = "```scrml\nfn f() { while (x) { } }\n```\n";
+    expect(readFences("﻿" + fence).map((f) => [f.startLine, f.text.trim()])).toEqual([[2, "fn f() { while (x) { } }"]]);
+    const d = mkdtempSync(join(tmpdir(), "rfl-"));
+    try {
+      mkdirSync(join(d, "docs"), { recursive: true });
+      writeFileSync(join(d, "docs/x.md"), "﻿" + fence);
+      writeFileSync(join(d, "baseline.json"), JSON.stringify({ soft: {}, pending: {} }));
+      const r = spawnSync(process.execPath, [join(ROOT, "scripts/retired-forms-lint.ts"), "--root", d, "--ledger", join(ROOT, "compiler/retired-forms.json"), "--baseline", join(d, "baseline.json")], { encoding: "utf8" });
+      expect(r.status).toBe(1);
+      expect(r.stdout + r.stderr).toContain("docs/x.md");
+    } finally { rmSync(d, { recursive: true, force: true }); }
+  });
   test("r5 HIGH-1: fences both readers agree on (containers, a tab under a list) are read with no exit 2", () => {
     const md = "# P\n\n```scrml\nx\n```\n\n> - a\n>   ```scrml\n>   y\n>   ```\n\n-\t```scrml\n\tz\n\t```\n";
     expect(readFences(md).map((f) => f.text.trim())).toEqual(["x", "y", "z"]);
