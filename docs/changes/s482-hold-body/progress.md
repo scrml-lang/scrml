@@ -98,3 +98,17 @@ the effect / request timing sentences.
 | snippet-gate | 0 failures |
 | e2e-render-map | 259 pass |
 | retired-forms gate | not on main — n/a |
+
+## Fix round r1 (review ~/.cache/scrml/review/s482-2106/review.md, LAND-W-F/U)
+
+- merged origin/main (clean; no §7.6 conflict — the seed-timing lane had not landed).
+- F1: §7.6 R5 and §6.7.4 "Held during the body" label the first-trigger dedupe (incl. a request absorbing a
+  later dep write and a body `refetch()`) as a PA reading, prov=pa-ruled. No behaviour change; a03 `e7`, a10 `R3`,
+  a05 `R` pinned (slice-m4/hold-body-s482.test.js).
+- F4: `Request.run` skips a held run whose pending cell a newer body write has superseded (`pendOlder(p, start)`);
+  fetch-count tests in slice-m1/hold-body.runtime.test.js (0 fetches; a `not` re-date issues 1). R5 says so.
+- F5: R5 half-sentence — a held run whose construct is torn down later in the same body does not run (§6.7.7 EC-3);
+  a04 pinned (`""`, `0`).
+- F2: behaviour unchanged; R5 ⚑ OPEN sentence + gap g-boot-held-runs-after-trap-s482 (owner question).
+- F3: no change; R5 direction note says Q6 widens the plain-`let`-display exposure and W-DISPLAY-UNTRACKED (A5) is
+  not emitted.
