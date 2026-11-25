@@ -174,6 +174,124 @@ ${CARD_LET}
   }, 240000);
 });
 
+// s482 r1 (#2112 review) — red on 47648f0bf: a18 / a03 / a03b / a14 compiled and showed `1 | 1` in
+// Chromium where the source order gives 5; a11's message read "a attribute value of `<outer>`".
+const FIELD_RENDERS = `<card t:string="x">
+    let <v:int=1/>
+    renders <b id="o">\${k}</b>
+</>
+renders <span><*v/></span>`;
+const PH = (child) => `\${ type Ph:enum = { A, B } }
+<ph:Ph=.A single>
+  <A rule=.B>${child}</>
+  <B rule=.A : "B">
+</>`;
+
+describe("r1: markup `<*f/>` renders, and a shared instance's read, are judged where they run", () => {
+  test("MED-1 a18: a child field's own `renders`, shown by `<*v/>` in the render, runs at the mount", async () => {
+    await refusedNaming(P(`${FIELD_RENDERS}
+\${ n = 5; }
+<card/>
+\${ const k: int = n + 0; }
+<p id="o2">\${k}</p>`), ["this `<card>` mounts an instance here", "its mount runs a display of `<card>`", "reads `k`"]);
+  }, 120000);
+
+  test("MED-2 a03: an instance in a body-level engine's state child, shown by `<*ph/>`, mounts at the `<*ph/>`", async () => {
+    await refusedNaming(P(`${CARD_LET}
+${PH("<card/>")}
+\${ n = 5; }
+<main><*ph/></main>
+\${ const k: int = n + 0; }
+<p id="o2">\${k}</p>`), ["this `<*ph/>` (whose markup mounts `<card>`) mounts an instance here", "the seed of field `v` of `<card>`", "Declare `k` before this `<*ph/>`"]);
+  }, 120000);
+
+  test("MED-2 a03b: a plain display in a state child is judged at the `<*ph/>`'s place, not where it is written", async () => {
+    await refusedNaming(P(`${PH(`<b id="o">\${k}</b>`)}
+\${ n = 5; }
+<main><*ph/></main>
+\${ const k: int = n + 0; }
+<p id="o2">\${k}</p>`), ["this `<*ph/>` renders a field's markup here", "that markup runs a display, which reads `k`", "Declare `k` before this `<*ph/>`"]);
+    // r05: the engine declared AFTER `k`, its `<*ph/>` before — the `<*ph/>`'s place is the bound
+    await refusedNaming(P(`\${ n = 5; }
+<main><*ph/></main>
+\${ const k: int = n + 0; }
+${PH(`<b id="o">\${k}</b>`)}`), ["this `<*ph/>` renders a field's markup here"]);
+  }, 240000);
+
+  test("MED-4 a14: a read of a declaration's shared instance constructs it at the read (R4) — its seed reaching a later binding", async () => {
+    await refusedNaming(P(`<card t:string="x">
+    let <v:int=(k + 0)/>
+</>
+\${ n = 5; }
+<p id="o">\${@card.v}</p>
+\${ const k: int = n + 0; }
+<p id="o2">\${k}</p>`), ["this display reads `@card`, the shared instance of `<card>`, constructed at its first reference (§7.6 R4)", "the seed of its field `v` reads `k`"]);
+  }, 120000);
+
+  test("MED-4 r06: a derived field read through the shared instance runs its formula at the read", async () => {
+    await refusedNaming(P(`let <m:int=1/>
+<card t:string="x">
+    <d:int=(@m + k)/>
+</>
+<p id="o">\${@card.d}</p>
+\${ const k: int = n + 0; }`), ["reads `@card.d`, a derived value computed when it is read, and its formula reads `k`"]);
+  }, 120000);
+
+  test("NIT-1 a11: the attribute is named on the element it is on, with the right article", async () => {
+    const d = await refusedNaming(P(`let <m:int=0/>
+<inner w:int=0>
+</> renders <b id="o">\${w}</b>
+<outer t:string="y">
+    <d:int=(@m + k)/>
+</> renders <div><inner w=(d)/></div>
+<outer/>
+\${ const k: int = n + 0; }`), ["its mount runs an attribute value (`w=` on `<inner>`) of `<outer>`"]);
+    expect(d.message).not.toContain("a attribute");
+  }, 120000);
+});
+
+describe("r1 legal: the same markup after the binding, and markup never shown", () => {
+  test("a child field's `renders`, a state child's instance and display, after `k`: the source-order value", async () => {
+    expect(await texts(P(`${FIELD_RENDERS}
+\${ n = 5; }
+\${ const k: int = n + 0; }
+<card/>
+<p id="o2">\${k}</p>`), ["o", "o2"])).toEqual(["5", "5"]);
+    expect(await texts(P(`${CARD_LET}
+${PH("<card/>")}
+\${ n = 5; }
+\${ const k: int = n + 0; }
+<main><*ph/></main>
+<p id="o2">\${k}</p>`), ["o", "o2"])).toEqual(["5", "5"]);
+    expect(await texts(P(`${PH(`<b id="o">\${k}</b>`)}
+\${ n = 5; }
+\${ const k: int = n + 0; }
+<main><*ph/></main>
+<p id="o2">\${k}</p>`), ["o", "o2"])).toEqual(["5", "5"]);
+  }, 360000);
+
+  test("r09: a child field's `renders` no `<*v/>` shows is not run, so not judged", async () => {
+    expect(await texts(P(`<card t:string="x">
+    let <v:int=1/>
+    renders <b>\${k}</b>
+</>
+renders <span id="o">\${v}</span>
+\${ n = 5; }
+<card/>
+\${ const k: int = n + 0; }
+<p id="o2">\${k}</p>`), ["o", "o2"])).toEqual(["1", "5"]);
+  }, 120000);
+
+  test("r17: a shared instance whose seed reads an EARLIER binding the body writes before the read", async () => {
+    expect(await texts(P(`<card t:string="x">
+    let <v:int=(n + 0)/>
+</>
+\${ n = 5; }
+<p id="o">\${@card.v}</p>
+<p id="o2">\${n}</p>`), ["o", "o2"])).toEqual(["5", "5"]);
+  }, 120000);
+});
+
 describe("legal: what the mount does not run, or runs after the binding's place", () => {
   test("a use after the binding shows the value from the source order", async () => {
     expect(await texts(P(`${CARD_LET}

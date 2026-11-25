@@ -13081,12 +13081,30 @@ ${
         return out;
     }
 
+    // s482 r1 (#2112 MED-4) — a field read through a shared instance (`@card.v`: the member carries
+    // NField(card, Shared, v)) counts too: a derived field's formula runs at that read (sharedReach).
     fn atUsesInExpr(t: Tables, e: AExpr) -> AExpr[] {
         let out: AExpr[] = [];
-        if (atName(e) != "" || writeCapOf(effectFact(t.effects, e.nid)) >= 0) out = [e];
+        if (atName(e) != "" || writeCapOf(effectFact(t.effects, e.nid)) >= 0 || sharedMember(t, e)) out = [e];
         for (const x of exprKids(e)) { out = out.concat(atUsesInExpr(t, x)); }
         for (const b of exprBlocksIn(e)) { out = out.concat(atUsesIn(t, b)); }
         return out;
+    }
+
+    fn sharedMember(t: Tables, e: AExpr) -> boolean {
+        const k: AExprK = e.k;
+        const isMember: boolean = match k {
+            .Member(obj: o) :> true,
+            // no-default-arm: only a member access reads a field through an instance
+            _ :> false
+        };
+        if (!isMember) return false;
+        const f: NameFact | not = nameFact(t.names, e.nid);
+        return match f {
+            .NField(decl: d, inst: i, idx: x) :> sharedDeclId(d, i) >= 0,
+            // no-default-arm: one question — is it a field of a shared instance
+            _ :> false
+        };
     }
 
     // The write capability (its Sym id) a cell write's effect names, else -1.
@@ -13229,6 +13247,9 @@ ${
         }
         for (const a of ats) {
             if (!spanInAny(a.span, defer)) {
+                // s482 r1 (#2112 MED-4) — a read of a declaration's shared instance constructs it here (R4)
+                const sr: SeedReach | not = sharedReach(cx, a, pos, seen);
+                if (sr is given) return sr;
                 let cid: int = progCellOf(cx.t, a, cx.prog, cx.pfields);
                 if (cid < 0) cid = outerCellOf(cx, a);     // s482 r1: a cell declared outside the body (outerSeedReachDiags)
                 if (cid < 0) cid = instCellOf(cx, a);      // s482: a field of the instance being mounted (mountReach)
@@ -13353,13 +13374,68 @@ ${
                     // no-default-arm: only an expression value is a display of its value
                     _ :> not
                 };
-                if (x is given) out = out.concat(bodyExprReach(cx, x, posOf(cx, a.span.start), "this attribute value"));
+                // s482 r1 (#2112 review NIT-1) — inside an instance's mount the message names the
+                // element the attribute is on (it may be a use nested in the render, not the outer one)
+                let what: string = "this attribute value";
+                if (cx.at >= 0) what = "this attribute value (`" + a.name + "=` on `<" + e.tag + ">`)";
+                if (x is given) out = out.concat(bodyExprReach(cx, x, posOf(cx, a.span.start), what));
                 if (a.name.substring(0, 5) == "bind:") out = out.concat(bodyBindReach(cx, a));
             }
         }
         for (const kid of e.kids) { out = out.concat(bodyNodeReach(cx, kid)); }
+        // s482 r1 (#2112 review MED-1 / MED-2) — `<*f/>` renders markup here
+        out = out.concat(starReach(cx, e));
         // s482 (lane s482-instance-mount-reach) — a use of a declaration mounts an instance here
         out = out.concat(mountReach(cx, e));
+        return out;
+    }
+
+    // s482 r1 (#2112 review MED-1 / MED-2; §7.6 R1 — every display and mount has one place in the
+    // body; O5 (1i) RULED — "a state-child's body is that variant's markup, rendered wherever the field
+    // renders"; §66.6.2 — `<*f/>` of a child field renders its own `renders`). `<*f/>` renders, at its
+    // own place, markup written elsewhere — a child field's own `renders` (MInline), or the state-child
+    // bodies of a `rule=` graph field (MStateView: a body-level engine `<ph:Ph=.A single>` shown by
+    // `<*ph/>`, or a declaration's field shown in its render). That markup — its displays, attribute
+    // values, statements, the instances it mounts — runs where `<*f/>` stands, so it is judged there:
+    // inside an instance's mount at the use's place (cx.at), in the body at the `<*f/>`'s own place
+    // (not where the markup is written: the declaration may stand anywhere). Every arm of a state view
+    // is judged, not only the variant held at mount — an arm first shown by a transition after the body
+    // would run with every binding placed, but which arms the body shows is not known at compile time:
+    // the `<*f/>`'s place is the bound, as for `if=` content (⚑ INTERIM, g-boot-conditional-mount-bound-s482).
+    // The shared instance's `<*x/>` (MInline with `subst`, MStar) is not walked here.
+    fn starReach(cx: BodyCx, e: AElem) -> Diag[] {
+        const f: ElemFact | not = elemFact(cx.t.elems, e.nid);
+        const nodes: ANode[] = match f {
+            .MInline(v: iv) :> inlineOwnNodes(iv),
+            .MStateView(v: sv) :> stateArmBodies(sv),
+            // no-default-arm: only `<*f/>` of a field renders markup written elsewhere
+            _ :> []
+        };
+        if (nodes.length == 0) return [];
+        let scx: BodyCx = cx;
+        if (cx.at < 0) {
+            // in the body: the markup runs at this `<*f/>`'s place; `dname` "" marks a body-level
+            // `<*f/>` for reachDiag's wording (no instance is mounted by it)
+            scx = { g: cx.g, t: cx.t, sum: cx.sum, usesD: cx.usesD, binds: cx.binds, file: cx.file, places: cx.places, cells: cx.cells, prog: cx.prog, pfields: cx.pfields, at: e.span.start, mfile: cx.file, mspan: e.span, mount: "this `<*" + e.tag + "/>`", dname: "", stack: cx.stack, idecl: cx.idecl, ifields: cx.ifields };
+        }
+        let out: Diag[] = [];
+        for (const n of nodes) { out = out.concat(bodyNodeReach(scx, n)); }
+        // one report per `<*f/>` in the body, as per mount
+        if (out.length > 0 && cx.at < 0) return [out[0]];
+        return out;
+    }
+
+    // A child field's own `renders` inlined by `<*f/>` (no `subst`); the shared instance's renders
+    // (`subst` given) are not this construct's.
+    fn inlineOwnNodes(iv: InlineView) -> ANode[] {
+        const s: InstRef | not = iv.subst;
+        if (s is given) return [];
+        return iv.nodes;
+    }
+
+    fn stateArmBodies(sv: StateView) -> ANode[] {
+        let out: ANode[] = [];
+        for (const a of sv.arms) { out = out.concat(a.body); }
         return out;
     }
 
@@ -13421,9 +13497,19 @@ ${
     fn reachDiag(cx: BodyCx, bp: BodyPlace, what: string, how: string, file: string, span: ASpan) -> Diag {
         if (cx.at < 0) return laterPlaceDiagHow(bp, what, how, file, span);
         const n: string = bp.name;
-        const w: string = what.replace("this ", "a ");
+        // s482 r1 (#2112 review NIT-1) — "a display", "an attribute value"
+        let w: string = what;
+        if (what.indexOf("this ") == 0) {
+            const rest: string = what.substring(5);
+            const c0: string = rest.substring(0, 1);
+            w = "a " + rest;
+            if (c0 == "a" || c0 == "e" || c0 == "i" || c0 == "o" || c0 == "u") w = "an " + rest;
+        }
         let top: string = cx.mount;
         if (top.indexOf(" (") >= 0) top = top.substring(0, top.indexOf(" ("));
+        // s482 r1 (#2112 review MED-2) — a body-level `<*f/>` (starReach, dname "") renders a field's
+        // markup here; it mounts nothing itself
+        if (cx.dname == "") return newDiag("E-SCOPE-001", "`" + n + "` is used before it is initialized — " + cx.mount + " renders a field's markup here (a state-child's body or a child field's `renders` runs where `<*f/>` renders it, O5 (1i), §7.6 R1 S482), and that markup runs " + w + ", which" + how + " and the `${ }` declaring `" + n + "` comes later in the program body. The body runs once, top to bottom, in source order, so `" + n + "` is not initialized when that markup is rendered (§7.6 R2). Declare `" + n + "` before " + top, cx.mfile, cx.mspan);
         return newDiag("E-SCOPE-001", "`" + n + "` is used before it is initialized — " + cx.mount + " mounts an instance here, and its mount runs " + w + " of `<" + cx.dname + ">` (an instance's field seeds and its render run at its mount, §66.7.6 rule 5, §7.6 R1 S482), which" + how + " and the `${ }` declaring `" + n + "` comes later in the program body. The body runs once, top to bottom, in source order, so `" + n + "` is not initialized when the instance is mounted (§7.6 R2). Declare `" + n + "` before " + top, cx.mfile, cx.mspan);
     }
 
@@ -13466,14 +13552,12 @@ ${
             mfile = cx.file;
             mspan = e.span;
             mount = "this `<" + e.tag + ">`";
+        } else if (cx.dname == "") {
+            mount = cx.mount + " (whose markup mounts `<" + e.tag + ">`)";
         } else {
             mount = cx.mount + " (whose render mounts `<" + e.tag + ">`)";
         }
-        let icells: BodyCell[] = [];
-        for (const fi of di.fields) {
-            const nm: string = fieldNameOf(d, fi.nid);
-            icells = icells.concat([{ sym: fi.sym.id, name: d.name + "." + nm, pos: -1, init: fi.init, derived: fi.wcap is not && lockedDerived(cx.g, cx.t, [], fi.init) }]);
-        }
+        const icells: BodyCell[] = declCells(cx, d, di);
         const icx: BodyCx = { g: cx.g, t: cx.t, sum: cx.sum, usesD: cx.usesD, binds: cx.binds, file: src.file, places: cx.places, cells: cx.cells.concat(icells), prog: cx.prog, pfields: cx.pfields, at: at, mfile: mfile, mspan: mspan, mount: mount, dname: d.name, stack: cx.stack.concat([u.id]), idecl: u.id, ifields: di.fields };
         let out: Diag[] = [];
         // its field seeds (a persisted declaration's are computed at construction, as a persisted
@@ -13496,6 +13580,84 @@ ${
         // one report per mount: the first path found names the fix (declare the binding earlier)
         if (out.length > 0 && cx.at < 0) return [out[0]];
         return out;
+    }
+
+    // An instance's fields as cells (BodyCell) for the reach walk: a seeded field has no body place
+    // (pos -1 — its seed runs when the instance is constructed, judged there), a DERIVED one runs its
+    // formula where it is read (cellRunsAt).
+    fn declCells(cx: BodyCx, d: ADecl, di: DeclInfo) -> BodyCell[] {
+        let icells: BodyCell[] = [];
+        for (const fi of di.fields) {
+            const nm: string = fieldNameOf(d, fi.nid);
+            icells = icells.concat([{ sym: fi.sym.id, name: d.name + "." + nm, pos: -1, init: fi.init, derived: fi.wcap is not && lockedDerived(cx.g, cx.t, [], fi.init) }]);
+        }
+        return icells;
+    }
+
+    // s482 r1 (#2112 review MED-4; §7.6 R4 — "A lazy shared instance is constructed at its first
+    // reference … judged by R2 at the demand point"; §66.7.1 — `@x` of a declaration reads its SHARED
+    // instance). A read `@card` / `@card.v` of a user declaration's shared instance constructs it there
+    // when it has not been: its field seeds run at the read, so what they reach is judged at `pos`
+    // (every reference is judged — the first one during the body is the demand point, and a later
+    // reference finds only what an earlier one would); a DERIVED field read (`@card.d`) runs its formula
+    // at the read (R4). Not this hop: a declaration whose one field is its own value (a cell outside the
+    // body, `outerSeedReachDiags` / outerCellOf — seeded before the body), the program, a persisted
+    // declaration's seeds (g-boot-persist-seed-at-construction-s482), a declaration already on the
+    // path (cx.stack — a cycle). ⚑ INTERIM (g-boot-shared-instance-reach-hoist-s482): a function that
+    // reads a shared instance's field is not followed here (its summary records no such atom), nor a
+    // `<*x/>` of the shared instance; and the printer runs a body binding a shared instance reaches at
+    // module initialization (bodyInits, constructedElsewhere), so a read AFTER the binding — legal by
+    // R4 — still shows a value computed before the body's writes.
+    fn sharedReach(cx: BodyCx, a: AExpr, pos: int, seen: int[]) -> SeedReach | not {
+        const f: NameFact | not = nameFact(cx.t.names, a.nid);
+        const did: int = match f {
+            .NInst(decl: d, inst: i) :> sharedDeclId(d, i),
+            .NField(decl: d, inst: i, idx: x) :> sharedDeclId(d, i),
+            // no-default-arm: one question — is it a read of a declaration's shared instance
+            _ :> -1
+        };
+        const idx: int = match f {
+            .NField(decl: d, inst: i, idx: x) :> x,
+            // no-default-arm: a whole-instance read names no field
+            _ :> -1
+        };
+        if (did < 0 || did == cx.prog || cx.stack.indexOf(did) >= 0) return not;
+        let src: DeclSrc | not = not;
+        for (const gd of cx.g.decls) { if (gd.info.sym.id == did && !gd.isProgram) src = gd; }
+        if (src is not) return not;
+        const d: ADecl | not = src.d;
+        if (d is not) return not;
+        const di: DeclInfo = src.info;
+        if (di.fields.length == 1 && di.fields[0].nid == di.nid) return not;
+        const icells: BodyCell[] = declCells(cx, d, di);
+        const icx: BodyCx = { g: cx.g, t: cx.t, sum: cx.sum, usesD: cx.usesD, binds: cx.binds, file: src.file, places: cx.places, cells: cx.cells.concat(icells), prog: cx.prog, pfields: cx.pfields, at: cx.at, mfile: cx.mfile, mspan: cx.mspan, mount: cx.mount, dname: cx.dname, stack: cx.stack.concat([did]), idecl: did, ifields: di.fields };
+        const pre: string = " reads `@" + d.name + "`, the shared instance of `<" + d.name + ">`, constructed at its first reference (§7.6 R4), so its seeds run here, and";
+        if (attrNamed(d.mods, "persist") is not) {
+            let i: int = 0;
+            for (const c of icells) {
+                if (!c.derived && seen.indexOf(c.sym) < 0) {
+                    const r: SeedReach | not = cellReach(icx, c, pos, seen.concat([c.sym]));
+                    if (r is given) return { bp: r.bp, how: pre + " the seed of its field `" + fieldNameOf(d, di.fields[i].nid) + "`" + r.how, file: cx.file, span: a.span };
+                }
+                i = i + 1;
+            }
+        }
+        if (idx >= 0 && idx < icells.length) {
+            const dc: BodyCell = icells[idx];
+            if (dc.derived && seen.indexOf(dc.sym) < 0) {
+                const r2: SeedReach | not = cellReach(icx, dc, pos, seen.concat([dc.sym]));
+                if (r2 is given) return { bp: r2.bp, how: cellHop(dc, r2), file: cx.file, span: a.span };
+            }
+        }
+        return not;
+    }
+
+    fn sharedDeclId(d: Sym, i: InstRef) -> int {
+        return match i {
+            .Shared(decl: s) :> (s.id == d.id ? d.id : -1),
+            // no-default-arm: only the shared instance is constructed on demand
+            _ :> -1
+        };
     }
 
     // The name of declaration `d`'s field whose node is `nid` (an attribute field, or a child field at
