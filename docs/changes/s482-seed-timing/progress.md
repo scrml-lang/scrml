@@ -93,3 +93,20 @@ Brief: ~/.cache/scrml/review/s482-briefs/fix-2105-r1.md; review ~/.cache/scrml/r
 - 5. LOW-2: E-DERIVED-ENGINE-NO-RULES no longer calls a constant derived (wording split on `cellReads`; lockedWhat needs the tables, which that pass precedes).
 - 6. g-boot-body-unread-cell-server-only-s482 filed (HIGH, ruling-gated, fork (a)/(b)/(c), rec (a)).
 - Pins: compiler/self-host-v2/slice-m4/outer-cell-place-s482.test.js.
+
+### r1 gates (head 06e24d2d7 vs base origin/main b65149386)
+
+| gate | result |
+|---|---|
+| pre-commit (both r1 commits) | PASS (58320 pass / 0 fail; one earlier attempt timed out in a beforeAll under load 12–21 from other lanes, re-run at lower load) |
+| pretest | exit 0 |
+| bootstrap-conformance --json | PASS 851 / FAIL 3 / CRASH 0, head and base; reports identical but for timings |
+| changed slices (outer-cell-place, seed-reach, body-run-order, client-roots, registry-client, value-no-write, server-only-stdlib) | 173 pass / 0 fail |
+| Chromium SCRML_BROWSER_TESTS=1: seed-timing 13, construct-init-place 6, effect-deps-mount 5, rcdata-holes 5, rcdata-init-place 17, valuesem 4 | all pass |
+| 461-probe set | 0 value changes vs base and vs fc3097098 |
+| review + r1 probes (133) | every change vs base listed in the r1 report with its basis |
+| corpus differential (2977 files) | 0 newly rejected / accepted / code changes; 1 client output diff (own-value-type/unproven-annotation-pos — the lane's, Q13); 0 server diffs; new client identifiers vs base: only that file's `seeded hold seed` |
+| s34-census --check-new --base origin/main | PASS |
+| types-gate --check | OK, 182 unchanged |
+| host-global-scan 1/2, 2/2 | 0 violations, exit 0 |
+| e2e-render-map | 259 pass / 0 fail |
