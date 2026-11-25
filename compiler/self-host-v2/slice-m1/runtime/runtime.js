@@ -162,6 +162,57 @@ function flush() {
   try { drainQueues(); } finally { flushing = false; restoreTries.clear(); }
 }
 
+// s482 (lane s482-hold-body; RULED S482, ruling:user-voice-scrml.md-S482-hold-until-body-ends, Q6 (b):
+// *"the runtime holds effect and request runs triggered during the body, running them after the body
+// in trigger order"* — owner: "yes, the runtime holds them") — THE BODY HOLD. While the program body
+// runs (`runBody`, the boot's one call of the program's render — every construct mounted as part of
+// that render included), a flush drains the render / structure queue as before (a display still shows
+// its value where it stands) but takes NOTHING from `effectQueue`: an `<effect>` whose dependency a
+// body-top statement writes, a `<request>`'s mount run, a run a body write of a request's dependency
+// triggers, a `refetch()` / `reset(@x)` made in the body — each waits there. When the body ends, one
+// flush runs them in TRIGGER ORDER (`effectQueue` is insertion-ordered; an effect or request triggered
+// twice runs once, at its first trigger's position — the "once per flush" rule, §6.7.4, which a flush
+// already applies). After the body nothing is held: a run is queued and flushed as before. A construct
+// mounted LATER (an `if=` turning true on an event) needs no hold of its own — its mount is a render
+// effect in `queue`, and a flush takes `effectQueue` only once `queue` is empty, so what its mount
+// triggers already runs after its mount completes.
+let bodyHold = 0;
+
+/**
+ * Run the program body `fn` with effect and request runs held until it ends (SPEC §7.6 R5, Q6).
+ * The held runs are flushed when the outermost body ends. When the body traps they are DROPPED, not
+ * run (RULED S482, ruling:user-voice-scrml.md-S482-drop-held-runs-on-trap): the page failed to boot,
+ * so a held request makes no server call and a held effect does not run; the hold is still released
+ * (a later write runs its effect as usual) and the trap is the one rethrown.
+ */
+export function runBody(fn) {
+  // what was queued before the outermost body began is not the body's (not dropped on a trap)
+  const before = bodyHold === 0 ? new Set(effectQueue) : null;
+  bodyHold++;
+  let ok = false;
+  try {
+    const r = fn();
+    ok = true;
+    return r;
+  } finally {
+    bodyHold--;
+    if (bodyHold === 0) {
+      if (!ok) {
+        // s482 r1 (S482-drop-held-runs-on-trap): drop the runs the body held
+        for (const e of effectQueue) {
+          if (before.has(e)) continue;
+          effectQueue.delete(e);
+          if (e instanceof Request) e.heldStart = 0;
+        }
+      }
+      if (batchDepth === 0) {
+        if (ok) flush();
+        else { try { flush(); } catch (err) { reportLater(err); } }
+      }
+    }
+  }
+}
+
 // s474 r1 (review of #1727, F1) — ONE EFFECT'S THROW NEVER STRANDS THE REST.
 // An effect that throws (a runtime trap, a template whose structure the parser
 // changed) used to unwind out of this loop, and every effect still queued
@@ -185,7 +236,7 @@ function drainQueues() {
       // attribute reads again go back now (`restoreHeld`), before the `<effect>` bodies run
       try { restoreHeld(); } catch (err) { if (!failed) { failed = true; first = err; } else reportLater(err); }
       continue;
-    } else if (effectQueue.size > 0) {
+    } else if (effectQueue.size > 0 && bodyHold === 0) {   // s482: held while the body runs (runBody)
       [e] = effectQueue;
       effectQueue.delete(e);
       if (!e.disposed) {
@@ -814,6 +865,8 @@ class Request {
     this.read = read;                   // §6.7.7.1: READ — a superseded / torn-down run's transport is aborted
     this.disposed = false;
     this.tasks = new Set();
+    // s482 (s482-hold-body): the start stamp of a run held by the body hold (runBody) — 0 when none
+    this.heldStart = 0;
     for (const d of deps) d.observers.add(this);
     // s475 r3 (N2): a pending cell (no state) — its writes and loads supersede one another by start stamp
     if (state === null) target.pend = { load: 0, wrote: 0, req: this, settling: false };
@@ -822,6 +875,11 @@ class Request {
   }
   markStale() {
     if (this.disposed) return;
+    // s482 (s482-hold-body): a run triggered during the body is held until it ends (runBody), but it
+    // is DATED at its trigger, so a pending cell's supersede order (§13.9.4, "the most recently
+    // started write or load wins") stays the source order: a body write of the cell after the
+    // request's place is still the later start. The newest trigger's date wins (a re-trigger).
+    if (bodyHold > 0 && this.target.pend !== null && this.target.pend.req === this) this.heldStart = ++pendSeq;
     effectQueue.add(this);
     if (batchDepth === 0) flush();
   }
@@ -852,15 +910,26 @@ class Request {
     if (this.disposed) return;
     const s = ++pendSeq;
     pendRestarted(this.target.pend, s);
+    // s482 (s482-hold-body): a reset made during the body is a request run triggered there — held
+    // until the body ends (runBody), dated at the reset (so `reset(@x); @x = v;` still keeps `v`)
+    if (bodyHold > 0) { this.heldStart = s; effectQueue.add(this); return; }
     this.run(s);
   }
   run(start = 0) {
     if (this.disposed) return;
+    // s482 (s482-hold-body): a held run starts dated at its trigger (markStale / resetRun above)
+    const held = start === 0 && this.heldStart > 0;
+    if (held) start = this.heldStart;
+    this.heldStart = 0;
+    const p = this.target.pend;
+    // s482 r1 (F4): a held load of a pending cell that a newer body write has already superseded is
+    // not issued — its result would be discarded by `pendOlder` when it settled (unheld, the write
+    // cancelled the live run's task and aborted a READ's transport; a held run has no task yet)
+    if (held && p !== null && p.req === this && pendOlder(p, start)) return;
     for (const t of this.tasks) t.cancel();
     this.tasks.clear();
     const task = new Task(this, this.read);
     this.tasks.add(task);
-    const p = this.target.pend;
     // N2: this load's start stamp — a reset's (resetRun), else now (a mount / dependency-change run
     // starts when it runs: the end of the batch that triggered it, §13.9.4 rule 3)
     if (p !== null && p.req === this) p.load = start > 0 ? start : ++pendSeq;

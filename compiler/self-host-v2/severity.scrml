@@ -63,6 +63,7 @@ ${
             "W-CHANNEL-WATCHES-NO-CONSUMER" :> Severity.Warning,
             "W-CHANNEL-WATCHES-NO-PK" :> Severity.Warning,
             "W-DEPRECATED-SERVER-MODIFIER" :> Severity.Warning,
+            "W-DISPLAY-UNTRACKED" :> Severity.Warning,
             "W-FOREIGN-001" :> Severity.Warning,
             "W-HTML-001" :> Severity.Warning,
             "W-IMPORT-001" :> Severity.Warning,

@@ -11831,16 +11831,24 @@ ${
             if (kc.ok) out = out.concat(initReachDiags(g, t, sum, fnE, servers, uses, usesD, binds, kc, ci));
             ci = ci + 1;
         }
-        // s482 r1 (#2053 review MED-1): body code is judged with function values counted as
-        // called (§6.7.4 rule 3) — not on the initializer rule's direct-call `usesD`. s482 r2
-        // (#2053 r1 review MED-A): ~~on `uses`~~ on `usesR` — a nested function declaration a
-        // reached function never calls nor uses as a value adds nothing
-        out = out.concat(constructReadDiags(g, t, sum, writes, sites, lets, reads, usesR));
+        // ~~constructReadDiags — the INTERIM g-boot-construct-request-write-s482: a non-acting
+        // initializer inside a construct that reads what a `<request>` there, before it, writes was
+        // E-FILE-SCOPE-INIT-IN-CONSTRUCT, because the request's first load ran where it stood, during
+        // the body~~ *(deleted S482, lane s482-hold-body: RULED S482,
+        // ruling:user-voice-scrml.md-S482-hold-until-body-ends — "the runtime holds effect and request
+        // runs triggered during the body, running them after the body in trigger order" — built
+        // (rt.runBody). A request's load now runs after the body wherever it stands, so the
+        // initializer, which runs just before the construct (§7.6 R3), reads the value before the load
+        // under both orders: the refusal guarded nothing. The model (c) study's "impossible by
+        // construction" holds for requests too. Probes q01 / t08–t10 / r03 / r06 / h31 / h06:
+        // docs/changes/s482-hold-body/progress.md.)*
         // s482 (lane s482-value-no-write) — §6.15 widened (A1) and §6.6 / §6.15 A3, on the same
         // closures (`writes`: the file-scope `let`s a callable writes, at any depth; `uses`: the
         // file-scope bindings it reads or writes, at any depth)
         out = out.concat(valueLetDiags(g, t, sum, writes, sites, lets));
         out = out.concat(derivedUntrackedDiags(g, t, sum, reads, lets));
+        // s482 (lane s482-display-untracked) — §6.15 A5, W-DISPLAY-UNTRACKED, on the same closures
+        out = out.concat(displayUntrackedDiags(g, t, sum, writes, sites, reads, lets));
         return out.concat(bodyReachDiags(g, t, sum, usesR, binds));
     }
 
@@ -12087,53 +12095,416 @@ ${
     }
 
     // =========================================================================
-    // s482 (lane s482-value-no-write; RULED S482, ruling:user-voice-scrml.md-S482-runorder-model-c) —
-    // §7.6 R3: an initializer with no single place is a value position (§6.15, A1: valueLetDiags), and
-    // it runs just before the construct. ~~The S482 enumeration of "what code inside the construct
-    // writes before the initializer" (its attributes, an earlier chain test, its content, a
-    // component's renders and seeds, a `<*field/>`'s state bodies, a viewed field's seed, a shared
-    // instance's seeds, an `<effect>`'s `deps=`, every seed placed at or after the construct — the
-    // INTERIM g-boot-construct-seed-bound-s482), and the refusal of an acting initializer after code
-    // inside an RCDATA element (g-boot-rcdata-init-after-code-s482)~~ *(deleted by this lane, as the
-    // ruling's INTERIM line says: "today's fail-closed construct rules … stay until A1 lands and are
-    // deleted in that PR" — none of that code can write a file-scope `let` or a cell now: every one
-    // of them is a value position.)*
-    //
-    // What is left is the one route the study's "impossible by construction" assumed closed by Q6
-    // (ruling:user-voice-scrml.md-S482 Q6, PERMANENT: *"effects and requests triggered during the
-    // body are held until the body ends"*), which the runtime does not build yet: a `<request>`'s
-    // first load runs where it stands, during the body (g-boot-request-runs-in-body-s482, open), and
-    // a request body is an action position that may write. So a non-acting initializer inside a
-    // construct that reads — directly, or (s482 r1, #2096 review HIGH-1) through a function it calls
-    // or hands on as a value, at any depth (initReadWritten / ReadCx; an unresolvable call fails
-    // closed) — a file-scope `let` or a program cell which a `<request>` inside that
-    // construct, before the initializer, writes — its body or its attribute values, directly or
-    // through a function they call, at any depth; a request in the state-child bodies a
-    // `<*field/>` there renders, in a shared instance a `<*x/>` there mounts (a request in a
-    // component's `renders` is E-BOOTSTRAP-UNSUPPORTED, so none can stand in a component used there);
-    // anything the walk does not understand fails closed to every request of the program body — is
-    // E-FILE-SCOPE-INIT-IN-CONSTRUCT: source order runs that load first, the place before the
-    // construct does not. ⚑ INTERIM (bootstrap, g-boot-construct-request-write-s482): lifted when the
-    // Q6 hold is built (then the load runs after the body under both orders).
+    // s482 (lane s482-display-untracked; RULED S482, ruling:user-voice-scrml.md-S482-display-untracked-
+    // warning: *"build it — a warning when a plain `let` that is displayed is written by a later effect,
+    // request or handler, with a fix-it to make it a cell."* — owner: *"yes, your recommendations on all
+    // four"*) — W-DISPLAY-UNTRACKED, §6.15 A5. A display of a plain file-scope `let` shows the value the
+    // `let` had when the display rendered: a write of a plain `let` marks nothing (§6.6 — the dirty flags
+    // track cells only), so the display is not updated when code that runs AFTER the body writes the `let`
+    // (the printer binds `${n}` as `rt.text(…, () => n)`, re-read only when a cell it reads changes).
+    // The displays: every render position of §6.15 item 3 (valuePositions' RenderKind — an interpolation,
+    // a Tier-0 gather, a non-handler attribute value: `class=`, `class:x=`, `style=`, `if=` / `show=`,
+    // `<each in=… key=…>`, …), in the program body and in a declaration's markup. What they read: the
+    // `let` by name, or through a function they call or hand on, at any depth (the `reads` closure, as A3).
+    // The writers (`writes` closure, as A1 / A3 — constrained to the #2096 path), directly or through a
+    // function they call at any depth:
+    //   the ruled kinds — an event handler (`on…=`, any element, a component's markup included); an
+    //     `<effect>` / `when … changes` body; a `<request>` body (§7.6 R5 holds a run triggered during the
+    //     body to after it — so it is later even when its trigger stands before the display);
+    //   PA reading (prov=pa-ruled, r1 of #2107: "code that runs later like a handler") — a runtime `^{ }`
+    //     block that re-runs: one whose body (not a function value in it) reads a §22.5 dependency,
+    //     `meta.get("x")` or a `meta.bindings` entry of a cell (meta.scrml respells both `^.get(@x)`);
+    //     §22.5: "A direct `@x` read in the body, or one in a function the body calls, is not a
+    //     dependency". And a function value in spine code (an arrow / block lambda — it runs when it is
+    //     called, a host callback included) or a function handed on as a value there.
+    // NOT a writer (r1 of #2107, item 1): spine code — a `<program>` body-top statement, a file-scope
+    // initializer, a `^{ }` that does not re-run, a statement in a declaration's markup (it runs at the
+    // instance's place) — before OR after the display's place. S481 (ruling:user-voice-scrml.md-S481-body-
+    // run-order): "A display of a `free` value reads it where it stands" — the in-place value is the
+    // intended one (conformance body-top/free-display-reads-in-place). Load-phase code (it runs before the
+    // body), and a function body by itself (it is judged where it is called).
+    // No suppression by a cell write in the same writer (r1 F1): a conditional or same-value cell write
+    // re-renders nothing, so a writer that writes the `let` warns whatever cells it also writes.
+    // The message names the display, the `let`, one writer (and its call chain) and the fix-it: the cell
+    // declaration that replaces the `let`, and `@n` for `n` at every use. A warning: it does not fail the
+    // compile (§34).
     // =========================================================================
-    fn constructReadDiags(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[], reads: FxAtom[][], usesR: FxAtom[][]) -> Diag[] {
+    type DuCx:struct = { g: Globals, t: Tables, sum: Summary, six: SymIx, writes: FxAtom[][], sites: LetW[][], lets: int[] }
+    // A write of a file-scope `let` (`sym`) by code that runs after the body: `who` names the code, `how`
+    // the call chain ("" — a direct write). `lc`: "" — or the lifecycle body that writes (`effect` /
+    // `request`), where the cell fix-it alone would be refused (an effect by §6.7.4; a request body by the
+    // bootstrap's Core C-R1, INTERIM).
+    type DispW:struct = { sym: int, who: string, how: string, file: string, lc: string }
+
+    fn displayUntrackedDiags(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], reads: FxAtom[][], lets: int[]) -> Diag[] {
+        if (lets.length == 0) return [];
+        const cx: DuCx = { g: g, t: t, sum: sum, six: nodeSymIx(sum.nodes), writes: writes, sites: sites, lets: lets };
+        let ws: DispW[] = [];
+        for (const ds of g.decls) {
+            for (const n of declMarkup(ds)) { ws = ws.concat(nodeDispWriters(cx, n, ds.file, ds.isProgram)); }
+        }
+        ws = ws.concat(spineInitWriters(cx));
+        if (ws.length == 0) return [];
         let out: Diag[] = [];
-        const pfields: FieldInfo[] = programCells(g);
-        const rx: ReadCx = { sum: sum, six: nodeSymIx(sum.nodes), reads: reads, usesR: usesR };
+        for (const ds of g.decls) {
+            for (const n of declMarkup(ds)) {
+                for (const p of nodePositions(t, n, ds.file)) {
+                    if (p.vk == ValueKind.RenderKind) out = out.concat(displayDiags(cx, ws, reads, p));
+                }
+            }
+        }
+        return out;
+    }
+
+    // One display: each written `let` it reads (directly, then through a call), reported once, with
+    // its first writer.
+    fn displayDiags(cx: DuCx, ws: DispW[], reads: FxAtom[][], p: ValuePos) -> Diag[] {
+        let out: Diag[] = [];
+        let seen: int[] = [];
+        for (const b of seedBlocks(p.v)) {
+            for (const ne of nameExprsIn(b)) {
+                const id: int = constSymOfFact(nameFact(cx.t.names, ne.nid));
+                if (id >= 0 && cx.lets.indexOf(id) >= 0 && seen.indexOf(id) < 0) {
+                    const w: DispW | not = laterWriter(ws, id);
+                    if (w is given) {
+                        seen = seen.concat([id]);
+                        out = out.concat([displayDiag(cx, p, id, "", w, ne.span, p.file)]);
+                    }
+                }
+            }
+        }
+        for (const r of scanValue({ t: cx.t, file: p.file }, p.v, emptyScan()).refs) {
+            const j: int = ixGet(cx.six, r.sym);
+            if (j >= 0 && !isValueLabel(r.name)) {
+                for (const a of reads[j]) {
+                    const id: int = atomBinding(a.key);
+                    if (a.key.indexOf("b:") == 0 && cx.lets.indexOf(id) >= 0 && seen.indexOf(id) < 0) {
+                        const w: DispW | not = laterWriter(ws, id);
+                        if (w is given) {
+                            seen = seen.concat([id]);
+                            const chain: string = chainText(fxChain(cx.sum, reads, j, a)) + " → " + letNameOf(cx.t, id);
+                            out = out.concat([displayDiag(cx, p, id, " (it calls `" + r.name + "`, which reads it: `" + chain + "`)", w, r.span, r.file)]);
+                        }
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    // The first writer of `sym` (every writer collected runs after the body).
+    fn laterWriter(ws: DispW[], sym: int) -> DispW | not {
+        for (const w of ws) {
+            if (w.sym == sym) return w;
+        }
+        return not;
+    }
+
+    fn displayDiag(cx: DuCx, p: ValuePos, sym: int, via: string, w: DispW, span: ASpan, file: string) -> Diag {
+        const name: string = letNameOf(cx.t, sym);
+        const msg: string = p.what + " at line " + lineOf(cx.g, p.file, p.span.start) + " reads `" + name + "`, a file-scope `let`" + via + ", and " + w.who + " writes `" + name + "`" + w.how + " after this display renders. `" + name + "` is plain state and is not tracked: the display shows the value `" + name + "` had when it rendered, and is not updated when `" + name + "` is written (§6.15 A5). " + cellFixIt(cx, sym) + lifecycleFix(w.lc, name);
+        return newDiag("W-DISPLAY-UNTRACKED", msg, file, span);
+    }
+
+    // The fix-it: the cell declaration that replaces the `let` (§66.9 rule 2 — `let` before the `<`; an
+    // opener value other than a literal or an `@` reference is parenthesized, §66.2), and `@n` for `n`.
+    // The `let` is quoted as written (its annotation with its grants, a string literal re-escaped); a
+    // tape cell keeps the written grants and adds the ones its writes need (writeGrantsOf).
+    fn cellFixIt(cx: DuCx, sym: int) -> string {
+        for (const c of cx.g.consts) {
+            if (c.sym.id == sym) {
+                // r2 (#2107 F-E) — a write the cell form of `c` cannot take yet: no fix-it that does not compile
+                const refused: string = cellWriteRefused(cx.t, sym, c.name);
+                if (refused != "") return "A cell would update this display, but the cell form of `" + c.name + "` is not yet supported for this edit: this compiler does not yet build " + refused + " on a cell (E-BOOTSTRAP-UNSUPPORTED, INTERIM), so no cell fix-it is given for `" + c.name + "`";
+                const at: AType | not = writtenTypeOf(cx.g, c);
+                let written: string = "let " + c.name;
+                if (at is given) written = written + ": " + aTypeWritten(at, []);
+                const lit: string = literalShown(c.init);
+                let wv: string = lit;
+                let cv: string = lit;
+                if (lit == "") {
+                    wv = "…";
+                    cv = "(…)";
+                } else if (isStrLit(c.init)) {
+                    // r2 (#2107 F-A) — a string is always parenthesized: the opener's quoted value is not
+                    // an expression string (it drops a `\n` escape to `n` and reads `${…}` as a reactive
+                    // template), so only `=("…")` keeps the value as written.
+                    cv = "(" + lit + ")";
+                }
+                let cell: string = "let <" + c.name;
+                let keep: string = "";
+                if (lit == "") keep = " (the same initializer, in the parentheses)";
+                const ty: Type | not = c.ty;
+                if (ty is given) {
+                    const el: Type | not = seqElem(unMaybe(ty));
+                    if (el is given) {
+                        // a tape cell: no `let` (O3 — E-GRANT-LET-ON-SEQUENCE); its grants are in its type (§66.12),
+                        // the written ones plus what its writes need (r2 #2107 F-C: computed in the reader)
+                        const tc: TapeCellText = tapeCellText(at, elemName(el), writeGrantsOf(cx.t, sym), c.name);
+                        cell = "<" + c.name + ":" + tc.ty;
+                        keep = keep + " — a tape cell takes no `let` (§66.12, E-GRANT-LET-ON-SEQUENCE) and its write grants in its type" + tc.note;
+                    } else if (at is given) {
+                        cell = cell + ":" + aTypeWritten(at, []);
+                    } else {
+                        cell = cell + ":" + typeName(ty);
+                    }
+                }
+                cell = cell + "=" + cv + "/>";
+                return "Make `" + c.name + "` a cell: replace `" + written + " = " + wv + ";` with `" + cell + "`" + keep + ", and write `@" + c.name + "` for `" + c.name + "` at every read and write (`" + "$" + "{@" + c.name + "}`, `@" + c.name + " = …`) — a write of a cell updates every display that reads it";
+            }
+        }
+        return "Make it a cell";
+    }
+
+    // The type annotation of a file-scope binding as written (`not`: none).
+    fn writtenTypeOf(g: Globals, c: ConstInfo) -> AType | not {
         for (const f of g.files) {
+            if (f.path == c.file) {
+                for (const ac of constItems(f.items)) {
+                    if (ac.nid == c.nid) return ac.ty;
+                }
+            }
+        }
+        return not;
+    }
+
+    // The grants a tape cell needs for the writes of `let` `sym` (every write the binder recorded): a
+    // whole-value write `replace`, a position write `write`, an edit its own grant (§66.12.3).
+    fn writeGrantsOf(t: Tables, sym: int) -> string[] {
+        let out: string[] = [];
+        for (const f of t.effects.facts) {
+            const gr: string = writeGrantOf(f, sym);
+            if (gr != "" && out.indexOf(gr) < 0) out = out.concat([gr]);
+        }
+        return out;
+    }
+
+    fn writeGrantOf(f: EffectFact, sym: int) -> string {
+        return match f {
+            .EAssignLocal(sym: s, path: pa) :> (s.id != sym ? "" : (pa.length == 0 ? "replace" : stepGrant(pa[0]))),
+            .ELocalEdit(sym: s, op: o, path: pa) :> (s.id != sym || pa.length > 0 ? "" : localEditMethodName(o)),
+            // no-default-arm: one question of a write — does it write the `let`'s own tape
+            _ :> ""
+        };
+    }
+
+    fn stepGrant(s: LStep) -> string {
+        return match s {
+            .LIndex(index: x) :> "write",
+            .LField(ref: x) :> ""
+        };
+    }
+
+    // r2 (#2107 F-E) — the first write of `let` `sym` whose cell form this compiler does not build yet
+    // ("" — none): `.remove(…)` / `.insert(…)` of a cell tape, an edit of a part (`b.xs.append(v)`,
+    // `g[i].pop()`), a write through a position (`m[i][j] = v`, `xs[i].a.b = v`) or a position of a
+    // sub-field tape (`p.xs[i] = v`) — each refused on a cell as E-BOOTSTRAP-UNSUPPORTED (INTERIM).
+    fn cellWriteRefused(t: Tables, sym: int, name: string) -> string {
+        for (const f of t.effects.facts) {
+            const k: EffectFact = f;
+            const why: string = match k {
+                .ELocalEdit(sym: s, op: o, path: pa) :> (s.id != sym ? "" : (pa.length > 0 ? "an edit of a part of `" + name + "` (a `." + localEditCall(o) + "` of one of its fields or positions)" : (o == LocalEdit.LRemoveAt || o == LocalEdit.LInsert ? "`" + name + "." + localEditCall(o) + "`" : ""))),
+                .EAssignLocal(sym: s, path: pa) :> (s.id != sym ? "" : pathRefusedOnCell(pa, name)),
+                // no-default-arm: one question of a write — does it write the `let` in a form its cell cannot take
+                _ :> ""
+            };
+            if (why != "") return why;
+        }
+        return "";
+    }
+
+    fn pathRefusedOnCell(pa: LStep[], name: string) -> string {
+        if (pa.length < 2) return "";
+        let deep: boolean = pa.length > 2 && isIndexStep(pa[0]);
+        let k: int = 1;
+        for (; k < pa.length; ) {
+            if (isIndexStep(pa[k])) deep = true;
+            k = k + 1;
+        }
+        if (!deep) return "";
+        if (isIndexStep(pa[0])) return "a write through a tape position of `" + name + "` (`" + name + "[i][j] = v`, `" + name + "[i].a.b = v`)";
+        return "a position write of a sub-field tape of `" + name + "` (`" + name + ".f[i] = v`)";
+    }
+
+    fn isIndexStep(s: LStep) -> boolean {
+        return match s {
+            .LIndex(index: x) :> true,
+            .LField(ref: x) :> false
+        };
+    }
+
+    // A literal initializer as source text ("" — anything else); a string literal re-escaped.
+    fn literalShown(e: AExpr) -> string {
+        const k: AExprK = e.k;
+        return match k {
+            .Num(raw: r) :> r,
+            .Str(v: s) :> "\"" + strEscaped(s) + "\"",
+            .Bool(v: b) :> (b ? "true" : "false"),
+            .NotLit :> "not",
+            // no-default-arm: one question — is it a literal
+            _ :> ""
+        };
+    }
+
+    fn isStrLit(e: AExpr) -> boolean {
+        const k: AExprK = e.k;
+        return match k {
+            .Str(v: x) :> true,
+            // no-default-arm: one question — is it a string literal
+            _ :> false
+        };
+    }
+
+    fn strEscaped(s: string) -> string {
+        let out: string = "";
+        let i: int = 0;
+        for (; i < s.length; ) {
+            const c: string = s.substring(i, i + 1);
+            const code: int = s.charCodeAt(i);
+            if (c == "\\") {
+                out = out + "\\\\";
+            } else if (c == "\"") {
+                out = out + "\\\"";
+            } else if (c == "\n") {
+                out = out + "\\n";
+            } else if (c == "\r") {
+                out = out + "\\r";
+            } else if (c == "\t") {
+                out = out + "\\t";
+            } else if (code < 32 || code == 127) {
+                out = out + "\\x" + "0123456789abcdef".charAt(Math.floor(code / 16)) + "0123456789abcdef".charAt(code % 16);
+            } else {
+                out = out + c;
+            }
+            i = i + 1;
+        }
+        return out;
+    }
+
+    // The writers in one markup node, at any depth.
+    fn nodeDispWriters(cx: DuCx, n: ANode, file: string, prog: boolean) -> DispW[] {
+        const k: ANodeK = n.k;
+        return match k {
+            .Elem(e: e) :> elemDispWriters(cx, e, file, prog),
+            .Effect(w: w) :> inLifecycle(siteDispWriters(cx, AAttrValue.Braced(w.body, ""), effectWho(cx, w, file), true, [], "", file), "effect"),
+            .Request(r: r) :> (r.pend < 0 ? inLifecycle(siteDispWriters(cx, AAttrValue.Braced(r.body, ""), "the `<request>` body at line " + lineOf(cx.g, file, r.span.start), true, [], "", file), "request") : []),
+            .Run(b: b, meta: mt) :> runDispWriters(cx, b, mt, n.span.start, file, prog),
+            .Gather(f: f) :> rowDispWriters(cx, f, file, prog),
+            .Text(text: x) :> [],
+            .Interp(e: x) :> [],
+            .DeclNode(d: x) :> [],
+            .Css(c: x) :> []
+        };
+    }
+
+    fn inLifecycle(ws: DispW[], lc: string) -> DispW[] {
+        let out: DispW[] = [];
+        for (const w of ws) { out = out.concat([{ sym: w.sym, who: w.who, how: w.how, file: w.file, lc: lc }]); }
+        return out;
+    }
+
+    // An `<effect>` may not write a cell (§6.7.4), so the cell fix-it is not enough there: the write moves
+    // out of the body as well (this follows from §6.7.4). A `<request>` body that writes another cell is
+    // refused by the bootstrap (E-BOOTSTRAP-UNSUPPORTED, Core C-R1, INTERIM: a side-effecting request body
+    // is not ruled); the request advice is a PA reading on top of that INTERIM.
+    fn lifecycleFix(lc: string, name: string) -> string {
+        if (lc == "effect") return ". An `<effect>` may not write a cell, directly or through a call (§6.7.4, E-EFFECT-WRITES-STATE): with `" + name + "` a cell, move this write out of the effect into the code that writes its trigger (the handler or function), or make `" + name + "` a derived cell of what it is computed from (§6.6)";
+        if (lc == "request") return ". This compiler refuses a `<request>` body that writes a cell other than its own (E-BOOTSTRAP-UNSUPPORTED — Core C-R1, INTERIM: a side-effecting request body is not ruled): with `" + name + "` a cell, move this write out of the function the request calls into the handler or function that should cause it, or compute `" + name + "` from the request's cell (a derived cell, §6.6)";
+        return "";
+    }
+
+    fn effectWho(cx: DuCx, w: AEffect, file: string) -> string {
+        if (w.keyword) return "the `when … changes` body at line " + lineOf(cx.g, file, w.span.start);
+        return "the `<effect>` body at line " + lineOf(cx.g, file, w.span.start);
+    }
+
+    fn rowDispWriters(cx: DuCx, f: AFor, file: string, prog: boolean) -> DispW[] {
+        let out: DispW[] = [];
+        for (const r of gatherRows(f)) { out = out.concat(nodeDispWriters(cx, r, file, prog)); }
+        return out;
+    }
+
+    fn elemDispWriters(cx: DuCx, e: AElem, file: string, prog: boolean) -> DispW[] {
+        let out: DispW[] = [];
+        for (const a of e.attrs) {
+            if (eventName(a.name) != "") out = out.concat(siteDispWriters(cx, a.value, "the `" + a.name + "=` handler on `<" + e.tag + ">` at line " + lineOf(cx.g, file, a.span.start), true, [], "", file));
+        }
+        for (const kid of e.kids) { out = out.concat(nodeDispWriters(cx, kid, file, prog)); }
+        return out;
+    }
+
+    // A `${ }` statement run: a runtime `^{ }` block that re-runs (rerunsOnDeps) is a writer; any other
+    // run — a body-top statement of the program, one in a declaration's markup (at its instance's place),
+    // a `^{ }` that runs once — is spine code at its place, and only its function values are writers.
+    fn runDispWriters(cx: DuCx, b: ABlock, meta: string, pos: int, file: string, prog: boolean) -> DispW[] {
+        const line: int = lineOf(cx.g, file, pos);
+        if (meta != "" && rerunsOnDeps(b)) return siteDispWriters(cx, AAttrValue.Braced(b, ""), "the runtime `^{ }` block at line " + line + " (it re-runs when a cell it reads through `meta.get` / `meta.bindings` changes, §22.5)", true, [], "", file);
+        let where: string = "the body-top statement at line " + line;
+        if (meta != "") {
+            where = "the runtime `^{ }` block at line " + line;
+        } else if (!prog) {
+            where = "the statement at line " + line;
+        }
+        return siteDispWriters(cx, AAttrValue.Braced(b, ""), where, false, deferredSpansIn(b), "a function value in " + where + " (it runs when it is called — a callback, a timer)", file);
+    }
+
+    // Does a runtime `^{ }` body re-run? §22.5: "The dependencies are exactly the reads §22.5.1 and §22.9
+    // name: `meta.get("x")` and a `meta.bindings` entry of a cell. A direct `@x` read in the body, or one
+    // in a function the body calls, is not a dependency. … They are dependencies only while the run is in
+    // progress. A `meta.get` in a timer or cleanup callback reads the cell and subscribes nothing."
+    // meta.scrml respells both `^.get(@x)`. r2 (#2107 F-B): only the function value handed DIRECTLY to
+    // `^.timeout` / `^.interval` / `^.cleanup` (or `^.subscribe`, whose callback runs on a later change)
+    // is such a callback; any other function value — one the body calls, or hands to a function that
+    // calls it — may run while the run is in progress, so its `^.get` counts (failing toward the warning).
+    fn rerunsOnDeps(b: ABlock) -> boolean {
+        let late: ASpan[] = [];
+        for (const e of allExprsIn(b)) { late = late.concat(metaCallbackSpans(e)); }
+        for (const e of allExprsIn(b)) {
+            if (isMetaGetCall(e) && !spanInAny(e.span, late)) return true;
+        }
+        return false;
+    }
+
+    // The function values passed directly to a `^.timeout` / `^.interval` / `^.cleanup` / `^.subscribe`.
+    fn metaCallbackSpans(e: AExpr) -> ASpan[] {
+        const k: AExprK = e.k;
+        const args: AExpr[] = match k {
+            .Call(callee: f, args: xs) :> (isMetaCallbackOp(metaOpCallee(f)) ? xs : []),
+            // no-default-arm: one question of an expression — is it a meta callback call
+            _ :> []
+        };
+        let out: ASpan[] = [];
+        for (const a of args) {
+            if (isLambda(a)) out = out.concat([a.span]);
+        }
+        return out;
+    }
+
+    fn isMetaCallbackOp(op: string) -> boolean {
+        return op == "timeout" || op == "interval" || op == "cleanup" || op == "subscribe";
+    }
+
+    fn isMetaGetCall(e: AExpr) -> boolean {
+        const k: AExprK = e.k;
+        return match k {
+            .Call(callee: f, args: x) :> metaOpCallee(f) == "get",
+            // no-default-arm: one question of an expression — is it `^.get(…)`
+            _ :> false
+        };
+    }
+
+    // The program body's file-scope initializers on the spine: spine code, so only a function value in
+    // one (or a function handed on as a value there) is a writer.
+    fn spineInitWriters(cx: DuCx) -> DispW[] {
+        let out: DispW[] = [];
+        for (const f of cx.g.files) {
             for (const it of f.items) {
                 const k: AItemK = it.k;
                 const ps: AItem[] = match k {
                     .ProgramItem(p: p) :> p.items,
-                    // no-default-arm: only the program body holds a construct
+                    // no-default-arm: only the program body holds a spine
                     _ :> []
                 };
-                let tops: ANode[] = [];
-                for (const pi of ps) {
-                    const n: ANode | not = markupOfItem(pi);
-                    if (n is given) tops = tops.concat([n]);
-                }
-                const cells: BodyCell[] = bodyCells(g, ps);
                 for (const ci of ps) {
                     const ck: AItemK = ci.k;
                     const c: AConst | not = match ck {
@@ -12142,17 +12513,11 @@ ${
                         _ :> not
                     };
                     if (c is given) {
-                        const where: string = constructAt(t, tops, ci.span.start);
-                        if (where != "" && initActWhat(c.init) == "") {
-                            const lo: int = constructStart(t, tops, ci.span.start);
-                            const bw: BodyW = constructRequestWrites(g, t, sum, writes, sites, lets, f.path, ps, pfields, lo, ci.span.start);
-                            const r: string = initReadWritten(t, rx, f.path, [c.init], bw, g.program.id, pfields, cells, lo, []);
-                            if (r != "") {
-                                let kw: string = "const";
-                                if (c.mutable) kw = "let";
-                                out = out.concat([newDiag("E-FILE-SCOPE-INIT-IN-CONSTRUCT", "the initializer of `" + kw + " " + c.name + "` reads " + r + ", which a `<request>` inside " + where + " writes before it — a request's first load runs where it stands, during the body, and the initializer, which has no single place there, runs just before the construct (§7.6 R3), so it would not see that write. Not in the bootstrap yet (INTERIM, g-boot-construct-request-write-s482: lifted when requests triggered during the body are held until it ends, §7.6 R5). Declare `" + c.name + "` before that element, or compute the value where the content needs it", f.path, c.span)]);
-                            }
-                        }
+                        let kw: string = "const";
+                        if (c.mutable) kw = "let";
+                        const line: int = lineOf(cx.g, f.path, ci.span.start);
+                        const fv: string = "a function value in the initializer of `" + kw + " " + c.name + "` at line " + line + " (it runs when it is called — a callback, a timer)";
+                        out = out.concat(siteDispWriters(cx, AAttrValue.Bare(c.init), "the initializer of `" + kw + " " + c.name + "` at line " + line, false, deferredSpansInExpr(c.init), fv, f.path));
                     }
                 }
             }
@@ -12160,170 +12525,42 @@ ${
         return out;
     }
 
-    // What the `<request>`s that run between `lo` (constructStart) and `hi` (the initializer's position)
-    // write: each request there (its body and its attribute values), and those in the code of each
-    // component used there (its renders, transitively — a `<*x/>` of a declaration's shared instance
-    // too) and in the state-child bodies a `<*field/>` there renders (regionScan's views). Anything
-    // there the walk does not positively understand fails closed: every request of the program body.
-    // `lo` < 0: every request of the program body.
-    fn constructRequestWrites(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[], file: string, items: AItem[], pfields: FieldInfo[], lo: int, hi: int) -> BodyW {
-        if (lo < 0) return requestWritesOf(g, t, sum, writes, sites, lets, file, items, pfields);
-        let blocks: ABlock[] = [];
-        let uses: int[] = [];
-        let views: ViewW[] = [];
-        let opaque: boolean = false;
-        for (const it of items) {
-            const n: ANode | not = markupOfItem(it);
-            if (n is given) {
-                blocks = blocks.concat(regionRequestBlocks(n, lo, hi));
-                uses = unionIds(uses, regionUses(t, n, lo, hi));
-                const sc: RegionScan = regionScan(t, n, lo, hi);
-                views = views.concat(placeViews(g, sc.views, file));
-                if (sc.opaque) opaque = true;
-            }
-        }
-        let bw: BodyW = blocksWrites(g, t, sum, writes, sites, lets, file, blocks, pfields);
-        const va: ViewAcc = viewsWrites(g, t, sum, writes, sites, lets, pfields, views);
-        bw = mergeBodyW(bw, va.bw);
-        if (va.opaque) opaque = true;
-        // the components used there, and those they use, each once
-        let seen: int[] = [];
-        let todo: int[] = unionIds(uses, va.uses);
-        for (; todo.length > 0; ) {
-            let next: int[] = [];
-            for (const d of todo) {
-                if (seen.indexOf(d) < 0) {
-                    seen = seen.concat([d]);
-                    for (const ds of g.decls) {
-                        const ad: ADecl | not = ds.d;
-                        if (ds.info.sym.id == d && !ds.isProgram && ad is given) {
-                            const r: AElem | not = ad.renders;
-                            if (r is given) {
-                                const rn: ANode = { nid: -1, span: r.span, k: ANodeK.Elem(r) };
-                                next = unionIds(next, regionUses(t, rn, -1, 2147483647));
-                                const rs: RegionScan = regionScan(t, rn, -1, 2147483647);
-                                if (rs.opaque) opaque = true;
-                                const rv: ViewAcc = viewsWrites(g, t, sum, writes, sites, lets, pfields, placeViews(g, rs.views, ds.file));
-                                bw = mergeBodyW(bw, rv.bw);
-                                next = unionIds(next, rv.uses);
-                                if (rv.opaque) opaque = true;
-                                bw = mergeBodyW(bw, blocksWrites(g, t, sum, writes, sites, lets, ds.file, requestCodeBlocks(rn), pfields));
-                            }
-                        }
-                    }
+    // The `let` writes of one piece of code `v` (`who`): direct, and through each function it calls or
+    // hands on (the `writes` closure). `live`: the code runs after the body (a handler, an effect, a
+    // request, a re-running `^{ }`) — every write counts. Otherwise it is spine code, and only a write
+    // inside `defer` (a function value) or through a function handed on as a value counts, named `deferWho`.
+    fn siteDispWriters(cx: DuCx, v: AAttrValue, who: string, live: boolean, defer: ASpan[], deferWho: string, file: string) -> DispW[] {
+        let out: DispW[] = [];
+        for (const b of seedBlocks(v)) {
+            for (const w of letWritesIn(cx.t, b, cx.lets, file)) {
+                if (live) {
+                    out = out.concat([{ sym: w.sym, who: who, how: "", file: file, lc: "" }]);
+                } else if (spanInAny(w.span, defer)) {
+                    out = out.concat([{ sym: w.sym, who: deferWho, how: "", file: file, lc: "" }]);
                 }
             }
-            todo = next;
         }
-        if (opaque) bw = mergeBodyW(bw, requestWritesOf(g, t, sum, writes, sites, lets, file, items, pfields));
-        return bw;
-    }
-
-    // What every `<request>` of the program body writes (the fail-closed bound).
-    fn requestWritesOf(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[], file: string, items: AItem[], pfields: FieldInfo[]) -> BodyW {
-        let blocks: ABlock[] = [];
-        for (const it of items) {
-            const n: ANode | not = markupOfItem(it);
-            if (n is given) blocks = blocks.concat(requestCodeBlocks(n));
-        }
-        return blocksWrites(g, t, sum, writes, sites, lets, file, blocks, pfields);
-    }
-
-    // The code of the `<request>`s in `n` (at any depth: an element's content, a gather's rows).
-    fn requestCodeBlocks(n: ANode) -> ABlock[] {
-        const k: ANodeK = n.k;
-        let out: ABlock[] = [];
-        const rq: ARequest | not = match k {
-            .Request(r: r) :> r,
-            // no-default-arm: one question of a node — is it a `<request>`
-            _ :> not
-        };
-        if (rq is given) return requestBlocks(rq);
-        const e: AElem | not = elemOfNodeK(k);
-        if (e is given) {
-            for (const kid of e.kids) { out = out.concat(requestCodeBlocks(kid)); }
-        }
-        const gf: AFor | not = match k {
-            .Gather(f: x) :> x,
-            // no-default-arm: only an element or a gather holds nodes
-            _ :> not
-        };
-        if (gf is given) {
-            for (const r of gatherRows(gf)) { out = out.concat(requestCodeBlocks(r)); }
-        }
-        return out;
-    }
-
-    // requestCodeBlocks of the part of `n` between `lo` and `hi` (a request that starts there).
-    fn regionRequestBlocks(n: ANode, lo: int, hi: int) -> ABlock[] {
-        if (n.span.end <= lo || n.span.start >= hi) return [];
-        const k: ANodeK = n.k;
-        const rq: ARequest | not = match k {
-            .Request(r: r) :> r,
-            // no-default-arm: one question of a node — is it a `<request>`
-            _ :> not
-        };
-        if (rq is given) {
-            if (n.span.start >= lo) return requestBlocks(rq);
-            return [];
-        }
-        let out: ABlock[] = [];
-        const e: AElem | not = elemOfNodeK(k);
-        if (e is given) {
-            for (const kid of e.kids) { out = out.concat(regionRequestBlocks(kid, lo, hi)); }
-        }
-        const gf: AFor | not = match k {
-            .Gather(f: x) :> x,
-            // no-default-arm: only an element or a gather holds nodes
-            _ :> not
-        };
-        if (gf is given) {
-            for (const r of gatherRows(gf)) { out = out.concat(regionRequestBlocks(r, lo, hi)); }
-        }
-        return out;
-    }
-
-    // What the program body's code writes: file-scope `let`s (`lets`, Sym ids) and program cells
-    // (`cells`, the cells' Sym ids; `cellNames`, their `@name` labels).
-    type BodyW:struct = { lets: int[], cells: int[], cellNames: string[] }
-
-    // s482 (lane s482-construct-init-fu) — the start of the construct a place at `pos` is put just
-    // before (lower.scrml lowerPlaced): the outermost `if=` / `else-if=` / `else`
-    // element (an if-chain's first member), component use or `<match>` on the path from the body's
-    // top nodes, descending only through what renders once, in place (an HTML element that holds no
-    // raw or parser-text content, a `<db>` block). ~~-1 when the place is put elsewhere (after some
-    // other element): then every body write counts, as in #2076 (fail closed).~~ s482 (lane
-    // s482-place-fu, #2079 review PRE-2): any other element the descent stops at — one whose
-    // content holds no place (`<textarea>`, `<title>`, raw content, `<each>`, …) — is the start
-    // too: lowerPlaced puts the place just before it. -1 when `pos` is in no element.
-    fn constructStart(t: Tables, ns: ANode[], pos: int) -> int {
-        let i: int = 0;
-        for (; i < ns.length; ) {
-            const e: AElem | not = elemOfNodeK(ns[i].k);
-            if (e is given && e.span.start <= pos && pos < e.span.end) {
-                if (attrNamed(e.attrs, "if") is given) return e.span.start;
-                if (attrNamed(e.attrs, "else-if") is given || attrNamed(e.attrs, "else") is given) return chainStartAt(ns, i);
-                const fct: ElemFact | not = elemFact(t.elems, e.nid);
-                const kind: int = match fct {
-                    .MUse(decl: d) :> 1,
-                    .MMatch(m: m) :> 1,
-                    .MHtml :> 2,
-                    .MDb :> 3,
-                    // no-default-arm: any other element gets the place just before it (lowerPlaced)
-                    _ :> 0
-                };
-                if (kind == 1) return e.span.start;
-                if (kind == 3 || (kind == 2 && !parserTextElem(e))) return constructStart(t, e.kids, pos);
-                return e.span.start;
+        const scan: BodyScan = scanValue({ t: cx.t, file: file }, v, emptyScan());
+        for (const r of scan.refs) {
+            const j: int = ixGet(cx.six, r.sym);
+            const inDefer: boolean = spanInAny(r.span, defer);
+            if (j >= 0 && !isValueLabel(r.name) && (live || r.asValue || inDefer)) {
+                let rw: string = who;
+                if (!live && inDefer) rw = deferWho;
+                if (!live && !inDefer) rw = who + ", which hands `" + r.name + "` on as a function value (whatever receives it may call it later)";
+                for (const a of cx.writes[j]) {
+                    const w: LetW = cx.sites[a.root][a.pos];
+                    const chain: string = chainText(fxChain(cx.sum, cx.writes, j, a)) + " → " + w.name;
+                    out = out.concat([{ sym: w.sym, who: rw, how: " (through `" + chain + "`)", file: file, lc: "" }]);
+                }
             }
-            i = i + 1;
         }
-        return -1;
+        return out;
     }
 
     // s482 (lane s482-place-fu, #2079 review PRE-2) — the element, named for a message, whose
     // content holds no place and in which a place at `pos` stands, when no construct does: the
-    // element the constructStart descent stops at that is not a construct (`<textarea>`, `<title>`
+    // element the (lower.scrml lowerPlaced) placement descent stops at that is not a construct (`<textarea>`, `<title>`
     // — the RCDATA elements; raw `<pre>` / `<code>` content and `<script>` / `<style>` hold no
     // declaration). lowerPlaced puts the place just before it. "" when there is none.
     fn placeHostAt(t: Tables, ns: ANode[], pos: int) -> string {
@@ -12350,33 +12587,6 @@ ${
         return "";
     }
 
-    // The first member of the if-chain whose `else-if=` / `else` member is ns[i] (lower.scrml
-    // chainEnd, read backwards: blank text between members, then the `if=` element).
-    fn chainStartAt(ns: ANode[], i: int) -> int {
-        let j: int = i - 1;
-        for (; j >= 0; ) {
-            const e: AElem | not = elemOfNodeK(ns[j].k);
-            if (e is given) {
-                if (attrNamed(e.attrs, "if") is given) return e.span.start;
-                if (attrNamed(e.attrs, "else-if") is not) return ns[i].span.start;
-            } else if (!blankTextNode(ns[j])) {
-                return ns[i].span.start;
-            }
-            j = j - 1;
-        }
-        return ns[i].span.start;
-    }
-
-    fn blankTextNode(n: ANode) -> boolean {
-        const k: ANodeK = n.k;
-        return match k {
-            .Text(text: x) :> x.trim() == "",
-            .Css(c: x) :> true,
-            // no-default-arm: only blank text (and a `#{}` block) sits between chain members
-            _ :> false
-        };
-    }
-
     // `<pre>` / `<code>` raw content and the elements the HTML parser reads as text (`<textarea>`,
     // `<title>`, `<script>`, `<style>`) — lower.scrml isRawContentElem / isTextOnlyElem: a place in
     // one is put after it.
@@ -12386,18 +12596,6 @@ ${
         if (first >= "A" && first <= "Z") return false;
         const x: string = e.tag.toLowerCase();
         return x == "pre" || x == "code" || x == "textarea" || x == "title" || x == "script" || x == "style";
-    }
-
-    fn unionIds(a: int[], b: int[]) -> int[] {
-        let out: int[] = a;
-        for (const x of b) { if (out.indexOf(x) < 0) out = out.concat([x]); }
-        return out;
-    }
-
-    fn mergeBodyW(a: BodyW, b: BodyW) -> BodyW {
-        let ns: string[] = a.cellNames;
-        for (const x of b.cellNames) { if (ns.indexOf(x) < 0) ns = ns.concat([x]); }
-        return { lets: unionIds(a.lets, b.lets), cells: unionIds(a.cells, b.cells), cellNames: ns };
     }
 
     // A seed (or a formula) that is code: an expression, or a `{ }` block.
@@ -12411,350 +12609,9 @@ ${
         };
     }
 
-    // The declarations (Sym ids) of the component uses that start between `lo` and `hi` in `n`.
-    fn regionUses(t: Tables, n: ANode, lo: int, hi: int) -> int[] {
-        if (n.span.end <= lo || n.span.start >= hi) return [];
-        const k: ANodeK = n.k;
-        let out: int[] = [];
-        const e: AElem | not = elemOfNodeK(k);
-        if (e is given) {
-            if (e.span.start >= lo) {
-                const fct: ElemFact | not = elemFact(t.elems, e.nid);
-                const d: int = match fct {
-                    .MUse(decl: d) :> d.id,
-                    // s482 r3 (#2082 r2 review MED-2) — `<*x/>` of a declaration's shared instance:
-                    // its mount runs that instance's seeds and its renders, as a use does
-                    .MStar(decl: d) :> d.id,
-                    // no-default-arm: only a use runs a component's code
-                    _ :> -1
-                };
-                if (d >= 0) out = out.concat([d]);
-            }
-            for (const kid of e.kids) { out = unionIds(out, regionUses(t, kid, lo, hi)); }
-        }
-        const gf: AFor | not = match k {
-            .Gather(f: x) :> x,
-            // no-default-arm: only an element or a gather holds nodes
-            _ :> not
-        };
-        if (gf is given) {
-            for (const r of gatherRows(gf)) { out = unionIds(out, regionUses(t, r, lo, hi)); }
-        }
-        return out;
-    }
-
-    // s482 r2 (#2082 r1 review HIGH-2, MED-1) — the walk is DEFAULT-DENY. s482 (lane
-    // s482-value-no-write): it now looks only for `<request>`s (regionRequestBlocks; the other code an
-    // element runs at mount is a value position and cannot write). regionScan names, for the part of
-    // `n` between `lo` and `hi`, (a) the markup a `<*x/>` there renders that is NOT its kids — every
-    // state-child body of a `rule=` graph field (MStateView, all states: any may be the one held at
-    // mount), the inlined renders of a child field (MInline) — which the caller walks as it walks a
-    // component's renders; and (b) `opaque`: something there the walk does not positively
-    // understand, on which the caller fails closed (every request of the program body,
-    // requestWritesOf). Understood, by ANodeK: Text, Interp, Run, Css, Effect (no request in them);
-    // Request (regionRequestBlocks; it holds no markup); Gather (its rows); Elem — by its ElemFact:
-    // MHtml, MUse (its renders: the component loop; its slot content: its kids), MStar (a
-    // declaration's shared instance — regionUses gives it to the component loop), MEach, MSlot, MDb,
-    // MSchema (kids), MMatch (every arm's body), MStateView / MInline (the views above). Opaque:
-    // DeclNode (a declaration where markup stands), MErrors, an element with no fact.
-    type ViewW:struct = { nodes: ANode[], decl: int, key: int, file: string }
-
-    type RegionScan:struct = { views: ViewW[], opaque: boolean }
-
-    fn noScan() -> RegionScan {
-        return { views: [], opaque: false };
-    }
-
-    fn opaqueScan() -> RegionScan {
-        return { views: [], opaque: true };
-    }
-
-    fn joinScan(a: RegionScan, b: RegionScan) -> RegionScan {
-        return { views: a.views.concat(b.views), opaque: a.opaque || b.opaque };
-    }
-
-    fn regionScan(t: Tables, n: ANode, lo: int, hi: int) -> RegionScan {
-        if (n.span.end <= lo || n.span.start >= hi) return noScan();
-        const k: ANodeK = n.k;
-        return match k {
-            .Elem(e: e) :> scanElem(t, e, lo, hi),
-            .Gather(f: gf) :> scanNodes(t, gatherRows(gf), lo, hi),
-            .Text(text: x) :> noScan(),
-            .Interp(e: x) :> noScan(),
-            .Run(b: rb) :> noScan(),
-            .Css(c: x) :> noScan(),
-            .Effect(w: x) :> noScan(),
-            // s482 r3 — its body and attribute values are code (regionRequestBlocks); it holds no markup
-            .Request(r: x) :> noScan(),
-            .DeclNode(d: x) :> (n.span.start >= lo ? opaqueScan() : noScan())
-        };
-    }
-
-    fn scanNodes(t: Tables, ns: ANode[], lo: int, hi: int) -> RegionScan {
-        let out: RegionScan = noScan();
-        for (const n of ns) { out = joinScan(out, regionScan(t, n, lo, hi)); }
-        return out;
-    }
-
-    fn scanElem(t: Tables, e: AElem, lo: int, hi: int) -> RegionScan {
-        // an element that holds `lo` (an HTML element or a `<db>` the place descends through,
-        // constructStart): only what is inside it is there
-        if (e.span.start < lo) return scanNodes(t, e.kids, lo, hi);
-        const fct: ElemFact | not = elemFact(t.elems, e.nid);
-        if (fct is not) return opaqueScan();
-        return scanFact(t, e, fct, lo, hi);
-    }
-
-    fn scanFact(t: Tables, e: AElem, fct: ElemFact, lo: int, hi: int) -> RegionScan {
-        const kids: RegionScan = scanNodes(t, e.kids, lo, hi);
-        return match fct {
-            .MHtml :> kids,
-            .MUse(decl: d) :> kids,
-            .MEach(bind: b) :> kids,
-            .MSlot :> kids,
-            .MDb :> kids,
-            .MSchema :> kids,
-            .MMatch(m: m) :> scanArms(t, e, m, lo, hi),
-            .MStateView(v: v) :> joinScan(kids, stateViewScan(e, v)),
-            .MInline(v: v) :> joinScan(kids, { views: [{ nodes: v.nodes, decl: -1, key: e.nid, file: "" }], opaque: false }),
-            .MStar(decl: d) :> kids,
-            .MErrors(of: o) :> opaqueScan()
-        };
-    }
-
-    // A `<match>`: its arms are its kids (the arm element carries no ElemFact); each arm's body.
-    fn scanArms(t: Tables, e: AElem, m: MatchBlock, lo: int, hi: int) -> RegionScan {
-        let out: RegionScan = noScan();
-        for (const kid of e.kids) {
-            const ae: AElem | not = elemOfNodeK(kid.k);
-            let arm: boolean = false;
-            if (ae is given) {
-                for (const ma of m.arms) { if (ma.elem.nid == ae.nid) arm = true; }
-            }
-            if (ae is given && arm) {
-                out = joinScan(out, scanNodes(t, ae.kids, lo, hi));
-            } else out = joinScan(out, regionScan(t, kid, lo, hi));
-        }
-        return out;
-    }
-
-    fn stateViewScan(e: AElem, v: StateView) -> RegionScan {
-        let vs: ViewW[] = [];
-        let i: int = 0;
-        for (const arm of v.arms) {
-            // key: the `<*x/>` element and the arm — each state body walked once
-            vs = vs.concat([{ nodes: arm.body, decl: v.decl.id, key: e.nid * 64 + i, file: "" }]);
-            i = i + 1;
-        }
-        return { views: vs, opaque: false };
-    }
-
-    // The file a view's markup is code of: the declaring declaration's (a state body), else `file`.
-    fn placeViews(g: Globals, vs: ViewW[], file: string) -> ViewW[] {
-        let out: ViewW[] = [];
-        for (const v of vs) {
-            let f: string = file;
-            if (v.decl >= 0) {
-                for (const ds of g.decls) { if (ds.info.sym.id == v.decl) f = ds.file; }
-            }
-            out = out.concat([{ nodes: v.nodes, decl: v.decl, key: v.key, file: f }]);
-        }
-        return out;
-    }
-
-    // What the views (and the views they hold) run: their writes, the components they use (a
-    // `<*x/>` of a shared instance included), and whether any holds something opaque.
-    type ViewAcc:struct = { bw: BodyW, uses: int[], opaque: boolean }
-
-    fn viewsWrites(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[], pfields: FieldInfo[], vs0: ViewW[]) -> ViewAcc {
-        let bw: BodyW = { lets: [], cells: [], cellNames: [] };
-        let uses: int[] = [];
-        let opaque: boolean = false;
-        let seen: int[] = [];
-        let todo: ViewW[] = vs0;
-        for (; todo.length > 0; ) {
-            let next: ViewW[] = [];
-            for (const v of todo) {
-                if (seen.indexOf(v.key) < 0) {
-                    seen = seen.concat([v.key]);
-                    let cb: ABlock[] = [];
-                    for (const vn of v.nodes) {
-                        cb = cb.concat(requestCodeBlocks(vn));
-                        uses = unionIds(uses, regionUses(t, vn, -1, 2147483647));
-                        const s: RegionScan = regionScan(t, vn, -1, 2147483647);
-                        if (s.opaque) opaque = true;
-                        next = next.concat(placeViews(g, s.views, v.file));
-                    }
-                    bw = mergeBodyW(bw, blocksWrites(g, t, sum, writes, sites, lets, v.file, cb, pfields));
-                }
-            }
-            todo = next;
-        }
-        return { bw: bw, uses: uses, opaque: opaque };
-    }
-
-    // What `blocks` (code of `file`) write, directly or through a function they call.
-    fn blocksWrites(g: Globals, t: Tables, sum: Summary, writes: FxAtom[][], sites: LetW[][], lets: int[], file: string, blocks: ABlock[], pfields: FieldInfo[]) -> BodyW {
-        let ls: int[] = [];
-        let cs: int[] = [];
-        let names: string[] = [];
-        const six: SymIx = nodeSymIx(sum.nodes);
-        for (const b of blocks) {
-            for (const w of letWritesIn(t, b, lets, file)) { if (ls.indexOf(w.sym) < 0) ls = ls.concat([w.sym]); }
-            for (const a of atUsesIn(t, b)) {
-                if (writeCapOf(effectFact(t.effects, a.nid)) >= 0) {
-                    const cs0: int = progCellOf(t, a, g.program.id, pfields);
-                    if (cs0 >= 0 && cs.indexOf(cs0) < 0) cs = cs.concat([cs0]);
-                }
-            }
-            for (const j of refTargets(sum.nodes, six, scanBlock({ t: t, file: file }, b, emptyScan()).refs, false)) {
-                for (const a of writes[j]) {
-                    const w: LetW = sites[a.root][a.pos];
-                    if (ls.indexOf(w.sym) < 0) ls = ls.concat([w.sym]);
-                }
-                for (const a of sum.writes[j]) {
-                    if (a.key.indexOf("w:@") == 0 && names.indexOf(a.key.substring(2)) < 0) names = names.concat([a.key.substring(2)]);
-                }
-            }
-        }
-        return { lets: ls, cells: cs, cellNames: names };
-    }
-
     fn exprBlock(e: AExpr) -> ABlock {
         const st: AStmt = { nid: -1, span: e.span, k: AStmtK.Eval(e) };
         return { nid: -1, span: e.span, stmts: [st] };
-    }
-
-    fn requestBlocks(r: ARequest) -> ABlock[] {
-        let out: ABlock[] = [r.body];
-        for (const a of r.attrs) {
-            if (eventName(a.name) == "") {
-                const v: AAttrValue = a.value;
-                const x: AExpr | not = match v {
-                    .Bare(e: x) :> x,
-                    .Paren(e: x) :> x,
-                    // no-default-arm: only an expression value is code
-                    _ :> not
-                };
-                if (x is given) out = out.concat([exprBlock(x)]);
-            }
-        }
-        return out;
-    }
-
-    // The first thing a (non-acting) initializer reads that the body writes, shown for a message
-    // (`` `n` `` / `` `@c` ``); "" when it reads none. s482 (s482-construct-init-fu): a read of a
-    // program cell whose seed would run at that read — a derived cell's formula (it runs at every
-    // read), or the seed of a cell whose place is at or after `lo` (not run yet when the place before
-    // the construct is reached) — follows what that seed or formula reads (`seen`: cells followed).
-    // s482 r1 (#2096 review HIGH-1) — the read side follows calls: what each function the
-    // initializer calls or hands on as a value reads, at any depth (`reads`, the A3 closure: the
-    // file-scope bindings; `usesR`: the program cells), counts as read by the initializer; a call the
-    // analysis cannot resolve fails closed when the requests there write anything.
-    type ReadCx:struct = { sum: Summary, six: SymIx, reads: FxAtom[][], usesR: FxAtom[][] }
-
-    // s482 r2 (#2096 review LOW-1): the first function value (`x => …`, a block lambda) or `match` /
-    // handling form in `e` — what initReadWritten's read scan does not follow — else `not`.
-    fn readScanOpaqueIn(e: AExpr) -> AExpr | not {
-        const k: AExprK = e.k;
-        const own: boolean = match k {
-            .Lambda(params: x) :> true,
-            .BlockLambda(params: x) :> true,
-            .Handled(h: x) :> true,
-            .At(name: n) :> false,
-            .AtItem :> false,
-            .Assign(target: t) :> false,
-            .Name(name: n) :> false,
-            .Num(raw: r) :> false,
-            .Str(v: v) :> false,
-            .Bool(v: v) :> false,
-            .NotLit :> false,
-            .Recovered :> false,
-            .Variant(name: n) :> false,
-            .Member(obj: o) :> false,
-            .Unary(op: o) :> false,
-            .Binary(op: o) :> false,
-            .Ternary(test: t) :> false,
-            .Template(quasis: q) :> false,
-            .HashRef(id: hr0) :> false,
-            .Foreign(f: fb0) :> false,
-            .Call(callee: c) :> false,
-            .ArrayLit(elems: x) :> false,
-            .ObjectLit(props: x) :> false,
-            .Spread(e: x) :> false,
-            .Index(obj: o) :> false,
-            .Sql(q: x) :> false
-        };
-        if (own) return e;
-        for (const x of exprKids(e)) {
-            const r: AExpr | not = readScanOpaqueIn(x);
-            if (r is given) return r;
-        }
-        return not;
-    }
-
-    fn initReadWritten(t: Tables, rx: ReadCx, file: string, inits: AExpr[], bw: BodyW, prog: int, pfields: FieldInfo[], cells: BodyCell[], lo: int, seen: int[]) -> string {
-        let more: AExpr[] = [];
-        let seen2: int[] = seen;
-        const bwAny: boolean = bw.lets.length > 0 || bw.cells.length > 0 || bw.cellNames.length > 0;
-        for (const init of inits) {
-            const b: ABlock = exprBlock(init);
-            for (const ne of nameExprsIn(b)) {
-                const id: int = constSymOfFact(nameFact(t.names, ne.nid));
-                if (id >= 0 && bw.lets.indexOf(id) >= 0) return "`" + letNameOf(t, id) + "`";
-            }
-            if (bwAny) {
-                // s482 r2 (#2096 review LOW-1): the scan below does not look inside a function value or a
-                // `match` / handling form written in the initializer (`xs.map(x => x + rd())`, `match (1) {
-                // 1 => rd(), … }`) — fail closed on one. Today g-boot-file-scope-init-residue-s479 refuses
-                // these too (E-BOOTSTRAP-UNSUPPORTED); lifting it depends on this refusal (or on scanning
-                // into those bodies with the same closure), or such a read would compile to a wrong value.
-                const ov: AExpr | not = readScanOpaqueIn(init);
-                if (ov is given) return "what " + blockerWhat(ov) + " in it reads (the bootstrap does not follow the reads inside one here, so it fails closed)";
-                const sc: BodyScan = scanValue({ t: t, file: file }, AAttrValue.Bare(init), emptyScan());
-                if (sc.unproven.length > 0) return "what a call the analysis cannot follow returns (" + sc.unproven[0].what + " — §6.7.4 rule 4: it may read anything, so the bootstrap fails closed)";
-                for (const r of sc.refs) {
-                    const j: int = ixGet(rx.six, r.sym);
-                    if (j < 0) return "what `" + r.name + "` returns (a call the analysis cannot follow — it may read anything, so the bootstrap fails closed)";
-                    for (const a of rx.reads[j]) {
-                        const id: int = atomBinding(a.key);
-                        if (a.key.indexOf("b:") == 0 && bw.lets.indexOf(id) >= 0) return "`" + letNameOf(t, id) + "` (through `" + r.name + "`, which reads it: `" + chainText(fxChain(rx.sum, rx.reads, j, a)) + " → " + letNameOf(t, id) + "`)";
-                    }
-                    for (const a of rx.usesR[j]) {
-                        if (a.key.indexOf("c:") == 0) {
-                            const cs: int = atomBinding(a.key);
-                            for (const fi of pfields) {
-                                if (fi.sym.id == cs && (bw.cells.indexOf(cs) >= 0 || bw.cellNames.indexOf("@" + fi.sym.hint) >= 0)) return "`@" + fi.sym.hint + "` (through `" + r.name + "`, which reads it: `" + chainText(fxChain(rx.sum, rx.usesR, j, a)) + " → @" + fi.sym.hint + "`)";
-                            }
-                            const bc: BodyCell | not = cellOfSym(cells, cs);
-                            if (bc is given && seen2.indexOf(cs) < 0 && (bc.derived || (lo >= 0 && bc.pos >= lo))) {
-                                seen2 = seen2.concat([cs]);
-                                const x: AExpr | not = valueExpr(bc.init);
-                                if (x is given) more = more.concat([x]);
-                            }
-                        }
-                    }
-                }
-            }
-            for (const a of atUsesIn(t, b)) {
-                const cs: int = progCellOf(t, a, prog, pfields);
-                if (cs >= 0) {
-                    for (const fi of pfields) {
-                        if (fi.sym.id == cs && (bw.cells.indexOf(cs) >= 0 || bw.cellNames.indexOf("@" + fi.sym.hint) >= 0)) return "`@" + fi.sym.hint + "`";
-                    }
-                    const bc: BodyCell | not = cellOfSym(cells, cs);
-                    if (bc is given && seen2.indexOf(cs) < 0 && (bc.derived || (lo >= 0 && bc.pos >= lo))) {
-                        seen2 = seen2.concat([cs]);
-                        const x: AExpr | not = valueExpr(bc.init);
-                        if (x is given) more = more.concat([x]);
-                    }
-                }
-            }
-        }
-        if (more.length == 0) return "";
-        const r: string = initReadWritten(t, rx, file, more, bw, prog, pfields, cells, lo, seen2);
-        if (r != "") return r + " (through the seed or formula of a cell it reads)";
-        return "";
     }
 
 
@@ -19776,6 +19633,69 @@ ${
             done = r.done;
         }
         return { msg: "", done: done };
+    }
+
+    // s482 r1 (#2107 F4, W-DISPLAY-UNTRACKED's fix-it) — a written type as source text, its grants as
+    // written (a reader: the grant words are read here only to quote them); `extra` grants are added to the outermost tape's bracket.
+    fn aTypeWritten(t: AType, extra: string[]) -> string {
+        const k: ATypeK = t.k;
+        return match k {
+            .TName(name: n) :> n,
+            .TSeq(elem: e, grants: gs) :> seqElemWritten(e) + "[" + gs.concat(extra).join(", ") + "]",
+            .TMaybe(inner: i) :> aTypeWritten(i, extra) + " | not",
+            .TLife(pre: f, post: x) :> "(" + aTypeWritten(f, []) + " to " + aTypeWritten(x, []) + ")",
+            .TRefine(base: b, pred: p) :> aTypeWritten(b, []) + "(" + p + ")",
+            .TFn(params: ps, ret: r, fx: x) :> fnATypeText(ps, r, x)
+        };
+    }
+
+    fn seqElemWritten(e: AType) -> string {
+        const k: ATypeK = e.k;
+        return match k {
+            .TMaybe(inner: i) :> "(" + aTypeWritten(e, []) + ")",
+            // no-default-arm: one question of an element type — does it need parentheses
+            _ :> aTypeWritten(e, [])
+        };
+    }
+
+    // The grants written on the outermost tape of a written type.
+    fn aTypeGrants(t: AType) -> string[] {
+        const k: ATypeK = t.k;
+        return match k {
+            .TSeq(elem: e, grants: gs) :> gs,
+            .TMaybe(inner: i) :> aTypeGrants(i),
+            // no-default-arm: only a tape carries grants
+            _ :> []
+        };
+    }
+
+    // s482 r2 (#2107 F-C, W-DISPLAY-UNTRACKED's fix-it) — a tape cell's type as source text: the grants
+    // written on `at` (none: the element `elem` with an empty bracket), plus the ones `need` (the grants
+    // its writes need, writeGrantsOf) adds — and `free` when an edit grows or shrinks the tape and no
+    // `free` is written (§66.12.1–§66.12.2, E-WRITE-INVARIANT). `note`: the message's account of the added.
+    type TapeCellText:struct = { ty: string, note: string }
+
+    fn tapeCellText(at: AType | not, elem: string, need: string[], name: string) -> TapeCellText {
+        let have: string[] = [];
+        if (at is given) have = aTypeGrants(at);
+        let added: string[] = [];
+        let resizes: boolean = false;
+        for (const gr of need) {
+            if (gr == "append" || gr == "prepend" || gr == "pop" || gr == "shift" || gr == "remove" || gr == "insert") resizes = true;
+        }
+        if (resizes && have.indexOf("free") < 0) added = ["free"];
+        for (const gr of need) {
+            if (have.indexOf(gr) < 0 && added.indexOf(gr) < 0) added = added.concat([gr]);
+        }
+        let ty: string = elem + "[" + added.join(", ") + "]";
+        if (at is given) ty = aTypeWritten(at, added);
+        let parts: string[] = [];
+        for (const gr of added) { parts = parts.concat(["`" + gr + "`"]); }
+        let note: string = "";
+        if (added.length > 0 && have.length > 0) note = ": the grants written, plus " + parts.join(", ") + " for the writes of `" + name + "`";
+        if (added.length > 0 && have.length == 0) note = ": " + parts.join(", ") + " for the writes of `" + name + "`";
+        if (added.indexOf("free") >= 0) note = note + " (`free`: an edit that grows or shrinks a tape needs it, §66.12.2)";
+        return { ty: ty, note: note };
     }
 
     // ---- END OF THE TAPE GRANT READER (tape-write-forms.test.js: no grant is read outside it) ----

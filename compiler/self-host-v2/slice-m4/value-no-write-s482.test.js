@@ -13,8 +13,9 @@
 //   Riders: Q5 — a runtime `^{}` inside a construct is a value position (may not write an enclosing `let`);
 //      Q13 — a locked field's initializer that writes is E-VALUE-WRITES-STATE.
 // The INTERIM construct write-side enumeration (g-boot-construct-seed-bound-s482 — this file replaces
-// cell-seed-bound-s482.test.js, which pinned it) is deleted; the one write route left is a `<request>`'s
-// first load in the body (g-boot-request-runs-in-body-s482): INTERIM g-boot-construct-request-write-s482.
+// cell-seed-bound-s482.test.js, which pinned it) is deleted; ~~the one write route left is a `<request>`'s
+// first load in the body (g-boot-request-runs-in-body-s482): INTERIM g-boot-construct-request-write-s482~~
+// — closed by the Q6 hold and deleted (s482-hold-body).
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
@@ -243,89 +244,70 @@ let <e:string="" length(>2)/>
   }, 120000);
 });
 
-describe("INTERIM (g-boot-construct-request-write-s482): a `<request>` there runs its first load in the body", () => {
-  const cases = [
-    ["r03 (body `@r = srv(bump())`)", `    server function srv(a: int) -> string { return "x"; }
-    let <r:string=""/>
-    <div if=(true)><request id="rq" deps=[]>\${ @r = srv(bump()); }</>\${ const k: int = n + 0; }<p id="o">\${k}</p></div>
-`],
-    ["r06 (no deps, body `@r = bump()`)", `    let <r:int=0/>
-    <div if=(true)><request id="rq">\${ @r = bump(); }</><b>\${@r}</b>\${ const k: int = n + 0; }<p id="o">\${k}</p></div>
-`],
-  ];
-  for (const [name, body] of cases) {
-    test(name + " refused at the reader", async () => {
-      const d = await errors(PRE + "<program>\n" + body + "</program>\n");
-      expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
-      expect(d[0].message).toContain("the initializer of `const k` reads `n`, which a `<request>` inside");
-      expect(d[0].message).toContain("g-boot-construct-request-write-s482");
-    }, 120000);
-  }
-
-  // s482 r1 (#2096 review HIGH-1): the read side follows calls — what a function the initializer calls
-  // reads, at any depth, counts (base refused these as "acting"; head before r1 showed `#o` = 1 in Chromium,
-  // source order gives 5).
+// s482 (lane s482-hold-body; RULED S482, ruling:user-voice-scrml.md-S482-hold-until-body-ends — Q6 (b): "the
+// runtime holds effect and request runs triggered during the body, running them after the body in trigger order"):
+// the INTERIM g-boot-construct-request-write-s482 (E-FILE-SCOPE-INIT-IN-CONSTRUCT for an initializer inside a
+// construct reading what a `<request>` there, before it, writes) is DELETED. The request's load now runs after the
+// body wherever it stands, and the initializer runs just before the construct (§7.6 R3), so it reads the value
+// before the load — the same whether the request is written before or after it ("then the load runs after the
+// body under both orders", the gap's capable alternative). Chromium head: every shape below shows `#o` = 1, as
+// does its twin with the request after the initializer.
+describe("Q6 hold: a `<request>` inside a construct no longer refuses the initializer after it", () => {
   const RQ = `    let <r:int=0/>
     \${ function rd() -> int { return n; } }
     \${ function rd2() -> int { return rd() + 0; } }
 `;
-  const viaCalls = [
+  const cases = [
+    ["r06 (no deps, body `@r = bump()`)", `    <div if=(true)><request id="rq">\${ @r = bump(); }</><b>\${@r}</b>\${ const k: int = n + 0; }<p id="o">\${k}</p></div>
+`],
     ["q01 (`const k = rd() + 0`)", `    <div if=(true)><request id="rq">\${ @r = bump(); }</request>\${ const k: int = rd() + 0; }<p id="o">\${k}</p></div>
-`, "`n` (through `rd()`, which reads it: `rd() → n`)"],
+`],
     ["t08 (in a nested `<span>`)", `    <div if=(true)><request id="rq">\${ @r = bump(); }</request><span>\${ const k: int = rd() + 0; }<b id="o">\${k}</b></span></div>
-`, "`n` (through `rd()`"],
+`],
     ["t09 (`rd2() → rd() → n`)", `    <div if=(true)><request id="rq">\${ @r = bump(); }</request>\${ const k: int = rd2(); }<p id="o">\${k}</p></div>
-`, "`n` (through `rd2()`, which reads it: `rd2() → rd() → n`)"],
+`],
     ["t10 (an `else` branch)", `    let <f:boolean=false/>
     <p if=(@f)>a</p>
     <div else><request id="rq">\${ @r = bump(); }</request>\${ const k: int = rd(); }<p id="o">\${k}</p></div>
-`, "`n` (through `rd()`"],
+`],
   ];
-  for (const [name, body, how] of viaCalls) {
-    test("HIGH-1 " + name + ": a read through a call is refused at the reader", async () => {
-      const d = await errors(PRE + "<program>\n" + RQ + body + "</program>\n");
-      expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
-      expect(d[0].message).toContain("the initializer of `const k` reads " + how);
+  for (const [name, body] of cases) {
+    test(name + ": compiles; the initializer reads the value before the held load — 1", async () => {
+      const src = PRE + "<program>\n" + RQ + body + "</program>\n";
+      expect(await codes(src)).toEqual([]);
+      expect(await texts(src, ["o"])).toEqual(["1"]);
     }, 120000);
   }
 
-  test("HIGH-1: a cell the request writes, read through a call, is refused too", async () => {
-    const d = await errors(PRE + `<program>
-    let <r:int=0/>
-    \${ function rdc() -> int { return @r; } }
-    <div if=(true)><request id="rq">\${ @r = bump(); }</request>\${ const k: int = rdc() + 0; }<p id="o">\${k}</p></div>
-</program>
-`);
-    const c = d.find((x) => x.code === "E-FILE-SCOPE-INIT-IN-CONSTRUCT");
-    expect(c?.message).toContain("reads `@r` (through `rdc()`, which reads it: `rdc() → @r`)");
+  test("twin: the request written AFTER the initializer gives the same value (order-independent) — 1", async () => {
+    const src = PRE + "<program>\n" + RQ + `    <div if=(true)>\${ const k: int = rd() + 0; }<p id="o">\${k}</p><request id="rq">\${ @r = bump(); }</request></div>
+` + "</program>\n";
+    expect(await codes(src)).toEqual([]);
+    expect(await texts(src, ["o"])).toEqual(["1"]);
   }, 120000);
 
-  test("HIGH-1 positive twin: the called function reads a `let` the request does NOT write — compiles, k = 3", async () => {
-    expect(await texts(PRE + `<program>
-    let <r:int=0/>
-    \${ let m: int = 3; }
-    \${ function rdm() -> int { return m; } }
-    <div if=(true)><request id="rq">\${ @r = bump(); }</request>\${ const k: int = rdm() + 0; }<p id="o">\${k}</p></div>
+  test("r03 (a server call in the body): no E-FILE-SCOPE-INIT-IN-CONSTRUCT", async () => {
+    expect(await codes(PRE + `<program>
+    server function srv(a: int) -> string { return "x"; }
+    let <r:string=""/>
+    <div if=(true)><request id="rq" deps=[]>\${ @r = srv(bump()); }</>\${ const k: int = n + 0; }<p id="o">\${k}</p></div>
 </program>
-`, ["o"])).toEqual(["3"]);
+`)).not.toContain("E-FILE-SCOPE-INIT-IN-CONSTRUCT");
   }, 120000);
 
-  // s482 r2 (#2096 r1 review LOW-1): the read scan does not follow a function value or a `match` written in
-  // the initializer, so it fails closed on one (h31 / h06). g-boot-file-scope-init-residue-s479 refuses these
-  // too today (E-BOOTSTRAP-UNSUPPORTED); this refusal is what keeps them closed when that INTERIM lifts.
+  // h31 / h06 (#2096 r1 review LOW-1) failed closed in the deleted read scan; whatever else refuses them today
+  // (g-boot-file-scope-init-residue-s479), it is no longer this INTERIM.
   const opaque = [
     ["h31 (a lambda: `xs.map(x => x + rd())`)", `    \${ const xs: int[] = [1]; }
     <div if=(true)><request id="rq" deps=[]>\${ @r = bump(); }</request>\${ const k: string = xs.map(x => x + rd()).join(","); }<p id="o">\${k}</p></div>
-`, "a function value"],
+`],
     ["h06 (`match` arms)", `    \${ function z() -> int { return 0; } }
     <div if=(true)><request id="rq" deps=[]>\${ @r = bump(); }</request>\${ const k: int = match (1) { 1 => rd(), _ => z() }; }<p id="o">\${k}</p></div>
-`, "a `match` or a handling form"],
+`],
   ];
-  for (const [name, body, what] of opaque) {
-    test("LOW-1 " + name + ": fails closed with E-FILE-SCOPE-INIT-IN-CONSTRUCT", async () => {
-      const d = await errors(PRE + "<program>\n" + RQ + body + "</program>\n");
-      const c = d.find((x) => x.code === "E-FILE-SCOPE-INIT-IN-CONSTRUCT");
-      expect(c?.message).toContain("the initializer of `const k` reads what " + what + " in it reads (the bootstrap does not follow the reads inside one here, so it fails closed)");
+  for (const [name, body] of opaque) {
+    test(name + ": no E-FILE-SCOPE-INIT-IN-CONSTRUCT", async () => {
+      expect(await codes(PRE + "<program>\n" + RQ + body + "</program>\n")).not.toContain("E-FILE-SCOPE-INIT-IN-CONSTRUCT");
     }, 120000);
   }
 
@@ -434,7 +416,9 @@ describe("A3 — E-DERIVED-READS-UNTRACKED", () => {
   // initializer that reads no cell, directly or through the functions it calls, is not derived (Q13: "the
   // derived-iff-reads-a-cell half stands"), so reading a written `let` through a call is legal there, as the
   // direct form `(n + 1)` already was. Probes h08 / l01 (base: compiles, `#o` = 5 in Chromium).
-  test("MED-1 h08: a prop default reading a written `let` through a call compiles — 5 (the request ran first)", async () => {
+  // s482 (s482-hold-body, Q6): the request's load is held until the body ends, so the instance's prop default,
+  // seeded at the instance's place, reads `n` before `bump()` — 1 (base 5: the load ran where it stood).
+  test("MED-1 h08: a prop default reading a written `let` through a call compiles — 1 (the request is held)", async () => {
     expect(await texts(`<program>
 \${ let n: int = 1; }
 \${ function bump() -> int { n = 5; return 0; } }
@@ -444,7 +428,7 @@ let <r:int=0/>
 </> renders <p id="o">\${v}</p>
 <request id="rq" deps=[]>\${ @r = bump(); }</request><cp/>
 </program>
-`, ["o"])).toEqual(["5"]);
+`, ["o"])).toEqual(["1"]);
   }, 120000);
 
   test("MED-1 l01: a locked field initializer reading a written `let` through a call compiles — 2", async () => {

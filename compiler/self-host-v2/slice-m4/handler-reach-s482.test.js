@@ -9,8 +9,10 @@
 // every view before a place into `reached` with reachOf, which walked the view's handlers as if
 // they ran in the body — `k` ran at module initialization, before `n = 5` (Chromium `1`, the
 // source order `5`). Fix: reachOf walks only the code that runs when its roots run (runsNowNode).
-// An `<effect>` / `<request>` body is still walked — both run during the body today
-// (g-boot-effect-fires-in-body-before-place-s482, g-boot-request-runs-in-body-s482); "E" pins it.
+// ~~An `<effect>` / `<request>` body is still walked — both run during the body today~~ s482 (lane
+// s482-hold-body, ruling:user-voice-scrml.md-S482-hold-until-body-ends): effect and request runs triggered
+// during the body are held until it ends, so their bodies are not walked either; "E" pins the values
+// (g-boot-effect-fires-in-body-before-place-s482, g-boot-request-runs-in-body-s482, resolved).
 //
 // Every case runs on the SHIPPING path: scripts/scrml-boot.ts `compileSource` → print.scrml, and
 // the conformance runner's `runBootstrapArtifact` (happy-dom; the values were also measured in
@@ -209,30 +211,33 @@ let <o:int=0/>
   }, 120000);
 });
 
-describe("E — kept as they are (they run during the body today): `<effect>` and `<request>`", () => {
-  // g-boot-effect-fires-in-body-before-place-s482 (OPEN owner question): a body-top write of the
-  // effect's dependency runs it during the body, so what it reaches is still run early (`1`, the
-  // source order 5) — not made worse here: skipping it would read `k` uninitialized.
-  test("e1: an effect whose dependency a body-top statement writes (probe r1-effect-fire) — unchanged", async () => {
+describe("E — `<effect>` and `<request>` (s482-hold-body: held until the body ends, Q6)", () => {
+  // g-boot-effect-fires-in-body-before-place-s482 (RESOLVED, ruling:user-voice-scrml.md-S482-hold-until-body-ends):
+  // the body-top write `@a = 2` triggers the effect, which is held until the body ends; it then reads `k` = 5
+  // (its place ran). `out` is a plain `let` shown at its place, before the effect ran — 0 there; the click shows
+  // the value the effect wrote — 5 (base: `1 1` / 1 — `k` had been run before the body, missing `n = 5`).
+  test("e1: an effect whose dependency a body-top statement writes (probe r1-effect-fire) — reads `k` = 5 after the body", async () => {
     const res = await compile(P(`\${ let out: int = 0; }
 \${ function note() -> int { out = k; return 1; } }
 let <a:int=0/>
 <effect deps=[@a]>\${ note(); }</effect>
 \${ @a = 2; }
 \${ const k: int = n + 0; }
-<p id="s">\${out} \${k}</p>`));
-    expect(await texts(res, ["s"])).toEqual(["1 1"]);
+<p id="s">\${out} \${k}</p>
+<button id="b" onclick=\${ @o = out; }>go</button>
+<p id="o">\${@o}</p>`));
+    expect(await texts(res, ["s", "o"])).toEqual(["0 5", "0"]);
+    expect(await texts(res, ["s", "o"], CLICK)).toEqual(["0 5", "5"]);
   }, 120000);
 
-  // g-boot-request-runs-in-body-s482: rt.requestOn runs a request's first load where it stands,
-  // during the body — skipping its body (as the lane brief proposed, after §7.6's "they run after
-  // the mount") showed `NaN 5` (the later `k` read uninitialized). Kept: `2 1` (source order `6 5`).
-  test("e2: a `<request>` body reaching a later binding (probe r1-request) — unchanged, never uninitialized", async () => {
+  // g-boot-request-runs-in-body-s482 (RESOLVED): the request's mount run is held until the body ends, so its
+  // body reads `k` from its place — `6 5`, the source order (base `2 1`).
+  test("e2: a `<request>` body reaching a later binding (probe r1-request) — `6 5`", async () => {
     const res = await compile(P(`let <m:int=0/>
 \${ function cnt(x: int) -> int { return x + k; } }
 <request id="load">\${ @m = cnt(1); }</request>
 \${ const k: int = n + 0; }
 <p id="s">\${@m} \${k}</p>`));
-    expect(await texts(res, ["s"])).toEqual(["2 1"]);
+    expect(await texts(res, ["s"])).toEqual(["6 5"]);
   }, 120000);
 });
