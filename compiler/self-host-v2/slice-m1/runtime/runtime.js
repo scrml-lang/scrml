@@ -904,13 +904,18 @@ class Request {
   run(start = 0) {
     if (this.disposed) return;
     // s482 (s482-hold-body): a held run starts dated at its trigger (markStale / resetRun above)
-    if (start === 0 && this.heldStart > 0) start = this.heldStart;
+    const held = start === 0 && this.heldStart > 0;
+    if (held) start = this.heldStart;
     this.heldStart = 0;
+    const p = this.target.pend;
+    // s482 r1 (F4): a held load of a pending cell that a newer body write has already superseded is
+    // not issued — its result would be discarded by `pendOlder` when it settled (unheld, the write
+    // cancelled the live run's task and aborted a READ's transport; a held run has no task yet)
+    if (held && p !== null && p.req === this && pendOlder(p, start)) return;
     for (const t of this.tasks) t.cancel();
     this.tasks.clear();
     const task = new Task(this, this.read);
     this.tasks.add(task);
-    const p = this.target.pend;
     // N2: this load's start stamp — a reset's (resetRun), else now (a mount / dependency-change run
     // starts when it runs: the end of the batch that triggered it, §13.9.4 rule 3)
     if (p !== null && p.req === this) p.load = start > 0 ? start : ++pendSeq;

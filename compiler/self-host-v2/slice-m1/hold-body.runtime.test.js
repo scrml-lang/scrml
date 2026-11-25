@@ -123,9 +123,39 @@ describe("§13.9.4 — a held run of a pending cell's load is dated at its trigg
       rt.requestOn(scope, who, [], () => ({ on: new Promise((r) => { resolve = r; }), then: (v) => who.set(v) }), { read: true });
       who.set("z");
     });
-    resolve("loaded");
+    resolve?.("loaded");   // s482 r1 (F4): the superseded held load is not issued at all
     await tick();
     expect(who.peek()).toBe("z");
+    scope.dispose();
+  });
+
+  test("a held load a body write has superseded is not issued (no fetch for a discarded result)", async () => {
+    // s482 r1 (F4) — mutation RED: Request.run issuing a held run whose start `pendOlder` already loses
+    const scope = rt.root.child();
+    const who = rt.cell(null);
+    let fetches = 0;
+    rt.runBody(() => {
+      rt.requestOn(scope, who, [], () => { fetches++; return { on: Promise.resolve("loaded"), then: (v) => who.set(v) }; }, { read: true });
+      who.set("z");
+    });
+    await tick();
+    expect(fetches).toBe(0);
+    expect(who.peek()).toBe("z");
+    scope.dispose();
+  });
+
+  test("a body write of `not` after the request re-dates the load: it is issued once and lands", async () => {
+    const scope = rt.root.child();
+    const who = rt.cell(null);
+    let fetches = 0;
+    rt.runBody(() => {
+      rt.requestOn(scope, who, [], () => { fetches++; return { on: Promise.resolve("loaded"), then: (v) => who.set(v) }; }, { read: true });
+      who.set("z");
+      who.set(null);
+    });
+    await tick();
+    expect(fetches).toBe(1);
+    expect(who.peek()).toBe("loaded");
     scope.dispose();
   });
 

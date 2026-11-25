@@ -183,3 +183,66 @@ let <m:int=0/>
     expect(await texts(res, ["in", "o"], [{ click: "#b" }, { click: "#c" }])).toEqual(["[]", "R"]);
   }, 120000);
 });
+
+// s482 r1 (review F1/F5): the PA reading of "trigger order" (S482 Q6; prov=pa-ruled) — a run triggered more
+// than once during the body runs once, at its first trigger's position, reading the values as they are when it
+// runs — and a held run whose construct the body tore down does not run (EC-3). Review probes a03/a10/a05/a04.
+describe("dedupe and teardown of held runs (PA reading, prov=pa-ruled)", () => {
+  test("a03: an effect triggered twice (`@a = 1; @a = 7;`) runs once and reads 7 (base `eXe7`)", async () => {
+    const res = await compile(`<program>
+\${ let log: string = ""; }
+\${ function lgi(x: int) -> int { if (x == 7) { log = log + "e7"; } else { log = log + "eX"; } return 1; } }
+let <a:int=0/>
+let <o:string=""/>
+<effect deps=[@a]>\${ lgi(@a); }</>
+\${ @a = 1; }
+\${ @a = 7; }
+<button id="b" onclick=\${ @o = log; }>go</button>
+<p id="o">\${@o}</p>
+</program>
+`);
+    expect(await texts(res, ["o"], CLICK)).toEqual(["e7"]);
+  }, 120000);
+
+  test("a10: a request whose dependency the body writes after its mount runs once, reading 3 (base `R0R3`)", async () => {
+    const res = await compile(`<program>
+\${ let log: string = ""; }
+\${ function lgq(q: int) -> int { if (q == 3) { log = log + "R3"; } else { log = log + "R0"; } return 1; } }
+let <q:int=0/>
+let <m:int=0/>
+let <o:string=""/>
+<request id="rq" deps=[@q]>\${ @m = lgq(@q); }</request>
+\${ @q = 3; }
+<button id="b" onclick=\${ @o = log; }>go</button>
+<p id="o">\${@o}</p>
+</program>
+`);
+    expect(await texts(res, ["o"], CLICK)).toEqual(["R3"]);
+  }, 120000);
+
+  test("a05: a body `refetch()` is absorbed into the request's held mount run — R once (base `RR`)", async () => {
+    const res = await compile(`<program>
+${LOG}
+let <m:int=0/>
+<request id="rq" deps=[]>\${ @m = lg("R"); }</request>
+\${ <#rq>.refetch(); }
+${SHOW}
+</program>
+`);
+    expect(await texts(res, ["o"], CLICK)).toEqual(["R"]);
+  }, 120000);
+
+  test("a04: a request mounted then torn down later in the body does not run (EC-3; base `R`)", async () => {
+    const res = await compile(`<program>
+${LOG}
+let <f:boolean=true/>
+let <m:int=0/>
+<div if=(@f)><request id="rq" deps=[]>\${ @m = lg("R"); }</request></div>
+\${ @f = false; }
+${SHOW}
+<p id="o2">\${@m}</p>
+</program>
+`);
+    expect(await texts(res, ["o", "o2"], CLICK)).toEqual(["", "0"]);
+  }, 120000);
+});
