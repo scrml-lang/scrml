@@ -69,3 +69,10 @@ R4 fixes), 2 crash → named refusal, the rest unchanged. Results: B.txt / F.txt
 - Pinned: slice instance-mount-reach-s482 "F1" describe (x01, x01c, x12 + derived read before `k` still
   refused) — 3 red on 9fdaa7925, 38/38 green; new Chromium file
   compiler/tests/browser/shared-instance-reach-chromium-s482.browser.test.js — 3 red on 9fdaa7925, 3/3 green.
+- F2: SPEC §7.6 R2 + gap g-boot-shared-instance-reach-hoist-s482 (body, locus, the "what resolved covers"
+  line) now name the remaining roots of constructedElsewhere: a function (client/server), an unplaced
+  file-scope binding's initializer (not observed — z03 E-BOOTSTRAP-UNSUPPORTED), a declaration constructed
+  elsewhere, transitively; SPEC states the construction runs the seeds only (F1).
+- F4: selfStarDiag message no longer says "without end" (true only while the arm is shown; cycles through
+  states that cannot co-hold are refused too). c05 (component mounting itself; stack overflow at load,
+  confirmed in Chromium on the merged tree) gets its own gap g-boot-component-mounts-self-s483 (LOW).

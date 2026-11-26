@@ -31174,7 +31174,7 @@ ${
     }
 
     fn selfStarDiag(st: AS, env: Env, e: AElem) -> AS {
-        return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<*" + e.tag + "/>` stands inside the markup it renders (a state-child body that shows its own field, or a field's `renders` that holds its own `<*" + e.tag + "/>`, directly or through another `<*f/>`): each one renders that markup again, without end — not in the bootstrap (§66.6.2, O5 (1i); no ruling gives such a render an end). Render the field from outside its own markup");
+        return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<*" + e.tag + "/>` stands inside the markup it renders (a state-child body that shows its own field, or a field's `renders` that holds its own `<*" + e.tag + "/>`, directly or through another `<*f/>`): while the arm holding it is shown, each one renders that markup again; every such cycle is refused, even one through states that cannot hold at the same time — not in the bootstrap (§66.6.2, O5 (1i); no ruling gives such a render an end). Render the field from outside its own markup");
     }
 
     // The state-children of the field declared by the ADecl `fieldNid` inside

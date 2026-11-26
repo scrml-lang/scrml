@@ -6575,7 +6575,8 @@ ${
     // elsewhere (transitively). One in the program's body — a display, an attribute, a statement, a
     // placed binding's initializer, a program cell's seed, the code of an instance the body mounts —
     // constructs the instance where it stands (`shared_<decl>()` is printed at the reference); the
-    // order walk reaches its seeds there (reachOf follows a shared reference into every field), so
+    // order walk reaches its seeds there (reachOf follows a shared reference into every seeded
+    // field; a derived field is reached where it is read — S483 #2116 review F1), so
     // a body binding the instance reads is computed at its own place, before the reference (R2
     // refuses a reference before it — analyze sharedReach), not hoisted to module initialization.
     fn constructedElsewhere(p: CoreProgram, marked: int[]) -> int[] {
