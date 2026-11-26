@@ -215,6 +215,74 @@ describe("bindings the client runs, and shells that reach nothing", () => {
   }, 180000);
 });
 
+// s482 r1 (#2113 review HIGH-1, PRE-1, MED-1, PRE-2). An acting initializer that nothing reads runs in
+// the client alone (§7.6 rule (b): "every file-scope initializer runs"); it is client code, so what it
+// reads is client-READ and held with its initializer — red on 19a014391: `let lit = null; let z = rec(lit);`
+// (v01, `plain` -> `null`), and on 153bd0334 too without the write (v01c, ReferenceError: lit). When the
+// binding it reads reaches the secret (v02), both are server-only (the largest set): the initializer and
+// its side effect run in the server artifact, and the client does not see them. A kept condition-head
+// assignment (`if ((x = v) == …)`, §50) is a whole-value write — red on 153bd0334 and 19a014391 alike
+// (v07 / v07b: ReferenceError at the click; x was in neither artifact's client).
+const ACT = (init, mark) => `\${
+    const API_KEY: string = "zz-sk-live-123";
+    function tag(s: string) -> string { return "[" + s + "]"; }
+    let lit: string = ${init};
+    let hits: string = "";
+    function rec(s: string) -> string { hits = hits + ${mark}; return "r"; }
+    let z: string = rec(lit);
+    function peek() -> string { return hits; }
+}`;
+const ACT_UI = `<button id="r" onclick={ @out = peek(); }>r</button>`;
+
+describe("a binding an acting, unread client initializer reads (#2113 r1)", () => {
+  test("v01: written by a handler, read only by `let z = rec(lit)` — held with its initializer, not a shell", async () => {
+    const s = PROG(ACT('"plain"', "s"), `${ACT_UI}\n<button id="b" onclick={ lit = "w"; }>b</button>`);
+    const b = await build(s);
+    expect(b.js).toMatch(/^let lit\w* = "plain";$/m);
+    expect(b.js).toMatch(/^let z\w* = rec\w*\(lit\w*\);$/m);
+    expect(await texts(s, ["c"], [{ click: "#b" }, { click: "#r" }])).toEqual(["[plain]"]);
+  }, 180000);
+
+  test("v01c: the same with no write — held (was left out: ReferenceError at load)", async () => {
+    const s = PROG(ACT('"plain"', "s"), ACT_UI);
+    expect((await build(s)).js).toMatch(/^let lit\w* = "plain";$/m);
+    expect(await texts(s, ["c"], [{ click: "#r" }])).toEqual(["[plain]"]);
+  }, 180000);
+
+  test("v02: the binding reaches the secret — it and z are server-only; z's side effect runs on the server, not seen by the client", async () => {
+    const s = PROG(ACT("tag(API_KEY)", '"<" + s + ">"'), `${ACT_UI}\n<button id="b" onclick={ lit = "w"; }>b</button>`);
+    const b = await build(s, "hits\\w*");
+    expect(leaked(b.client, SECRET)).toEqual([]);
+    expect(b.js).toMatch(/^let lit\w* = null;$/m);
+    expect(b.js).not.toMatch(/^let z\w* = /m);
+    expect(b.value).toBe("<[zz-sk-live-123]>");
+    expect(await texts(s, ["c"], [{ click: "#b" }, { click: "#r" }])).toEqual(["[]"]);
+  }, 180000);
+});
+
+describe("a condition-head assignment is a whole-value write (#2113 r1 PRE-2)", () => {
+  const COND = `<button id="r" onclick={ if ((keyLet = "w") == "w") { @out = "ok"; } }>r</button>`;
+  test("v07: a secret-initialized `let` written only in a condition head — a shell; the click runs", async () => {
+    const s = PROG(LET, COND);
+    const b = await build(s, "keyLet\\w*");
+    expect(leaked(b.client, SECRET)).toEqual([]);
+    expect(b.js).toMatch(/^let keyLet\w* = null;$/m);
+    expect(b.value).toBe("[zz-sk-live-123]");
+    expect(await texts(s, ["c"], [{ click: "#r" }])).toEqual(["[ok]"]);
+  }, 180000);
+
+  test("v07b: a literal-initialized `let` — a shell; the click runs", async () => {
+    const pre = `\${
+    const API_KEY: string = "zz-sk-live-123";
+    function tag(s: string) -> string { return "[" + s + "]"; }
+    let keyLet: string = "plain";
+}`;
+    const s = PROG(pre, COND);
+    expect((await build(s)).js).toMatch(/^let keyLet\w* = null;$/m);
+    expect(await texts(s, ["c"], [{ click: "#r" }])).toEqual(["[ok]"]);
+  }, 180000);
+});
+
 describe("not covered — ruling-gated (g-boot-body-unread-cell-server-only-s482)", () => {
   test("a cell declared in the program BODY, written but never read, still ships the secret (today's behaviour, pinned)", async () => {
     const b = await build(PROG(LIB, `let <keyCell:string=(tag(API_KEY))/>\n<button id="b" onclick={ @keyCell = "w"; }>b</button>`));

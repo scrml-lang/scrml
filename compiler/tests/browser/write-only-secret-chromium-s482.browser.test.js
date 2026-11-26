@@ -143,6 +143,49 @@ describe("a write to a shell runs without error (Chromium)", () => {
     expect(await load(b, ["n"], ["b"])).toEqual({ errors: [], texts: ["1"] });
   }, 120000);
 
+  // s482 r1 (#2113 review HIGH-1 / PRE-1 / MED-1): an acting initializer nothing reads runs in the client
+  // alone; what it reads is client-read. 19a014391 printed `let lit = null; let z = rec(lit);` (v01: the
+  // page showed `null`, not `plain`); 153bd0334 and 19a014391 left `lit` out with no write (v01c:
+  // ReferenceError at load). v02: the binding reaches the secret, so it and z are server-only (rule (b),
+  // the largest set) — z's side effect runs on the server and the page shows nothing.
+  const ACT = (init, mark) => `\${
+    const API_KEY: string = "zz-sk-live-123";
+    function tag(s: string) -> string { return "[" + s + "]"; }
+    let lit: string = ${init};
+    let hits: string = "";
+    function rec(s: string) -> string { hits = hits + ${mark}; return "r"; }
+    let z: string = rec(lit);
+    function peek() -> string { return hits; }
+}`;
+  const ACT_UI = `<button id="r" onclick={ @out = peek(); @n = @n + 1; }>r</button>`;
+
+  test("v01 / v01c: a binding read only by an acting, unread initializer keeps its value", async () => {
+    if (skip()) return;
+    const a = build(PROG(ACT('"plain"', "s"), `${ACT_UI}\n<button id="b" onclick={ lit = "w"; @n = @n + 1; }>b</button>`));
+    expect(await load(a, ["n", "c"], ["b", "b", "r"])).toEqual({ errors: [], texts: ["3", "[plain]"] });
+    const c = build(PROG(ACT('"plain"', "s"), ACT_UI));
+    expect(await load(c, ["n", "c"], ["r"])).toEqual({ errors: [], texts: ["1", "[plain]"] });
+  }, 120000);
+
+  test("v02: the binding reaches the secret — not in the client; z's side effect is the server's", async () => {
+    if (skip()) return;
+    const out = build(PROG(ACT("tag(API_KEY)", '"<" + s + ">"'), `${ACT_UI}\n<button id="b" onclick={ lit = "w"; @n = @n + 1; }>b</button>`));
+    expect(clientHolds(out, "zz-sk-live-123")).toEqual([]);
+    expect(await load(out, ["n", "c"], ["b", "b", "r"])).toEqual({ errors: [], texts: ["3", "[]"] });
+  }, 120000);
+
+  // s482 r1 (#2113 review PRE-2): a kept condition-head assignment is a whole-value write — the binding
+  // gets a shell (153bd0334 and 19a014391: ReferenceError at the click)
+  test("v07 / v07b: a `let` written only in a condition head", async () => {
+    if (skip()) return;
+    const COND = `<button id="r" onclick={ if ((keyLet = "w") == "w") { @out = "ok"; } @n = @n + 1; }>r</button>`;
+    const a = build(PROG(LET, COND));
+    expect(clientHolds(a, "zz-sk-live-123")).toEqual([]);
+    expect(await load(a, ["n", "c"], ["r"])).toEqual({ errors: [], texts: ["1", "[ok]"] });
+    const b = build(PROG(LIB + `\n\${ let keyLet: string = "plain"; }`, COND));
+    expect(await load(b, ["n", "c"], ["r"])).toEqual({ errors: [], texts: ["1", "[ok]"] });
+  }, 120000);
+
   test("control: a cell the page reads keeps its seed and shows the write", async () => {
     if (skip()) return;
     const out = build(PROG(CELL, `<button id="b" onclick={ @keyCell = "w"; }>b</button>\n<p id="d">\${@keyCell}</p>`));
