@@ -15,9 +15,10 @@
 // A read anywhere in client code — a display, a compound write `x = x + …`, a later handler, `bind:` —
 // keeps the binding client-read, unchanged.
 //
-// Not covered (left, ruling-gated): a cell declared in the program BODY (g-boot-body-unread-cell-server-only-s482
-// — §7.6 rule (b)'s classification speaks of file-scope bindings; whether a body cell is one is the open
-// owner fork). Its leak is pinned below as today's behaviour.
+// Not covered: a cell declared in the program BODY (g-boot-body-unread-cell-server-only-s482, open). Ruled
+// S482 (ruling:user-voice-scrml.md-S482-body-cell-server-only, (a)): rule (b)'s classification applies to a
+// body cell as to a file-scope binding. The build is queued for its own lane, so the leak is pinned below as
+// today's behaviour.
 //
 // Shipping path: the scrml-boot CLI (every client file read) and scripts/bootstrap-conformance.ts
 // `runBootstrapArtifact` (happy-dom). Chromium: compiler/tests/browser/write-only-secret-chromium-s482.browser.test.js.
@@ -369,7 +370,7 @@ describe("a client-written binding server code reads, read by an acting initiali
   }, 180000);
 });
 
-describe("not covered — ruling-gated (g-boot-body-unread-cell-server-only-s482)", () => {
+describe("not covered — ruled (a), build queued (g-boot-body-unread-cell-server-only-s482)", () => {
   test("a cell declared in the program BODY, written but never read, still ships the secret (today's behaviour, pinned)", async () => {
     const b = await build(PROG(LIB, `let <keyCell:string=(tag(API_KEY))/>\n<button id="b" onclick={ @keyCell = "w"; }>b</button>`));
     expect(leaked(b.client, ["zz-sk-live-123"]).length).toBeGreaterThan(0);
