@@ -7,22 +7,22 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1973 of 1973 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1986 of 1986 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 851 | 43.1% |
+| PASS | 864 | 43.5% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 3 | 0.2% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 628 | 31.8% |
-| UNSUPPORTED | 491 | 24.9% |
+| NOT-TWINNED | 628 | 31.6% |
+| UNSUPPORTED | 491 | 24.7% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 854; of those, 851 hold (99.6%). Runtime half executed on the bootstrap for 289 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 867; of those, 864 hold (99.7%). Runtime half executed on the bootstrap for 291 case(s).
 
-- **Vacuous** passes: 15 of 851 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **836**.
+- **Vacuous** passes: 15 of 864 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **849**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 1 of 3; the other 2 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
@@ -30,7 +30,7 @@ UNSUPPORTED by reason: bootstrap-unsupported 491.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **902** — PASS 530 · FAIL 3 · UNSUPPORTED 369. Twin holds 530 (non-vacuous 518). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **903** — PASS 531 · FAIL 3 · UNSUPPORTED 369. Twin holds 531 (non-vacuous 519). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 7 replace a twin's expectations · 14 exclude a case.
 - Superseded-code mappings applied: 8 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -148,6 +148,7 @@ NOT-TWINNED by reason (628 cases; a case counts once per distinct reason):
 | forms | 66 | 15 | · | · | · | 49 | 2 | · | · |
 | hostmethod | 1 | 1 | · | · | · | · | · | · | · |
 | input | 2 | · | · | · | · | · | 2 | · | · |
+| invariant | 13 | 13 | · | · | · | · | · | · | · |
 | lifecycle | 69 | 35 | · | · | · | 22 | 12 | · | · |
 | linear | 16 | 6 | · | · | · | · | 10 | · | · |
 | loop | 8 | 3 | · | 1 | · | 2 | 2 | · | · |
@@ -207,7 +208,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (851)
+### PASS / CODES-ONLY (864)
 
 - `attr-executable-sink/base-href-data-neg` — PASS · TWIN
 - `attr-executable-sink/base-href-static-pos` — PASS · TWIN
@@ -599,6 +600,19 @@ none
 - `forms/validator-dead-locked-pos` — PASS
 - `forms/validator-live-let-neg` — PASS
 - `hostmethod/substring-match-typed` — PASS · TWIN
+- `invariant/accepted` — PASS
+- `invariant/at-read-neg` — PASS
+- `invariant/booking-accepted` — PASS
+- `invariant/captures-call-neg` — PASS
+- `invariant/decl-defaults-neg` — PASS
+- `invariant/fn-chain-cell-neg` — PASS · TWIN
+- `invariant/fn-chain-let-neg` — PASS
+- `invariant/impure-neg` — PASS
+- `invariant/in-opener-neg` — PASS
+- `invariant/no-fields-neg` — PASS
+- `invariant/not-bool-neg` — PASS
+- `invariant/type-literal-neg` — PASS
+- `invariant/use-site-literal-neg` — PASS
 - `lifecycle/cleanup-error-non-function` — PASS
 - `lifecycle/effect-empty-body-neg` — PASS · TWIN
 - `lifecycle/effect-empty-body-pos` — PASS · TWIN

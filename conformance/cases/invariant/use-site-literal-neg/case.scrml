@@ -1,0 +1,11 @@
+// §66.13.5 (S482 / S483) — a use site's literal attributes break `min <= value && value <= max`.
+<program>
+    <slider min:int=0 max:int=100>
+        let <value:int=50/>
+    </>
+    invariant (min <= value && value <= max)
+    renders <span>${value}</span>
+    <main>
+        <slider min=60 max=10/>
+    </main>
+</program>

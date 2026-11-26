@@ -567,7 +567,7 @@ ${
             vals = vals.concat([{ nid: v.nid, span: v.span, name: v.name, arg: r.a }]);
         }
         return { d: { nid: d.nid, span: d.span, exported: d.exported, isLet: d.isLet, name: d.name, ty: d.ty, own: ro.v,
-                      attrs: attrs, mods: rm.attrs, body: body, renders: renders, validators: vals }, c: c };
+                      attrs: attrs, mods: rm.attrs, body: body, renders: renders, validators: vals, invs: d.invs }, c: c };
     }
 
     type RStateChild:struct = { s: AStateChild, c: MC }

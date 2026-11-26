@@ -1,0 +1,26 @@
+{
+  "id": "invariant-fn-chain-cell-neg",
+  "description": "An invariant whose pure `fn` reads a cell through another `fn`: E-CONTRACT-003 naming the chain — a `fn` called from an invariant reads exactly what the invariant may read directly.",
+  "language-version": "1.0",
+  "spec": "§66.13.5",
+  "provenance": "ruling:user-voice-scrml.md-S483-struct-invariant-syntax (\"yes, your recommendations on all three plus the follow-up\"); ruling:user-voice-scrml.md-S482-struct-invariant-contract (\"RULED yes (a)\")",
+  "rationale": "§66.13.5 rule 7 (r1): a `fn` called from an invariant, directly or through other `fn`s, reads no cell (E-CONTRACT-003, rule 6) and no outer binding; otherwise a write to `@limit` could break a stored value's invariant with nothing re-checking it.",
+  "expect": {
+    "codes": [
+      "E-CONTRACT-003"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-decl-invariant-unimplemented-s483",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=3",
+          "emitted:E-SCOPE-001=6",
+          "emitted:E-STATE-UNDECLARED=2",
+          "missing:E-CONTRACT-003"
+        ]
+      }
+    }
+  }
+}

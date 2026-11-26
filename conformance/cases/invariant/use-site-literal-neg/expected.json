@@ -1,0 +1,29 @@
+{
+  "id": "invariant-use-site-literal-neg",
+  "description": "A use site whose literal attributes provably break the declaration's invariant (min 60 > max 10): E-WRITE-INVARIANT.",
+  "language-version": "1.0",
+  "spec": "§66.13.5",
+  "provenance": "ruling:user-voice-scrml.md-S483-struct-invariant-syntax (\"yes, your recommendations on all three plus the follow-up\"); ruling:user-voice-scrml.md-S482-struct-invariant-contract (\"RULED yes (a)\")",
+  "rationale": "§66.13.5 rule 9: a use site whose attribute values are literals (`<slider min=60 max=10/>`) is a provable case of E-WRITE-INVARIANT.",
+  "expect": {
+    "codes": [
+      "E-WRITE-INVARIANT"
+    ],
+    "notCodes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-decl-invariant-unimplemented-s483",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=3",
+          "emitted:E-SCOPE-001=11",
+          "emitted:E-STMT-NO-EFFECT=1",
+          "missing:E-WRITE-INVARIANT"
+        ]
+      }
+    }
+  }
+}

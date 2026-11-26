@@ -1,0 +1,14 @@
+// §66.13.5 rule 7 (S483 r1, prov=pa-ruled:S483-fn-chain-purity) — `ok` reads the mutable file-scope `let` `lim`.
+<program>
+    ${ let lim = 3;
+       fn ok(a: int, b: int) -> bool { return b - a <= lim; }
+       function bump() { lim = lim + 1; } }
+    <dateRange:struct>
+        let <start:int=0/>
+        let <end:int=0/>
+    </>
+    invariant (ok(start, end))
+    <main>
+        <button id="b" onclick=bump()>${@dateRange.start}</button>
+    </main>
+</program>

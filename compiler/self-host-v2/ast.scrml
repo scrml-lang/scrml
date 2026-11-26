@@ -383,7 +383,9 @@ ${
     export type AVariant:struct   = { nid: int, span: ASpan, name: string, fields: ATypeField[] }
     export type ATypeBody:enum = {
         EnumBody(variants: AVariant[]),
-        StructBody(fields: ATypeField[]),
+        // s483 (Q21 lane 1) — `invs`: the `invariant (expr) [label]` clauses written after the
+        // `{ … }` body (§14.2, §66.13.5), in source order.
+        StructBody(fields: ATypeField[], invs: AInvariant[]),
         HostBody,       // s473: `type Name:host` inside a `<host>` (DRAFT §21.3.3 rule 15) — a closed, opaque host handle type
         AliasBody(ty: AType),   // s478: `type Name = T` — a type alias; `Name` is `T` wherever it is written (§14.1.2 "type-alias right-hand sides (`type A = Type`)")
     }
@@ -575,6 +577,14 @@ ${
     }
     export type AValidator:struct = { nid: int, span: ASpan, name: string, arg: AValArg }
 
+    // s483 (Q21 lane 1, ruling:user-voice-scrml.md-S483-struct-invariant-syntax) — a
+    // declaration invariant (§66.13.5): `invariant (e) [label]` written after a
+    // declaration's closer (any order with `renders`, several allowed) or after a
+    // `type X:struct = { … }` body. `e` is the expression inside the parentheses;
+    // `label` the `[label]` name, "" when none is written; `text` the expression as
+    // written (for messages). Its names are analyze's.
+    export type AInvariant:struct = { nid: int, span: ASpan, e: AExpr, label: string, text: string }
+
     // `ty` = the own type (`name:Type`); `own` = the own value (NoValue = none);
     // `mods` = the opener's other words (`single`, …); `validators` = its
     // validators, in source order (§55.12: error order is declaration order).
@@ -582,7 +592,7 @@ ${
         nid: int, span: ASpan, exported: boolean, isLet: boolean,
         name: string, ty: AType | not, own: AAttrValue,
         attrs: ADeclAttr[], mods: AAttr[], body: ADeclChild[], renders: AElem | not,
-        validators: AValidator[],
+        validators: AValidator[], invs: AInvariant[],
     }
 
     // -------------------------------------------------------------------------

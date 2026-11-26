@@ -1,0 +1,42 @@
+{
+  "id": "invariant-accepted",
+  "description": "Declaration invariants in both forms — after a declaration's closer (with `renders` between clauses) and after a `type :struct` body — whose literals keep them, compile and run; a clause may call a pure `fn` that computes only from its arguments (through another `fn`) and a deterministic built-in (`.every(x => …)`).",
+  "language-version": "1.0",
+  "spec": "§66.13.5, §14.2",
+  "provenance": "ruling:user-voice-scrml.md-S483-struct-invariant-syntax (\"yes, your recommendations on all three plus the follow-up\"); ruling:user-voice-scrml.md-S482-struct-invariant-contract (\"RULED yes (a)\")",
+  "rationale": "§66.13.5 rules 1-2: several clauses and `renders` follow the closer in either order; rule 7 (r1, prov=pa-ruled:S483-fn-chain-purity and prov=pa-ruled:S483-direct-equals-fn-purity): a pure `fn` chain that reads only its arguments and a deterministic built-in method are admitted.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-DECL-INVARIANT-"
+    ],
+    "notCodes": [
+      "E-WRITE-INVARIANT",
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#lo",
+        "text": "18"
+      },
+      {
+        "selector": "#r",
+        "text": "2"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-decl-invariant-unimplemented-s483",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=5",
+          "emitted:E-SCOPE-001=22",
+          "emitted:E-STATE-UNDECLARED=2",
+          "emitted:E-STMT-NO-EFFECT=1"
+        ],
+        "runtime": "sha256:6a7bd15b29286996"
+      }
+    }
+  }
+}

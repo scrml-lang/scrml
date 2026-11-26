@@ -3,7 +3,7 @@
   "soft": {
     "rhs-decl": {
       "README.md": 8,
-      "compiler/SPEC.md": 308,
+      "compiler/SPEC.md": 307,
       "conformance/cases/api/api-clean-pos/case.scrml": 1,
       "conformance/cases/api/api-endpoint-unknown-neg/case.scrml": 1,
       "conformance/cases/api/api-req-shape-mismatch-neg/case.scrml": 1,
@@ -1423,7 +1423,7 @@
     },
     "engine-element": {
       "README.md": 1,
-      "compiler/SPEC.md": 65,
+      "compiler/SPEC.md": 64,
       "conformance/cases/components/ambient-engine-cell/case.scrml": 1,
       "conformance/cases/control-flow/if-on-engine-render-gate-absent-rt/case.scrml": 1,
       "conformance/cases/control-flow/if-on-engine-render-gate-mounts-rt/case.scrml": 1,
