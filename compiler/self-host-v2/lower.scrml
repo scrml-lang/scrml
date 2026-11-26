@@ -46,7 +46,8 @@ ${
              SqlInfo, HandledFact, FailFact, Retag, RemoteFact, SuspendPlan, SuspendAt, SuspendK, PlainMatch, PlainArm, plainFactOf,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest, sqlInfo, isServerPlaced,
              failFact, builtinFile, blockReference, suspendAtOf, tempOf, joinOf, retOf, remoteCaller, serverCallErrorName, typeInfoName, fieldInfoName, ServerFacts, SrvCopy, sideCallee,
-             sqlParamRep, distinctSqlParams, CssFacts, CssInline, CssBridge, LStep, LocalEdit, BoundCheck, boundCheckAt, editBoundNid, RefineCheck, refineCheckAt, txAtOf, txPlainAt, rowOfSite } from "./analyze.scrml";
+             sqlParamRep, distinctSqlParams, CssFacts, CssInline, CssBridge, LStep, LocalEdit, BoundCheck, boundCheckAt, editBoundNid, RefineCheck, refineCheckAt, txAtOf, txPlainAt, rowOfSite,
+             InvInfo, InvCheck, InvCapField, invInstanceChecks, invValueChecks, invGroupChecks, invCapField, invRefNames, invLoc, invProven } from "./analyze.scrml";
     import { RefineTop, refineTopOf, refineSpec, refineLitVerdict } from "./parse.scrml";
 
     // s451 — THE DIAGNOSTICS GATE. `core` is `not` whenever the analysis
@@ -561,7 +562,7 @@ ${
             .Ternary(test: t, yes: y, no: n) :> boolMatch(lowerExpr(c, t), lowerExpr(c, y), lowerExpr(c, n)),
             .Assign(target: t, value: v, kept: kp) :> keptAssignExpr(c, e, v, kp),   // s474 (§50, D10)
             .ArrayLit(elems: es) :> arrayValue(c, es),
-            .ObjectLit(props: ps) :> valueExpr(c, valueFact(c.t.values, e.nid), ps),
+            .ObjectLit(props: ps) :> constructed(c, e, valueExpr(c, valueFact(c.t.values, e.nid), ps)),
             .Spread(e: sx) :> missing(),
             .Index(obj: o, idx: ix) :> indexExpr(c, e, o, ix),    // s469 (§49.13)
             .Lambda(params: lp, body: lb) :> lambdaExpr(c, valueFact(c.t.values, e.nid), lb),
@@ -849,6 +850,25 @@ ${
     // A constant the binder resolved: a literal, a variant, or a struct value
     // in DECLARED field order (analyze's `order`: the prop index of each
     // declared field; `ps` are the object literal's props). L19.
+    // s483 (Q21 lane 2) — a CONSTRUCTION of a value of a type with invariants (§66.13.5
+    // "construction"): the struct value through its invariant check, unless analyze proved
+    // it (an all-literal value its invariants fold to `true`, invProven — §66.13.5 rule 10:
+    // "A compiler MAY omit the check where it proves the write keeps the invariant").
+    fn constructed(c: LC, e: AExpr, v: Expr) -> Expr {
+        const ty: Sym | not = structOfTy(v);
+        if (ty is not) return v;
+        if (invProven(c.t, ty, e)) return v;
+        return invValue(c, Type.Named(ty), Expr.Lit(Literal.Absent), [], v, e.span.start);
+    }
+
+    fn structOfTy(v: Expr) -> Sym | not {
+        return match v {
+            .StructOf(ty: t) :> t,
+            // no-default-arm: one question of a lowered object literal — is it a struct value
+            _ :> not
+        };
+    }
+
     fn valueExpr(c: LC, f: ValueFact | not, ps: AProp[]) -> Expr {
         return match f {
             .VLit(lit: l) :> Expr.Lit(l),
@@ -1063,6 +1083,7 @@ ${
             .BParam(sym: x) :> not,
             .BGiven(sym: x) :> not,
             .BJump(target: x) :> not,
+            .BInv(params: x) :> not,
             not :> not
         };
     }
@@ -1070,6 +1091,7 @@ ${
     fn jumpTarget(f: BindFact | not) -> Sym | not {
         return match f {
             .BJump(target: t) :> t,
+            .BInv(params: x) :> not,
             .BLoop(label: x) :> not,
             .BBind(sym: x) :> not,
             .BParam(sym: x) :> not,
@@ -1327,6 +1349,7 @@ ${
             .BParam(sym: x) :> not,
             .BLoop(label: x) :> not,
             .BJump(target: x) :> not,
+            .BInv(params: x) :> not,
             .BGiven(sym: x) :> not,
             not :> not
         };
@@ -1363,6 +1386,7 @@ ${
             .BParam(sym: x) :> [],
             .BLoop(label: x) :> [],
             .BJump(target: x) :> [],
+            .BInv(params: x) :> [],
             not :> []
         };
     }
@@ -1374,12 +1398,12 @@ ${
         const k: AExprK = e.k;
         const value: AExpr | not = assignedValue(k);
         return match f {
-            .EWrite(w: w) :> writeStmt(c, w, value),
-            .ESpread(ws: ws, inst: si, snap: sn, fields: sf) :> spreadStmts(c, ws, si, sn, sf, value),
-            .EReset(w: w, decl: d, idx: i) :> resetStmt(c, w, d, i),
-            .EAssignLocal(sym: s, path: pa) :> assignLocal(c, s, pa, value),
-            .EEdits(w: w, elems: es, tmps: ts, snap: sn) :> editStmts(c, w, es, ts, sn),
-            .ERemove(w: w) :> [Stmt.Write(w.cap, instOf(c, w.inst), w.edit, Expr.Lit(Literal.Int(1)), w.check)],
+            .EWrite(w: w) :> writeStmt(c, w, value, e.span.start),
+            .ESpread(ws: ws, inst: si, snap: sn, fields: sf) :> spreadStmts(c, ws, si, sn, sf, value, e.span.start),
+            .EReset(w: w, decl: d, idx: i) :> resetStmt(c, w, d, i, e.span.start),
+            .EAssignLocal(sym: s, path: pa, root: rt) :> assignLocal(c, s, pa, value, rt, e.span.start),
+            .EEdits(w: w, elems: es, tmps: ts, snap: sn) :> editStmts(c, w, es, ts, sn, e.span.start),
+            .ERemove(w: w) :> removeStmt(c, w, e.span.start),
             .EElemAt(cap: cap, inst: i, index: ix, path: path, loc: loc) :> elemAtStmt(c, cap, i, ix, path, loc, value),
             .EPosition(cap: cap, inst: i, index: ix, loc: lc) :> positionStmt(c, cap, i, ix, lc, value),
             .ELocalEdit(sym: s, op: op, arg: a, path: pa, tmps: tm, index: ix, loc: lc) :> localEditStmt(c, e, s, op, a, pa, tm, not, not, ix, lc),
@@ -1508,7 +1532,7 @@ ${
         const f: EffectFact | not = effectFact(c.t.effects, v.nid);
         return match f {
             .ELocalEdit(sym: s, op: op, arg: a, path: pa, tmps: tm, taken: tk, at: at) :> takenLocalPre(c, v, s, op, a, pa, tm, tk, at),
-            .ERemove(w: w, taken: sn) :> takenCellPre(c, w, sn),
+            .ERemove(w: w, taken: sn) :> takenCellPre(c, w, sn, v.span.start),
             .EWrite(w: x) :> [],
             .ESpread(ws: x) :> [],
             .EReset(w: x) :> [],
@@ -1527,13 +1551,20 @@ ${
 
     // `@xs.pop()` / `@xs.shift()` as a value: the removed element of the cell's field
     // read into `sn.local`, then the cell's Write (RemoveEnd / RemoveFront, count 1).
-    fn takenCellPre(c: LC, w: WriteFact, sn: SeqSnap | not) -> Stmt[] {
+    fn takenCellPre(c: LC, w: WriteFact, sn: SeqSnap | not, at: int) -> Stmt[] {
         if (sn is not) return [];
         const inst: InstRef = instOf(c, w.inst);
         const tape: Expr = Expr.Read(Place.Cell(sn.decl, inst, [{ owner: sn.decl, idx: sn.idx }]));
         let op: LocalEdit = LocalEdit.LShift;
         if (w.edit == EditKind.RemoveEnd) op = LocalEdit.LPop;
-        return [Stmt.Let(sn.local, removedRead(op, tape, [tape])), Stmt.Write(w.cap, inst, w.edit, Expr.Lit(Literal.Int(1)), w.check)];
+        return [Stmt.Let(sn.local, removedRead(op, tape, [tape])), Stmt.Write(w.cap, inst, w.edit, invLone(c, w.cap, inst, w.edit, Expr.Lit(Literal.Int(1)), at), w.check)];
+    }
+
+    // `@xs.pop()` / `@xs.shift()` as a statement: a removal of one element (s483: through
+    // the invariant check of a tape an invariant reads, §66.13.5).
+    fn removeStmt(c: LC, w: WriteFact, at: int) -> Stmt[] {
+        const inst: InstRef = instOf(c, w.inst);
+        return [Stmt.Write(w.cap, inst, w.edit, invLone(c, w.cap, inst, w.edit, Expr.Lit(Literal.Int(1)), at), w.check)];
     }
 
     // One step of a part edit's path: the Lets it needs, the part read so far, the
@@ -1612,9 +1643,231 @@ ${
         return args[0];
     }
 
-    fn writeStmt(c: LC, w: WriteFact, value: AExpr | not) -> Stmt[] {
+    fn writeStmt(c: LC, w: WriteFact, value: AExpr | not, at: int) -> Stmt[] {
         if (value is not) return [];
-        return [Stmt.Write(w.cap, instOf(c, w.inst), w.edit, lowerExpr(c, value), w.check)];
+        const inst: InstRef = instOf(c, w.inst);
+        return [Stmt.Write(w.cap, inst, w.edit, invLone(c, w.cap, inst, w.edit, lowerExpr(c, value), at), w.check)];
+    }
+
+    // =========================================================================
+    // s483 (Q21 lane 2) — DECLARATION INVARIANTS checked on every write (§66.13.5 "When
+    // it is checked"; ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 2:
+    // "check every write, as ruled. The grouped write is the existing spread … one
+    // snapshot, all or nothing, checked once" — "otherwise the E-WRITE-INVARIANT-RT trap
+    // before any write (S477)"). A write that touches a field an invariant reads (analyze
+    // invInstanceChecks / invGroupChecks / invValueChecks: the read set, the deepest value
+    // first) judges the invariants on the CANDIDATE value before anything is written:
+    //  - a lone write's value passes through Prim(InvariantGuard, [the instance, [the
+    //    write], the checks, loc]) — the runtime reads the instance's other fields
+    //    untracked, applies the write, judges every check, and returns the value;
+    //  - a group (a spread's overrides, a sequence shape's edits — a Commit) holds one
+    //    InvariantGuard Eval after its Writes, over all of them: checked once, after every
+    //    field's own contract, before any write (print.scrml commitJs);
+    //  - a value (a construction `{ … }` of a type with invariants, a local's part write)
+    //    passes through Prim(InvariantValue, [current, path, op, value, checks, loc]);
+    //  - a declaration's construction runs one InvariantGuard over the fresh instance
+    //    (Decl.invs), so a use-site initializer and a non-literal default are checked.
+    // A check is `[at, (fields…) => e, [names], owner, what]`: the clause lowered as a
+    // function of the fields it reads, its parameters the binder's BInv locals.
+    // =========================================================================
+    fn invParamsOf(f: BindFact | not) -> Sym[] {
+        return match f {
+            .BInv(params: ps) :> ps,
+            .BBind(sym: x) :> [],
+            .BParam(sym: x) :> [],
+            .BGiven(sym: x) :> [],
+            .BLoop(label: x) :> [],
+            .BJump(target: x) :> [],
+            not :> []
+        };
+    }
+
+    // The clause as a function of the fields it reads: a declaration's names its
+    // fields as NField facts (read here as the parameters, through a snapshot binding);
+    // a `type X:struct`'s names them as its BInv locals already.
+    fn invPredicate(c: LC, ck: InvCheck) -> Expr {
+        const ps: Sym[] = invParamsOf(bindFact(c.t.binds, ck.inv.nid));
+        let params: Sym[] = [];
+        let fields: SnapField[] = [];
+        for (const h of ck.inv.heads) {
+            if (h < ps.length) {
+                params = params.concat([ps[h]]);
+                fields = fields.concat([{ ref: { owner: ck.sym, idx: h }, local: ps[h] }]);
+            }
+        }
+        if (params.length == 0 || params.length != ck.inv.heads.length) return missing();
+        if (!ck.decl) return Expr.Lambda(params, lowerExpr({ t: c.t, file: c.file, subst: not, snap: not, rows: [] }, ck.inv.e));
+        const sn: SnapB = { decl: ck.sym, inst: InstRef.Lexical(0), path: [], whole: params[0], fields: fields };
+        return Expr.Lambda(params, lowerExpr({ t: c.t, file: c.file, subst: not, snap: sn, rows: [] }, ck.inv.e));
+    }
+
+    fn invWhat(iv: InvInfo) -> string {
+        if (iv.label != "") return "[" + iv.label + "]";
+        return "`" + iv.text + "`";
+    }
+
+    fn invStrs(xs: string[]) -> Expr {
+        let out: Expr[] = [];
+        for (const x of xs) { out = out.concat([litStr(x)]); }
+        return Expr.ArrayOf(out);
+    }
+
+    fn invChecksExpr(c: LC, cks: InvCheck[]) -> Expr {
+        let out: Expr[] = [];
+        for (const ck of cks) {
+            out = out.concat([Expr.ArrayOf([invStrs(ck.at), invPredicate(c, ck), invStrs(ck.names), litStr(ck.owner.replaceAll("`", "")), litStr(invWhat(ck.inv))])]);
+        }
+        return Expr.ArrayOf(out);
+    }
+
+    // One write of a guarded group: `[field, path, op, value]`.
+    fn invWriteOf(idx: int, path: string[], op: string, v: Expr) -> Expr {
+        return Expr.ArrayOf([Expr.Lit(Literal.Int(idx)), invStrs(path), litStr(op), v]);
+    }
+
+    fn invGuardOf(c: LC, inst: InstRef, writes: Expr[], cks: InvCheck[], loc: string) -> Expr {
+        return Expr.Prim(PrimOp.InvariantGuard, [Expr.Handle(inst), Expr.ArrayOf(writes), invChecksExpr(c, cks), litStr(loc)]);
+    }
+
+    // What a classified edit writes below its field: the member path and the op.
+    type InvEdit:struct = { path: string[], op: string }
+
+    fn invE(path: string[], op: string) -> InvEdit { return { path: path, op: op }; }
+
+    fn invEditOf(c: LC, edit: EditKind) -> InvEdit {
+        return match edit {
+            .Replace :> invE([], "set"),
+            .Transition :> invE([], "set"),
+            .Anywhere :> invE([], "set"),
+            .PositionWrite :> invE([], "set"),
+            .RemoveAnywhere :> invE([], "set"),
+            .Append :> invE([], "append"),
+            .Prepend :> invE([], "prepend"),
+            .RemoveEnd :> invE([], "dropEnd"),
+            .RemoveFront :> invE([], "dropFront"),
+            .FieldAt(path: p) :> invE(invRefNames(c.t, p), "set"),
+            // analyze refuses a position write the invariants touch (invPositionMsg) — no check here
+            .ElemAt(index: ix) :> invE([], ""),
+            .PositionAt(index: ix) :> invE([], "")
+        };
+    }
+
+    // The checks one write to field `idx` of `d` needs (none: an edit analyze refused, or
+    // one that touches no read path).
+    fn invEditChecks(c: LC, d: DeclInfo, idx: int, ie: InvEdit) -> InvCheck[] {
+        if (ie.op == "" || idx < 0 || idx >= d.fields.length) return [];
+        return invInstanceChecks(c.t, d, [d.fields[idx].sym.hint].concat(ie.path));
+    }
+
+    // A lone write's value through its invariant check, or as it is.
+    fn invLone(c: LC, cap: Sym, inst: InstRef, edit: EditKind, v: Expr, at: int) -> Expr {
+        const cf: InvCapField | not = invCapField(c.t, cap);
+        if (cf is not) return v;
+        const ie: InvEdit = invEditOf(c, edit);
+        const cks: InvCheck[] = invEditChecks(c, cf.d, cf.idx, ie);
+        if (cks.length == 0) return v;
+        return invGuardOf(c, inst, [invWriteOf(cf.idx, ie.path, ie.op, ie.op == "set" ? unconstructed(v) : v)], cks, invLoc(c.t, c.file, at));
+    }
+
+    // A constructed value's own check is a subset of the write guard's (the guard judges the
+    // whole value written, every clause of its type — invWalk): one check, not two.
+    fn unconstructed(v: Expr) -> Expr {
+        return match v {
+            .Prim(op: o, args: a) :> (o == PrimOp.InvariantValue && a.length == 6 && invIsAbsent(a[0]) ? a[3] : v),
+            // no-default-arm: one question of a written value — is it a construction's check
+            _ :> v
+        };
+    }
+
+    fn invIsAbsent(e: Expr) -> boolean {
+        return match e {
+            .Lit(lit: l) :> l == Literal.Absent,
+            // no-default-arm: one question — is it the absent literal
+            _ :> false
+        };
+    }
+
+    // A group of Writes to one instance (a spread's overrides, a sequence shape's edits,
+    // each value a Local): the Commit's invariant check, an Eval after its Writes, or none.
+    fn invGroup(c: LC, inst: InstRef, writes: Stmt[], at: int) -> Stmt[] {
+        let entries: Expr[] = [];
+        let paths: string[][] = [];
+        let d: DeclInfo | not = not;
+        for (const s of writes) {
+            const wp: InvWriteParts | not = invWriteParts(s);
+            if (wp is given) {
+                const cf: InvCapField | not = invCapField(c.t, wp.cap);
+                if (cf is given) {
+                    d = cf.d;
+                    const ie: InvEdit = invEditOf(c, wp.edit);
+                    if (ie.op != "" && cf.idx < cf.d.fields.length) {
+                        entries = entries.concat([invWriteOf(cf.idx, ie.path, ie.op, wp.value)]);
+                        paths = paths.concat([[cf.d.fields[cf.idx].sym.hint].concat(ie.path)]);
+                    }
+                }
+            }
+        }
+        if (d is not) return [];
+        const cks: InvCheck[] = invGroupChecks(c.t, d, paths);
+        if (cks.length == 0) return [];
+        return [Stmt.Eval(invGuardOf(c, inst, entries, cks, invLoc(c.t, c.file, at)))];
+    }
+
+    type InvWriteParts:struct = { cap: Sym, edit: EditKind, value: Expr }
+
+    fn invWriteParts(s: Stmt) -> InvWriteParts | not {
+        return match s {
+            .Write(cap: cap, edit: edit, value: v) :> { cap: cap, edit: edit, value: v },
+            // no-default-arm: one question of a Commit member — is it a Write
+            _ :> not
+        };
+    }
+
+    // A value of a type with invariants written at `path` below `cur` (a local's part
+    // write), or — `cur` not, `path` empty — constructed whole.
+    fn invValue(c: LC, ty: Type | not, cur: Expr, path: string[], v: Expr, at: int) -> Expr {
+        const cks: InvCheck[] = invValueChecks(c.t, ty, path);
+        if (cks.length == 0) return v;
+        return Expr.Prim(PrimOp.InvariantValue, [cur, invStrs(path), litStr("set"), v, invChecksExpr(c, cks), litStr(invLoc(c.t, c.file, at))]);
+    }
+
+    // A request's load (loadBody): the value its Write stores — the guarded value inside
+    // its invariant check, else the value itself — and the check rebuilt around the load.
+    fn invGuardedValue(e: Expr) -> Expr {
+        const w: Expr[] = invGuardFirst(e);
+        if (w.length != 4) return e;
+        return w[3];
+    }
+
+    fn invGuardFirst(e: Expr) -> Expr[] {
+        const a: Expr[] = invGuardArgs(e);
+        if (a.length != 4) return [];
+        const ws: Expr[] = invArrayElems(a[1]);
+        if (ws.length != 1) return [];
+        return invArrayElems(ws[0]);
+    }
+
+    fn invGuardArgs(e: Expr) -> Expr[] {
+        return match e {
+            .Prim(op: o, args: a) :> (o == PrimOp.InvariantGuard ? a : []),
+            // no-default-arm: one question of a write's value — is it an InvariantGuard
+            _ :> []
+        };
+    }
+
+    fn invArrayElems(e: Expr) -> Expr[] {
+        return match e {
+            .ArrayOf(elems: es) :> es,
+            // no-default-arm: one question of a guard argument — is it an ArrayOf
+            _ :> []
+        };
+    }
+
+    fn invRewrap(e: Expr, v: Expr) -> Expr {
+        const w: Expr[] = invGuardFirst(e);
+        if (w.length != 4) return v;
+        const a: Expr[] = invGuardArgs(e);
+        return Expr.Prim(PrimOp.InvariantGuard, [a[0], Expr.ArrayOf([Expr.ArrayOf([w[0], w[1], w[2], v])]), a[2], a[3]]);
     }
 
     // s442 / r1 F5 F6 — a recognized sequence shape (§66.11.2): `@x = [...@x, a, b]`
@@ -1633,7 +1886,7 @@ ${
     // prepend onto the target (a write a called function made to `@x` while
     // the elements were evaluated survives, as a struct spread keeps a write
     // to a field it does not override).
-    fn editStmts(c: LC, w: WriteFact, elems: AExpr[], tmps: Sym[], sn: SeqSnap) -> Stmt[] {
+    fn editStmts(c: LC, w: WriteFact, elems: AExpr[], tmps: Sym[], sn: SeqSnap, at: int) -> Stmt[] {
         const target: InstRef = instOf(c, w.inst);
         const place: FieldRef[] = [{ owner: sn.decl, idx: sn.idx }];
         const sc: LC = { t: c.t, file: c.file, subst: c.subst, snap: { decl: sn.decl, inst: target, path: place, whole: sn.local, fields: [] }, rows: c.rows };
@@ -1641,7 +1894,7 @@ ${
         for (const x of elems) { values = values.concat([lowerExpr(sc, x)]); }
         let pre: Stmt[] = [];
         if (anyReads(values, sn.local)) pre = [Stmt.Let(sn.local, Expr.Read(Place.Cell(sn.decl, target, place)))];
-        if (values.length == 1) return pre.concat([Stmt.Write(w.cap, target, w.edit, values[0], w.check)]);
+        if (values.length == 1) return pre.concat([Stmt.Write(w.cap, target, w.edit, invLone(c, w.cap, target, w.edit, values[0], at), w.check)]);
         let lets: Stmt[] = pre;
         let k = 0;
         for (const v of values) {
@@ -1661,18 +1914,36 @@ ${
                 writes = writes.concat([Stmt.Write(w.cap, target, w.edit, Expr.Local(t), w.check)]);
             }
         }
-        const edit: Stmt = Stmt.Commit(writes);
+        const edit: Stmt = Stmt.Commit(writes.concat(invGroup(c, target, writes, at)));
         return lets.concat([edit]);
     }
 
     // A local rebinding (`path` empty), or (s472) a write to a part of the
     // local: Assign with the path analyze resolved — its indices lowered in
     // order, before the value (the order they are evaluated in).
-    fn assignLocal(c: LC, s: Sym, path: LStep[], value: AExpr | not) -> Stmt[] {
+    fn assignLocal(c: LC, s: Sym, path: LStep[], value: AExpr | not, root: Type | not, at: int) -> Stmt[] {
         if (value is not) return [];
         let steps: PathStep[] = [];
         for (const st of path) { steps = steps.concat([lowerStep(c, st)]); }
-        return [Stmt.Assign(s, lowerExpr(c, value), steps)];
+        // s483 (Q21 lane 2): a part write of a local whose type carries invariants — the
+        // candidate is the local with the part written (a position inside one is refused by
+        // analyze, invPartHit, so the path is field names only)
+        const v: Expr = lowerExpr(c, value);
+        if (path.length == 0) return [Stmt.Assign(s, v, steps)];
+        return [Stmt.Assign(s, invValue(c, root, Expr.Local(s), invStepNames(c, path), v, at), steps)];
+    }
+
+    fn invStepNames(c: LC, path: LStep[]) -> string[] {
+        let out: string[] = [];
+        for (const st of path) { out = out.concat(invStepName(c, st)); }
+        return out;
+    }
+
+    fn invStepName(c: LC, st: LStep) -> string[] {
+        return match st {
+            .LField(ref: r) :> invRefNames(c.t, [r]),
+            .LIndex(index: ix) :> []
+        };
     }
 
     fn lowerStep(c: LC, st: LStep) -> PathStep {
@@ -1705,7 +1976,7 @@ ${
     // the pre-statement z. (bump's own write to a field NOT overridden survives:
     // the Commit writes only the overridden fields.) The snapshot Let is emitted
     // only when some override value reads it.
-    fn spreadStmts(c: LC, ws: SpreadWrite[], inst: Sym, snap: Sym, fields: SnapField[], value: AExpr | not) -> Stmt[] {
+    fn spreadStmts(c: LC, ws: SpreadWrite[], inst: Sym, snap: Sym, fields: SnapField[], value: AExpr | not, at: int) -> Stmt[] {
         if (value is not) return [];
         const ps: AProp[] = objectProps(value);
         // `@x = { ...@x }`: no override — the same value; nothing to write
@@ -1716,7 +1987,8 @@ ${
         for (const sw of ws) { values = values.concat([lowerExpr(sc, ps[sw.prop].value)]); }
         if (ws.length == 1) {
             const w0: WriteFact = ws[0].w;
-            return snapLets(operand, snap, fields, values).concat([Stmt.Write(w0.cap, instOf(c, w0.inst), w0.edit, values[0], w0.check)]);
+            const i0: InstRef = instOf(c, w0.inst);
+            return snapLets(operand, snap, fields, values).concat([Stmt.Write(w0.cap, i0, w0.edit, invLone(c, w0.cap, i0, w0.edit, values[0], at), w0.check)]);
         }
         const one: InstRef = InstRef.Narrowed(inst);
         let lets: Stmt[] = [Stmt.Let(inst, Expr.Handle(instOf(c, ws[0].w.inst)))];
@@ -1733,7 +2005,7 @@ ${
             }
             k = k + 1;
         }
-        return lets.concat([Stmt.Commit(writes)]);
+        return lets.concat([Stmt.Commit(writes.concat(invGroup(c, one, writes, at)))]);
     }
 
     // The snapshot Lets (RULED S440 strict snapshot, narrowed by S440 re-review
@@ -1826,7 +2098,7 @@ ${
     // writes `InitOf` (D15, re-run at runtime). The program (R4) is a `single`
     // with no use site: its initializer is the declared one, lowered inline
     // with `.Lexical(0)` meaning the instance being reset.
-    fn resetStmt(c: LC, w: WriteFact, d: Sym, idx: int) -> Stmt[] {
+    fn resetStmt(c: LC, w: WriteFact, d: Sym, idx: int, at: int) -> Stmt[] {
         const di: DeclInfo | not = declInfo(c.t, d);
         if (di is not) return [];
         const target: InstRef = instOf(c, w.inst);
@@ -1838,11 +2110,11 @@ ${
             if (prq is given) return [Stmt.Eval(Expr.Refetch(prq.handle))].concat(surfaceReset(di, target, idx));
         }
         const surf: Stmt[] = surfaceReset(di, target, idx).concat(unpersistReset(c.t, di, target, idx));
-        if (!isProgramKind(di.kind)) return [Stmt.Write(w.cap, target, w.edit, Expr.InitOf(d, target, idx), w.check)].concat(surf);
+        if (!isProgramKind(di.kind)) return [Stmt.Write(w.cap, target, w.edit, invLone(c, w.cap, target, w.edit, Expr.InitOf(d, target, idx), at), w.check)].concat(surf);
         const ic: LC = { t: c.t, file: c.file, subst: target, snap: not, rows: c.rows };
         const init: Expr | not = lowerValue(ic, di.fields[idx].init);
         if (init is not) return [];
-        return [Stmt.Write(w.cap, target, w.edit, init, w.check)].concat(surf);
+        return [Stmt.Write(w.cap, target, w.edit, invLone(c, w.cap, target, w.edit, init, at), w.check)].concat(surf);
     }
 
     // s449 — §55.13: `reset(@x)` "clears synthesized validity state in
@@ -1882,7 +2154,7 @@ ${
         if (init is not) return [];
         let edit: EditKind = EditKind.Replace;
         if (f.graph is given) edit = EditKind.Transition;
-        return [Stmt.Write(cap, InstRef.Lexical(0), edit, init, Check.Static)].concat(surfaceReset(d, InstRef.Lexical(0), idx)).concat(unpersistReset(c.t, d, InstRef.Lexical(0), idx));
+        return [Stmt.Write(cap, InstRef.Lexical(0), edit, invLone(c, cap, InstRef.Lexical(0), edit, init, f.span.start), Check.Static)].concat(surfaceReset(d, InstRef.Lexical(0), idx)).concat(unpersistReset(c.t, d, InstRef.Lexical(0), idx));
     }
 
     fn isProgramKind(k: DeclKind) -> boolean {
@@ -2380,8 +2652,10 @@ ${
         const last: Stmt = b.stmts[n - 1];
         const w: WriteParts | not = writeParts(last);
         if (w is not) return b;
-        const wr: Stmt = Stmt.Write(w.cap, w.inst, w.edit, Expr.Local(rq.load), w.check);
-        return block(b.stmts.slice(0, n - 1).concat([Stmt.Suspend(rq.load, w.value, block([wr]))]));
+        // s483 (Q21 lane 2): a reload's invariant check (§66.13.5 "a server reload") judges the
+        // LOADED value — the guard is rebuilt around the load local, after the wait
+        const wr: Stmt = Stmt.Write(w.cap, w.inst, w.edit, invRewrap(w.value, Expr.Local(rq.load)), w.check);
+        return block(b.stmts.slice(0, n - 1).concat([Stmt.Suspend(rq.load, invGuardedValue(w.value), block([wr]))]));
     }
 
     type WriteParts:struct = { cap: Sym, inst: InstRef, edit: EditKind, value: Expr, check: Check }
@@ -3279,7 +3553,16 @@ ${
             if (rv is given) renders = stampViews(rv, cssRootAttrs(t, d), t.css.scopes.length > 0);
         }
         const wiring: WiringAttr[] = [];
-        return { sym: d.sym, key: declKey(t, d), kind: d.kind, single: d.single, fields: fields, renders: renders, wiring: wiring, handles: d.handles };
+        return { sym: d.sym, key: declKey(t, d), kind: d.kind, single: d.single, fields: fields, renders: renders, wiring: wiring, handles: d.handles, invs: constructCheck(c, d) };
+    }
+
+    // s483 (Q21 lane 2) — a declaration's construction check (§66.13.5 "a use-site
+    // initializer, construction"): every invariant on the fresh instance's seeded fields.
+    fn constructCheck(c: LC, d: DeclInfo) -> Expr | not {
+        if (d.invs.length == 0) return not;
+        const cks: InvCheck[] = invInstanceChecks(c.t, d, []);
+        if (cks.length == 0) return not;
+        return invGuardOf(c, InstRef.Lexical(0), [], cks, invLoc(c.t, d.file, d.span.start));
     }
 
     // s474 (door 3): a user declaration's output name is per-file qualified, always (core.scrml
@@ -3437,6 +3720,7 @@ ${
             .BParam(sym: s, ty: ty) :> [{ sym: s, ty: ty }],
             .BLoop(label: x) :> [],
             .BJump(target: x) :> [],
+            .BInv(params: x) :> [],
             .BBind(sym: s) :> [],
             .BGiven(sym: s) :> [],
             not :> []
@@ -5182,7 +5466,7 @@ ${
     fn serverView(t: Tables, plan: SuspendPlan, inherited: int[]) -> Tables {
         const f: ServerFacts = t.server;
         const sf: ServerFacts = { servers: f.servers, sqls: f.sqls, dbs: f.dbs, places: f.places, inherited: inherited, plan: plan, loads: f.loads, envelopes: f.envelopes, txs: f.txs, reqReads: f.reqReads, tool: f.tool, endpoints: f.endpoints, channels: f.channels, copies: f.copies, onServer: true };
-        return { program: t.program, types: t.types, decls: t.decls, fns: t.fns, handles: t.handles, names: t.names, values: t.values, effects: t.effects, binds: t.binds, elems: t.elems, attrs: t.attrs, fails: t.fails, annots: t.annots, unresolved: t.unresolved, typing: t.typing, novalidate: t.novalidate, resets: t.resets, gated: t.gated, persists: t.persists, timings: t.timings, server: sf, css: t.css, consts: t.consts, requests: t.requests, taliases: t.taliases, tscope: t.tscope, waits: t.waits, rows: t.rows };
+        return { program: t.program, types: t.types, decls: t.decls, fns: t.fns, handles: t.handles, names: t.names, values: t.values, effects: t.effects, binds: t.binds, elems: t.elems, attrs: t.attrs, fails: t.fails, annots: t.annots, unresolved: t.unresolved, typing: t.typing, novalidate: t.novalidate, resets: t.resets, gated: t.gated, persists: t.persists, timings: t.timings, server: sf, css: t.css, consts: t.consts, requests: t.requests, taliases: t.taliases, tscope: t.tscope, waits: t.waits, rows: t.rows, lines: t.lines };
     }
 
     export fn lower(tp: TypedProgram) -> Lowered {
@@ -5309,7 +5593,7 @@ ${
                 let gated: View[] = gateViews(p, rs, ext);
                 if (!isProgramKind(d.kind)) gated = reachList(namedFields(p, rs, not, [d.sym.id]), gated);
                 out = out.concat([{ sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: d.fields, renders: gated,
-                                    wiring: d.wiring, handles: d.handles }]);
+                                    wiring: d.wiring, handles: d.handles, invs: d.invs }]);
             } else {
                 out = out.concat([d]);
             }

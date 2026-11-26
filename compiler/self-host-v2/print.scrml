@@ -1200,6 +1200,10 @@ ${
             .LengthCheck :> rtCall(ctx, "lengthCheck", a),
             // s478 (§53.4.5) — a boundary-zone refinement's runtime check (the E-CONTRACT-001-RT trap)
             .RefineCheck :> rtCall(ctx, "refineCheck", a),
+            // s483 (Q21 lane 2, §66.13.5) — a declaration invariant on the candidate value (the
+            // E-WRITE-INVARIANT-RT trap before the write)
+            .InvariantGuard :> rtCall(ctx, "invariantGuard", a),
+            .InvariantValue :> rtCall(ctx, "invariantValue", a),
             .TapeInsert :> rtCall(ctx, "tapeInsert", a),
             // s478 (§20.7) — raw stdout (server-runtime.js printOut; server code only, check.scrml C-P1)
             .Print :> rtCall(ctx, "printOut", a),
@@ -2976,8 +2980,50 @@ ${
         const owner: CapOwner | not = capOwner(ctx.p, cap);
         if (owner is not) return sexpr(jid("danglingWriteCapability$" + cap.id));
         const target: JsExpr = fieldCell(instJs(ctx, inst), owner.decl, owner.idx);
-        const v: JsExpr = exprJs(ctx, value);
+        const v: JsExpr = guardedWriteJs(ctx, target, owner, edit, value, check);
         return sexpr(editJs(ctx, target, owner, edit, v, check));
+    }
+
+    // s483 (Q21 lane 2) — a lone write whose value passes through its declaration-invariant
+    // check (an InvariantGuard) and whose field contract is ALSO checked at run time (a
+    // RuntimeEdge transition, a RuntimeLength edit): the contract is judged first (§66.13.5
+    // evaluation order — the field's own contract, then the invariants): the guard calls the
+    // `pre` it is given with the write's value before it judges the candidate. The write
+    // itself re-checks its contract afterwards, on the same state (nothing ran in between).
+    fn guardedWriteJs(ctx: Ctx, target: JsExpr, owner: CapOwner, edit: EditKind, value: Expr, check: Check) -> JsExpr {
+        const args: Expr[] | not = invGuardArgs(value);
+        if (args is not) return exprJs(ctx, value);
+        const pre: JsExpr | not = contractFirstJs(ctx, target, owner, edit, check);
+        if (pre is not) return exprJs(ctx, value);
+        return rtCall(ctx, "invariantGuard", exprsJs(ctx, args).concat([pre]));
+    }
+
+    fn invGuardArgs(e: Expr) -> Expr[] | not {
+        return match e {
+            .Prim(op: o, args: a) :> invGuardOp(o, a),
+            // no-default-arm: one question of a write's value — is it an InvariantGuard primitive
+            _ :> not
+        };
+    }
+
+    fn invGuardOp(o: PrimOp, a: Expr[]) -> Expr[] | not {
+        if (o == PrimOp.InvariantGuard) return a;
+        return not;
+    }
+
+    fn contractFirstJs(ctx: Ctx, target: JsExpr, owner: CapOwner, edit: EditKind, check: Check) -> JsExpr | not {
+        if (isTransitionEdit(edit) && isRuntimeEdge(check)) return rtCall(ctx, "edgeFirst", [target, jid(nameOf(ctx.names, NameKey.Edges(owner.decl.sym.id, owner.idx)))]);
+        return match check {
+            .RuntimeLength(min: a, max: b, loc: l) :> lengthFirstJs(ctx, target, edit, a, b, l),
+            .Static :> not,
+            .RuntimeEdge :> not
+        };
+    }
+
+    fn lengthFirstJs(ctx: Ctx, target: JsExpr, edit: EditKind, a: int, b: int, l: string) -> JsExpr | not {
+        if (edit == EditKind.Append || edit == EditKind.Prepend) return rtCall(ctx, "lengthFirst", [target, jnum(1), jnum(a), jnum(b), jstr(l)]);
+        if (edit == EditKind.RemoveEnd || edit == EditKind.RemoveFront) return rtCall(ctx, "lengthFirst", [target, jnum(-1), jnum(a), jnum(b), jstr(l)]);
+        return not;
     }
 
     // An all-or-nothing group of writes (Stmt.Commit, RULED S440): first every
@@ -2992,16 +3038,30 @@ ${
     // batch, observers run once, after the last write. The checks stay OUTSIDE
     // the batch: they are pure reads (`peek`), nothing can run between them and
     // the batch, and a refusal throws before any batch bookkeeping begins.
+    // s483 (Q21 lane 2) — a Commit's declaration-invariant checks (its InvariantGuard
+    // Evals, check.scrml C7) run after every write's own contract check and before the
+    // batch: the §66.13.5 order — each field's contract, then the invariants on the
+    // candidate, then the writes.
     fn commitJs(ctx: Ctx, ws: Stmt[]) -> JsStmt[] {
         let checks: JsStmt[] = [];
+        let invs: JsStmt[] = [];
         let writes: JsStmt[] = [];
         let k: int = 0;
         for (const s of ws) {
             checks = checks.concat(commitCheckJs(ctx, s)).concat(commitLengthJs(ctx, ws, k));
+            invs = invs.concat(commitInvJs(ctx, s));
             writes = writes.concat(commitWriteJs(ctx, s));
             k = k + 1;
         }
-        return checks.concat([sexpr(rtCall(ctx, "batch", [JsExpr.JArrow([], writes)]))]);
+        return checks.concat(invs).concat([sexpr(rtCall(ctx, "batch", [JsExpr.JArrow([], writes)]))]);
+    }
+
+    fn commitInvJs(ctx: Ctx, s: Stmt) -> JsStmt[] {
+        return match s {
+            .Eval(e: e) :> [sexpr(exprJs(ctx, e))],
+            // no-default-arm: one question of a Commit member — is it its invariant check (an Eval); every Write is printed by commitWriteJs
+            _ :> []
+        };
     }
 
     fn commitCheckJs(ctx: Ctx, s: Stmt) -> JsStmt[] {
@@ -4734,6 +4794,10 @@ ${
             body = body.concat([JsStmt.SAssign(handleSlot(jid("inst$"), k, h.hint), rtCall(ctx, "handle", []))]);
             k = k + 1;
         }
+        // s483 (Q21 lane 2): the construction check of a declaration with invariants
+        // (§66.13.5) — the fresh instance's seeded fields, before its children
+        const ci: Expr | not = d.invs;
+        if (ci is given) body = body.concat([sexpr(exprJs(fctx, ci))]);
         body = body.concat(kidsJs(fctx, d));
         if (d.sym.id == ctx.p.program.id) body = body.concat(holdJs(fctx, d));
         const run: JsExpr = rtCall(ctx, "construct", [jid("inst$"), JsExpr.JArrow([], body)]);
@@ -6180,7 +6244,7 @@ ${
     }
 
     fn withRenders(d: Decl, rs: View[]) -> Decl {
-        return { sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: d.fields, renders: rs, wiring: d.wiring, handles: d.handles };
+        return { sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: d.fields, renders: rs, wiring: d.wiring, handles: d.handles, invs: d.invs };
     }
 
     // `p` with the program declaration's renders replaced by `rs`.
@@ -8023,7 +8087,7 @@ ${
             fs = fs.concat([{ sym: f.sym, ty: f.ty, init: Expr.Lit(Literal.Absent), mode: f.mode, role: f.role, grants: f.grants, graph: f.graph,
                               exported: f.exported, wcap: f.wcap, vals: f.vals, persist: f.persist, timing: f.timing }]);
         }
-        return { sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: fs, renders: d.renders, wiring: d.wiring, handles: d.handles };
+        return { sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: fs, renders: d.renders, wiring: d.wiring, handles: d.handles, invs: d.invs };
     }
 
     fn seedConst(p: CoreProgram, c: OuterCell) -> CoreConst[] {
@@ -8344,7 +8408,7 @@ ${
         let ds: Decl[] = [];
         for (const d of p.decls) {
             if (d.sym.id == pd.sym.id) {
-                ds = ds.concat([{ sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: fs, renders: d.renders, wiring: d.wiring, handles: d.handles }]);
+                ds = ds.concat([{ sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: fs, renders: d.renders, wiring: d.wiring, handles: d.handles, invs: d.invs }]);
             } else {
                 ds = ds.concat([d]);
             }

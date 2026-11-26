@@ -1270,7 +1270,7 @@ ${
 
         const decl: Decl = {
             sym: prog, key: prog.hint, kind: DeclKind.Program, single: true, fields: fs.fields,
-            renders: vs.views, wiring: [], handles: [],
+            renders: vs.views, wiring: [], handles: [], invs: not,
         };
         const core: CoreProgram = { program: prog, decls: [decl], types: [], fns: fns, server: [], dbs: [], reset: false, sqlError: not, serverCallError: not, css: not, consts: [], loads: [], envelopes: [], head: plainHead(), tool: not, endpoints: [], channels: [], typed: [], outer: [] };   // the hybrid's stylesheet is css-ingest's (slice-m3)
         return { core: core, why: dedupeStr(why) };
@@ -1427,6 +1427,8 @@ ${
             .TapeIncludes :> "TapeIncludes",
             .LengthCheck :> "LengthCheck",
             .RefineCheck :> "RefineCheck",
+            .InvariantGuard :> "InvariantGuard",
+            .InvariantValue :> "InvariantValue",
             .TapeInsert :> "TapeInsert",
             .Print :> "Print",
             .MetaGet :> "MetaGet",

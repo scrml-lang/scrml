@@ -80,7 +80,7 @@ ${
 
         const program: Decl = {
             sym: sProgram, key: sProgram.hint, kind: DeclKind.Program, single: true,
-            fields: [fAudit, fSeen], renders: [main], wiring: [], handles: [],
+            fields: [fAudit, fSeen], renders: [main], wiring: [], handles: [], invs: not,
         };
         return { program: sProgram, decls: [program], types: [], fns: [log], server: [], dbs: [], reset: true, sqlError: not, serverCallError: not, css: not, consts: [], loads: [], envelopes: [], head: plainHead(), tool: not, endpoints: [], channels: [], typed: [], outer: [] };
     }

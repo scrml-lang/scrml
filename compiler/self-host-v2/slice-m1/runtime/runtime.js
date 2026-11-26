@@ -3291,6 +3291,117 @@ export function refineCheck(v, base, spec, shown, what, at) {
     { type: shown, value: v, failing, what, at });
 }
 
+// ---------------------------------------------------------------------------
+// s483 (Q21 lane 2) — DECLARATION INVARIANTS checked on every write (SPEC §66.13.5;
+// ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 2: "check every write
+// … one snapshot, all or nothing, checked once … otherwise the E-WRITE-INVARIANT-RT
+// trap before any write (S477)"). The compiler emits these only for a write that
+// touches a field an invariant reads and that it could not prove; the check runs on
+// the CANDIDATE value — the current value with the write applied — before anything
+// is written, so a refused write writes nothing and notifies nothing.
+//
+// One check is `[at, pred, names, owner, what]`: `at` the path (member names, tape
+// positions) from the candidate's root to the value the invariant constrains (`[]`
+// for a declaration's own invariant; `["range"]` for a field of a `type X:struct`
+// with invariants); `pred` the invariant as a function of the fields it reads, in
+// the order of `names`; `owner` / `what` name the declaration or type and the
+// invariant (its `[label]`, else its expression) for the trap. A `not` value at
+// `at` (an optional field that holds no value) has nothing to check.
+// One write is `[name-or-index, path, op, v]`: `op` "set" writes `v` at `path`
+// below the field; "append" / "prepend" add the element `v`; "dropEnd" /
+// "dropFront" remove `v` elements (a tape edit, §66.12.6).
+
+function invShow(v) {
+  if (v === null || v === undefined) return "not";
+  if (typeof v === "string") return JSON.stringify(v);
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  if (Array.isArray(v)) return "[" + v.map(invShow).join(", ") + "]";
+  if (typeof v === "object" && typeof v.variant === "string" && "data" in v) return "." + v.variant + "(…)";
+  if (typeof v === "object") return "{ " + Object.keys(v).map((k) => k + ": " + invShow(v[k])).join(", ") + " }";
+  return "a " + typeof v;
+}
+
+function invEdit(cur, op, v) {
+  if (op === "append") return [...(cur ?? []), v];
+  if (op === "prepend") return [v, ...(cur ?? [])];
+  if (op === "dropEnd") return (cur ?? []).slice(0, Math.max(0, (cur ?? []).length - v));
+  if (op === "dropFront") return (cur ?? []).slice(v);
+  return v;
+}
+
+// `cur` with the write applied at `path` — a COPY along the path (values are immutable, §66.10)
+function invApply(cur, path, op, v) {
+  if (path.length === 0) return invEdit(cur, op, v);
+  const [k, ...rest] = path;
+  const base = cur ?? {};
+  const copy = Array.isArray(base) ? base.slice() : { ...base };
+  copy[k] = invApply(base[k], rest, op, v);
+  return copy;
+}
+
+function invEnsure(cand, check, loc) {
+  const [at, pred, names, owner, what] = check;
+  let val = cand;
+  for (const k of at) { val = val === null || val === undefined ? val : val[k]; }
+  if (val === null || val === undefined) return;
+  const args = names.map((n) => val[n]);
+  if (pred(...args) === true) return;
+  const shown = names.map((n, i) => n + " = " + invShow(args[i])).join(", ");
+  throw new ScrmlTrap("E-WRITE-INVARIANT-RT",
+    "the write would break the invariant " + what + " of " + owner + " — the candidate value has " + shown + " (" + loc + ") — nothing was written",
+    { owner, invariant: what, values: Object.fromEntries(names.map((n, i) => [n, args[i]])), at: loc });
+}
+
+/**
+ * A write to the fields of the declaration instance `inst` (one field, or a spread's
+ * group — §66.11.3): the candidate is the instance's current fields (read untracked)
+ * with every write in `writes` applied, checked against `checks` in order. Returns the
+ * first write's value, so a lone write's value passes through it. `pre` (optional): the
+ * write's own runtime contract check (edgeFirst / lengthFirst), run first (§66.13.5 order).
+ */
+export function invariantGuard(inst, writes, checks, loc, pre) {
+  if (pre && writes.length > 0) pre(writes[0][3]);
+  const names = inst.decl.fields;
+  const need = new Set();
+  for (const w of writes) need.add(typeof w[0] === "number" ? names[w[0]] : w[0]);
+  for (const c of checks) {
+    if (c[0].length > 0) need.add(c[0][0]);
+    else for (const n of c[2]) need.add(n);
+  }
+  const cand = {};
+  for (const n of need) {
+    const i = names.indexOf(n);
+    if (i >= 0) cand[n] = inst.fields[i].peek();
+  }
+  for (const [f, path, op, v] of writes) {
+    const n = typeof f === "number" ? names[f] : f;
+    cand[n] = invApply(cand[n], path, op, v);
+  }
+  for (const c of checks) invEnsure(cand, c, loc);
+  return writes.length > 0 ? writes[0][3] : undefined;
+}
+
+/**
+ * A value of a type with invariants: `cur` with the write `op` of `v` applied at
+ * `path` (`path` empty and `op` "set": `v` itself — a constructed or replacing value)
+ * is checked against `checks`. Returns `v`.
+ */
+export function invariantValue(cur, path, op, v, checks, loc) {
+  const cand = path.length === 0 && op === "set" ? v : invApply(cur, path, op, v);
+  for (const c of checks) invEnsure(cand, c, loc);
+  return v;
+}
+
+/** A lone graph write's edge check, as `transition` makes it, for invariantGuard to run first. */
+export function edgeFirst(target, table) {
+  return (to) => { if (!timedEdgeJudged(target)) checkEdge(target, table, to); };
+}
+
+/** A lone bounded-tape edit's length check (`sign` 1: one element added; -1: `v` removed), run first. */
+export function lengthFirst(target, sign, min, max, at) {
+  return (v) => lengthGuard(target, sign > 0 ? 1 : -v, min, max, at);
+}
+
 /**
  * `xs.insert(i, v)` (§66.12.6 rule 3, grow anywhere): a NEW tape with `v` at
  * position `i` — `0 <= i <= xs.length` (`i == xs.length` adds at the end). A

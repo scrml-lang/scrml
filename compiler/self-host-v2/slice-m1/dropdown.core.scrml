@@ -230,7 +230,7 @@ ${
         const dropdown: Decl = {
             sym: sDropdown, key: scopeKey("lib/dropdown.scrml", sDropdown.hint), kind: DeclKind.User, single: false,
             fields: [fLabel, fOptions, fValue, fOpen],
-            renders: [dropdownView], wiring: [], handles: [],
+            renders: [dropdownView], wiring: [], handles: [], invs: not,
         };
 
         // ---- the program (a `single` declaration, R4) ----
@@ -349,7 +349,7 @@ ${
             sym: sProgram, key: sProgram.hint, kind: DeclKind.Program, single: true,
             fields: programFields,
             renders: programViews, wiring: [],
-            handles: [hCountry, hColor],                 // top-level as= cells live on the program instance (L10)
+            handles: [hCountry, hColor], invs: not,                 // top-level as= cells live on the program instance (L10)
         };
 
         // function closeCountry() { @country.open = .Closed }

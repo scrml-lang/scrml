@@ -31,7 +31,8 @@
 //       "proven by a dominating test" is NOT provable here: lower must emit
 //       RuntimeEdge for it (L8).
 //   C7  a Commit (all-or-nothing spread edit, RULED S440) holds ≥ 2 Writes and
-//       nothing else, each storing a Local (the snapshot its Let evaluated)
+//       nothing else, each storing a Local (the snapshot its Let evaluated) —
+//       s483: and, after them, the Eval of its declaration-invariant check
 //   C8  (s444) a Bind writes exactly its event-value sink, once, to the place
 //       its `read` reads (Replace or FieldAt of that field)
 //   C9  (s444) a removal's value: RemoveEnd / RemoveFront carry an Int count
@@ -5349,14 +5350,71 @@ ${
     // snapshot its Let evaluated — so the printer may read a value once to
     // check it and again to apply it. Its Writes themselves are checked by
     // C2–C6 as every Write is (walk visits them as ordinary statements).
+    // s483 (Q21 lane 2): besides its Writes, a Commit may hold, AFTER them, the
+    // Eval of its declaration-invariant check (Prim InvariantGuard, §66.13.5 —
+    // the group checked once): the printer runs it after every Write's own
+    // contract check and before any write (print.scrml commitJs).
     fn checkCommit(ws: Stmt[]) -> string[] {
         let out: string[] = [];
-        if (ws.length < 2) out = out.concat(["C7: a Commit groups " + ws.length + " write(s); one write is already all-or-nothing — it must be a plain Write"]);
+        let writes: int = 0;
+        let sawCheck: boolean = false;
         for (const w of ws) {
-            const problem: string = commitMember(w);
-            if (problem != "") out = out.concat(["C7: " + problem]);
+            const g: boolean = isInvGuardEval(w);
+            if (g) {
+                sawCheck = true;
+            } else {
+                writes = writes + 1;
+                if (sawCheck) out = out.concat(["C7: a Write follows the Commit's invariant check — the check stands after every Write"]);
+                const problem: string = commitMember(w);
+                if (problem != "") out = out.concat(["C7: " + problem]);
+            }
         }
+        if (writes < 2) out = out.concat(["C7: a Commit groups " + writes + " write(s); one write is already all-or-nothing — it must be a plain Write"]);
         return out;
+    }
+
+    fn isInvGuardEval(s: Stmt) -> boolean {
+        return match s {
+            .Eval(e: e) :> isInvGuard(e),
+            // no-default-arm: one question of a Commit member — is it its invariant check
+            _ :> false
+        };
+    }
+
+    fn isInvGuard(e: Expr) -> boolean {
+        return match e {
+            .Prim(op: o) :> o == PrimOp.InvariantGuard,
+            // no-default-arm: one question of an expression — is it an InvariantGuard
+            _ :> false
+        };
+    }
+
+    // The value a write stores when it passes through its InvariantGuard (one write): that
+    // write's value; any other value is itself.
+    fn unguarded(v: Expr) -> Expr {
+        const a: Expr[] = guardArgs(v);
+        if (a.length != 4) return v;
+        const ws: Expr[] = arrayItems(a[1]);
+        if (ws.length != 1) return v;
+        const w: Expr[] = arrayItems(ws[0]);
+        if (w.length != 4) return v;
+        return w[3];
+    }
+
+    fn guardArgs(e: Expr) -> Expr[] {
+        return match e {
+            .Prim(op: o, args: a) :> (o == PrimOp.InvariantGuard ? a : []),
+            // no-default-arm: one question of an expression — the arguments of an InvariantGuard
+            _ :> []
+        };
+    }
+
+    fn arrayItems(e: Expr) -> Expr[] {
+        return match e {
+            .ArrayOf(elems: es) :> es,
+            // no-default-arm: one question of an expression — the elements of an ArrayOf
+            _ :> []
+        };
     }
 
     fn commitMember(s: Stmt) -> string {
@@ -5367,7 +5425,7 @@ ${
             .Assign(local: x) :> "an Assign inside a Commit",
             .If(cond: x) :> "an If inside a Commit",
             .Return(e: x) :> "a Return inside a Commit",
-            .Eval(e: x) :> "an Eval inside a Commit",
+            .Eval(e: x) :> "an Eval inside a Commit (other than its invariant check)",
             .Suspend(bind: x) :> "a Suspend inside a Commit",
             .ResetSurface(of: x) :> "a ResetSurface inside a Commit",
             .Defer(body: x) :> "a Defer inside a Commit",
@@ -5413,7 +5471,11 @@ ${
         };
     }
 
-    fn checkWrite(p: CoreProgram, ob: OnceBinds, encl: Decl[], cap: Sym, inst: InstRef, edit: EditKind, value: Expr, check: Check) -> string[] {
+    fn checkWrite(p: CoreProgram, ob: OnceBinds, encl: Decl[], cap: Sym, inst: InstRef, edit: EditKind, value0: Expr, check: Check) -> string[] {
+        // s483 (Q21 lane 2): a lone write's value may pass through its declaration-invariant
+        // check (Prim InvariantGuard, whose value is its one write's value) — the write is
+        // judged on that value (C3, C6, C9)
+        const value: Expr = unguarded(value0);
         const owner: CapOwner | not = capOwner(p, cap);
         if (owner is not) return ["C2: a write names sym " + cap.id + " (`" + cap.hint + "`), which is not a write capability"];
         const d: Decl = owner.decl;

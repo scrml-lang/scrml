@@ -246,6 +246,28 @@ ${
         // naming the constraint `shown`, the value, the failing clause, the variable
         // `what` and its location `loc` (§53.4.5 item 3).
         RefineCheck,
+        // s483 (Q21 lane 2) — a DECLARATION INVARIANT checked on a write (§66.13.5;
+        // ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 2: "Provable
+        // violation E-WRITE-INVARIANT, otherwise the E-WRITE-INVARIANT-RT trap before any
+        // write (S477)"). Each check is `ArrayOf([at, pred, names, owner, what])`: `at` the
+        // path (Str members, Int / index positions) from the candidate's root to the value
+        // the invariant constrains; `pred` a Lambda — the clause as a function of the
+        // fields it reads, in the order of `names` (Str); `owner` / `what` (Str) name the
+        // declaration or type and the clause for the trap. One write is `ArrayOf([field,
+        // path, op, value])`: `field` an Int field index (InvariantGuard) or unused; `path`
+        // the members / positions below it; `op` a Str — "set", "append", "prepend",
+        // "dropEnd", "dropFront" (§66.12.6 edits).
+        // InvariantGuard(inst, writes, checks, loc): the CANDIDATE of instance `inst`
+        // (a Handle) — its current fields, read untracked, with every write applied — is
+        // checked; a `false` clause is the E-WRITE-INVARIANT-RT trap (§19.17) naming the
+        // owner, the clause, the candidate field values and `loc`, and nothing is written
+        // (the check runs before the write it guards). Its value is the first write's
+        // value, so a lone Write's value passes through it; a group's check stands as an
+        // Eval inside its Commit, after the writes (check.scrml C7).
+        // InvariantValue(cur, path, op, v, checks, loc): a VALUE — `cur` with the write
+        // `op` of `v` applied at `path` (with `path` empty and "set", `v` itself: a
+        // constructed value) — is checked the same way; its value is `v`.
+        InvariantGuard, InvariantValue,
         // s478 (s478-boot-print-builtins, §20.7) — Print(s): write the string `s` to host stdout as RAW
         // text (§20.7.6: "NO origin tag / `file:line` / side classification"), its value `not`. What
         // `print(…)` / `println(…)` lower to: `s` is the arguments' texts space-joined (§20.7.1), with one
@@ -1101,6 +1123,11 @@ ${
         renders: View[] | not,
         wiring: WiringAttr[],
         handles: Sym[],
+        // s483 (Q21 lane 2) — the declaration's CONSTRUCTION check (§66.13.5 "a use-site
+        // initializer, construction"): an InvariantGuard over the fresh instance
+        // (`Lexical(0)`, no writes) with every invariant of the declaration, run once its
+        // fields are seeded; `not` when it has none.
+        invs: Expr | not,
     }
 
     export type Param:struct    = { sym: Sym, ty: Type }
