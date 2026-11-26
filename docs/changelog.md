@@ -2,6 +2,46 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S482 — 2026-11-21 → 11-26 (bryan · theRog) — run-order model (c), the retired-forms ledger + gate, `^{}` phases 0–3 in the bootstrap, Q6 body hold, seed timing, `::` deprecated, `/}` retired; 41 PRs + bot regens; conformance PASS 767 → 851 (FAIL 3, CRASH 0)
+
+Rulings: user-voice §S482 (about 30 entries; ⭐⭐ S482-runorder-model-c; Q1–Q22, R1–R5; PA-ruled readings labelled prov=pa-ruled). Every code PR took an S239 adversarial review on a frozen tree; every fix round a fresh agent and a fresh re-review.
+
+Run order (§7.6 R1–R6):
+- #2041 — the program body runs once, in source order (§7.6 / §40.8; S481 lane, landed S482).
+- #2053 — run-order follow-ups: seeds in place, a later place is E-SCOPE-001, an acting initializer in a construct refused, comments / `#{}` keep a chain.
+- #2063 — E-SCOPE-001 when a cell's seed reaches a later binding (read early, and at its place); #2071 — event handlers no longer make the printer run a binding before its place.
+- #2076, #2079, #2082, #2088 — place follow-ups: a non-acting construct initializer runs just before the construct; RCDATA initializer before its element; `effect deps=` are mount code; base's fail-closed seed rule kept (PA-ruled after three rounds of silent-wrong holes).
+- ⭐⭐ #2096 — run-order model (c): computing a value never writes a file-scope `let` (A1), the body spine is setup code (A2), E-DERIVED-READS-UNTRACKED (A3); the INTERIM construct enumeration deleted.
+- #2106 — Q6: effect / request runs triggered during the body are held until it ends (trigger order); Q18 drops them when the body traps; Q17 held load dated at its trigger; ~615 lines of construct-request INTERIM deleted.
+- #2107 — W-DISPLAY-UNTRACKED (Q19 / §6.15 A5): a display of a plain `let` that later code writes.
+- #2105 — Q12 outside-body cells seeded before the body in link order; Q13 a locked field is derived iff it reads a cell, else a constant seeded at the mount; closes an unread-outer-cell secret leak.
+- #2112 — an instance's mount is judged at the use's place (R2).
+
+Security:
+- #2061 — the client artifact holds only what the client runs (§12.2 T6); server-only init gets a server artifact.
+- #2093 — the runtime reflect registry holds only client-used types (Q10, identity-keyed).
+- #2113 — a binding the client only writes is judged by reads: client shells, no server-only secret in the client.
+
+`^{}` meta in the bootstrap:
+- #2045 — phases 0+1: static checks, a compile-time scrml interpreter, emit splice (six review rounds; coarse compile-wide backstop).
+- #2067 — phase 2: runtime `^{}` blocks (§22.5). #2080 — phase 3: runtime type registry (`reflect` / TypeInfo) and `meta.subscribe`.
+- #2089 — Q11: host calls are unproven under the §6.7.4 no-write rule in `<effect>` bodies; effect run cap 100 per flush.
+
+Retired forms and rulings records:
+- ⭐ #2101 — retired-forms ledger (`compiler/retired-forms.json`) + gate (`scripts/retired-forms-lint.ts`) reading every SPEC / docs fence (marked 14 cross-checked by commonmark 0.31.2); R3 E-CELL-ANGLE-READ, R4 fix-it, R5 ledger rule; Q16 E-CONTRACT-003 advises a derived check; 907 HARD-form occurrences baselined as dated debt.
+- #2095 — the terse `/}` closer retired (Appendix E governs; E-SYNTAX-050).
+- #2103 — `::` variant access deprecated: W-VARIANT-COLONS-LEGACY + `scrml fix`, corpus migrated (R2).
+- #2092, #2098 — rulings records Q1/Q2/Q3/Q4/Q5/Q7/Q9: `of` adjacency, `x is T.V`, `meta.get` typed.
+- #2110 — quoted-value escapes refused fail-closed (INTERIM); #2115 — Q22: quoted attribute / opener values follow the §4.18.3 escape catalog (`\'` hint, emit advice).
+
+Parser, lexer, self-host and `scrml fix`:
+- #2046, #2051, #2054 — self-host off `while`; `--loop-interim` capture checks (keyword-named bindings).
+- #2056, #2058, #2060, #2066 — keyword-named members, contextual words bind at every binding site, `as.value` adjacency, `/` touching `as` divides; the self-host parses to the end.
+- #2069 — RCDATA content with a `${}` is one text value. #2072, #2075, #2078 — `|` arm-pattern alternation (§18.2) and its follow-ups.
+- #2083, #2085, #2087 — parser lows: body-top `not` + parse error, alias skippedDecls, markup attribute value extent.
+
+- In review at wrap: #2116 (shared instance constructed at its first body reference; self-rendering `<*f/>` named) — FIX-small.
+
 ## S481 — 2026-11-20 → 11-21 (bryan · theRog) — Track M step 2 landed; body run order, `^{}` phases 0+1 and self-host `while` in review
 
 Rulings: user-voice §S481 (four batches, PA recs adopted). Every code PR took an S239 adversarial review on a frozen tree; every fix round a fresh agent.
