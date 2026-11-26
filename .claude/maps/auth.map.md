@@ -1,6 +1,6 @@
 # auth.map.md
 # project: scrml
-# updated: 2026-11-08T16:47:39Z  commit: f92d1a8fb
+# updated: 2026-11-26T22:24:19Z  commit: fa24c93bb
 # The repo has no auth of its own (a compiler). This map covers the auth/session/CSRF/protect surface the compiler EMITS into user programs, and the stdlib auth modules.
 # compiler/src (impl#1) auth code is unchanged fa0e875b4..f92d1a8fb; S475 touched only the bootstrap.
 
@@ -29,7 +29,7 @@ commands/refusal-gate.js — refuses writing a build that has refusals (compile/
 
 ## Bootstrap (impl#2) equivalents
 CSRF double-submit: runtime.js `CSRF_COOKIE` = "scrml_csrf", `CSRF_HEADER` = "X-CSRF-Token" (:4726); server-runtime.js checks the pair.
-server-runtime.js `tenantGate` :1196, `route` :1130; analyze.scrml `placePass` :32043 decides placement; `<host>` allowlist (host-surface.scrml) + url.scrml sink rules.
+server-runtime.js `tenantGate` :1529, `route` :1463; analyze.scrml `placePass` :48715 decides placement; `<host>` allowlist (host-surface.scrml) + url.scrml sink rules.
 
 ## Token Lifecycle
 Issued: emitted session store on login flows (app code; stdlib/auth/flows.scrml: verifyMagicLink, verifyEmail, verifyResetToken; stdlib/auth/jwt.scrml: signJwt / verifyJwt / decodeJwt, JwtError)
@@ -56,11 +56,11 @@ Config: `<program auth="required|optional" login-redirect=... csrf="auto|on|off"
 
 The write half of the session model: a server function can now `session.set(key, value)` / `session.destroy()` in addition to the pre-existing read-only `@currentUser`/`@session` projections. `session` is a RESERVED identifier bound into scope automatically inside a server-escalated function body (`type-system.ts`'s `annotateNodes`, `scopeChain.bind("session", ...)` when `boundary === "server"`) — referencing `session` also AUTO-ESCALATES the enclosing function to server (mirrors the SSE `route` auto-injection and the §38.6 channel-builtin injection).
 
-**API surface** (§20.5, `compiler/SPEC.md:15738-15743` — the fenced `session` object shape under
+**API surface** (§20.5, `compiler/SPEC.md:16311-16316` — the fenced `session` object shape under
 `### 20.5 Session Context` at `:15719`; the write half `#### 20.5.1` is at `:15792`):
 
 ⛑ **S391 — THIS ANCHOR WAS WRONG *FROM BIRTH*, AND IT IS THE THIRD SUCH FINDING THIS PASS
-(invariant 77).** It read `SPEC.md:14566-14571`. That range is **§19.9.x error handling** — at
+(invariant 77).** It read `SPEC.md:15139-15144`. That range is **§19.9.x error handling** — at
 `0dd659a1` line 14566 was *"4. The client code handles the error via match, `?`, `!{}`, or
 `<errorBoundary>`"*, and the range now resolves to `#### 19.9.2 HTTP Status Code Mapping`. **It has
 never pointed at §20.5.** A mechanical delta-refresh would have carried it forward forever: it
