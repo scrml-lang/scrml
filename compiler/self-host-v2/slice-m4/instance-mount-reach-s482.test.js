@@ -439,6 +439,52 @@ ${CARD_K}
   }, 120000);
 });
 
+// S483 r1 (review s482-2116 F1): the construction at the first reference runs the SEEDS only — a
+// derived field is lazy (its formula runs where it is read), so an unread derived field that reads a
+// later binding does not pull that binding ahead of the body. Red on 9fdaa7925: x01 / x12 showed
+// `1 | 1` and x01c `1 | 1 1` (`k` hoisted to module init, before `n = 5`).
+const CARD_D = `let <m:int=0/>
+<card t:string="x">
+    let <v:int=(1)/>
+    <d:int=(@m + k)/>
+</>`;
+
+describe("F1: a shared reference constructs the seeds, not an unread derived field", () => {
+  test("x01: a seed read before `k`, the derived field never read", async () => {
+    expect(await texts(P(`${CARD_D}
+\${ n = 5; }
+<p id="o">\${@card.v}</p>
+\${ const k: int = n + 0; }
+<p id="o2">\${k}</p>`), ["o", "o2"])).toEqual(["1", "5"]);
+  }, 120000);
+
+  test("x01c: the derived field read after `k` runs its formula there", async () => {
+    expect(await texts(P(`${CARD_D}
+\${ n = 5; }
+<p id="o">\${@card.v}</p>
+\${ const k: int = n + 0; }
+<p id="o2">\${k} \${@card.d}</p>`), ["o", "o2"])).toEqual(["1", "5 5"]);
+  }, 120000);
+
+  test("x12: the shared read in another component's render, mounted before `k`", async () => {
+    expect(await texts(P(`${CARD_D}
+<show1 t:string="y">
+</> renders <b id="o">\${@card.v}</b>
+\${ n = 5; }
+<show1/>
+\${ const k: int = n + 0; }
+<p id="o2">\${k}</p>`), ["o", "o2"])).toEqual(["1", "5"]);
+  }, 120000);
+
+  test("still refused: the derived field READ before `k`", async () => {
+    await refusedNaming(P(`${CARD_D}
+\${ n = 5; }
+<p id="o">\${@card.d}</p>
+\${ const k: int = n + 0; }
+<p id="o2">\${k}</p>`), []);
+  }, 120000);
+});
+
 describe("F/U-2: a `<*f/>` inside the markup it renders is a named refusal, never a stack overflow", () => {
   const SELF = "stands inside the markup it renders";
   test("s08: a state-child body showing its own field", async () => {

@@ -66,3 +66,6 @@ R4 fixes), 2 crash → named refusal, the rest unchanged. Results: B.txt / F.txt
 - F1 reproduced on the merged tree (Chromium): x01 1|1, x01c 1|1 1, x12 1|1. Locus confirmed: reachOf's
   shared-ref branch pushed every field incl. derived. Fix: filter by `f3.wcap is given || constSeedField(p, f3)`
   (bodyInits' `pre` predicate). After: x01 1|5, x01c 1|5 5, x12 1|5; controls x01b 1|5, x01d 1|5 5 unchanged.
+- Pinned: slice instance-mount-reach-s482 "F1" describe (x01, x01c, x12 + derived read before `k` still
+  refused) — 3 red on 9fdaa7925, 38/38 green; new Chromium file
+  compiler/tests/browser/shared-instance-reach-chromium-s482.browser.test.js — 3 red on 9fdaa7925, 3/3 green.
