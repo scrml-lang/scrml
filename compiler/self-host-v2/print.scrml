@@ -209,9 +209,13 @@ ${
     // constsReadIn is (Core order: an initializer names only earlier bindings): the initializer of
     // each binding read, and of each binding written that is NOT in `noInit` — the bindings whose
     // initializer this artifact does not run (it gets a shell, clientConsts); a written binding of
-    // `noInit` names nothing through its initializer.
-    // Without `noInit` (every written binding's initializer followed), reads ∪ writes is exactly
-    // constsReadIn's set.
+    // `noInit` names nothing through its initializer. s482 r1 (#2113 review HIGH-1): and the
+    // initializer of every binding OUTSIDE `noInit` — this artifact runs it whether or not its code
+    // uses the binding, so it is a root (constUse).
+    // With every binding in `noInit` (constsOnlyRead), `reads` is constsReadIn's set less the
+    // bindings that are only overwritten whole (and those only their initializers name); a kept
+    // condition-head assignment (Expr.Assigned) is a whole-value write here, which constReads does
+    // not count (#2113 review PRE-2: it is on this path only).
     // =========================================================================
     type ConstUse:struct = { reads: int[], writes: int[] }
 
@@ -222,7 +226,16 @@ ${
         let i: int = p.consts.length - 1;
         for (; i >= 0; ) {
             const id: int = p.consts[i].sym.id;
-            if (hasInt(u.reads, id) || (hasInt(u.writes, id) && !hasInt(noInit, id))) u = constUseIn(p, Node.NExpr(p.consts[i].init), u);
+            // s482 r1 (#2113 review HIGH-1 / PRE-1): a binding OUTSIDE `noInit` has its initializer run by
+            // this artifact whether or not its code uses the binding (clientConsts: one that acts, that
+            // server code does not read and that is not server-only runs in the client alone) — so
+            // that initializer is this artifact's code, a root like the others, and what it reads is
+            // READ (`let z = rec(lit)`, nothing reads z: `lit` is client-read, held with its
+            // initializer — never a shell, never left out). (A binding only overwritten, in `noInit`,
+            // names nothing through its initializer — the shell.) Core order makes this one pass a fixed
+            // point: an initializer names only earlier bindings, and whether a binding is in `noInit`
+            // does not depend on what this walk finds.
+            if (hasInt(u.reads, id) || !hasInt(noInit, id)) u = constUseIn(p, Node.NExpr(p.consts[i].init), u);
             i = i - 1;
         }
         return u;
@@ -238,7 +251,12 @@ ${
         for (const n of allNodes(root)) {
             const id: int = localReadOf(n);
             if (id >= 0 && isConstSym(p, id) && !hasInt(reads, id)) reads = reads.concat([id]);
-            const wl: int = assignedLocalOf(n);
+            let wl: int = assignedLocalOf(n);
+            // s482 r1 (#2113 review PRE-2): the kept condition-head assignment (`if ((x = v) == …)`,
+            // Expr.Assigned, §50) rebinds the whole local too — a whole-value write. Its value is
+            // `v`'s (walked on its own as the child it is), never the old value, so it reads nothing
+            // of the binding
+            if (wl < 0) wl = assignedExprLocalOf(n);
             if (wl >= 0 && isConstSym(p, wl)) {
                 if (assignsWhole(n)) {
                     if (!hasInt(writes, wl)) writes = writes.concat([wl]);
@@ -267,8 +285,28 @@ ${
         return c;
     }
 
-    // an `Assign` that rebinds the whole local (no path)
+    // s482 r1 (#2113 review PRE-2) — the local a kept condition-head assignment (Expr.Assigned)
+    // rebinds whole, else -1
+    fn assignedExprLocalOf(n: Node) -> int {
+        return match n {
+            .NExpr(e: e) :> exprAssignedLocal(e),
+            // no-default-arm: one question of a node — is it a condition-head assignment
+            _ :> -1
+        };
+    }
+
+    fn exprAssignedLocal(e: Expr) -> int {
+        return match e {
+            .Assigned(local: l) :> l.id,
+            // no-default-arm: one question of an expression — is it a condition-head assignment
+            _ :> -1
+        };
+    }
+
+    // an `Assign` that rebinds the whole local (no path), or a condition-head assignment
+    // (Expr.Assigned, which has no path)
     fn assignsWhole(n: Node) -> boolean {
+        if (assignedExprLocalOf(n) >= 0) return true;
         return match n {
             .NStmt(s: s) :> stmtAssignsWhole(s),
             // no-default-arm: one question of a node — is it a statement that rebinds a whole local
