@@ -83,3 +83,27 @@ Harness `~/.cache/scrml/review/s482-2113-r1/` (base = 153bd0334 tree, prhead = g
 - Gates: pretest 0; conformance PASS 851 FAIL 3 NOT-TWINNED 628 UNSUPPORTED 491 CRASH 0, 0 verdict diffs / 1973;
   slices 243 pass 0 fail 5 skip; Chromium 9 files 74 pass; corpus 2977: 0/0/0/0/0, 0 new client identifiers;
   s34 PASS; types-gate OK 182; host-global 1/2 + 2/2 exit 0; e2e-render-map 259; retired-forms OK.
+
+## Fix round r2 (#2113 r1 review FIX: MED-A, LOW-2, F/U-1)
+Harness `~/.cache/scrml/review/s482-2113-r2fix/` (base = main 3535bad9b, pre = b0b77bdbb (r1), mrg = 2c89f6c26
+(r1 + main), head = dd7ba838f; probes = r1rev p/: lane 180, v01–v29 (36), q/ (71)).
+- [merge] origin/main (3535bad9b, #2112) merged. One SPEC §7.6 conflict, line-level: this PR's rule (b) paragraph
+  ("A write is not a read") + main's R1 paragraph (n09 / n03b); each side changed only its own line. Probe
+  outputs pre vs mrg (287 probes, every output file + error codes): byte-identical except r0/y/y10, y11, y12 —
+  now E-SCOPE-001, #2112's intended VALUE→REFUSED (its progress: "3 VALUE→REFUSED (y10/y11/y12 copies)").
+- [MED-A] print.scrml constReads counts Expr.Assigned (kept condition-head assignment) as a write, exactly as a
+  plain `x = v`: a server-run initializer calling a function that writes a file-scope `let` so (rule (c) exempts
+  module-initialization writes) now gets that `let` declared in the server artifact. mrg vs head: only
+  program.server.js of q67 / q76 / q77 / q78 changes. Server-artifact import (srvload.ts): base 80 artifacts,
+  1 fails (q77, pre-existing); pre / mrg 95, 4 fail (q67 q76 q77 q78); head 95, 0 fail.
+- [LOW-2] SPEC §7.6 provenance: "No secret is needed" — q30 / q32 `<plain>` → empty, q76 `<qx>` → empty; q31
+  empty on base too. [F/U-1] SPEC "Not covered" + gap g-boot-body-unread-cell-server-only-s482: status=open,
+  ruling:user-voice-scrml.md-S482-body-cell-server-only quoted; build queued, not here (n31 stays pinned).
+- Tests: slice +4 (q76, q77, q78 — import the server artifact; q30). q76–q78 red with the constReads line
+  reverted (ReferenceError: lit is not defined), green with it.
+- Values (Chromium) base vs head: lane 180 0 diffs (leaks 32 -> 22); v (36) v01c / v02 / v07 / v07b only (leaks
+  15 -> 10); q (71) the r1rev list exactly (ReferenceError → value ×12; secret leaves the client q21 q25 q66 q68
+  q78; LOW-2 class q30 q32 q76); 0 head-only leaks.
+- Gates: pretest 0 (base, head); conformance base = head PASS 851 FAIL 3 NOT-TWINNED 628 UNSUPPORTED 491 CRASH 0,
+  0 verdict diffs / 1973; slices (9) 247 pass 0 fail 5 skip; Chromium (10 s482 files) 75 pass; corpus 2977:
+  0/0/0/0/0/0; s34 PASS; types-gate OK 182; host-global 1/2 + 2/2 0 violations; retired-forms OK; e2e 259 pass.
