@@ -1,8 +1,8 @@
 {
   "id": "components-prop-substitution-string-escapes",
-  "description": "§15.10.1 (S458 third round, N3) — an escape inside a string literal in a component body's quoted attribute round-trips through expansion exactly as the same attribute written outside a component: `title=\"${n + 'it\\'s'}\"` renders `ait's` (it used to be cooked to `'it's'` before the expander re-parsed the body — then truncated to `'it'`, or E-CODEGEN-INVALID-LOGIC), and `data-pat=\"^\\d+$\"` keeps one backslash (it used to double).",
+  "description": "§15.10.1 (S458 third round, N3) — an escape inside a string literal in a component body's quoted attribute round-trips through expansion exactly as the same attribute written outside a component: `title=\"${n + 'it\\'s'}\"` renders `ait's` (it used to be cooked to `'it's'` before the expander re-parsed the body — then truncated to `'it'`, or E-CODEGEN-INVALID-LOGIC), and `data-pat=\"^\\\\d+$\"` renders one backslash, `^\\d+$` (it used to double). Spelled `\\\\` since S482: a quoted value has only the §4.18.3 escapes (§5.2, ruled B), so `\\d` alone is E-PARSE-001.",
   "language-version": "1.0",
-  "spec": "§15.10.1",
+  "spec": "§15.10.1, §5.2",
   "rationale": "§15.10.1 substitutes the caller value for identifier references only; everything else in the attribute is the author's text and is preserved — the component's `<span>` and the plain `<span>` render identically.",
   "expect": {
     "codes": [],
@@ -12,5 +12,13 @@
       { "selector": ".c", "attr": { "title": "ait's", "data-pat": "^\\d+$" } },
       { "selector": ".d", "attr": { "title": "ait's", "data-pat": "^\\d+$" } }
     ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-quoted-value-escapes-content-s482",
+      "fails": {
+        "runtime": "sha256:a5b7c11ccdb17f9f"
+      }
+    }
   }
 }
