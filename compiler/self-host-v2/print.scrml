@@ -172,11 +172,17 @@ ${
 
     // s479: a READ (`Local(sym)`, a place rooted at it) or a WRITE (a file-scope `let`'s
     // `Assign`) — an artifact that only writes the binding still declares it.
+    // s482 r2 (#2113 r1 review MED-A): a kept condition-head assignment (`if ((x = v) == …)`,
+    // Expr.Assigned, §50) is a write too, exactly as `x = v` is. A server-run initializer may call a
+    // function that writes a file-scope `let` this way (rule (c) exempts writes made at module
+    // initialization), so the server artifact must declare that binding — without it the module
+    // threw `ReferenceError` at load (probes q76 / q77 / q78).
     fn constReads(p: CoreProgram, root: Node, acc: int[]) -> int[] {
         let out: int[] = acc;
         for (const n of allNodes(root)) {
             let id: int = localReadOf(n);
             if (id < 0) id = assignedLocalOf(n);
+            if (id < 0) id = assignedExprLocalOf(n);
             // s482 r1 (#2105 review HIGH-1): a reference to the shared instance of a cell declared
             // outside the body that outerPlaced classifies as a binding (its id is then a constant's
             // — never otherwise: a declaration's Sym is not a constant's) reads that binding
@@ -186,6 +192,240 @@ ${
             }
             if (id >= 0 && !hasInt(out, id) && isConstSym(p, id)) out = out.concat([id]);
         }
+        return out;
+    }
+
+    // =========================================================================
+    // s482 (lane s482-write-only-secret) — READS apart from WRITES. §7.6 rule (b) S481 makes a
+    // binding server-only *"when only server code reads it, or when no code reads it and its
+    // initializer reaches … another server-only binding"*: a write is not a read. constReads counts
+    // a client write as a use (an artifact that writes a binding must declare it), and serverInitsRound
+    // judged "the client reads" from it — so a binding the client only WROTE kept its initializer
+    // in the client, and with it the server-only value that initializer reached (probes o9 / o9-let:
+    // `const API_KEY = "zz-sk-live-123"` in program.client.js).
+    //
+    // `reads`: the bindings the code under the roots reads — a `Local`, a place rooted at one, a
+    // PART write (`Assign` with a path: the new value is a copy of the old one, §66.10), and a
+    // reference to the shared instance of a cell declared outside the body that outerPlaced made a
+    // binding — except the instance a whole-value write addresses. `writes`: the bindings it
+    // OVERWRITES whole — `Assign` with no path (`x = v`), or a `Write` of such a cell's shared
+    // instance that replaces its value with no run-time check (`@c = v`: EditKind.Replace,
+    // Check.Static — any other edit or check reads the old value, so it is a read). A binding both
+    // read and written is in `reads` (and may be in `writes`). Closed through initializers as
+    // constsReadIn is (Core order: an initializer names only earlier bindings): the initializer of
+    // each binding read, and of each binding written that is NOT in `noInit` — the bindings whose
+    // initializer this artifact does not run (it gets a shell, clientConsts); a written binding of
+    // `noInit` names nothing through its initializer. s482 r1 (#2113 review HIGH-1): and the
+    // initializer of every binding OUTSIDE `noInit` — this artifact runs it whether or not its code
+    // uses the binding, so it is a root (constUse).
+    // With every binding in `noInit` (constsOnlyRead), `reads` is constsReadIn's set less the
+    // bindings that are only overwritten whole (and those only their initializers name); a kept
+    // condition-head assignment (Expr.Assigned) is a whole-value write here (#2113 review PRE-2),
+    // and constReads counts it as the write it is (#2113 r1 review MED-A).
+    // =========================================================================
+    type ConstUse:struct = { reads: int[], writes: int[] }
+
+    fn constUse(p: CoreProgram, roots: Node[], noInit: int[]) -> ConstUse {
+        let u: ConstUse = { reads: [], writes: [] };
+        if (p.consts.length == 0) return u;
+        for (const r of roots) { u = constUseIn(p, r, u); }
+        let i: int = p.consts.length - 1;
+        for (; i >= 0; ) {
+            const id: int = p.consts[i].sym.id;
+            // s482 r1 (#2113 review HIGH-1 / PRE-1): a binding OUTSIDE `noInit` has its initializer run by
+            // this artifact whether or not its code uses the binding (clientConsts: one that acts, that
+            // server code does not read and that is not server-only runs in the client alone) — so
+            // that initializer is this artifact's code, a root like the others, and what it reads is
+            // READ (`let z = rec(lit)`, nothing reads z: `lit` is client-read, held with its
+            // initializer — never a shell, never left out). (A binding only overwritten, in `noInit`,
+            // names nothing through its initializer — the shell.) Core order makes this one pass a fixed
+            // point: an initializer names only earlier bindings, and whether a binding is in `noInit`
+            // does not depend on what this walk finds.
+            if (hasInt(u.reads, id) || !hasInt(noInit, id)) u = constUseIn(p, Node.NExpr(p.consts[i].init), u);
+            i = i - 1;
+        }
+        return u;
+    }
+
+    fn constUseIn(p: CoreProgram, root: Node, acc: ConstUse) -> ConstUse {
+        let reads: int[] = acc.reads;
+        let writes: int[] = acc.writes;
+        // shared-instance references, with multiplicity: every one (`refs`), and those a whole-value
+        // write addresses (`over`) — a reference is a read unless it is one of the latter
+        let refs: int[] = [];
+        let over: int[] = [];
+        for (const n of allNodes(root)) {
+            const id: int = localReadOf(n);
+            if (id >= 0 && isConstSym(p, id) && !hasInt(reads, id)) reads = reads.concat([id]);
+            let wl: int = assignedLocalOf(n);
+            // s482 r1 (#2113 review PRE-2): the kept condition-head assignment (`if ((x = v) == …)`,
+            // Expr.Assigned, §50) rebinds the whole local too — a whole-value write. Its value is
+            // `v`'s (walked on its own as the child it is), never the old value, so it reads nothing
+            // of the binding
+            if (wl < 0) wl = assignedExprLocalOf(n);
+            if (wl >= 0 && isConstSym(p, wl)) {
+                if (assignsWhole(n)) {
+                    if (!hasInt(writes, wl)) writes = writes.concat([wl]);
+                } else if (!hasInt(reads, wl)) {
+                    reads = reads.concat([wl]);
+                }
+            }
+            const sr: Sym | not = sharedRefOf(n);
+            if (sr is given) { if (isConstSym(p, sr.id)) refs = refs.concat([sr.id]); }
+            const ow: int = overwrittenSharedOf(n);
+            if (ow >= 0 && isConstSym(p, ow)) over = over.concat([ow]);
+        }
+        for (const s of refs) {
+            if (countInt(refs, s) > countInt(over, s)) {
+                if (!hasInt(reads, s)) reads = reads.concat([s]);
+            } else if (!hasInt(writes, s)) {
+                writes = writes.concat([s]);
+            }
+        }
+        return { reads: reads, writes: writes };
+    }
+
+    fn countInt(xs: int[], x: int) -> int {
+        let c: int = 0;
+        for (const y of xs) { if (y == x) c = c + 1; }
+        return c;
+    }
+
+    // s482 r1 (#2113 review PRE-2) — the local a kept condition-head assignment (Expr.Assigned)
+    // rebinds whole, else -1
+    fn assignedExprLocalOf(n: Node) -> int {
+        return match n {
+            .NExpr(e: e) :> exprAssignedLocal(e),
+            // no-default-arm: one question of a node — is it a condition-head assignment
+            _ :> -1
+        };
+    }
+
+    fn exprAssignedLocal(e: Expr) -> int {
+        return match e {
+            .Assigned(local: l) :> l.id,
+            // no-default-arm: one question of an expression — is it a condition-head assignment
+            _ :> -1
+        };
+    }
+
+    // an `Assign` that rebinds the whole local (no path), or a condition-head assignment
+    // (Expr.Assigned, which has no path)
+    fn assignsWhole(n: Node) -> boolean {
+        if (assignedExprLocalOf(n) >= 0) return true;
+        return match n {
+            .NStmt(s: s) :> stmtAssignsWhole(s),
+            // no-default-arm: one question of a node — is it a statement that rebinds a whole local
+            _ :> false
+        };
+    }
+
+    fn stmtAssignsWhole(s: Stmt) -> boolean {
+        return match s {
+            .Assign(path: path) :> path.length == 0,
+            // no-default-arm: one question of a statement — is it a whole-local Assign
+            _ :> false
+        };
+    }
+
+    // the declaration whose SHARED instance a whole-value, statically checked `Write` overwrites
+    // (`@c = v`), else -1
+    fn overwrittenSharedOf(n: Node) -> int {
+        return match n {
+            .NStmt(s: s) :> stmtOverwrittenShared(s),
+            // no-default-arm: one question of a node — is it a whole-value write of a shared instance
+            _ :> -1
+        };
+    }
+
+    fn stmtOverwrittenShared(s: Stmt) -> int {
+        return match s {
+            .Write(inst: i, edit: e, check: c) :> overwriteTarget(i, e, c),
+            // no-default-arm: one question of a statement — is it a whole-value Write
+            _ :> -1
+        };
+    }
+
+    fn overwriteTarget(i: InstRef, e: EditKind, c: Check) -> int {
+        if (!isReplaceEdit(e) || !isStaticCheck(c)) return -1;
+        return match i {
+            .Shared(decl: d) :> d.id,
+            // no-default-arm: one question of an instance reference — is it a declaration's shared instance itself
+            _ :> -1
+        };
+    }
+
+    fn isReplaceEdit(e: EditKind) -> boolean {
+        return match e {
+            .Replace :> true,
+            // no-default-arm: one question of an edit — does it replace the whole value
+            _ :> false
+        };
+    }
+
+    fn isStaticCheck(c: Check) -> boolean {
+        return match c {
+            .Static :> true,
+            // no-default-arm: one question of a check — is it decided at compile time
+            _ :> false
+        };
+    }
+
+    // s482 (lane s482-write-only-secret) — the bindings the code under `roots` READS, closed through
+    // the initializers of those it reads only (constUse with every binding in `noInit`).
+    fn constsOnlyRead(p: CoreProgram, roots: Node[]) -> int[] {
+        return constUse(p, roots, allConstIds(p)).reads;
+    }
+
+    // s482 (lane s482-write-only-secret) — fnClosureThroughConsts, closed through the initializers of
+    // the bindings the code READS only: a binding it only overwrites runs its initializer here only
+    // when the client runs it (clientLiveFns roots those initializers by itself), so what that
+    // initializer calls is not client code because of the write.
+    fn fnClosureThroughReads(p: CoreProgram, roots: Node[]) -> int[] {
+        let start: int[] = [];
+        for (const r of roots) { start = start.concat(fnCalleesIn(p, r)); }
+        let fns: int[] = fnClosure(p, start);
+        if (p.consts.length == 0) return fns;
+        let more = true;
+        for (; more; ) {
+            more = false;
+            let rs: Node[] = roots;
+            for (const f of p.fns) { if (hasInt(fns, f.sym.id)) rs = rs.concat([Node.NFn(f)]); }
+            let add: int[] = [];
+            for (const kid of constsOnlyRead(p, rs)) {
+                const k: CoreConst | not = findConst(p, kid);
+                if (k is given) {
+                    for (const c of fnCalleesIn(p, Node.NExpr(k.init))) {
+                        if (!hasInt(fns, c) && !hasInt(add, c)) add = add.concat([c]);
+                    }
+                }
+            }
+            if (add.length > 0) {
+                fns = fnClosure(p, fns.concat(add));
+                more = true;
+            }
+        }
+        return fns;
+    }
+
+    // s482 (lane s482-write-only-secret) — the bindings the client does NOT run the initializer of:
+    // all but those clientConsts gives the client for running alone (no code reads it, server code
+    // does not read it, it acts, and it is not server-only — S481 "every file-scope initializer
+    // runs", in the client). A binding the client READS is held whatever this says (constUse); one it
+    // only overwrites and that is in this set gets a shell.
+    fn clientNoInit(p: CoreProgram, sread: int[], si: int[]) -> int[] {
+        let out: int[] = [];
+        for (const k of p.consts) {
+            if (!(initActs(k.init) && !hasInt(sread, k.sym.id) && !hasInt(si, k.sym.id))) out = out.concat([k.sym.id]);
+        }
+        return out;
+    }
+
+    // reads ∪ the written bindings outside `noInit`: the bindings the client holds WITH their
+    // initializer because its code uses them
+    fn clientHeld(u: ConstUse, noInit: int[]) -> int[] {
+        let out: int[] = u.reads;
+        for (const w of u.writes) { if (!hasInt(noInit, w) && !hasInt(out, w)) out = out.concat([w]); }
         return out;
     }
 
@@ -6062,12 +6302,15 @@ ${
         let croots: Node[] = [];
         for (const d0 of p0.decls) { croots = croots.concat([Node.NDecl(d0)]); }
         croots = croots.concat(clientFnRoots(p0, serverOnly0, keep, si));     // s482: the reached ones (§12.2 Trigger 6)
-        let clientRead: int[] = [];
-        for (const k0 of constsReadIn(p0, croots)) { clientRead = clientRead.concat([k0.sym.id]); }
         // r2 (#2041 re-review INFO-5): the same server roots as clientConsts / serverInits — the
         // server functions AND the functions only server code reaches (serverOnly0)
         // s482 r1 (#2061 review H1): and the server-only initializers (serverRoots)
         const serverRead: int[] = constsReached(p0, serverRoots(p0, serverOnly0, si));
+        // s482 (lane s482-write-only-secret): the bindings the client holds with their initializer —
+        // as clientConsts judges it: a binding its code only overwrites, whose initializer it does
+        // not run (clientNoInit), is a shell there, never placed here
+        const noInit0: int[] = clientNoInit(p0, serverRead, si);
+        const clientRead: int[] = clientHeld(constUse(p0, croots, noInit0), noInit0);
         // s482 (§7.6 rule (b) S482, ruling:user-voice-scrml.md-S481-run-order-followups item 1):
         // "each seed is computed at its place in the sequence; records are still created at
         // construction … a read of a seed before its place computes it early, on demand". The
@@ -6156,20 +6399,31 @@ ${
     // those NO artifact reads — in Core order. A binding only server code reads stays out, and
     // so does one no code reads whose initializer reaches server-only code (`si`, serverInits:
     // the server artifact runs it).
+    // s482 (lane s482-write-only-secret): a binding the client's code only OVERWRITES (constUse
+    // `writes`, not `reads`) and whose initializer the client does not run (clientNoInit: it is
+    // server-only, server code reads it, or it does nothing) is a SHELL here — `let x = null;`, the
+    // binding with the absence value `not` (§42) as its seed and never its initializer, so the
+    // client's writes have a binding to write and nothing the initializer reaches is printed because
+    // of it. Its value is never observed: a client read of it would have been counted. (A cell
+    // declared outside the body that outerPlaced made a binding is written through its shell
+    // DECLARATION instead — outerAsConsts — so it gets no binding here.)
     fn clientConsts(p: CoreProgram, clientRoots: Node[], serverOnly: int[], si: int[]) -> CoreConst[] {
-        const read: CoreConst[] = constsReadIn(p, clientRoots);
-        if (read.length == p.consts.length) return read;
-        let rid: int[] = [];
-        for (const k of read) { rid = rid.concat([k.sym.id]); }
         // s482 r1 (#2061 review H1): server code includes the server-only initializers (serverRoots)
         const sread: int[] = constsReached(p, serverRoots(p, serverOnly, si));
+        const noInit: int[] = clientNoInit(p, sread, si);
+        const u: ConstUse = constUse(p, clientRoots, noInit);
+        const rid: int[] = clientHeld(u, noInit);
+        if (rid.length == p.consts.length) return p.consts;
         let out: CoreConst[] = [];
         for (const k2 of p.consts) {
-            if (hasInt(rid, k2.sym.id)) {
+            const id: int = k2.sym.id;
+            if (hasInt(rid, id)) {
                 out = out.concat([k2]);
-            } else if (!hasInt(sread, k2.sym.id) && initActs(k2.init) && !hasInt(si, k2.sym.id)) {
+            } else if (!hasInt(sread, id) && initActs(k2.init) && !hasInt(si, id)) {
                 // (one that does nothing, nothing reads: running it is unobservable — left out)
                 out = out.concat([k2]);
+            } else if (hasInt(u.writes, id) && findDecl(p, k2.sym) is not) {
+                out = out.concat([{ sym: k2.sym, init: Expr.Lit(Literal.Absent), mutable: true }]);
             }
         }
         return out;
@@ -6238,8 +6492,10 @@ ${
         // function that reads a server-only binding stayed in the client and shipped it (probes
         // t6 / t6c — the smaller fixed point, not the largest).
         croots = croots.concat(clientFnRoots(p, serverOnly, keep, allConstIds(p)));     // s482: the reached ones (§12.2 Trigger 6)
-        let cread: int[] = [];
-        for (const k0 of constsReadIn(p, croots)) { cread = cread.concat([k0.sym.id]); }
+        // s482 (lane s482-write-only-secret): what the client READS — a binding it only overwrites is
+        // not client-read (§7.6 rule (b): "no code reads it"); the client gets a shell to write to
+        // (clientConsts), never the initializer
+        const cread: int[] = constsOnlyRead(p, croots);
         const sread: int[] = constsReached(p, serverRoots(p, serverOnly, prev));
         // the bindings only server code reads
         let held: int[] = [];
@@ -7201,7 +7457,10 @@ ${
         for (const k of p.consts) {
             if (!hasInt(si, k.sym.id) && !hasInt(sread, k.sym.id) && initActs(k.init)) roots = roots.concat([Node.NExpr(k.init)]);
         }
-        return fnClosureThroughConsts(p, roots);
+        // s482 (lane s482-write-only-secret): closed through the initializers of the bindings this
+        // code READS — one it only overwrites keeps its initializer out of the client unless the loop
+        // above roots it (clientNoInit / clientConsts: the same condition)
+        return fnClosureThroughReads(p, roots);
     }
 
     // s482 r1 (#2061 review H1) — the code the SERVER artifact runs, as roots: the server
@@ -7661,11 +7920,11 @@ ${
     fn outerPlaced(p: CoreProgram, keep: int[]) -> CoreProgram {
         const outs: OuterCell[] = outerLive(p);
         if (outs.length == 0) return p;
-        const si: int[] = serverInitsExposing(outerAsConsts(p, outs), keep);
+        const si: int[] = serverInitsExposing(outerAsConsts(p, outs, false), keep);
         let moved: OuterCell[] = [];
         for (const oc of outs) { if (hasInt(si, oc.decl.id)) moved = moved.concat([oc]); }
         if (moved.length == 0) return p;
-        return outerAsConsts(p, moved);
+        return outerAsConsts(p, moved, true);
     }
 
     // `p` with each cell of `cs` (cells declared outside the body, CoreProgram.outer) as a
@@ -7673,9 +7932,28 @@ ${
     // initializer is the cell's seed put among the constants at its place in link order
     // (OuterCell.at). It stays in `outer` (runsK: its seed is placed even when it does nothing);
     // each later outer cell's place moves past the bindings put before it.
-    fn outerAsConsts(p: CoreProgram, cs: OuterCell[]) -> CoreProgram {
+    // s482 (lane s482-write-only-secret) — `shells`: a cell of `cs` that code WRITES whole (a
+    // whole-value Write of its shared instance, overwrittenSharedOf — a client read keeps the cell
+    // client-read, so not server-only; a read in code that never runs, a function nothing calls,
+    // names no shell) keeps a SHELL declaration: the declaration
+    // with the absence value `not` (§42) as its seed, so the client's writes have a cell to write and
+    // the seed — which runs in the server artifact — is not in the client. Its seed does nothing,
+    // so it is constructed at its first write (outerLive: not live). Its value is never observed: a
+    // client read of the cell would have been counted. The binding of the same Sym carries the real
+    // seed (findConst; outerRefusal judges it).
+    fn outerAsConsts(p: CoreProgram, cs: OuterCell[], shells: boolean) -> CoreProgram {
+        let named: int[] = [];
+        if (shells) {
+            for (const n of allNodes(Node.NProgram(p))) {
+                const w: int = overwrittenSharedOf(n);
+                if (w >= 0 && !hasInt(named, w)) named = named.concat([w]);
+            }
+        }
         let ds: Decl[] = [];
-        for (const d of p.decls) { if (!outerIn(cs, d.sym.id)) ds = ds.concat([d]); }
+        for (const d of p.decls) {
+            if (!outerIn(cs, d.sym.id)) ds = ds.concat([d]);
+            else if (hasInt(named, d.sym.id)) ds = ds.concat([shellDecl(d)]);
+        }
         let ks: CoreConst[] = [];
         let i: int = 0;
         for (const k of p.consts) {
@@ -7695,6 +7973,15 @@ ${
                  tool: p.tool, endpoints: p.endpoints, channels: p.channels, typed: p.typed, outer: os };
     }
 
+    fn shellDecl(d: Decl) -> Decl {
+        let fs: Field[] = [];
+        for (const f of d.fields) {
+            fs = fs.concat([{ sym: f.sym, ty: f.ty, init: Expr.Lit(Literal.Absent), mode: f.mode, role: f.role, grants: f.grants, graph: f.graph,
+                              exported: f.exported, wcap: f.wcap, vals: f.vals, persist: f.persist, timing: f.timing }]);
+        }
+        return { sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: fs, renders: d.renders, wiring: d.wiring, handles: d.handles };
+    }
+
     fn seedConst(p: CoreProgram, c: OuterCell) -> CoreConst[] {
         const d: Decl | not = findDecl(p, c.decl);
         if (d is not) return [];
@@ -7712,7 +7999,9 @@ ${
     export fn outerRefusal(p: CoreProgram) -> string[] {
         let out: string[] = [];
         for (const oc of p.outer) {
-            if (findDecl(p, oc.decl) is not) {
+            // s482 (lane s482-write-only-secret): a moved cell is the binding of its Sym (findConst) —
+            // its shell declaration (outerAsConsts `shells`) may remain
+            if (findConst(p, oc.decl.id) is given) {
                 const k: CoreConst | not = findConst(p, oc.decl.id);
                 if (k is given && readsCellReach(p, k.init)) {
                     out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: the seed of `@" + oc.decl.hint + "`, a cell declared outside the program body that nothing on the client reads, reaches server-only code, so it runs in the server artifact (§7.6 rule (b), S481/S482) — but it also reads a cell (or calls through what the bootstrap cannot follow), which the server artifact does not hold. The bootstrap does not run such a seed yet (⚑ INTERIM, g-boot-outer-cell-server-seed-reads-cell-s482). Read the cell in the page, or seed it from bindings and functions only"]);

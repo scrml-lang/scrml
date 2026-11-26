@@ -2,9 +2,10 @@
  * s482-opener-escapes — gap g-boot-opener-string-escapes-s482 in a REAL browser (Playwright Chromium).
  * change-id: s482-opener-escapes.
  *
- * INTERIM (fail closed — NOT RULED; SPEC §5.2 / §66.2.4): in a quoted attribute or declaration value, `\"` and
- * `\\` are read as `"` and `\` (the meaning every candidate reading gives them); any other `\` + character is
- * E-PARSE-001 (compile-side pins: compiler/self-host-v2/slice-m4/opener-escapes-s482.test.js). This pins the
+ * RULED (user-voice-scrml.md-S482-quoted-value-escapes-catalog, "B"; SPEC §5.2 / §66.2.4 — built as an INTERIM by
+ * s482-opener-escapes, promoted by s482-escapes-ruled): in a quoted attribute or declaration value the §4.18.3
+ * catalog holds — `\"` and `\\` are read as `"` and `\`; any other `\` + character is E-PARSE-001 (compile-side
+ * pins: compiler/self-host-v2/slice-m4/opener-escapes-s482.test.js). This pins the
  * values the admitted escapes produce in the page, and that the parenthesized form the E-PARSE-001 message names
  * (`=("a\nb")`) gives a real newline.
  *
@@ -83,7 +84,7 @@ async function codes(out, ids) {
 
 const cps = (s) => [...s].map((c) => c.codePointAt(0));
 
-describe("quoted-value escapes in Chromium (INTERIM, g-boot-opener-string-escapes-s482)", () => {
+describe("quoted-value escapes in Chromium (the §4.18.3 catalog, RULED S482; g-boot-opener-string-escapes-s482)", () => {
   test("`\\\"` and `\\\\` in a declaration's own value and an attribute value; `=(\"a\\nb\")` is a newline", async () => {
     if (!browser) { console.log(`[skip] Chromium unavailable: ${launchError}`); return; }
     const out = build([
