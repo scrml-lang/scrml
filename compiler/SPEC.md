@@ -31943,7 +31943,8 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-DECL-ELEMENT-NAME-COLLIDES | §66.6.6 | A program cell whose name is an HTML element name, declared in a scope that also uses that name as a tag (`let <filter:string=""/>` and `<filter/>`): reported at the DECLARATION, naming the element and the tag use. The cell is legal when no tag use collides. **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 review-surfaced decisions, all PA recs" ("your recs") item 3. Code name: PA reading, confirmed S475 (ruling:user-voice-scrml.md S475 "⭐ RULED — S475 owner questions, PA recs adopted wholesale" item 15, *"The older S473 veto-window readings are confirmed."*). (Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml`, PR #1678; Nominal on impl#1, which does not implement §66.) | Error |
 | E-DECL-SLOT-OUTSIDE-RENDERS | §66.15.2 | §66 dialect: a `<slot/>` outside a declaration's `renders` — it names no use, so it would render nothing. (Rules 1–2 of §66.15.2 reuse E-COMPONENT-021 / E-COMPONENT-020.) **Provenance:** ruling:user-voice-scrml.md S473 D11 "your recs on all". Code name: PA reading, confirmed S475 (ruling:user-voice-scrml.md S475 "⭐ RULED — S475 owner questions, PA recs adopted wholesale" item 15, *"The older S473 veto-window readings are confirmed."*). Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`resolveSlot`) (`g-boot-slot-count-unchecked-s473`, resolved by s473-boot-ruled-refusals); Nominal on impl#1, which does not implement §66. | Error |
 | E-DECL-INVARIANT-IN-OPENER | §66.13.5, §66.2.5, §66.20 | §66 dialect: an `invariant (expr)` clause written inside a declaration's opener (`<r:struct invariant (a <= b)>`). The message says the clause follows the closer (`/>` or `</>`), with the declaration's field names bare — the S447 rule that a word introducing what follows stands outside the opener (the `E-DECL-RENDERS-IN-OPENER` parallel). **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1 (*"`invariant (expr)` after the closer"*). Emitted by the bootstrap at `compiler/self-host-v2/parse.scrml` (`invariantInOpener`, `parseOpenerB`); Nominal on impl#1 (§34.0). Direction of change: newly-rejecting. | Error |
-| E-DECL-INVARIANT-IMPURE | §66.13.5, §66.20 | §66 dialect: a declaration invariant reads something other than the value's own fields, literals, enum variants and calls of a pure `fn` — an outer binding (a file-scope constant, a host binding, a function named as a value), a call of a `function`, a method or host call, a write, a function value, a query or a handled failable call. An `@` read is `E-CONTRACT-003` instead. The message names the fix: a `fn` that takes the fields as parameters. **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1 (*"Reads only the value's own fields, literals and pure `fn` calls; an `@cell` read is E-CONTRACT-003."*). Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`invPurity`); Nominal on impl#1 (§34.0). Direction of change: newly-rejecting. | Error |
+| E-DECL-INVARIANT-IMPURE | §66.13.5, §66.20 | §66 dialect: a declaration invariant reads something other than the value's own fields, literals, enum variants, the deterministic built-in methods a pure `fn` body may use (`.trim()`, `.length`, a `x => expr` sequence callback) and calls of a pure `fn` that computes only from its arguments — an outer binding (a file-scope constant or `let`, a host binding, a function named as a value), a call of a `function`, a host call, a write, a function value held as a value, a query or a handled failable call; or calls a `fn` that, directly or through the `fn`s it calls, reads an outer binding (the message names the call chain). An `@` read, direct or reached through a `fn`, is `E-CONTRACT-003` instead. The message names the fix: a `fn` that takes the fields as parameters. **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1 (*"Reads only the value's own fields, literals and pure `fn` calls; an `@cell` read is E-CONTRACT-003."*); the call-chain rule and direct-equals-`fn` purity are PA readings (r1 of #2120, prov=pa-ruled:S483-fn-chain-purity, prov=pa-ruled:S483-direct-equals-fn-purity; open to owner veto). Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`invPurity`, `invReachPass`); Nominal on impl#1 (§34.0). Direction of change: newly-rejecting. | Error |
+| E-DECL-INVARIANT-CAPTURES-CALL | §66.13.5, §66.20 | §66 dialect: `invariant (…)` written right after a declaration's closer or a `:struct` type body is read as an invariant clause (§66.13.5 rule 2), and a binding named `invariant` (a function, a constant, a file-scope `let`, a host binding) is in scope there — so the line may be meant as a call. The clause is refused, not judged further (fail closed); a captured call is never silently dropped. The message: this is read as an invariant clause; to call the function, rename it or move the call; to state an invariant, rename the binding. **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1 (the clause grammar, candidate A — whose "Against" names the capture); that the capture is never silent is a PA reading (r1 of #2120, prov=pa-ruled:S483-capture-never-silent; open to owner veto). Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`invCaptureWhy`, `resolveDeclInvs`, `resolveTypeInvs`); Nominal on impl#1 (§34.0). Direction of change: newly-rejecting. | Error |
 | E-DECL-INVARIANT-NO-FIELDS | §66.13.5, §66.20 | §66 dialect: an `invariant (expr)` clause on a declaration that defines no fields — no typed attribute and no child field: a scalar cell (`let <n:int=0/> invariant (n >= 0)`) or a cell of an existing type. The message names the two fixes: a cell of a type inherits the type's invariants (state the invariant on the type's declaration), and a scalar is bounded by a refinement type (`int(>=0)`, §53). **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1 and ruling:user-voice-scrml.md-S482-struct-invariant-contract (*"an invariant on the declaration itself"*). Emitted by the bootstrap at `compiler/self-host-v2/parse.scrml` (`invariantsKept`); Nominal on impl#1 (§34.0). Direction of change: newly-rejecting. | Error |
 | E-DECL-INVARIANT-NOT-BOOL | §66.13.5, §66.20 | §66 dialect: a declaration invariant's expression is not of type `bool` (`invariant (start + end)`). **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax (S430 Q1 *"typed, obviously"*; the design's typed condition). Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`invTypeCheck`); Nominal on impl#1 (§34.0). Direction of change: newly-rejecting. | Error |
 | E-DECL-USE-ATTR | §66.6.9, §66.20 | §66 dialect: an attribute on a plain use `<x …/>` that is not a declared attribute or child field of `x`, `as=`, or `if=` / `else-if=` / `else` (`class`, `style`, `id`, `aria-*`, `data-*`, `on…`, `bind:…`, `show=`, `key=`, a misspelled field, …); an attribute on a `<*x>` reference that names no field of `x` (`as=` included; `if=` / `else-if=` / `else` excepted — the open residue O18-r, `E-BOOTSTRAP-UNSUPPORTED` on the bootstrap for now, §66.6.9 rule 3); a construction value written as a `{…}` block. Nothing a use writes reaches an element of its `renders`. The legacy `const X = <…>` form keeps `E-COMPONENT-011` (§15.10). **Provenance:** ruling:user-voice-scrml.md S462 "ratified path to X" (dpa-069 item 1). **Nominal on impl#1** (impl#1 does not implement §66); emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`resolveUse`, `resolveStar`, `resolveConstructValue`). | Error |
@@ -47861,17 +47862,21 @@ replaces the `<engine for=Struct>` guard this example used; `<engine>` is §66.2
 
 ```scrml
 type Booking:struct = {
-    start:  string,
-    end:    string,
-    nights: number(>0 && <365)     // inline predicate on the field
-} invariant (start < end) [validDateRange]      // declaration invariant over two fields
+    checkIn:  int,                 // day numbers: `<` takes numbers (ruled S440)
+    checkOut: int,
+    nights:   number(>0 && <365)   // inline predicate on the field
+} invariant (checkIn < checkOut) [validDateRange]      // declaration invariant over two fields
 
-let <booking:Booking=({ start: "2026-06-01", end: "2026-06-08", nights: 7 })/>
+let <booking:Booking=({ checkIn: 20240, checkOut: 20247, nights: 7 })/>
 ```
 
 > **Amendment S483.** The example's `<engine name=ValidBooking for=Booking> { * => * given (self.start <
 > self.end) }` is re-expressed as the declaration invariant `invariant (start < end)` (§66.13.5; bare field
-> names, no `self.`). **Provenance:** ruling:user-voice-scrml.md-S482-struct-invariant-contract,
+> names, no `self.`). r1 of #2120 (review F4): the date fields are `int` day numbers (`checkIn`, `checkOut`) —
+> `<` takes numbers, not strings (ruled S440), so the earlier `start: string` / `end: string` form did not
+> compile. The invariant half is proven by the conformance case `invariant-booking-accepted` and the bootstrap
+> slice `invariant-decl-s483.test.js`; the field refinement `number(>0 && <365)` on a struct field is the
+> bootstrap's run-time-refinement INTERIM (`g-boot-refinement-runtime-checks-s478`), not this example's. **Provenance:** ruling:user-voice-scrml.md-S482-struct-invariant-contract,
 > ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1.
 
 ### §53.8.2 Execution Order
@@ -47894,7 +47899,7 @@ invariant", §66.13.5 — ruling:user-voice-scrml.md-S483-struct-invariant-synta
 If a predicate expression contains any reference to a reactive variable (`@name`), sibling field
 reference (`self.field`), or any identifier that resolves outside the incoming-value scope, the
 compiler SHALL emit `E-CONTRACT-003` at compile time. ~~with a message directing the developer to
-use `<machine>` instead.~~ with a message that says a type's rule checks only its own value and, to compare against another cell, directs the developer to a derived check (e.g. `<overBudget=(@spent > @maxMana)/>`) used in markup or the handler that changes the value (ruling:user-voice-scrml.md-S482-contract-003-derived-check). For a sibling-field reference, the message SHOULD also say that fields of one struct are related by a declaration invariant on its declaration, `invariant (start < end)` (§66.13.5, S483).
+use `<machine>` instead.~~ with a message that says a type's rule checks only its own value and, to compare against another cell, directs the developer to a derived check (e.g. `<overBudget=(@spent > @maxMana)/>`) used in markup or the handler that changes the value (ruling:user-voice-scrml.md-S482-contract-003-derived-check). For a sibling-field reference, the message SHOULD also say that fields of one struct are related by a declaration invariant on its declaration, `invariant (start < end)` (§66.13.5; prov=pa-ruled:S483-sibling-advice — a PA reading carried by the lane-1 brief from the design's §5 table, not a ruled item; open to owner veto).
 
 ```scrml
 // INVALID — @maxMana is an external reactive reference
@@ -55476,7 +55481,15 @@ invariant-clause ::= 'invariant' '(' expression ')' ( '[' identifier ']' )?
    (§66.2.5 zone 3, §66.5.1).
 2. `invariant` is a **contextual keyword** only right after a declaration's closer or a `:struct` type body, and
    only when a `(` follows it. Anywhere else it is an ordinary name: a function named `invariant` is called as
-   any other.
+   any other. The consequence, stated plainly: a call `invariant(x)` (with or without `;`) written directly
+   after a declaration's closer or a `:struct` type body is read as an invariant CLAUSE, not a call. That
+   reading is never silent: when a binding named `invariant` (a function, a constant, a file-scope `let`, a
+   host binding) is in scope at the clause, the clause is **`E-DECL-INVARIANT-CAPTURES-CALL`** (§66.20) and is
+   not judged further (fail closed). The message says the line is read as a clause and names the fixes: to
+   call the function, rename it or move the call (another statement between the declaration and the call); to
+   state an invariant there, rename the binding. *(r1 of #2120, prov=pa-ruled:S483-capture-never-silent — the
+   capture itself is the ruled grammar (S483 item 1, candidate A, whose "Against" names it); that it is never
+   silent is a PA reading, open to owner veto.)*
 3. `invariant (…)` written inside an opener is **`E-DECL-INVARIANT-IN-OPENER`** (§66.20): a word that introduces
    what follows stands outside the opener (§66.2.5). The message says the clause follows the closer.
 4. The `[label]` (the §53.2.3 spelling) names the invariant in diagnostics; a violation's message names the
@@ -55489,16 +55502,38 @@ invariant-clause ::= 'invariant' '(' expression ')' ( '[' identifier ']' )?
 
 **Scope — what an invariant may read.** Inside the expression, the value's own attributes and child fields are
 bound as **bare, read-only names** — the §66.5.2 `renders` reading — and nested fields are reached by path
-(`range.end`). The expression may also hold literals, enum variants and calls of a pure `fn` (§48). It reads
-nothing else:
+(`range.end`). The expression may also hold literals, enum variants, calls of a pure `fn` (§48) that
+computes only from its arguments (rule 7), and the deterministic built-in methods and properties a pure `fn`
+body may use on its own values — a string's or a tape's methods (`first.trim()`, `name.toUpperCase()`,
+`tags.includes(t)`), `.length`, `.at(i)`, a sequence callback written `x => expr` (`[lo, hi].every(x => x >= 0)`),
+`E.toEnum(s)`, a payload-variant construction. The purity of a direct expression is the purity of a pure `fn`
+body: what a `fn` may compute from its own values, an invariant may compute from its fields; what a `fn` may not
+use, an invariant may not either (*r1 of #2120, prov=pa-ruled:S483-direct-equals-fn-purity*). It reads nothing
+else:
 
 6. An `@` read (`@limit`, `@.`) is **`E-CONTRACT-003`** (§53.11): a type's rule checks only its own value; the
    message directs the author to a derived check (ruling:user-voice-scrml.md-S482-contract-003-derived-check).
-7. Any other outer binding (a file-scope constant, a host binding, a function named as a value), a call of a
-   function declared `function`, a method or host call, a write, a function value, a query or a handled
-   failable call is **`E-DECL-INVARIANT-IMPURE`** (§66.20). The fix is a `fn` that takes the fields as
-   parameters. (These rules make the expression evaluate identically on the client and the server, and make it
-   provable at compile time where its inputs are literals.)
+   An `@` read reached through a called `fn` (rule 7) is `E-CONTRACT-003` too, the message naming the call
+   chain.
+7. Any other outer binding (a file-scope constant or `let`, a host binding, a function named as a value), a
+   call of a function declared `function`, a host call (`Date.now()`, a method of a host global), a write, a
+   function value held as a value (other than a sequence callback, above), a query or a handled failable call
+   is **`E-DECL-INVARIANT-IMPURE`** (§66.20). The fix is a `fn` that takes the fields as parameters.
+   **A called `fn` reads what the invariant may read, at any depth of calls.** A `fn` called from an invariant
+   — directly, or transitively through the `fn`s it calls — that reads a cell (`@x`, `@.`: `E-CONTRACT-003`,
+   rule 6) or an outer binding (a file-scope `let` or constant, a `<request>`'s or a validity surface's state, a
+   lifecycle element: `E-DECL-INVARIANT-IMPURE`) is refused at the call, the message naming the call chain
+   (`ok` → `inner`) and the read. The set refused through a call is exactly the set refused directly. A §48
+   `fn` MAY read `@x` as a value (§48.5.3), so "pure `fn`" alone would not make the invariant a function of the
+   value's fields: a write to `@limit` could then break a stored value's invariant with nothing re-checking it
+   (the read set never names `@limit`), and the client and the server could disagree. A called function whose
+   body the compiler cannot see is refused (fail closed). *(r1 of #2120, prov=pa-ruled:S483-fn-chain-purity —
+   the ruling admits "pure `fn` calls" and makes "an `@cell` read … E-CONTRACT-003"; the design's rationale,
+   "It may not read cells …, impure `function`s, or outer bindings … Without these rules it could not be
+   evaluated identically on the client and the server, or proven statically", resolves the two toward refusal.
+   A PA reading, open to owner veto.)* (Rules 6 and 7, with this, make the expression a function of the value's
+   fields alone — so it evaluates identically on the client and the server, its read set holds every value it
+   depends on, and it is provable at compile time where its inputs are literals.)
 8. Its type SHALL be `bool`; any other type is **`E-DECL-INVARIANT-NOT-BOOL`** (§66.20).
 
 **The read set.** The compiler records, for each invariant, the field paths it reads (its READ SET). A write
@@ -56259,6 +56294,8 @@ emitter). Every code below is Nominal on impl#1.
 > with its bootstrap emitter and its §34 row; `E-WRITE-INVARIANT` / `E-WRITE-INVARIANT-RT` widened from "a sequence
 > invariant" to "a sequence or declaration invariant". `W-INVARIANT-SPLIT-WRITE` and `W-BIND-INVARIANT-FIELD`
 > (ruling S483 items 2 and 3) land with their emitters (owed, `g-boot-invariant-boundaries-lints-s483`).
+> r1 of #2120: a fifth row, `E-DECL-INVARIANT-CAPTURES-CALL` (§66.13.5 rule 2; prov=pa-ruled:S483-capture-never-silent),
+> and `E-DECL-INVARIANT-IMPURE` widened to a `fn` reached through calls (prov=pa-ruled:S483-fn-chain-purity).
 > **Provenance:** ruling:user-voice-scrml.md-S482-struct-invariant-contract;
 > ruling:user-voice-scrml.md-S483-struct-invariant-syntax.
 
@@ -56304,7 +56341,8 @@ emitter). Every code below is Nominal on impl#1.
 | **`E-FOREIGN-REPLACE-PRIVATE`** | Error | A whole-value replace, from outside the defining file, of a value whose type has any private field (§66.14). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; ~~the bootstrap does~~ the bootstrap does not emit it either — *record-lag corrected S473 D31*). |
 | **`E-THEME-TOKEN-CELL-COLLISION`** | Error | A `<theme>` token and a cell are declared with the same name in one program — tokens and cells share ONE namespace (§66.17 item 4), so the pair cannot coexist silently. The message names both declarations. (No existing code fits: `E-NAME-COLLIDES-STATE` is a *local* reusing a cell name, §6.1.3; `E-SCOPE-REDECLARE` is function-body scope, §7.3.3.) **Nominal / spec-ahead — not yet emitted** (impl#1 does not implement §66; the bootstrap front end does not parse T3 yet, so it has no fire site). Provenance: ruling:user-voice-scrml.md S440 (all recs #2, item 5). |
 | **`E-DECL-INVARIANT-IN-OPENER`** | Error | `invariant (expr)` is written inside a declaration's opener (§66.13.5). The message says the clause follows the closer (`/>` or `</>`). **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1. **Nominal on impl#1; the bootstrap emits it** (`compiler/self-host-v2/parse.scrml`, s483-invariant-1). |
-| **`E-DECL-INVARIANT-IMPURE`** | Error | A declaration invariant reads an outer binding, calls a `function` / a method / a host function, writes, or holds a function value, a query or a handled failable call (§66.13.5 rule 7; an `@` read is `E-CONTRACT-003`). **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1. **Nominal on impl#1; the bootstrap emits it** (`compiler/self-host-v2/analyze.scrml`). |
+| **`E-DECL-INVARIANT-IMPURE`** | Error | A declaration invariant reads an outer binding, calls a `function` or a host function, writes, or holds a function value (other than a `x => expr` sequence callback), a query or a handled failable call — or calls a `fn` that, directly or through the `fn`s it calls, reads an outer binding (§66.13.5 rule 7; an `@` read, direct or through a `fn`, is `E-CONTRACT-003`). The deterministic built-in methods a pure `fn` body may use are admitted. **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1; the call-chain and built-in readings prov=pa-ruled (r1 of #2120). **Nominal on impl#1; the bootstrap emits it** (`compiler/self-host-v2/analyze.scrml`). |
+| **`E-DECL-INVARIANT-CAPTURES-CALL`** | Error | `invariant (…)` right after a declaration's closer or a `:struct` type body is read as a clause (§66.13.5 rule 2) while a binding named `invariant` is in scope there; refused, never a silently dropped call. **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1; never-silent prov=pa-ruled:S483-capture-never-silent (r1 of #2120). **Nominal on impl#1; the bootstrap emits it** (`compiler/self-host-v2/analyze.scrml`). |
 | **`E-DECL-INVARIANT-NO-FIELDS`** | Error | An invariant on a declaration with no typed attribute and no child field — a scalar cell or a cell of an existing type (§66.13.5 rule 5). **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1. **Nominal on impl#1; the bootstrap emits it** (`compiler/self-host-v2/parse.scrml`). |
 | **`E-DECL-INVARIANT-NOT-BOOL`** | Error | A declaration invariant whose expression is not a `bool` (§66.13.5 rule 8). **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax. **Nominal on impl#1; the bootstrap emits it** (`compiler/self-host-v2/analyze.scrml`). |
 | **`E-DECL-RENDERS-IN-OPENER`** | Error | `renders` is written inside a declaration's opener (§66.5.1). Message: *"`renders` follows the closer (`/>` or `</>`)"* — replacing the generic parse error on the `<` that follows it. **Provenance:** ruling:user-voice-scrml.md S447 (*"your recs"*, item 2, sub-rec 2). **Nominal on impl#1; the bootstrap emits it** (`compiler/self-host-v2/parse.scrml`, S449). |
