@@ -49,3 +49,35 @@ TypeInfo.invs: InvInfo[]      // a `type X:struct`'s clauses, source order
   field per clause (minted in `resolveTypeInvs`; the typer re-binds them by name, `typeTypeInvs`). Lane 2 can
   lower `e` against the candidate value with those facts, or re-bind by `reads`.
 - `text` / `label` — for the E-WRITE-INVARIANT(-RT) message: name the label when given, else the text.
+
+## SPEC / ledgers (commit 1dd8d4c19)
+
+- SPEC: new §66.13.5; amended §66.2.5 zone 3, §66.5.1, §66.13.1 (five kinds), §66.11.1 table row, §66.11.2 item 1,
+  §14.2 (clause + grammar), §53.1, §53.3.2 row, §53.8.1 example, §53.8.2 order, §53.8.3 sibling-field advice
+  (the bootstrap's E-CONTRACT-003 IDENT message now names `invariant`), §19.17 / §34 / §66.20 E-WRITE-INVARIANT[-RT]
+  widened, four new §34 + §66.20 rows, the S477-supersedes-S440 line at §66.11.7.
+- Not edited here (lane 3): §66.21 engine-row mapping, §38 receiver check (3), §53.9.4 server-param check.
+- Retired-forms ledger: NO new row. The `<engine for=Struct> … given (self.a < self.b)` form is already counted
+  by the `engine-element` SOFT row (one detector, `<engine\b`); a second row would double-count. Noted for lane 3
+  in g-boot-invariant-boundaries-lints-s483. The §53.8.1 example's `<engine>` and `<booking>: … =` lines left
+  the SPEC, so the engine-element and rhs-decl SPEC counts fell by one each (baseline lowered, `--update`).
+- known-gaps: g-spec-struct-invariant-form-s482 RESOLVED; opened g-boot-invariant-write-checks-s483 (lane 2),
+  g-boot-invariant-boundaries-lints-s483 (lane 3), g-boot-invariant-flow-discharge-s483 (INTERIM, ruled follow-up),
+  g-boot-invariant-draft-form-s483 (owed capable form), g-boot-invariant-nested-field-s483 (INTERIM refusal),
+  g-impl1-decl-invariant-unimplemented-s483 (carried; pins the 9 conformance cases' impl#1 xfail).
+
+## Gates (head 1dd8d4c19 vs base origin/main 2d40d8407)
+
+- pre-commit hook: 58631 pass / 0 fail / 255 skip, RESULT PASS (base commit's hook: 58596 pass / 0 fail / 255 skip).
+- slice-m4/invariant-decl-s483.test.js: 26 pass. slice-m4/severity.test.js: 11 pass.
+- bootstrap-conformance --json: base PASS 851 / FAIL 3 / NOT-TWINNED 628 / UNSUPPORTED 491 / CRASH 0 / INVALID 0;
+  head PASS 860 (the 9 new invariant cases) / FAIL 3 / NOT-TWINNED 628 / UNSUPPORTED 491 / CRASH 0 / INVALID 0;
+  0 verdict or emitted-code changes on the 1973 existing cases.
+- conformance/run.ts (impl#1): the 9 new cases XFAIL under g-impl1-decl-invariant-unimplemented-s483; no FAIL.
+- Corpus differential + byte-compare (bootstrap compileSource over conformance/cases, examples, samples,
+  benchmarks): 2977 files on both sides — 0 newly rejected, 0 newly accepted, 0 error-code changes, 0 warning
+  changes, 0 artifact diffs, 0 crashes; 9 head-only files (the new cases). No corpus file writes `invariant (`.
+- types-gate --check OK unchanged; s34-census --check-new --base origin/main PASS (12 new/changed rows);
+  retired-forms-lint --base-ref origin/main OK; spec-coverage-check 0 violations; state.ts --check exit 4
+  (generated block stale — bot-owned); gen-bootstrap-severity --check exit 4 (stale; severity.test.js passes, so
+  the bot owns the regen, B7); regen-spec-index --check exit 4 (bot-owned).
