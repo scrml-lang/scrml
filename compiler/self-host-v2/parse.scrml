@@ -15730,14 +15730,17 @@ ${
             // statement like an `import`: its region ends at the line, not after its `}`
             if (chAt(after, 0) == "{" || chAt(after, 0) == "*") return logicRegionItem(mp, LexStop.Line, fileTop);
             // s478: `export const NAME = …;` ends at its `;` (LexStop.Decl), not at a later `}`
-            if (!fileTop && (wl.w == "const" || wl.w == "let" || wl.w == "type")) return logicRegionItem(mp, LexStop.Decl, false);
+            if (!fileTop && wl.w == "type") return typeRegionItem(mp, LexStop.Decl);
+            if (!fileTop && (wl.w == "const" || wl.w == "let")) return logicRegionItem(mp, LexStop.Decl, false);
+            if (wl.w == "type") return typeRegionItem(mp, LexStop.Statement);
             return logicRegionItem(mp, LexStop.Statement, false);
         }
         // s479 — a `type` declaration at a body top is ONE declaration (LexStop.Decl):
         // a braceless alias `type N = number;` has no `}` for LexStop.Statement to
         // stop after, so its region ran on past its `;` (g-boot-body-top-type-alias-region-s478)
-        if (!fileTop && w.w == "type") return logicRegionItem(mp, LexStop.Decl, false);
-        if (w.w == "function" || w.w == "fn" || w.w == "type") return logicRegionItem(mp, LexStop.Statement, false);
+        if (!fileTop && w.w == "type") return typeRegionItem(mp, LexStop.Decl);
+        if (w.w == "type") return typeRegionItem(mp, LexStop.Statement);
+        if (w.w == "function" || w.w == "fn") return logicRegionItem(mp, LexStop.Statement, false);
         // s451 (U1a): `server function …` (the deprecated modifier, §52.10)
         if (w.w == "server") return logicRegionItem(mp, LexStop.Statement, false);
         // s449: the keyword `when … changes { … }` at the program body top (§40.8: code)
@@ -16176,6 +16179,67 @@ ${
         let t: TP = adv({ toks: tp.toks, i: tp.i, nid: nid, diags: m.diags, file: tp.file, ns: tp.ns, inFn: tp.inFn });
         if (isP(t, ";")) t = adv(t);
         return { items: items, tp: t };
+    }
+
+    // s483 (Q21 lane 1) — a `type` declaration at a file / body top: its region
+    // (LexStop.Statement / .Decl) ends at the body's `}` (or its `;`), so the
+    // `invariant (e) [label]` clauses written after a `:struct` body (§14.2,
+    // §66.13.5) are read here, on the markup side, and attached to that type.
+    fn typeRegionItem(mp: MP, stop: LexStop) -> RMItems {
+        const r: RMItems = logicRegionItem(mp, stop, false);
+        if (r.items.length == 0) return r;
+        const last: AItem = r.items[r.items.length - 1];
+        const lk: AItemK = last.k;
+        const td: ATypeDecl | not = match lk {
+            .TypeItem(t: x) :> x,
+            .ImportItem(i: x) :> not,
+            .FnItem(f: x) :> not,
+            .DeclItem(d: x) :> not,
+            .MarkupItem(n: x) :> not,
+            .ProgramItem(p: x) :> not,
+            .ConstItem(c: x) :> not
+        };
+        if (td is not) return r;
+        const tb: ATypeBody = td.body;
+        const fs: ATypeField[] | not = match tb {
+            .StructBody(fields: xs) :> xs,
+            .EnumBody(variants: vs) :> not,
+            .HostBody :> not,
+            .AliasBody(ty: x) :> not
+        };
+        if (fs is not) return r;
+        let invs: AInvariant[] = structInvs(tb);
+        let m: MP = r.mp;
+        for (;;) {
+            const after: MP = skipTrivia(m);
+            const rw: RWord = readName(after);
+            if (!(rw.w == "invariant" && chAt(skipSpace(rw.mp), 0) == "(")) { break; }
+            const ri: RMInv = declInvariant(skipSpace(rw.mp), after.pos);
+            invs = invs.concat([ri.inv]);
+            m = ri.mp;
+        }
+        if (m.pos == r.mp.pos) return r;
+        const nd: ATypeDecl = { nid: td.nid, span: mkSpan(td.span.start, m.pos), exported: td.exported, name: td.name, body: ATypeBody.StructBody(fs, invs) };
+        let items: AItem[] = [];
+        let i: int = 0;
+        for (const it of r.items) {
+            if (i == r.items.length - 1) {
+                items = items.concat([{ nid: it.nid, span: it.span, k: AItemK.TypeItem(nd) }]);
+            } else {
+                items = items.concat([it]);
+            }
+            i = i + 1;
+        }
+        return { items: items, mp: m };
+    }
+
+    fn structInvs(tb: ATypeBody) -> AInvariant[] {
+        return match tb {
+            .StructBody(invs: xs) :> xs,
+            .EnumBody(variants: vs) :> [],
+            .HostBody :> [],
+            .AliasBody(ty: x) :> []
+        };
     }
 
     fn logicRegionItem(mp: MP, stop: LexStop, top: boolean) -> RMItems {

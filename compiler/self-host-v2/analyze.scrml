@@ -50,7 +50,7 @@ ${
              mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl, plainHead, declScopeKey } from "./core.scrml";
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, IfForm, AEffect, ARequest, AType, ATypeK, AFnFx,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport, ALink,
-             AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
+             AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AInvariant, AValArg, AValidator,
              AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, APage, AEndpoint, AEpArm, AChannel, AOnchange, Diag, ASql, ASqlMode,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, AForeign,
              ACss, ACssItem, ACssRule, ACssDecl, ACssPart, ACssRef, mkSpan, newDiag,
@@ -147,6 +147,7 @@ ${
     export type ValInfo:struct = { name: string, span: ASpan, attrs: HtmlAttrPair[], core: Validator }
 
     // `nid` = the ADecl (user) / AProgram node. `file` = the defining file (E2).
+    // s483 (Q21 lane 1) — `invs`: the declaration's invariants (§66.13.5, InvInfo).
     export type DeclInfo:struct = {
         nid: int,
         span: ASpan,
@@ -156,7 +157,20 @@ ${
         file: string,
         fields: FieldInfo[],
         handles: Sym[],
+        invs: InvInfo[],
     }
+
+    // s483 (Q21 lane 1) — one declaration invariant `invariant (e) [label]` (§66.13.5),
+    // as analyze records it on its declaration (DeclInfo.invs) or its `type X:struct`
+    // (TypeInfo.invs). THE READ SET, for the write side (lane 2): `reads` — every
+    // field path the expression reads, dotted from the value's root (`start`,
+    // `range.end`; the LONGEST path at each read), deduped, in first-read order;
+    // `heads` — the index of each top field it reads (into DeclInfo.fields /
+    // the StructDef's fields), in first-read order. A write that touches no path in
+    // `reads` (nor a prefix or an extension of one) needs no check. `e` / `text` /
+    // `label`: the expression, its source text and its `[label]` ("" when none) —
+    // a violation's message names the label, else the text.
+    export type InvInfo:struct = { nid: int, span: ASpan, label: string, text: string, e: AExpr, reads: string[], heads: int[] }
 
     // An `as=` handle (L10): where its cell lives (`owner` = the declaration or
     // `<each>` element nid), the declaration of the instance it names, and
@@ -165,7 +179,7 @@ ${
     export type HandleInfo:struct = { sym: Sym, name: string, target: Sym, owner: int, conditional: boolean,
                                       span: ASpan, file: string }
 
-    export type TypeInfo:struct = { nid: int, span: ASpan, name: string, file: string, exported: boolean, def: TypeDef }
+    export type TypeInfo:struct = { nid: int, span: ASpan, name: string, file: string, exported: boolean, def: TypeDef, invs: InvInfo[] }   // s483: `invs` — a `:struct` type's invariants (InvInfo)
     // `arity`: its parameter count (the bootstrap has no default parameters);
     // -1 when the signature did not parse cleanly or a parameter is untyped
     // (no arity check against it). `ret`: the declared return type (`-> T`),
@@ -2655,7 +2669,7 @@ ${
             } else {
                 const r: RTypeDef = typeDefOf(fte, s, body, st);
                 st = r.st;
-                out = out.concat([{ nid: s.nid, span: s.src.span, name: s.name, file: s.file, exported: s.exported, def: r.def }]);
+                out = out.concat([{ nid: s.nid, span: s.src.span, name: s.name, file: s.file, exported: s.exported, def: r.def, invs: typeInvInfos(body, r.def) }]);
             }
         }
         return { ts: out, st: st };
@@ -6529,6 +6543,12 @@ ${
                     if (reservedElementName(d.name)) {
                         st = addDiag(st, te.file, d.span, "E-NAME-COLLIDES-RESERVED", "a cell named `" + d.name + "` takes a reserved scrml structural-element name (§4.15: a cell, like a user declaration, may not be named `engine`, `match`, `each`, `errors`, `render`, `page`, `theme`, `defaults`, `md`, `schema`, `db`, … — compared lowercase, §24.4). Rename the cell");
                     }
+                    // s483 (Q21 lane 1): a program cell is no declaration that defines fields
+                    // (§66.13.5) — an invariant reaching here (the parser refused the field-less
+                    // ones) is not judged: refused by name, never accepted unchecked
+                    for (const iv of d.invs) {
+                        st = addDiag(st, te.file, iv.span, "E-BOOTSTRAP-UNSUPPORTED", "`invariant (" + iv.text + ")` on the program cell `" + d.name + "` is not judged by the bootstrap — an invariant stands on a declaration that defines fields (`<" + d.name + ":struct> … </> invariant (…)`) or on a `type X:struct` (§66.13.5; INTERIM, g-boot-invariant-nested-field-s483)");
+                    }
                     const r: RField = fieldOf(te, g, d.nid, d.span, d.name, d.isLet, d.exported, d.ty, d.own, d.body, FieldRole.Child, d.validators, 2, ix, tab, boundaryOf(d.exported, d.mods), pend.indexOf(d.nid) >= 0, st);
                     out = out.concat([r.f]);
                     st = r.st;
@@ -8329,7 +8349,7 @@ ${
         const rtf: RSym = mint(st, "t");
         st = rtf.st;
         vs = vs.concat([{ sym: rt.s, fields: [{ sym: rtf.s, ty: Type.Named(sce), grants: noGrants() }] }]);
-        const ti: TypeInfo = { nid: -1, span: mkSpan(0, 0), name: name, file: builtinFile(), exported: false, def: TypeDef.EnumDef(re.s, vs) };
+        const ti: TypeInfo = { nid: -1, span: mkSpan(0, 0), name: name, file: builtinFile(), exported: false, def: TypeDef.EnumDef(re.s, vs), invs: [] };
         return { ti: ti, st: st };
     }
 
@@ -8895,7 +8915,7 @@ ${
             }
             let kind: DeclKind = DeclKind.User;
             if (ds.isProgram) kind = DeclKind.Program;
-            const info: DeclInfo = { nid: ds.nid, span: declSpan(ds), sym: ds.sym, kind: kind, single: single, file: ds.file, fields: fields, handles: own };
+            const info: DeclInfo = { nid: ds.nid, span: declSpan(ds), sym: ds.sym, kind: kind, single: single, file: ds.file, fields: fields, handles: own, invs: declInvInfos(ds.d, fields) };
             decls = decls.concat([{ info: info, file: ds.file, isProgram: ds.isProgram, d: ds.d, p: ds.p }]);
         }
         const rc: RCycles = derivedCycles(decls, files, lk, handles, st);
@@ -9013,7 +9033,7 @@ ${
             }
             if (hit) {
                 const oi: DeclInfo = ds.info;
-                const ni: DeclInfo = { nid: oi.nid, span: oi.span, sym: oi.sym, kind: oi.kind, single: oi.single, file: oi.file, fields: nf, handles: oi.handles };
+                const ni: DeclInfo = { nid: oi.nid, span: oi.span, sym: oi.sym, kind: oi.kind, single: oi.single, file: oi.file, fields: nf, handles: oi.handles, invs: declInvInfos(ds.d, nf) };
                 out = out.concat([{ info: ni, file: ds.file, isProgram: ds.isProgram, d: ds.d, p: ds.p }]);
             } else {
                 out = out.concat([ds]);
@@ -24784,7 +24804,7 @@ ${
                                         st = rf.st;
                                         fields = fields.concat([{ sym: rf.s, ty: colType(c), grants: noGrants() }]);
                                     }
-                                    types = types.concat([{ nid: -1, span: mkSpan(tbl.start, tbl.end), name: hint, file: builtinFile(), exported: false, def: TypeDef.StructDef(rs.s, fields) }]);
+                                    types = types.concat([{ nid: -1, span: mkSpan(tbl.start, tbl.end), name: hint, file: builtinFile(), exported: false, def: TypeDef.StructDef(rs.s, fields), invs: [] }]);
                                     keys = keys.concat([{ key: key, sym: rs.s }]);
                                     sym = rs.s;
                                 }
@@ -33214,8 +33234,791 @@ ${
                  host: HostCtx.HostNo, own: "", inEffect: false, fx: noFailCtx(), lift: LiftCtx.NoLift, nest: noNest() };
     }
 
+    // =========================================================================
+    // s483 (Q21 lane 1) — DECLARATION INVARIANTS, the declaration side (§66.13.5).
+    // ruling:user-voice-scrml.md-S482-struct-invariant-contract (Q21 = (a): "an
+    // invariant on the declaration itself …, checked on every write from any writer
+    // like the other kinds, a violating write rejected") and
+    // ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1: "`invariant
+    // (expr)` after the closer, bare field names (the `renders` scope), optional
+    // `[label]`; several clauses allowed; `type X:struct = {…} invariant (expr)` on
+    // the type form. Reads only the value's own fields, literals and pure `fn`
+    // calls; an `@cell` read is E-CONTRACT-003." Item 2: "Provable violation
+    // E-WRITE-INVARIANT, otherwise the E-WRITE-INVARIANT-RT trap before any write".
+    // Here: the read set (invInfosOf, recorded on DeclInfo / TypeInfo for the write
+    // side — lane 2), the scope and purity (invResolve*), the `bool` type
+    // (invTypeCheck), and the static zone — a value whose read fields are all
+    // literals is folded now (invFold): `false` is E-WRITE-INVARIANT. The run-time
+    // check of every other write is lane 2 (g-boot-invariant-write-checks-s483).
+    // =========================================================================
+
+    // The invariant clauses of a declaration / struct type, with their read sets
+    // against the value's field names (`names`, in field order).
+    fn invInfosOf(invs: AInvariant[], names: string[]) -> InvInfo[] {
+        let out: InvInfo[] = [];
+        for (const iv of invs) {
+            const reads: string[] = invReads(iv.e, names, []);
+            let heads: int[] = [];
+            for (const p of reads) {
+                const dot: int = p.indexOf(".");
+                const h: string = dot < 0 ? p : p.substring(0, dot);
+                const i: int = names.indexOf(h);
+                if (i >= 0 && heads.indexOf(i) < 0) heads = heads.concat([i]);
+            }
+            out = out.concat([{ nid: iv.nid, span: iv.span, label: iv.label, text: iv.text, e: iv.e, reads: reads, heads: heads }]);
+        }
+        return out;
+    }
+
+    fn declInvInfos(d: ADecl | not, fields: FieldInfo[]) -> InvInfo[] {
+        if (d is not) return [];
+        if (d.invs.length == 0) return [];
+        let names: string[] = [];
+        for (const f of fields) { names = names.concat([f.sym.hint]); }
+        return invInfosOf(d.invs, names);
+    }
+
+    fn typeInvInfos(body: ATypeBody, def: TypeDef) -> InvInfo[] {
+        const invs: AInvariant[] = match body {
+            .StructBody(invs: xs) :> xs,
+            .EnumBody(variants: vs) :> [],
+            .HostBody :> [],
+            .AliasBody(ty: x) :> []
+        };
+        if (invs.length == 0) return [];
+        return invInfosOf(invs, structFieldNames(def));
+    }
+
+    fn structFieldNames(def: TypeDef) -> string[] {
+        let out: string[] = [];
+        for (const f of invFieldDefs(def)) { out = out.concat([f.sym.hint]); }
+        return out;
+    }
+
+    fn invFieldDefs(def: TypeDef) -> FieldDef[] {
+        const fs: FieldDef[] | not = structFieldDefs(def);
+        if (fs is not) return [];
+        return fs;
+    }
+
+    // The variant name of an expression's kind (a test without a default arm).
+    fn exprTag(e: AExpr) -> string {
+        const k: AExprK = e.k;
+        return match k {
+            .Name(name: n) :> "Name",
+            .At(name: n) :> "At",
+            .AtItem :> "AtItem",
+            .Num(raw: r) :> "Num",
+            .Str(v: s) :> "Str",
+            .Bool(v: b) :> "Bool",
+            .NotLit :> "NotLit",
+            .Recovered :> "Recovered",
+            .Variant(name: n) :> "Variant",
+            .Member(obj: o) :> "Member",
+            .Call(callee: c) :> "Call",
+            .Unary(op: o) :> "Unary",
+            .Binary(op: o) :> "Binary",
+            .Ternary(test: t) :> "Ternary",
+            .Assign(target: t) :> "Assign",
+            .ArrayLit(elems: es) :> "ArrayLit",
+            .ObjectLit(props: ps) :> "ObjectLit",
+            .Spread(e: x) :> "Spread",
+            .Index(obj: o) :> "Index",
+            .Lambda(params: ps) :> "Lambda",
+            .BlockLambda(params: ps) :> "BlockLambda",
+            .Sql(q: q) :> "Sql",
+            .Handled(h: h) :> "Handled",
+            .Template(quasis: qs) :> "Template",
+            .Foreign(f: f) :> "Foreign",
+            .HashRef(id: i) :> "HashRef"
+        };
+    }
+
+    // The dotted field path `e` names from the value's root (`start`, `range.end`),
+    // or "" when it is not one.
+    fn invPath(e: AExpr, names: string[]) -> string {
+        const k: AExprK = e.k;
+        if (exprTag(e) == "Name") {
+            const n: string = nameOfExpr(e);
+            if (names.indexOf(n) >= 0) return n;
+            return "";
+        }
+        return match k {
+            .Member(obj: o, name: m) :> invPathMember(invPath(o, names), m),
+            .Name(name: n) :> "",
+            .At(name: n) :> "",
+            .AtItem :> "",
+            .Num(raw: r) :> "",
+            .Str(v: s) :> "",
+            .Bool(v: b) :> "",
+            .NotLit :> "",
+            .Recovered :> "",
+            .Variant(name: n) :> "",
+            .Call(callee: c) :> "",
+            .Unary(op: o) :> "",
+            .Binary(op: o) :> "",
+            .Ternary(test: t) :> "",
+            .Assign(target: t) :> "",
+            .ArrayLit(elems: es) :> "",
+            .ObjectLit(props: ps) :> "",
+            .Spread(e: x) :> "",
+            .Index(obj: o) :> "",
+            .Lambda(params: ps) :> "",
+            .BlockLambda(params: ps) :> "",
+            .Sql(q: q) :> "",
+            .Handled(h: h) :> "",
+            .Template(quasis: qs) :> "",
+            .Foreign(f: f) :> "",
+            .HashRef(id: i) :> ""
+        };
+    }
+
+    fn invPathMember(base: string, m: string) -> string {
+        if (base == "") return "";
+        return base + "." + m;
+    }
+
+    fn nameOfExpr(e: AExpr) -> string {
+        const k: AExprK = e.k;
+        return match k {
+            .Name(name: n) :> n,
+            .At(name: n) :> "",
+            .AtItem :> "",
+            .Num(raw: r) :> "",
+            .Str(v: s) :> "",
+            .Bool(v: b) :> "",
+            .NotLit :> "",
+            .Recovered :> "",
+            .Variant(name: n) :> "",
+            .Member(obj: o) :> "",
+            .Call(callee: c) :> "",
+            .Unary(op: o) :> "",
+            .Binary(op: o) :> "",
+            .Ternary(test: t) :> "",
+            .Assign(target: t) :> "",
+            .ArrayLit(elems: es) :> "",
+            .ObjectLit(props: ps) :> "",
+            .Spread(e: x) :> "",
+            .Index(obj: o) :> "",
+            .Lambda(params: ps) :> "",
+            .BlockLambda(params: ps) :> "",
+            .Sql(q: q) :> "",
+            .Handled(h: h) :> "",
+            .Template(quasis: qs) :> "",
+            .Foreign(f: f) :> "",
+            .HashRef(id: i) :> ""
+        };
+    }
+
+    // The read set: every LONGEST field path the expression reads, first-read order.
+    fn invReads(e: AExpr, names: string[], acc: string[]) -> string[] {
+        const p: string = invPath(e, names);
+        if (p != "") {
+            if (acc.indexOf(p) >= 0) return acc;
+            return acc.concat([p]);
+        }
+        let out: string[] = acc;
+        for (const x of exprKids(e)) { out = invReads(x, names, out); }
+        return out;
+    }
+
+    // ---- scope and purity (phaseB) --------------------------------------------
+    // What an invariant may read (ruling S483 item 1; §66.13.5): the value's own
+    // fields (bare, nested paths included), literals, enum variants and calls of a
+    // pure `fn`. An `@` read is E-CONTRACT-003 (the S482 derived-check advice); any
+    // other outer binding, a `function` call, a method or host call, a write, a
+    // function value, a query or a handled failable is E-DECL-INVARIANT-IMPURE. A
+    // name that is nothing in scope is left to the resolver (E-SCOPE-001). An
+    // expression that fails here is not resolved further (no cascade).
+    type RInvP:struct = { ok: boolean, st: AS }
+
+    fn invImpure(env: Env, e: AExpr, why: string, st: AS) -> RInvP {
+        return { ok: false, st: addDiag(st, env.file, e.span, "E-DECL-INVARIANT-IMPURE", why + " — an invariant reads only the value's own fields, literals, enum variants and calls of a pure `fn` (§66.13.5), so it is evaluated identically wherever the value is written. Compute the value in a `fn` that takes the fields as parameters: `invariant (ok(start, end))`") };
+    }
+
+    fn invPurity(env: Env, e: AExpr, names: string[], what: string, st0: AS) -> RInvP {
+        const k: AExprK = e.k;
+        const shown: string = "`invariant (…)` on " + what;
+        if (exprTag(e) == "At") {
+            const an: string = atName(e);
+            return { ok: false, st: addDiag(st0, env.file, e.span, "E-CONTRACT-003", shown + " reads the cell `@" + an + "` — an invariant checks only the value's own fields (§66.13.5; ruling:user-voice-scrml.md-S483-struct-invariant-syntax: \"an `@cell` read is E-CONTRACT-003\"). A type's rule checks only its own value; to compare against another cell, write a derived check (e.g. `<over=(@x.end > @" + an + ")/>`, where `@x` is the declared value) and use it in markup or the handler that changes the value") };
+        }
+        if (exprTag(e) == "AtItem") return { ok: false, st: addDiag(st0, env.file, e.span, "E-CONTRACT-003", shown + " reads the row value `@.` — an invariant checks only the value's own fields (§66.13.5); compare against a row in a derived check instead") };
+        if (exprTag(e) == "Name") {
+            const n: string = nameOfExpr(e);
+            if (names.indexOf(n) >= 0) return { ok: true, st: st0 };
+            if (fnNamedIn(env, n) is given) return invImpure(env, e, shown + " names the function `" + n + "` as a value", st0);
+            if (constNamed(env.g, env.file, n) is given) return invImpure(env, e, shown + " reads the file-scope constant `" + n + "`, an outer binding", st0);
+            if (hostBinding(env.g, env.file, n) is given) return invImpure(env, e, shown + " reads the host binding `" + n + "`, an outer binding", st0);
+            return { ok: true, st: st0 };
+        }
+        if (exprTag(e) == "Call") {
+            const callee: AExpr = callCallee(e);
+            const cn: string = nameOfExpr(callee);
+            if (cn == "" || names.indexOf(cn) >= 0) return invImpure(env, e, shown + " calls something that is not a declared `fn` (a method, a host function or a field)", st0);
+            const cf: FnInfo | not = fnNamedIn(env, cn);
+            if (cf is given && !cf.pure) return invImpure(env, e, shown + " calls `" + cn + "`, which is declared `function` — it carries no purity guarantee (§48.6.2); declare it with `fn`", st0);
+            let st: AS = st0;
+            let ok = true;
+            for (const a of invCallArgs(e)) {
+                const r: RInvP = invPurity(env, a, names, what, st);
+                st = r.st;
+                if (!r.ok) ok = false;
+            }
+            return { ok: ok, st: st };
+        }
+        const bad: string = match k {
+            .Assign(target: t) :> "writes a value",
+            .Lambda(params: ps) :> "holds a function value",
+            .BlockLambda(params: ps) :> "holds a function value",
+            .Sql(q: q) :> "runs a query",
+            .Handled(h: h) :> "handles a failable call",
+            .Foreign(f: f) :> "holds a foreign code block",
+            .HashRef(id: i) :> "reads a lifecycle element",
+            .Spread(e: x) :> "spreads a value",
+            .Name(name: n) :> "",
+            .At(name: n) :> "",
+            .AtItem :> "",
+            .Num(raw: r) :> "",
+            .Str(v: s) :> "",
+            .Bool(v: b) :> "",
+            .NotLit :> "",
+            .Recovered :> "",
+            .Variant(name: n) :> "",
+            .Member(obj: o) :> "",
+            .Call(callee: c) :> "",
+            .Unary(op: o) :> "",
+            .Binary(op: o) :> "",
+            .Ternary(test: t) :> "",
+            .ArrayLit(elems: es) :> "",
+            .ObjectLit(props: ps) :> "",
+            .Index(obj: o) :> "",
+            .Template(quasis: qs) :> ""
+        };
+        if (bad != "") return invImpure(env, e, shown + " " + bad, st0);
+        let st2: AS = st0;
+        let ok2 = true;
+        for (const x of exprKids(e)) {
+            const r2: RInvP = invPurity(env, x, names, what, st2);
+            st2 = r2.st;
+            if (!r2.ok) ok2 = false;
+        }
+        return { ok: ok2, st: st2 };
+    }
+
+    fn callCallee(e: AExpr) -> AExpr {
+        const kids: AExpr[] = exprKids(e);
+        return kids[0];
+    }
+
+    fn invCallArgs(e: AExpr) -> AExpr[] {
+        let out: AExpr[] = [];
+        let i: int = 0;
+        for (const x of exprKids(e)) {
+            if (i > 0) out = out.concat([x]);
+            i = i + 1;
+        }
+        return out;
+    }
+
+    // A user declaration's invariants: purity, then resolved in the declaration's
+    // `renders` scope (declEnv with inRenders — its fields are bare read-only
+    // projections of the current instance, §66.5.2).
+    fn resolveDeclInvs(g: Globals, ds: DeclSrc, st0: AS) -> AS {
+        let st: AS = st0;
+        const d: ADecl | not = ds.d;
+        if (d is not || ds.isProgram) return st;
+        let names: string[] = [];
+        for (const f of ds.info.fields) { names = names.concat([f.sym.hint]); }
+        const env: Env = declEnv(g, ds, true);
+        for (const iv of ds.info.invs) {
+            const r: RInvP = invPurity(env, iv.e, names, "`<" + d.name + ">`", st);
+            st = r.st;
+            if (r.ok) st = resolveExpr(env, iv.e, Type.Bool, st).st;
+        }
+        return st;
+    }
+
+    // A `type X:struct`'s invariants: its fields are bound as read-only locals of
+    // the invariant's scope (the same bare-name reading as a declaration's).
+    fn resolveTypeInvs(g: Globals, ti: TypeInfo, st0: AS) -> AS {
+        let st: AS = st0;
+        const names: string[] = structFieldNames(ti.def);
+        const fds: FieldDef[] = invFieldDefs(ti.def);
+        for (const iv of ti.invs) {
+            let env: Env = constEnv(g, ti.file);
+            for (const fd of fds) {
+                const rs: RSym = mint(st, fd.sym.hint);
+                st = rs.st;
+                env = withLocal(env, { name: fd.sym.hint, s: rs.s, ty: fd.ty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "", foreign: false });
+            }
+            const r: RInvP = invPurity(env, iv.e, names, "`type " + ti.name + "`", st);
+            st = r.st;
+            if (r.ok) st = resolveExpr(env, iv.e, Type.Bool, st).st;
+        }
+        return st;
+    }
+
+    // ---- the `bool` type and the declaration's defaults (the typer) -------------
+    fn isBoolVT(v: VType) -> boolean {
+        const t: Type | not = knownOf(v);
+        if (t is not) return false;
+        return t == Type.Bool;
+    }
+
+    // `vt` provably not a `bool` (a known other type, or `not`)?
+    fn notBoolVT(v: VType) -> boolean {
+        if (v == VType.Absent) return true;
+        const t: Type | not = knownOf(v);
+        if (t is not) return false;
+        return t != Type.Bool;
+    }
+
+    // One invariant typed: true when it stands (typed `bool`, nothing reported in it).
+    type RInvT:struct = { ok: boolean, ts: TypeState }
+
+    fn invTypeCheck(env: TEnv, iv: InvInfo, what: string, ts0: TypeState) -> RInvT {
+        if (hasErrIn(env.blame.spans, iv.span)) return { ok: false, ts: ts0 };
+        const n0: int = ts0.diags.length;
+        const r: RVT = typeExpr(env, iv.e, ts0);
+        if (r.ts.diags.length > n0) return { ok: false, ts: r.ts };
+        if (notBoolVT(r.vt)) {
+            return { ok: false, ts: report(r.ts, env, iv.e.span, "E-DECL-INVARIANT-NOT-BOOL", "`invariant (" + iv.text + ")` on " + what + " is " + vtShown(r.vt) + ", not a `bool` — an invariant is a condition every value must satisfy (§66.13.5); write a comparison, e.g. `invariant (start <= end)`") };
+        }
+        return { ok: isBoolVT(r.vt), ts: r.ts };
+    }
+
+    fn vtShown(v: VType) -> string {
+        if (v == VType.Absent) return "`not`";
+        const t: Type | not = knownOf(v);
+        if (t is given) return "of type `" + typeName(t) + "`";
+        return "not a `bool`";
+    }
+
+    // A user declaration's invariants typed, and folded over its defaults: a
+    // declaration whose defaults break an invariant has an invalid shared instance
+    // and `reset` target — E-WRITE-INVARIANT at the declaration.
+    fn typeDeclInvs(env: TEnv, d: ADecl, ts0: TypeState) -> TypeState {
+        const di: DeclInfo | not = declByNid(env.t, d.nid);
+        if (di is not) return ts0;
+        let ts: TypeState = ts0;
+        const env0: FEnt[] = declDefaults(di);
+        for (const iv of di.invs) {
+            const r: RInvT = invTypeCheck(env, iv, "`<" + d.name + ">`", ts);
+            ts = r.ts;
+            if (r.ok) ts = invVerdict(env, iv, env0, d.span, "the defaults of `<" + d.name + ">` (its shared instance and `reset` target)", ts);
+        }
+        return ts;
+    }
+
+    // A `type X:struct`'s invariants typed: each field a read-only local of its type.
+    fn typeTypeInvs(env0: TEnv, ti: TypeInfo, ts0: TypeState) -> TypeState {
+        let ts: TypeState = ts0;
+        const fds: FieldDef[] = invFieldDefs(ti.def);
+        for (const iv of ti.invs) {
+            let env: TEnv = env0;
+            for (const x of invNameNodes(iv.e)) {
+                const nf: NameFact | not = nameFact(env.t.names, x.nid);
+                const s: Sym | not = invLocalSym(nf);
+                if (s is given) {
+                    for (const fd of fds) {
+                        if (fd.sym.hint == nameOfExpr(x)) env = tWithLocal(env, s, known(fd.ty));
+                    }
+                }
+            }
+            ts = invTypeCheck(env, iv, "`type " + ti.name + "`", ts).ts;
+        }
+        return ts;
+    }
+
+    fn invLocalSym(nf: NameFact | not) -> Sym | not {
+        return match nf {
+            .NLocal(sym: s) :> s,
+            .NField(decl: d) :> not,
+            .NInst(decl: d) :> not,
+            .NStruct(owner: o) :> not,
+            .NFn(sym: s) :> not,
+            .NLength :> not,
+            .NSurface(of: x) :> not,
+            .NReq(id: i) :> not,
+            .NConst(sym: s) :> not,
+            not :> not
+        };
+    }
+
+    fn invNameNodes(e: AExpr) -> AExpr[] {
+        if (nameOfExpr(e) != "") return [e];
+        let out: AExpr[] = [];
+        for (const x of exprKids(e)) { out = out.concat(invNameNodes(x)); }
+        return out;
+    }
+
+    // ---- the static zone: a value folded (§66.11.7 O36: "a write that PROVABLY
+    // violates … stays a compile error (`E-WRITE-INVARIANT`)") ---------------------
+    // A folded value: a number, a string, a bool, a variant, `not`, or unknown.
+    type FV:enum = { FNum(n: number), FStr(s: string), FBool(b: boolean), FVar(name: string), FAbsent, FNo }
+    // One known field path and its literal value.
+    type FEnt:struct = { path: string, v: FV }
+
+    fn fvLit(e: AExpr) -> FV {
+        const k: AExprK = e.k;
+        return match k {
+            .Num(raw: r) :> fvNum(r),
+            .Str(v: s) :> FV.FStr(s),
+            .Bool(v: b) :> FV.FBool(b),
+            .NotLit :> FV.FAbsent,
+            .Variant(name: n) :> FV.FVar(n),
+            .Unary(op: o, e: x) :> fvNeg(o, fvLit(x)),
+            .Name(name: n) :> FV.FNo,
+            .At(name: n) :> FV.FNo,
+            .AtItem :> FV.FNo,
+            .Recovered :> FV.FNo,
+            .Member(obj: o) :> FV.FNo,
+            .Call(callee: c) :> FV.FNo,
+            .Binary(op: o) :> FV.FNo,
+            .Ternary(test: t) :> FV.FNo,
+            .Assign(target: t) :> FV.FNo,
+            .ArrayLit(elems: es) :> FV.FNo,
+            .ObjectLit(props: ps) :> FV.FNo,
+            .Spread(e: x) :> FV.FNo,
+            .Index(obj: o) :> FV.FNo,
+            .Lambda(params: ps) :> FV.FNo,
+            .BlockLambda(params: ps) :> FV.FNo,
+            .Sql(q: q) :> FV.FNo,
+            .Handled(h: h) :> FV.FNo,
+            .Template(quasis: qs) :> FV.FNo,
+            .Foreign(f: f) :> FV.FNo,
+            .HashRef(id: i) :> FV.FNo
+        };
+    }
+
+    fn fvNum(raw: string) -> FV {
+        const n: number = Number(raw);
+        if (Number.isNaN(n)) return FV.FNo;
+        return FV.FNum(n);
+    }
+
+    fn fvNeg(o: UnOp, v: FV) -> FV {
+        if (o != UnOp.Neg) return FV.FNo;
+        return match v {
+            .FNum(n: n) :> FV.FNum(0 - n),
+            .FStr(s: s) :> FV.FNo,
+            .FBool(b: b) :> FV.FNo,
+            .FVar(name: n) :> FV.FNo,
+            .FAbsent :> FV.FNo,
+            .FNo :> FV.FNo
+        };
+    }
+
+    // The known entries a literal value at `path` gives: a scalar literal one entry;
+    // an object literal one per literal prop, nested (a later spread hides the
+    // props before it — their value comes from the spread operand, unknown here).
+    fn fvEntries(path: string, e: AExpr) -> FEnt[] {
+        const k: AExprK = e.k;
+        if (exprTag(e) == "ObjectLit") {
+            let out: FEnt[] = [];
+            for (const p of objProps(e)) {
+                if (p.spread) {
+                    out = [];
+                } else {
+                    out = fvDrop(out, path + "." + p.name).concat(fvEntries(path + "." + p.name, p.value));
+                }
+            }
+            return out;
+        }
+        const v: FV = fvLit(e);
+        if (fvKind(v) == 0) return [];
+        return [{ path: path, v: v }];
+    }
+
+    fn objProps(e: AExpr) -> AProp[] {
+        const k: AExprK = e.k;
+        return match k {
+            .ObjectLit(props: ps) :> ps,
+            .Name(name: n) :> [],
+            .At(name: n) :> [],
+            .AtItem :> [],
+            .Num(raw: r) :> [],
+            .Str(v: s) :> [],
+            .Bool(v: b) :> [],
+            .NotLit :> [],
+            .Recovered :> [],
+            .Variant(name: n) :> [],
+            .Member(obj: o) :> [],
+            .Call(callee: c) :> [],
+            .Unary(op: o) :> [],
+            .Binary(op: o) :> [],
+            .Ternary(test: t) :> [],
+            .Assign(target: t) :> [],
+            .ArrayLit(elems: es) :> [],
+            .Spread(e: x) :> [],
+            .Index(obj: o) :> [],
+            .Lambda(params: ps) :> [],
+            .BlockLambda(params: ps) :> [],
+            .Sql(q: q) :> [],
+            .Handled(h: h) :> [],
+            .Template(quasis: qs) :> [],
+            .Foreign(f: f) :> [],
+            .HashRef(id: i) :> []
+        };
+    }
+
+    // `ents` without `path` and every path under it.
+    fn fvDrop(ents: FEnt[], path: string) -> FEnt[] {
+        let out: FEnt[] = [];
+        for (const x of ents) {
+            if (x.path != path && !x.path.startsWith(path + ".")) out = out.concat([x]);
+        }
+        return out;
+    }
+
+    // The entries of an attribute value (an own value / default / use-site value).
+    fn fvAttr(path: string, v: AAttrValue) -> FEnt[] {
+        return match v {
+            .Bare(e: e) :> fvEntries(path, e),
+            .Paren(e: e) :> fvEntries(path, e),
+            .Quoted(v: s) :> [{ path: path, v: FV.FStr(s) }],
+            .Dur(text: s) :> [],
+            .NoValue :> [],
+            .Braced(b: b) :> []
+        };
+    }
+
+    fn declDefaults(di: DeclInfo) -> FEnt[] {
+        let out: FEnt[] = [];
+        for (const f of di.fields) { out = out.concat(fvAttr(f.sym.hint, f.init)); }
+        return out;
+    }
+
+    // The entries of an object literal written as a whole value of a struct.
+    fn fvObject(e: AExpr) -> FEnt[] {
+        let out: FEnt[] = [];
+        for (const x of fvEntries("", e)) { out = out.concat([{ path: x.path.substring(1), v: x.v }]); }
+        return out;
+    }
+
+    fn fvLookup(ents: FEnt[], path: string) -> FV {
+        for (const x of ents) {
+            if (x.path == path) return x.v;
+        }
+        return FV.FNo;
+    }
+
+    // `e` folded over the known field values `ents` (`names`: the value's fields).
+    fn invFold(e: AExpr, ents: FEnt[], names: string[]) -> FV {
+        const p: string = invPath(e, names);
+        if (p != "") return fvLookup(ents, p);
+        const k: AExprK = e.k;
+        return match k {
+            .Unary(op: o, e: x) :> fvUnary(o, invFold(x, ents, names)),
+            .Binary(op: o, l: l, r: r) :> fvBinary(o, invFold(l, ents, names), r, ents, names),
+            .Ternary(test: t, yes: y, no: n) :> fvChoose(invFold(t, ents, names), y, n, ents, names),
+            .Num(raw: r) :> fvNum(r),
+            .Str(v: s) :> FV.FStr(s),
+            .Bool(v: b) :> FV.FBool(b),
+            .NotLit :> FV.FAbsent,
+            .Variant(name: n) :> FV.FVar(n),
+            .Name(name: n) :> FV.FNo,
+            .At(name: n) :> FV.FNo,
+            .AtItem :> FV.FNo,
+            .Recovered :> FV.FNo,
+            .Member(obj: o) :> FV.FNo,
+            .Call(callee: c) :> FV.FNo,
+            .Assign(target: t) :> FV.FNo,
+            .ArrayLit(elems: es) :> FV.FNo,
+            .ObjectLit(props: ps) :> FV.FNo,
+            .Spread(e: x) :> FV.FNo,
+            .Index(obj: o) :> FV.FNo,
+            .Lambda(params: ps) :> FV.FNo,
+            .BlockLambda(params: ps) :> FV.FNo,
+            .Sql(q: q) :> FV.FNo,
+            .Handled(h: h) :> FV.FNo,
+            .Template(quasis: qs) :> FV.FNo,
+            .Foreign(f: f) :> FV.FNo,
+            .HashRef(id: i) :> FV.FNo
+        };
+    }
+
+    fn fvChoose(t: FV, y: AExpr, n: AExpr, ents: FEnt[], names: string[]) -> FV {
+        if (fvBoolOf(t) == 1) return invFold(y, ents, names);
+        if (fvBoolOf(t) == 0) return invFold(n, ents, names);
+        return FV.FNo;
+    }
+
+    fn fvUnary(o: UnOp, v: FV) -> FV {
+        if (fvKind(v) == 0) return FV.FNo;
+        if (o == UnOp.Neg) return fvNeg(o, v);
+        if (o == UnOp.IsGiven) return FV.FBool(fvKind(v) != 5);
+        if (o == UnOp.IsNot) return FV.FBool(fvKind(v) == 5);
+        return match v {
+            .FBool(b: b) :> FV.FBool(!b),
+            .FNum(n: n) :> FV.FNo,
+            .FStr(s: s) :> FV.FNo,
+            .FVar(name: n) :> FV.FNo,
+            .FAbsent :> FV.FNo,
+            .FNo :> FV.FNo
+        };
+    }
+
+    // `&&` / `||` short-circuit as they run: a decided left side decides alone.
+    fn fvBinary(o: BinOp, l: FV, re: AExpr, ents: FEnt[], names: string[]) -> FV {
+        if (o == BinOp.And && fvBoolOf(l) == 0) return l;
+        if (o == BinOp.Or && fvBoolOf(l) == 1) return l;
+        const r: FV = invFold(re, ents, names);
+        if (o == BinOp.And || o == BinOp.Or) {
+            // an undecided left side with a deciding right one: `x && false` is false whatever `x` is
+            if (o == BinOp.And && fvBoolOf(r) == 0) return r;
+            if (o == BinOp.Or && fvBoolOf(r) == 1) return r;
+            if (fvBoolOf(l) >= 0 && fvBoolOf(r) >= 0) return r;
+            return FV.FNo;
+        }
+        if (fvKind(l) == 0 || fvKind(r) == 0) return FV.FNo;
+        if (o == BinOp.Eq) return fvEq(l, r);
+        if (o == BinOp.Ne) {
+            const q: int = fvBoolOf(fvEq(l, r));
+            if (q == 1) return FV.FBool(false);
+            if (q == 0) return FV.FBool(true);
+            return FV.FNo;
+        }
+        const a: number | not = fvNumOf(l);
+        const b: number | not = fvNumOf(r);
+        if (a is not || b is not) return FV.FNo;
+        if (o == BinOp.Lt) return FV.FBool(a < b);
+        if (o == BinOp.Le) return FV.FBool(a <= b);
+        if (o == BinOp.Gt) return FV.FBool(a > b);
+        if (o == BinOp.Ge) return FV.FBool(a >= b);
+        if (o == BinOp.Add) return FV.FNum(a + b);
+        if (o == BinOp.Sub) return FV.FNum(a - b);
+        if (o == BinOp.Mul) return FV.FNum(a * b);
+        return FV.FNo;
+    }
+
+    // 1 a known `true`, 0 a known `false`, -1 anything else.
+    fn fvBoolOf(v: FV) -> int {
+        return match v {
+            .FBool(b: b) :> b ? 1 : 0,
+            .FNum(n: n) :> -1,
+            .FStr(s: s) :> -1,
+            .FVar(name: n) :> -1,
+            .FAbsent :> -1,
+            .FNo :> -1
+        };
+    }
+
+    fn fvNumOf(v: FV) -> number | not {
+        return match v {
+            .FNum(n: n) :> n,
+            .FStr(s: s) :> not,
+            .FBool(b: b) :> not,
+            .FVar(name: n) :> not,
+            .FAbsent :> not,
+            .FNo :> not
+        };
+    }
+
+    // Equality of two known values: same kind, same value; `not` equals only `not`.
+    fn fvEq(l: FV, r: FV) -> FV {
+        if (fvKind(l) == 5 || fvKind(r) == 5) return FV.FBool(fvKind(l) == fvKind(r));
+        if (fvKind(l) != fvKind(r)) return FV.FNo;
+        return FV.FBool(fvShown(l) == fvShown(r));
+    }
+
+    fn fvKind(v: FV) -> int {
+        return match v {
+            .FNum(n: n) :> 1,
+            .FStr(s: s) :> 2,
+            .FBool(b: b) :> 3,
+            .FVar(name: n) :> 4,
+            .FAbsent :> 5,
+            .FNo :> 0
+        };
+    }
+
+    fn fvShown(v: FV) -> string {
+        return match v {
+            .FNum(n: n) :> "" + n,
+            .FStr(s: s) :> "\"" + s + "\"",
+            .FBool(b: b) :> b ? "true" : "false",
+            .FVar(name: n) :> "." + n,
+            .FAbsent :> "not",
+            .FNo :> "?"
+        };
+    }
+
+    // The verdict of one invariant over known field values: provably `false` is
+    // E-WRITE-INVARIANT (at `span`, naming `what`); otherwise nothing now.
+    fn invVerdict(env: TEnv, iv: InvInfo, ents: FEnt[], span: ASpan, what: string, ts: TypeState) -> TypeState {
+        const v: FV = invFold(iv.e, ents, invNamesOf(iv, ents));
+        if (fvBoolOf(v) != 0) return ts;
+        let vals: string = "";
+        for (const p of iv.reads) {
+            const x: FV = fvLookup(ents, p);
+            if (fvKind(x) != 0) vals = vals + (vals == "" ? "" : ", ") + p + " = " + fvShown(x);
+        }
+        let named: string = "the invariant `" + iv.text + "`";
+        if (iv.label != "") named = "the invariant `[" + iv.label + "]` (`" + iv.text + "`)";
+        return report(ts, env, span, "E-WRITE-INVARIANT", what + " provably break" + (what.startsWith("the defaults") ? "" : "s") + " " + named + " — with " + vals + " it is `false` (§66.13.5; a declaration invariant is checked on every write, and a write that provably breaks it is a compile error, §66.11.7)");
+    }
+
+    // The field names an invariant's paths are read against: the heads of its reads.
+    fn invNamesOf(iv: InvInfo, ents: FEnt[]) -> string[] {
+        let out: string[] = [];
+        for (const p of iv.reads) {
+            const dot: int = p.indexOf(".");
+            const h: string = dot < 0 ? p : p.substring(0, dot);
+            if (out.indexOf(h) < 0) out = out.concat([h]);
+        }
+        return out;
+    }
+
+    // A use site `<x a=lit …/>` of a declaration with invariants: its literal
+    // attribute values over the declaration's defaults.
+    fn useInvs(env: TEnv, e: AElem, di: DeclInfo, ts0: TypeState) -> TypeState {
+        if (di.invs.length == 0) return ts0;
+        let ents: FEnt[] = declDefaults(di);
+        for (const a of e.attrs) {
+            const i: int = constructIndex(attrFact(env.t.attrs, a.nid));
+            if (i >= 0 && i < di.fields.length) {
+                const f: string = di.fields[i].sym.hint;
+                ents = fvDrop(ents, f).concat(fvAttr(f, a.value));
+            }
+        }
+        let ts: TypeState = ts0;
+        for (const iv of di.invs) {
+            if (!hasErrIn(env.blame.spans, iv.span)) ts = invVerdict(env, iv, ents, e.span, "the use `<" + e.tag + ">`", ts);
+        }
+        return ts;
+    }
+
+    // A whole object-literal value into a struct type or a declaration's instance
+    // with invariants (a construction, an initializer, an argument, a whole write):
+    // its literal props folded. A value with no object literal at its top is the
+    // run-time check's (lane 2).
+    fn literalInvs(env: TEnv, x: AExpr, target: Type, what: string, ts: TypeState) -> TypeState {
+        if (objProps(x).length == 0) return ts;
+        const s: Sym | not = namedSym(unMaybe(target));
+        if (s is not) return ts;
+        let invs: InvInfo[] = [];
+        for (const ti of env.t.types) {
+            if (ti.invs.length > 0 && typeDefSym(ti.def).id == s.id) invs = ti.invs;
+        }
+        for (const di of env.t.decls) {
+            if (di.sym.id == s.id) invs = di.invs;
+        }
+        if (invs.length == 0) return ts;
+        const ents: FEnt[] = fvObject(x);
+        let out: TypeState = ts;
+        for (const iv of invs) { out = invVerdict(env, iv, ents, x.span, what, out); }
+        return out;
+    }
+
+
     fn phaseB(g: Globals, st0: AS) -> AS {
         let st: AS = st0;
+        // s483 (Q21 lane 1): each `type X:struct`'s invariants (§66.13.5)
+        for (const ti of g.types) {
+            if (ti.invs.length > 0) st = resolveTypeInvs(g, ti, st);
+        }
         for (const ds of g.decls) {
             // initializers (L2: the instance under construction is Lexical(0))
             const ienv: Env = declEnv(g, ds, false);
@@ -33237,6 +34040,8 @@ ${
             if (ds.p is not) {
                 for (const fd of fieldDecls(ds)) { st = resolveNodes(withOwn(renv, fd.name), rendersOf(fd), st); }
             }
+            // s483 (Q21 lane 1): its invariants, in the `renders` scope (§66.13.5)
+            st = resolveDeclInvs(g, ds, st);
         }
         const prog: DeclSrc | not = findDeclSrc(g, g.program);
         let progHandles: HandleInfo[] = [];
@@ -36294,7 +37099,7 @@ ${
     // =========================================================================
     fn boundValue(env: TEnv, x: AExpr, target: Type, what: string, ts: TypeState) -> TypeState {
         if (isNotLit(x)) return ts;
-        let out: TypeState = ts;
+        let out: TypeState = literalInvs(env, x, target, what, ts);   // s483 (Q21 lane 1): a struct literal into a type with invariants (§66.13.5)
         if (innerBounded(target)) out = innerBoundValue(env, x, target, what, out);
         const b: BoundRange | not = boundOfType(target);
         if (b is not) return out;
@@ -42707,6 +43512,7 @@ ${
                 }
             }
         }
+        if (di is given) ts = useInvs(env, e, di, ts);   // s483 (Q21 lane 1): a use's literal attributes (§66.13.5)
         return typeNodes(renv, e.kids, ts);
     }
 
@@ -42923,6 +43729,10 @@ ${
             const blame: Blame = { spans: errorSpansIn(prior, f.path), syms: [], fns: fns };
             const env: TEnv = { t: t, file: f.path, errs: f.errs, locals: [], settled: settled, narrowed: [], fnw: fnwIx(fnwIn(fnw, lk, f.path)), rows: [], fret: not, blame: blame };
             for (const it of f.items) { ts = typeItem(env, it, ts); }
+            // s483 (Q21 lane 1): this file's `type X:struct` invariants (§66.13.5)
+            for (const ti of t.types) {
+                if (ti.file == f.path && ti.invs.length > 0) ts = typeTypeInvs(env, ti, ts);
+            }
         }
         return ts;
     }
@@ -43071,6 +43881,7 @@ ${
 
     fn typeUserDecl(env: TEnv, d: ADecl, ts0: TypeState) -> TypeState {
         let ts: TypeState = typeFieldInits(env, declByNid(env.t, d.nid), ts0);
+        ts = typeDeclInvs(env, d, ts);   // s483 (Q21 lane 1): its invariants (§66.13.5)
         // s442: its child fields' markup (only a user declaration has child fields)
         if (declByNid(env.t, d.nid) is given) ts = typeFieldMarkup(env, childFields(d.body), ts);
         const r: AElem | not = d.renders;
