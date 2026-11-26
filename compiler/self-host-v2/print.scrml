@@ -33,7 +33,7 @@ ${
              Failable, OkArm, ErrArm, ServerFn, SqlQuery, SqlMode, Param, LoopHead, EachHead, RangeHead, CssUnit, CoreCss, CssVar,
              Gather, Lifted, GatherRow, PathStep, CoreConst, HeadTitle, CoreMeta, ForeignSlice, CoreChannel, DbLoad,
              findDecl, findTypeDef, typeDefSym, capOwner, findFn, findServerFn, mountedInstances, block, mkSym } from "./core.scrml";
-    import { Node, nodeKids, allNodes, sharedRefs, sharedRefOf, boundSyms, assignedSyms, requestHandles } from "./walk.scrml";
+    import { Node, nodeKids, allNodes, sharedRefs, sharedRefOf, boundSyms, assignedSyms, requestHandles, requestStateDeps } from "./walk.scrml";
     import { JsOp, JsUnOp, JsExpr, JsProp, JsStmt, JsLoopHead, JsForInit,
              jid, jstr, jnum, jmember, jcall, jmcall, jthunk, sexpr, printModule } from "./js.scrml";
     import { HAttr, HNode, Page, printPage, isVoid, dropsLeadingLf, cutNewline } from "./html.scrml";
@@ -177,9 +177,18 @@ ${
     // function that writes a file-scope `let` this way (rule (c) exempts writes made at module
     // initialization), so the server artifact must declare that binding — without it the module
     // threw `ReferenceError` at load (probes q76 / q77 / q78).
+    // s483 (lane s483-body-cell-server-only; ruling:user-voice-scrml.md-S482-body-cell-server-only): a
+    // reference to a cell of the program BODY that bodyPlaced classifies as a binding (bodyCellsOf) —
+    // a read, a write, or any other reference to it — uses that binding, as for a cell declared
+    // outside the body.
     fn constReads(p: CoreProgram, root: Node, acc: int[]) -> int[] {
         let out: int[] = acc;
+        const bc: BodyCells = bodyCellsOf(p);
         for (const n of allNodes(root)) {
+            if (bc.prog >= 0) {
+                const bu: ConstUse = bodyUseOf(bc, n);
+                for (const b of bu.reads.concat(bu.writes)) { if (!hasInt(out, b)) out = out.concat([b]); }
+            }
             let id: int = localReadOf(n);
             if (id < 0) id = assignedLocalOf(n);
             if (id < 0) id = assignedExprLocalOf(n);
@@ -254,7 +263,16 @@ ${
         // write addresses (`over`) — a reference is a read unless it is one of the latter
         let refs: int[] = [];
         let over: int[] = [];
+        // s483 (lane s483-body-cell-server-only): a cell of the program body bodyPlaced classifies as a
+        // binding — a whole-value, statically checked write of it (`@c = v`) is a write; every other
+        // reference reads it (bodyUseOf)
+        const bc: BodyCells = bodyCellsOf(p);
         for (const n of allNodes(root)) {
+            if (bc.prog >= 0) {
+                const bu: ConstUse = bodyUseOf(bc, n);
+                for (const br of bu.reads) { if (!hasInt(reads, br)) reads = reads.concat([br]); }
+                for (const bw of bu.writes) { if (!hasInt(writes, bw)) writes = writes.concat([bw]); }
+            }
             const id: int = localReadOf(n);
             if (id >= 0 && isConstSym(p, id) && !hasInt(reads, id)) reads = reads.concat([id]);
             let wl: int = assignedLocalOf(n);
@@ -6318,7 +6336,8 @@ ${
         // and so are those of each instance the body mounts unconditionally (liveSeedDecl; its
         // place is its mount) — so neither reaches anything before the body. What still runs
         // before it: the construction of a declaration the body does not mount (a shared
-        // reference, an instance a function lifts — constructedElsewhere), a seed that is not
+        // reference in a function or an unplaced binding, an instance a function lifts —
+        // constructedElsewhere; a shared reference in the body is constructed at it, R4), a seed that is not
         // held (a persisted cell's default), and the §25.7 CSS bridges; and a READ of a seed, or
         // of a lazy derived value, before its place runs its initializer then (reachOf follows
         // cell reads into their initializers, and instances into their declarations).
@@ -6333,7 +6352,7 @@ ${
             const od: Decl | not = findDecl(p0, oc.decl);
             if (od is given) pre = pre.concat([Node.NField(od.fields[0])]);
         }
-        const elsewhere: int[] = constructedElsewhere(p0);
+        const elsewhere: int[] = constructedElsewhere(p0, marked);
         for (const d1 of p0.decls) { if (hasInt(elsewhere, d1.sym.id)) pre = pre.concat([Node.NDecl(d1)]); }
         const css: CoreCss | not = p0.css;
         if (css is given) { for (const cv of css.vars) { pre = pre.concat([Node.NExpr(cv.read)]); } }
@@ -6412,11 +6431,16 @@ ${
         const noInit: int[] = clientNoInit(p, sread, si);
         const u: ConstUse = constUse(p, clientRoots, noInit);
         const rid: int[] = clientHeld(u, noInit);
-        if (rid.length == p.consts.length) return p.consts;
+        if (rid.length == p.consts.length && bodyCellsOf(p).prog < 0) return p.consts;
         let out: CoreConst[] = [];
         for (const k2 of p.consts) {
             const id: int = k2.sym.id;
-            if (hasInt(rid, id)) {
+            // s483 (lane s483-body-cell-server-only): a body cell bodyPlaced made a binding is never a
+            // client binding — the client writes its shell FIELD (bodyAsConsts), and its seed runs in
+            // the server artifact
+            if (isBodyCell(p, id)) {
+                // (its shell is the program declaration's field)
+            } else if (hasInt(rid, id)) {
                 out = out.concat([k2]);
             } else if (!hasInt(sread, id) && initActs(k2.init) && !hasInt(si, id)) {
                 // (one that does nothing, nothing reads: running it is unobservable — left out)
@@ -6535,10 +6559,12 @@ ${
     // or the seed of a cell declared outside the body that outerPlaced classifies as a binding —
     // Q12 runs it "even when nothing reads the cell", and a seed that only reads a server-only
     // binding must be judged too (probe t11), not left to the client as one that does nothing.
+    // s483 (lane s483-body-cell-server-only): and the seed of a cell of the program BODY that
+    // bodyPlaced classifies as a binding (isBodyCell) — the same judgment as an outer cell's.
     fn runsK(p: CoreProgram, k: CoreConst) -> boolean {
         if (initActs(k.init)) return true;
         for (const oc of p.outer) { if (oc.decl.id == k.sym.id) return true; }
-        return false;
+        return isBodyCell(p, k.sym.id);
     }
 
     fn withoutInits(rs: View[]) -> View[] {
@@ -6566,16 +6592,32 @@ ${
     // (unconditionally, or in a branch / row) is constructed and rendered at its place in the
     // run, so its declaration's code is reached there (reachOf, as the order walk passes it).
     // One nothing names is never constructed, so its code never runs.
-    fn constructedElsewhere(p: CoreProgram) -> int[] {
+    // s482 (lane s482-mount-reach-fu, #2112 r1 re-review F/U-1; §7.6 R4: "A lazy shared instance is
+    // constructed at its first reference. Each is judged by R2 at the demand point.") — a shared
+    // reference counts here only where it stands in code that may run BEFORE the body or outside its
+    // order: a function (it may be called before a place, or through a value), a file-scope binding
+    // the body does not place (not `marked`: module initialization), and a declaration constructed
+    // elsewhere (transitively). One in the program's body — a display, an attribute, a statement, a
+    // placed binding's initializer, a program cell's seed, the code of an instance the body mounts —
+    // constructs the instance where it stands (`shared_<decl>()` is printed at the reference); the
+    // order walk reaches its seeds there (reachOf follows a shared reference into every seeded
+    // field; a derived field is reached where it is read — S483 #2116 review F1), so
+    // a body binding the instance reads is computed at its own place, before the reference (R2
+    // refuses a reference before it — analyze sharedReach), not hoisted to module initialization.
+    fn constructedElsewhere(p: CoreProgram, marked: int[]) -> int[] {
+        let roots: Node[] = [];
+        for (const f0 of p.fns) { roots = roots.concat([Node.NFn(f0)]); }
+        for (const sf of p.server) { roots = roots.concat([Node.NServerFn(sf)]); }
+        for (const k0 of p.consts) { if (!hasInt(marked, k0.sym.id)) roots = roots.concat([Node.NExpr(k0.init)]); }
         let out: int[] = [];
-        for (const s of sharedRefs(Node.NProgram(p))) { if (s.id != p.program.id && !hasInt(out, s.id)) out = out.concat([s.id]); }
+        for (const r of roots) { out = unionInts(out, sharedIdsIn(p, r)); }
         for (const f of p.fns) { out = unionInts(out, instancedIn(Node.NFn(f))); }
         let changed = true;
         for (; changed; ) {
             changed = false;
             for (const d of p.decls) {
                 if (hasInt(out, d.sym.id)) {
-                    const more: int[] = unionInts(out, instancedIn(Node.NDecl(d)));
+                    const more: int[] = unionInts(unionInts(out, instancedIn(Node.NDecl(d))), sharedIdsIn(p, Node.NDecl(d)));
                     if (more.length != out.length) {
                         out = more;
                         changed = true;
@@ -6586,6 +6628,14 @@ ${
         let res: int[] = [];
         for (const x of out) { if (x != p.program.id) res = res.concat([x]); }
         return res;
+    }
+
+    // s482 (lane s482-mount-reach-fu) — the declarations whose shared instance code under `root`
+    // references (sharedRefs), the program's own left out.
+    fn sharedIdsIn(p: CoreProgram, root: Node) -> int[] {
+        let out: int[] = [];
+        for (const s of sharedRefs(root)) { if (s.id != p.program.id && !hasInt(out, s.id)) out = out.concat([s.id]); }
+        return out;
     }
 
     // s482 — the program cells whose seed is HELD for its place (§7.6 rule (b) S482): a writable
@@ -6858,6 +6908,30 @@ ${
                                 if (cf.decl != p.program.id && !hasInt(seenD, -1 - cf.decl)) {
                                     seenD = seenD.concat([-1 - cf.decl]);
                                     for (const iv of insts) { if (viewInstanced(iv) == cf.decl) next = next.concat([Node.NView(iv)]); }
+                                }
+                            }
+                        }
+                    }
+                    // s482 (lane s482-mount-reach-fu; §7.6 R4) — a reference to a declaration's shared
+                    // instance constructs it (its first one): every SEED of the record runs there
+                    // (rt.seeded is owed until the construction ends), so every seeded field is reached
+                    // — the same "has a seed" test as bodyInits' `pre` (a writable cell's, or a
+                    // constant's with a live seed, constSeedField). A derived field is lazy
+                    // (rt.derived): its formula runs where it is READ, and the cellReadOf branch
+                    // above reaches it there (`@card.d`, or the whole record), not at the
+                    // construction (S483 review F1 of #2116: an unread derived field hoisted).
+                    const sh: Sym | not = sharedRefOf(n);
+                    if (sh is given && sh.id != p.program.id) {
+                        for (const d3 of p.decls) {
+                            if (d3.sym.id == sh.id) {
+                                let k3: int = 0;
+                                for (const f3 of d3.fields) {
+                                    const key3: string = sh.id + ":" + k3;
+                                    if (seenF.indexOf(key3) < 0 && (f3.wcap is given || constSeedField(p, f3))) {
+                                        seenF = seenF.concat([key3]);
+                                        next = next.concat([Node.NField(f3)]);
+                                    }
+                                    k3 = k3 + 1;
                                 }
                             }
                         }
@@ -7874,14 +7948,27 @@ ${
     // calls through what the walk cannot follow, can run in neither artifact: outerRefusal.)
     // A program with no such cell is returned as it is.
     // =========================================================================
+    //
+    // s483 (lane s483-body-cell-server-only; ruling:user-voice-scrml.md-S482-body-cell-server-only — "treat
+    // body cells like top-level ones, so the same rule (b) classification applies"): and the cells of
+    // the program BODY (bodyCands), judged in the same classification — each as a binding whose
+    // initializer is its seed (bodyAsConsts) — so a chain through both kinds (o2b: an unread body cell
+    // reading an outer cell) is one fixed point. A body cell it makes server-only is a SHELL field in
+    // the program declaration and a binding the server artifact runs (bodyAsConsts `fin`).
     fn outerPlaced(p: CoreProgram, keep: int[]) -> CoreProgram {
         const outs: OuterCell[] = outerLive(p);
-        if (outs.length == 0) return p;
-        const si: int[] = serverInitsExposing(outerAsConsts(p, outs, false), keep);
+        const bcs: int[] = bodyCands(p);
+        if (outs.length == 0 && bcs.length == 0) return p;
+        const si: int[] = serverInitsExposing(bodyAsConsts(outerAsConsts(p, outs, false), p, bcs, false), keep);
         let moved: OuterCell[] = [];
         for (const oc of outs) { if (hasInt(si, oc.decl.id)) moved = moved.concat([oc]); }
-        if (moved.length == 0) return p;
-        return outerAsConsts(p, moved, true);
+        let bmoved: int[] = [];
+        for (const b of bcs) { if (hasInt(si, b)) bmoved = bmoved.concat([b]); }
+        if (moved.length == 0 && bmoved.length == 0) return p;
+        let q: CoreProgram = p;
+        if (moved.length > 0) q = outerAsConsts(p, moved, true);
+        if (bmoved.length > 0) q = bodyAsConsts(q, p, bmoved, true);
+        return q;
     }
 
     // `p` with each cell of `cs` (cells declared outside the body, CoreProgram.outer) as a
@@ -7965,7 +8052,311 @@ ${
                 }
             }
         }
+        // s483 (lane s483-body-cell-server-only): the same for a cell of the program BODY that
+        // bodyPlaced made server-only (a derived one has no binding: nothing runs its formula)
+        const pd: Decl | not = programDeclOf(p);
+        if (pd is given) {
+            for (const f of pd.fields) {
+                const bk: CoreConst | not = findConst(p, f.sym.id);
+                if (bk is given && readsCellReach(p, bk.init)) {
+                    out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: the seed of `@" + f.sym.hint + "`, a cell of the program body that nothing on the client reads, reaches server-only code, so it runs in the server artifact (§7.6 rule (b), S481/S482; ruling:user-voice-scrml.md-S482-body-cell-server-only — a body cell is judged as a file-scope binding is) — but it also reads a cell (or calls through what the bootstrap cannot follow), which the server artifact does not hold. The bootstrap does not run such a seed yet (⚑ INTERIM, g-boot-outer-cell-server-seed-reads-cell-s482). Read the cell in the page, or seed it from bindings and functions only"]);
+                }
+            }
+        }
         return out;
+    }
+
+    // =========================================================================
+    // s483 (lane s483-body-cell-server-only; gap g-boot-body-unread-cell-server-only-s482;
+    // ruling:user-voice-scrml.md-S482-body-cell-server-only — "(a) treat body cells like top-level
+    // ones, so the same rule (b) classification applies"). A cell of the program BODY is a field of the
+    // program declaration — a client root — so its seed was printed in the client whether or not any
+    // code read it, with whatever server-only binding the seed reached (probes s12 / s13 / o2b / n31).
+    // It is now judged by §7.6 rule (b) exactly as a file-scope binding and a cell declared outside the
+    // body are — by serverInits itself, not by a second rule (outerPlaced): each candidate (bodyCands)
+    // is put in the program as a binding of its field's Sym whose initializer is its seed
+    // (bodyAsConsts), and a reference to the field is a use of that binding (constReads / constUseIn
+    // through bodyUseOf): a read, or a whole-value overwrite (`@c = v`, EditKind.Replace with a static
+    // check — "a write is not a read", S482). One the classification makes SERVER-ONLY — nothing on the
+    // client reads it, and its seed reaches server-only code, directly, through a function, or through
+    // another server-only binding (the largest set) — keeps its field in the program declaration as a
+    // SHELL (seed `not`, §42 — S482 `prov=pa-ruled:S482-write-only-shell-not`), so the record's field
+    // positions and the client's writes stand; and its seed becomes that binding, which the server
+    // artifact runs at module initialization at its place in Core order (print-server.scrml
+    // serverConsts). A DERIVED body cell (a locked one whose formula reads a cell, §66.9 rule 3) has no
+    // place: its formula runs only when it is read, so an unread one runs nowhere — it is a shell and
+    // no binding. One whose seed reads a cell is refused by name (outerRefusal — the server artifact
+    // holds no cell).
+    // =========================================================================
+    type BodyCells:struct = { prog: int, ids: int[], caps: int[] }
+
+    // The program declaration's fields that are bindings here (`ids[i]`: field i's Sym id, or -1) and
+    // their write capabilities (`caps[i]`, or -1); `prog` -1 when no field is one.
+    fn bodyCellsOf(p: CoreProgram) -> BodyCells {
+        const none: BodyCells = { prog: -1, ids: [], caps: [] };
+        if (p.consts.length == 0) return none;
+        const pd: Decl | not = programDeclOf(p);
+        if (pd is not) return none;
+        let ids: int[] = [];
+        let caps: int[] = [];
+        let any: boolean = false;
+        for (const f of pd.fields) {
+            let id: int = -1;
+            if (isConstSym(p, f.sym.id)) {
+                id = f.sym.id;
+                any = true;
+            }
+            ids = ids.concat([id]);
+            let cap: int = -1;
+            const w: Sym | not = f.wcap;
+            if (w is given) cap = w.id;
+            caps = caps.concat([cap]);
+        }
+        if (!any) return none;
+        return { prog: pd.sym.id, ids: ids, caps: caps };
+    }
+
+    fn isBodyCell(p: CoreProgram, id: int) -> boolean {
+        const pd: Decl | not = programDeclOf(p);
+        if (pd is not) return false;
+        for (const f of pd.fields) { if (f.sym.id == id) return true; }
+        return false;
+    }
+
+    // One node's uses of the body cells that are bindings. FAIL CLOSED: every reference to such a
+    // field other than a whole-value, statically checked Write is a READ — a place read (a whole
+    // program snapshot reads them all), a part / compound / checked write, a re-run initializer, a
+    // validity surface or its reset, a storage removal, an effect's, a request's or a reset's
+    // dependency (a request's target too), an error list, a gate, a handle of the program instance
+    // (any Lexical handle counts), a `<*x/>` of the program.
+    fn bodyUseOf(bc: BodyCells, n: Node) -> ConstUse {
+        return match n {
+            .NPlace(pl: pl) :> readUse(bodyPlaceIds(bc, pl)),
+            .NStmt(s: s) :> bodyStmtUse(bc, s),
+            .NExpr(e: e) :> readUse(bodyExprIds(bc, e)),
+            .NView(v: v) :> readUse(bodyViewIds(bc, v)),
+            .NAttr(a: a) :> readUse(bodyAttrIds(bc, a)),
+            // no-default-arm: one question of a node — does it reference a body cell
+            _ :> readUse([])
+        };
+    }
+
+    fn readUse(ids: int[]) -> ConstUse {
+        return { reads: ids, writes: [] };
+    }
+
+    fn bodyAt(bc: BodyCells, idx: int) -> int[] {
+        if (idx < 0 || idx >= bc.ids.length) return [];
+        if (bc.ids[idx] < 0) return [];
+        return [bc.ids[idx]];
+    }
+
+    fn bodyAll(bc: BodyCells) -> int[] {
+        let out: int[] = [];
+        for (const id of bc.ids) { if (id >= 0) out = out.concat([id]); }
+        return out;
+    }
+
+    fn bodyCellIds(bc: BodyCells, d: Sym, path: FieldRef[]) -> int[] {
+        if (d.id != bc.prog) return [];
+        if (path.length == 0) return bodyAll(bc);
+        return bodyAt(bc, path[0].idx);
+    }
+
+    fn bodyPlaceIds(bc: BodyCells, pl: Place) -> int[] {
+        return match pl {
+            .Cell(decl: d, path: ps) :> bodyCellIds(bc, d, ps),
+            .LocalPath(sym: x) :> []
+        };
+    }
+
+    fn bodyFieldIds(bc: BodyCells, d: Sym, idx: int) -> int[] {
+        if (d.id != bc.prog) return [];
+        return bodyAt(bc, idx);
+    }
+
+    fn bodyStmtUse(bc: BodyCells, s: Stmt) -> ConstUse {
+        return match s {
+            .Write(cap: c, edit: e, check: k) :> bodyWriteUse(bc, c, e, k),
+            .ResetSurface(of: v) :> readUse(bodyValidityIds(bc, v)),
+            .Unpersist(decl: d, idx: i) :> readUse(bodyFieldIds(bc, d, i)),
+            // no-default-arm: one question of a statement — does it write or reset a body cell
+            _ :> readUse([])
+        };
+    }
+
+    fn bodyWriteUse(bc: BodyCells, cap: Sym, e: EditKind, c: Check) -> ConstUse {
+        let i: int = 0;
+        for (const w of bc.caps) {
+            if (w == cap.id && bc.ids[i] >= 0) {
+                if (isReplaceEdit(e) && isStaticCheck(c)) return { reads: [], writes: [bc.ids[i]] };
+                return readUse([bc.ids[i]]);
+            }
+            i = i + 1;
+        }
+        return readUse([]);
+    }
+
+    fn bodyExprIds(bc: BodyCells, e: Expr) -> int[] {
+        return match e {
+            .InitOf(decl: d, idx: i) :> bodyFieldIds(bc, d, i),
+            .Validity(of: v) :> bodyValidityIds(bc, v),
+            .Handle(inst: i) :> bodyInstIds(bc, i),
+            // no-default-arm: one question of an expression — does it read a body cell other than by a place
+            _ :> []
+        };
+    }
+
+    fn bodyInstIds(bc: BodyCells, i: InstRef) -> int[] {
+        return match i {
+            .Shared(decl: d) :> (d.id == bc.prog ? bodyAll(bc) : []),
+            .Lexical(depth: x) :> bodyAll(bc),
+            // no-default-arm: one question of an instance reference — may it name the program instance
+            _ :> []
+        };
+    }
+
+    fn bodyValidityIds(bc: BodyCells, v: ValidityOf) -> int[] {
+        return match v {
+            .OfField(decl: d, idx: i) :> bodyFieldIds(bc, d, i),
+            .OfDecl(decl: d) :> (d.id == bc.prog ? bodyAll(bc) : [])
+        };
+    }
+
+    fn bodyDepIds(bc: BodyCells, ds: EffectDep[]) -> int[] {
+        let out: int[] = [];
+        for (const d of ds) { out = unionInts(out, bodyFieldIds(bc, d.decl, d.idx)); }
+        return out;
+    }
+
+    fn bodyValiditiesIds(bc: BodyCells, vs: ValidityOf[]) -> int[] {
+        let out: int[] = [];
+        for (const v of vs) { out = unionInts(out, bodyValidityIds(bc, v)); }
+        return out;
+    }
+
+    fn bodyViewIds(bc: BodyCells, v: View) -> int[] {
+        return match v {
+            .Effect(deps: ds) :> bodyDepIds(bc, ds),
+            .Request(target: t, deps: ds, state: st) :> bodyDepIds(bc, [t].concat(ds).concat(requestStateDeps(st))),
+            .ResetOn(triggers: ds) :> bodyDepIds(bc, ds),
+            .Errors(of: x) :> bodyValidityIds(bc, x),
+            .Reach(fields: fs) :> bodyValiditiesIds(bc, fs),
+            .Star(decl: d) :> (d.id == bc.prog ? bodyAll(bc) : []),
+            // no-default-arm: one question of a view — does it name a body cell other than by a place
+            _ :> []
+        };
+    }
+
+    fn bodyAttrIds(bc: BodyCells, a: Attr) -> int[] {
+        return match a {
+            .Gate(fields: fs) :> bodyValiditiesIds(bc, fs),
+            // no-default-arm: one question of an attribute — does a form gate name a body cell
+            _ :> []
+        };
+    }
+
+    // The cells of the program body the classification judges: each field of the program
+    // declaration with a seed that may reach something (seedLive — a literal reaches nothing), except
+    // the fields whose value the client holds by construction: a `<db>` cell (its load's answer,
+    // §8.1.3), a `<channel>`'s synced cell (§38.4 — sent to other clients), a §25.7 CSS bridge's cell
+    // (cssVarStmts reads it in the client), and an engine field with an `<onIdle>` watchdog (the
+    // runtime reads it, §51.0.R).
+    fn bodyCands(p: CoreProgram) -> int[] {
+        const pd: Decl | not = programDeclOf(p);
+        if (pd is not) return [];
+        let skip: int[] = [];
+        for (const ld of p.loads) { skip = skip.concat([ld.cell.id]); }
+        for (const ch of p.channels) { for (const c of ch.cells) { skip = skip.concat([c.id]); } }
+        const css: CoreCss | not = p.css;
+        if (css is given) { for (const cv of css.vars) { skip = skip.concat([cv.cell.id]); } }
+        let out: int[] = [];
+        for (const f of pd.fields) {
+            const init: Expr | not = f.init;
+            if (init is given && !hasInt(skip, f.sym.id) && !idleWatched(f) && seedLive(init)) out = out.concat([f.sym.id]);
+        }
+        return out;
+    }
+
+    fn idleWatched(f: Field) -> boolean {
+        const g: TransitionGraph | not = f.graph;
+        if (g is not) return false;
+        return g.idle is given;
+    }
+
+    // A derived body cell (no write capability, not a constant — its formula reads a cell; §66.9
+    // rule 3): judged on `orig`, the program before any field was made a shell.
+    fn bodyDerived(orig: CoreProgram, f: Field) -> boolean {
+        return f.wcap is not && f.persist is not && !constSeedField(orig, f);
+    }
+
+    // `p` with each body cell of `cells` (field Sym ids) a SHELL field — its seed `not` — and a binding
+    // of the field's Sym whose initializer is the cell's seed among the constants, at the cell's place:
+    // after the body binding placed before it (the program's View.Init order), else before the first
+    // one placed after it, else last. `fin`: the program both printers print — a DERIVED cell
+    // (bodyDerived, judged on `orig`) gets no binding there (nothing runs an unread formula); in the
+    // classification (`fin` false) it is one, so what its formula reaches is judged. Each cell
+    // declared outside the body keeps its place (OuterCell.at moves past the bindings put before it).
+    fn bodyAsConsts(p: CoreProgram, orig: CoreProgram, cells: int[], fin: boolean) -> CoreProgram {
+        const pd: Decl | not = programDeclOf(p);
+        if (pd is not || cells.length == 0) return p;
+        let fs: Field[] = [];
+        let adds: CoreConst[] = [];
+        for (const f of pd.fields) {
+            const init: Expr | not = f.init;
+            if (hasInt(cells, f.sym.id) && init is given) {
+                fs = fs.concat([shellField(f)]);
+                if (!fin || !bodyDerived(orig, f)) adds = adds.concat([{ sym: f.sym, init: init, mutable: f.wcap is given }]);
+            } else {
+                fs = fs.concat([f]);
+            }
+        }
+        let marks: int[] = [];
+        const rs: View[] | not = pd.renders;
+        if (rs is given) marks = initsIn(rs);
+        // the added bindings in place order (a cell with no place goes last)
+        let order: CoreConst[] = [];
+        for (const m of marks) { for (const a of adds) { if (a.sym.id == m) order = order.concat([a]); } }
+        for (const a2 of adds) { if (!hasInt(marks, a2.sym.id)) order = order.concat([a2]); }
+        let ks: CoreConst[] = [];
+        let done: int[] = [];
+        let newAt: int[] = [];
+        for (const k of p.consts) {
+            const mk: int = marks.indexOf(k.sym.id);
+            if (mk >= 0) {
+                for (const c of order) {
+                    if (!hasInt(done, c.sym.id) && marks.indexOf(c.sym.id) >= 0 && marks.indexOf(c.sym.id) < mk) {
+                        ks = ks.concat([c]);
+                        done = done.concat([c.sym.id]);
+                    }
+                }
+            }
+            newAt = newAt.concat([ks.length]);
+            ks = ks.concat([k]);
+        }
+        for (const c2 of order) { if (!hasInt(done, c2.sym.id)) ks = ks.concat([c2]); }
+        let os: OuterCell[] = [];
+        for (const o of p.outer) {
+            let at: int = ks.length;
+            if (o.at < newAt.length) at = newAt[o.at];
+            os = os.concat([{ decl: o.decl, at: at }]);
+        }
+        let ds: Decl[] = [];
+        for (const d of p.decls) {
+            if (d.sym.id == pd.sym.id) {
+                ds = ds.concat([{ sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: fs, renders: d.renders, wiring: d.wiring, handles: d.handles }]);
+            } else {
+                ds = ds.concat([d]);
+            }
+        }
+        return { program: p.program, decls: ds, types: p.types, fns: p.fns, server: p.server, dbs: p.dbs, reset: p.reset, sqlError: p.sqlError,
+                 serverCallError: p.serverCallError, css: p.css, consts: ks, loads: p.loads, envelopes: p.envelopes, head: p.head,
+                 tool: p.tool, endpoints: p.endpoints, channels: p.channels, typed: p.typed, outer: os };
+    }
+
+    fn shellField(f: Field) -> Field {
+        return { sym: f.sym, ty: f.ty, init: Expr.Lit(Literal.Absent), mode: f.mode, role: f.role, grants: f.grants, graph: f.graph,
+                 exported: f.exported, wcap: f.wcap, vals: f.vals, persist: f.persist, timing: f.timing };
     }
 
     fn withDeclsFns(p: CoreProgram, ds: Decl[], fs: Fn[], lds: DbLoad[]) -> CoreProgram {

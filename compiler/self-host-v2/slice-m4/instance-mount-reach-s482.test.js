@@ -193,7 +193,7 @@ describe("r1: markup `<*f/>` renders, and a shared instance's read, are judged w
 \${ n = 5; }
 <card/>
 \${ const k: int = n + 0; }
-<p id="o2">\${k}</p>`), ["this `<card>` mounts an instance here", "its mount runs a display of `<card>`", "reads `k`"]);
+<p id="o2">\${k}</p>`), ["this `<card>` mounts an instance here", "its mount runs a display in the markup `<card>`'s render shows through `<*v/>`", "reads `k`"]);
   }, 120000);
 
   test("MED-2 a03: an instance in a body-level engine's state child, shown by `<*ph/>`, mounts at the `<*ph/>`", async () => {
@@ -225,7 +225,7 @@ ${PH(`<b id="o">\${k}</b>`)}`), ["this `<*ph/>` renders a field's markup here"])
 \${ n = 5; }
 <p id="o">\${@card.v}</p>
 \${ const k: int = n + 0; }
-<p id="o2">\${k}</p>`), ["this display reads `@card`, the shared instance of `<card>`, constructed at its first reference (§7.6 R4)", "the seed of its field `v` reads `k`"]);
+<p id="o2">\${k}</p>`), ["this display reads `@card.v`, a field of the shared instance of `<card>`, which is constructed at its first reference (§7.6 R4)", "the seed of its field `v` reads `k`"]);
   }, 120000);
 
   test("MED-4 r06: a derived field read through the shared instance runs its formula at the read", async () => {
@@ -337,5 +337,211 @@ let <out:int=0/>
 <card/>
 \${ n = 5; }
 <p id="o2">\${n}</p>`), ["o", "o2"])).toEqual(["1", "5"]);
+  }, 120000);
+});
+
+// s482 lane s482-mount-reach-fu (#2112 r1 re-review F/U-1, F/U-2, NIT-2). §7.6 R4: "A lazy shared
+// instance is constructed at its first reference. Each is judged by R2 at the demand point." Red on
+// 3535bad9b: every value case below showed the value computed before the body's writes (`1`, r01 /
+// r07 / r12 / r14 / r08 and the n-probes), and the two self-rendering `<*f/>` shapes overflowed the
+// stack in the lowerer (an internal error, no diagnostic).
+const CARD_K = `<card t:string="x">
+    let <v:int=(k + 0)/>
+</>`;
+
+describe("F/U-1: a shared instance read in the body is constructed there (R4) — its binding runs at its own place", () => {
+  test("r01: the fix-it of a14 (declare `k` before the read) gives the source-order value", async () => {
+    expect(await texts(P(`${CARD_K}
+\${ n = 5; }
+\${ const k: int = n + 0; }
+<p id="o">\${@card.v}</p>
+<p id="o2">\${k}</p>`), ["o", "o2"])).toEqual(["5", "5"]);
+  }, 120000);
+
+  test("r14 / r07: the binding before the declaration; a derived field read through the instance", async () => {
+    expect(await texts(P(`\${ n = 5; }
+\${ const k: int = n + 0; }
+${CARD_K}
+<p id="o">\${@card.v}</p>
+<p id="o2">\${k}</p>`), ["o", "o2"])).toEqual(["5", "5"]);
+    expect(await texts(P(`let <m:int=1/>
+<card t:string="x">
+    <d:int=(@m + k)/>
+</>
+\${ n = 5; }
+\${ const k: int = n + 0; }
+<p id="o">\${@card.d}</p>
+<p id="o2">\${k}</p>`), ["o", "o2"])).toEqual(["6", "5"]);
+  }, 240000);
+
+  test("the read in another component's render, a program cell's seed, a statement, `<*card/>`", async () => {
+    expect(await texts(P(`${CARD_K}
+<show1 t:string="y">
+</> renders <b id="o">\${@card.v}</b>
+\${ n = 5; }
+\${ const k: int = n + 0; }
+<show1/>
+<p id="o2">\${k}</p>`), ["o", "o2"])).toEqual(["5", "5"]);
+    expect(await texts(P(`${CARD_K}
+\${ n = 5; }
+\${ const k: int = n + 0; }
+let <z:int=(@card.v)/>
+<p id="o">\${@z}</p>`), ["o"])).toEqual(["5"]);
+    expect(await texts(P(`let <out:int=0/>
+${CARD_K}
+\${ n = 5; }
+\${ const k: int = n + 0; }
+\${ @out = @card.v; }
+<p id="o">\${@out}</p>`), ["o"])).toEqual(["5"]);
+    expect(await texts(P(`<card t:string="x">
+    let <v:int=(k + 0)/>
+</> renders <b id="o">\${v}</b>
+\${ n = 5; }
+\${ const k: int = n + 0; }
+<main><*card/></main>`), ["o"])).toEqual(["5"]);
+  }, 480000);
+
+  test("every seed of the instance runs at the read: two fields reading two bindings, and a shared instance its seed reads", async () => {
+    expect(await texts(P(`<card t:string="x">
+    let <v:int=(k + 0)/>
+    let <w:int=(k2 + 0)/>
+</>
+\${ n = 5; }
+\${ const k: int = n + 0; }
+\${ n = 7; }
+\${ const k2: int = n + 0; }
+<p id="o">\${@card.v}</p>
+<p id="o2">\${@card.w}</p>`), ["o", "o2"])).toEqual(["5", "7"]);
+    expect(await texts(P(`<other t:string="x">
+    let <w:int=(k + 0)/>
+</>
+<card t:string="x">
+    let <v:int=(@other.w + 1)/>
+</>
+\${ n = 5; }
+\${ const k: int = n + 0; }
+<p id="o">\${@card.v}</p>`), ["o"])).toEqual(["6"]);
+  }, 240000);
+
+  test("still refused: the read before the binding (a14 / r15), whatever the binding's value", async () => {
+    await refusedNaming(P(`${CARD_K}
+<p id="o">\${@card.v}</p>
+\${ const k: int = 5; }`), ["reads `@card.v`, a field of the shared instance of `<card>`"]);
+  }, 120000);
+
+  test("unchanged (⚑ INTERIM, g-boot-shared-instance-reach-hoist-s482): a FUNCTION reading the instance still constructs it before the body", async () => {
+    expect(await texts(P(`${CARD_K}
+\${ function rv() -> int { return @card.v; } }
+\${ n = 5; }
+\${ const k: int = n + 0; }
+<p id="o">\${rv()}</p>
+<p id="o2">\${k}</p>`), ["o", "o2"])).toEqual(["1", "1"]);
+  }, 120000);
+});
+
+// S483 r1 (review s482-2116 F1): the construction at the first reference runs the SEEDS only — a
+// derived field is lazy (its formula runs where it is read), so an unread derived field that reads a
+// later binding does not pull that binding ahead of the body. Red on 9fdaa7925: x01 / x12 showed
+// `1 | 1` and x01c `1 | 1 1` (`k` hoisted to module init, before `n = 5`).
+const CARD_D = `let <m:int=0/>
+<card t:string="x">
+    let <v:int=(1)/>
+    <d:int=(@m + k)/>
+</>`;
+
+describe("F1: a shared reference constructs the seeds, not an unread derived field", () => {
+  test("x01: a seed read before `k`, the derived field never read", async () => {
+    expect(await texts(P(`${CARD_D}
+\${ n = 5; }
+<p id="o">\${@card.v}</p>
+\${ const k: int = n + 0; }
+<p id="o2">\${k}</p>`), ["o", "o2"])).toEqual(["1", "5"]);
+  }, 120000);
+
+  test("x01c: the derived field read after `k` runs its formula there", async () => {
+    expect(await texts(P(`${CARD_D}
+\${ n = 5; }
+<p id="o">\${@card.v}</p>
+\${ const k: int = n + 0; }
+<p id="o2">\${k} \${@card.d}</p>`), ["o", "o2"])).toEqual(["1", "5 5"]);
+  }, 120000);
+
+  test("x12: the shared read in another component's render, mounted before `k`", async () => {
+    expect(await texts(P(`${CARD_D}
+<show1 t:string="y">
+</> renders <b id="o">\${@card.v}</b>
+\${ n = 5; }
+<show1/>
+\${ const k: int = n + 0; }
+<p id="o2">\${k}</p>`), ["o", "o2"])).toEqual(["1", "5"]);
+  }, 120000);
+
+  test("still refused: the derived field READ before `k`", async () => {
+    await refusedNaming(P(`${CARD_D}
+\${ n = 5; }
+<p id="o">\${@card.d}</p>
+\${ const k: int = n + 0; }
+<p id="o2">\${k}</p>`), []);
+  }, 120000);
+});
+
+describe("F/U-2: a `<*f/>` inside the markup it renders is a named refusal, never a stack overflow", () => {
+  const SELF = "stands inside the markup it renders";
+  test("s08: a state-child body showing its own field", async () => {
+    const es = await errors(P(`\${ type Ph:enum = { A, B } }
+<ph:Ph=.A single>
+  <A rule=.B><b id="o">x</b></>
+  <B rule=.A><div><*ph/></div></>
+</>
+<main><*ph/></main>`));
+    expect(es.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(es[0].message).toContain("`<*ph/>` " + SELF);
+  }, 120000);
+
+  test("s08b: a field's `renders` holding its own `<*v/>`", async () => {
+    const es = await errors(P(`<card t:string="x">
+    let <v:int=1/>
+    renders <b id="o"><*v/></b>
+</>
+renders <span><*v/></span>
+<card/>`));
+    expect(es.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(es[0].message).toContain("`<*v/>` " + SELF);
+  }, 120000);
+
+  test("two engines rendering each other; a nested `<*qh/>` with no cycle still compiles", async () => {
+    const es = await errors(P(`\${ type Ph:enum = { A, B } }
+<ph:Ph=.A single>
+  <A rule=.B><b>x</b></>
+  <B rule=.A><div><*qh/></div></>
+</>
+<qh:Ph=.A single>
+  <A rule=.B><b>y</b></>
+  <B rule=.A><div><*ph/></div></>
+</>
+<main><*ph/></main>`));
+    expect(es.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(es[0].message).toContain(SELF);
+    expect(await texts(P(`\${ type Ph:enum = { A, B } }
+<qh:Ph=.A single>
+  <A rule=.B><b>y</b></>
+  <B rule=.A><i>q</i></>
+</>
+<ph:Ph=.A single>
+  <A rule=.B><div id="o"><*qh/></div></>
+  <B rule=.A><b>x</b></>
+</>
+<main><*ph/></main>`), ["o"])).toEqual(["y"]);
+  }, 240000);
+});
+
+describe("NIT-2: messages name what the source reads and where the code is", () => {
+  test("s06: a display in `<ph>`'s state child, shown by `<*ph/>` in `<card>`'s render", async () => {
+    await refusedNaming(P(`${PH(`<b id="o">\${k}</b>`)}
+<card t:string="x">
+</> renders <div><*ph/></div>
+\${ n = 5; }
+<card/>
+\${ const k: int = n + 0; }`), ["its mount runs a display in the markup `<card>`'s render shows through `<*ph/>`"]);
   }, 120000);
 });
