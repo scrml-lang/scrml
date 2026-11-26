@@ -15,10 +15,10 @@
 // A read anywhere in client code — a display, a compound write `x = x + …`, a later handler, `bind:` —
 // keeps the binding client-read, unchanged.
 //
-// Not covered: a cell declared in the program BODY (g-boot-body-unread-cell-server-only-s482, open). Ruled
-// S482 (ruling:user-voice-scrml.md-S482-body-cell-server-only, (a)): rule (b)'s classification applies to a
-// body cell as to a file-scope binding. The build is queued for its own lane, so the leak is pinned below as
-// today's behaviour.
+// A cell declared in the program BODY (g-boot-body-unread-cell-server-only-s482): ruled S482
+// (ruling:user-voice-scrml.md-S482-body-cell-server-only, (a)) — rule (b)'s classification applies to a body
+// cell as to a file-scope binding; built s483 (lane s483-body-cell-server-only). Probe n31 is pinned below,
+// flipped; the family is compiler/self-host-v2/slice-m4/body-cell-server-only-s483.test.js.
 //
 // Shipping path: the scrml-boot CLI (every client file read) and scripts/bootstrap-conformance.ts
 // `runBootstrapArtifact` (happy-dom). Chromium: compiler/tests/browser/write-only-secret-chromium-s482.browser.test.js.
@@ -370,9 +370,15 @@ describe("a client-written binding server code reads, read by an acting initiali
   }, 180000);
 });
 
-describe("not covered — ruled (a), build queued (g-boot-body-unread-cell-server-only-s482)", () => {
-  test("a cell declared in the program BODY, written but never read, still ships the secret (today's behaviour, pinned)", async () => {
-    const b = await build(PROG(LIB, `let <keyCell:string=(tag(API_KEY))/>\n<button id="b" onclick={ @keyCell = "w"; }>b</button>`));
-    expect(leaked(b.client, ["zz-sk-live-123"]).length).toBeGreaterThan(0);
+// s483 (lane s483-body-cell-server-only; ruling:user-voice-scrml.md-S482-body-cell-server-only, (a)) — built:
+// a cell of the program BODY is judged as a file-scope binding is. Probe n31 was pinned here as the leak
+// (`program.client.js` held `const API_KEY = "zz-sk-live-123"`); it is flipped. The body-cell family:
+// compiler/self-host-v2/slice-m4/body-cell-server-only-s483.test.js.
+describe("a cell declared in the program BODY (g-boot-body-unread-cell-server-only-s482, built s483)", () => {
+  test("n31: written but never read — its field is a shell (seed `not`); the server runs the seed", async () => {
+    const b = await build(PROG(LIB, `let <keyCell:string=(tag(API_KEY))/>\n<button id="b" onclick={ @keyCell = "w"; }>b</button>`), "keyCell\\w*");
+    expect(leaked(b.client, SECRET)).toEqual([]);
+    expect(b.js).toContain("rt.seeded(() => null)");
+    expect(b.value).toBe("[zz-sk-live-123]");
   }, 180000);
 });
