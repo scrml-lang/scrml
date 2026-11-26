@@ -60,3 +60,26 @@ Probes: o9 (outer cell, p/x/o9-write-only), o9-let (plain let, p/r2/o9-let).
 - sread (server reads) unchanged (with writes): rule (c) E-FILE-SCOPE-LET-SERVER-WRITE means server code never
   writes a file-scope `let`, so there is nothing to split there. reachedOnlyByServer / reachOf / server closures
   keep the write-following closure (conservative: fewer server-only functions, earlier runs as before).
+
+## Fix round r1 (#2113 review FIX: HIGH-1, MED-1, LOW-1, PRE-1, PRE-2)
+Harness `~/.cache/scrml/review/s482-2113-r1/` (base = 153bd0334 tree, prhead = git archive 19a014391, head = this branch).
+- [HIGH-1 + PRE-1] print.scrml constUse: the initializer of every binding OUTSIDE `noInit` (acts, not server-read,
+  not server-only — the set clientConsts runs in the client alone) is a root; what it reads is READ. One reverse
+  pass is the fixed point (Core order; `noInit` does not depend on the walk). Reaches clientConsts and bodyInits'
+  clientRead (the two partial-`noInit` callers). serverInitsRound / clientLiveFns use constsOnlyRead (`noInit` =
+  all) — unchanged: serverInitsRound's client roots deliberately exclude unread initializers (largest set,
+  ruling S482-circular-server-only); a client-run z that read a server-held binding would itself be server-only,
+  so the fixed point is consistent without them. v01 `null` -> `plain`; v01c ReferenceError -> `plain`.
+  (First attempt also followed WRITTEN bindings' initializers under `noInit` = all, which emptied serverInits
+  — v02 leaked again; caught by the v-probe run before commit.)
+- [PRE-2] constUse counts Expr.Assigned (§50 kept condition-head assignment) as a whole-value write (its value
+  is the RHS, walked as a child — not a read of the old value). v07 / v07b: ReferenceError -> `ok`, shells, no leak.
+  On constUse only; constReads (server side) unchanged — rule (c) for Assigned is analyze.scrml's (fileScopePass).
+- [MED-1] SPEC §7.6 provenance: the observable case named exactly (v02); [LOW-1] prov=pa-ruled:S482-write-only-shell-not.
+- Tests: slice +5 (v01, v01c, v02, v07, v07b; 4 red on 19a014391, v02 green on both), Chromium +3 (2 red on 19a014391).
+- Values (Chromium) base vs head: lane 180 identical (leaks 32 -> 22, 10 closed, no new); v01–v29 (36): identical
+  except v02 (rule (b), documented) and v01c / v07 / v07b (ReferenceError -> value). prhead vs head: v01, v01c,
+  v07, v07b only; leak column identical.
+- Gates: pretest 0; conformance PASS 851 FAIL 3 NOT-TWINNED 628 UNSUPPORTED 491 CRASH 0, 0 verdict diffs / 1973;
+  slices 243 pass 0 fail 5 skip; Chromium 9 files 74 pass; corpus 2977: 0/0/0/0/0, 0 new client identifiers;
+  s34 PASS; types-gate OK 182; host-global 1/2 + 2/2 exit 0; e2e-render-map 259; retired-forms OK.
