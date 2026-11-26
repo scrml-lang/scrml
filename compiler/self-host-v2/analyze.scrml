@@ -1240,7 +1240,7 @@ ${
     }
 
     fn builtinStruct(name: string, fs: ATypeField[]) -> ATypeDecl {
-        return { nid: -1, span: mkSpan(0, 0), exported: false, name: name, body: ATypeBody.StructBody(fs) };
+        return { nid: -1, span: mkSpan(0, 0), exported: false, name: name, body: ATypeBody.StructBody(fs, []) };
     }
 
     // A built-in struct field of the named type (`tape` — a tape of it).
@@ -49785,7 +49785,7 @@ ${
                 if (e0 is given) {
                     const notE: AExpr = { nid: next, span: e0.span, k: AExprK.NotLit };
                     const d2: ADecl = { nid: d.nid, span: d.span, exported: d.exported, isLet: d.isLet, name: d.name, ty: d.ty, own: AAttrValue.Bare(notE),
-                                        attrs: d.attrs, mods: d.mods, body: d.body, renders: d.renders, validators: d.validators };
+                                        attrs: d.attrs, mods: d.mods, body: d.body, renders: d.renders, validators: d.validators, invs: d.invs };
                     const tgt: AExpr = { nid: next + 1, span: d.span, k: AExprK.At(d.name) };
                     const asg: AExpr = { nid: next + 2, span: e0.span, k: AExprK.Assign(tgt, e0, false, false) };
                     const stmt: AStmt = { nid: next + 3, span: e0.span, k: AStmtK.Eval(asg) };
@@ -49996,7 +49996,7 @@ ${
                 props = props.concat([{ nid: next + 1, span: sp, spread: false, name: "r", value: rv2 }]);
                 next = next + 2;
             }
-            tys = [{ nid: next, span: af.span, exported: false, name: sname, body: ATypeBody.StructBody(fields) }];
+            tys = [{ nid: next, span: af.span, exported: false, name: sname, body: ATypeBody.StructBody(fields, []) }];
             const lit: AExpr = { nid: next + 1, span: sp, k: AExprK.ObjectLit(props) };
             const sty: AType = { nid: next + 2, span: sp, k: ATypeK.TName(sname) };
             bstmts = bstmts.concat([{ nid: next + 3, span: sp, k: AStmtK.Local("#cells", false, sty, lit, false) }]);
@@ -56864,7 +56864,7 @@ ${
                 nid = nid + 2;
             }
         }
-        const d: ATypeDecl = { nid: nid, span: sp, exported: false, name: name, body: ATypeBody.StructBody(fields) };
+        const d: ATypeDecl = { nid: nid, span: sp, exported: false, name: name, body: ATypeBody.StructBody(fields, []) };
         return { decls: decls.concat([d]), ok: ok, nid: nid + 1, diags: diags };
     }
 
