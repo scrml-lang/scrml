@@ -44363,6 +44363,9 @@ ${
     //      with an explicit `deps=[]` … SHALL run once on each mount, as today",
     //      and no dependency triggers it. Fail-closed over-approximation: a query
     //      the reader cannot prove read-only counts.
+    //  (3) s483 (RULED S483, Q14) — a body reaching UNPROVEN host code is
+    //      E-REQUEST-WRITE-UNPROVEN (requestHostDiags, over hostChain), as an
+    //      `<effect>` body is E-EFFECT-WRITE-UNPROVEN.
     // =========================================================================
     fn requestPass(t: Tables, sum: Summary) -> Diag[] {
         let out: Diag[] = requestCycles(t);
@@ -44387,6 +44390,8 @@ ${
                         out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", reqBody(rq) + " writes `" + sw.site.cell + "` through a call: `" + chainText(sw.chain) + " → " + sw.site.cell + "` — a request body writes only its one `@var`, its settle, not through a called function either (Core C-R1, INTERIM: a side-effecting request body is not ruled, §6.7.7); call a function that writes nothing, and make the other write in a handler", r.file, r.span)]);
                     } else if (su is given) {
                         out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", reqBody(rq) + " reaches a call the compiler cannot resolve, through `" + chainText(su.chain) + "`: " + su.site.what + " — it cannot prove the body writes nothing besides its target (Core C-R1), and the rule fails closed", r.file, r.span)]);
+                    } else {
+                        out = out.concat(requestHostDiags(t, rq, r, sum));
                     }
                 }
             }
@@ -44404,6 +44409,27 @@ ${
             }
         }
         return out;
+    }
+
+    // s483 (s483-host-render-request; RULED S483, ruling:user-voice-scrml.md-S483-host-calls-render-request,
+    // Q14: "apply hostChain in requestPass — a `<request>` body reaching unproven host code is refused like
+    // an `<effect>` body") — host code has no write summary: glue that fires a DOM event whose handler
+    // writes the request's dependency re-ran the request 100 times a click, up to the effect run cap
+    // (probes F6 / F7 / G2). So a request body (an author's `<request>`, or a pending cell's load) reaching
+    // an UNPROVEN host-backed function — directly, through a scrml wrapper at any depth (a server function
+    // included), or a wrapper handed on as a value — is E-REQUEST-WRITE-UNPROVEN (§6.7.7), naming the
+    // chain; whatever the request's `deps=`. `hostChain` and the `pureHostFile` allow-list as-is
+    // (`scrml:math` / `scrml:random` stay proven). A `<host>` function itself named as a value is the
+    // binder's refusal (fnNameRef), not reported again.
+    fn requestHostDiags(t: Tables, rq: ReqFact, r: FnRef, s: Summary) -> Diag[] {
+        const hr: HostReach = hostChain(s, t, r.sym);
+        const hc: string[] = hr.chain;
+        if (hc.length == 0 || (r.asValue && hc.length == 1)) return [];
+        let how: string = " calls `" + hc[hc.length - 1] + "`, " + hr.what + ", through `" + chainText(hc) + "`";
+        if (hc.length == 1) how = " calls `" + hc[0] + "`, " + hr.what;
+        if (r.asValue) how = " hands `" + r.name.replace("()", "") + "` on as a function value, and it reaches `" + hc[hc.length - 1] + "`, " + hr.what + ", through `" + chainText(hc) + "`";
+        const msg: string = reqBody(rq) + how + " — host code is outside the analysis (it can write a reactive cell, e.g. by firing a DOM event whose handler writes one the request depends on, which would run the request again), so the compiler cannot prove the body writes nothing besides its target, and a `<request>` body fails closed as an `<effect>` body does (§6.7.7). Call the host function from an event handler, or compute the value in scrml";
+        return [newDiag("E-REQUEST-WRITE-UNPROVEN", msg, r.file, r.span)];
     }
 
     // s475 (S4) — a request as a diagnostic names it: an author's `<request>` body, or a pending
