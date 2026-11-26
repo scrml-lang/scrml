@@ -76,3 +76,18 @@ R4 fixes), 2 crash → named refusal, the rest unchanged. Results: B.txt / F.txt
 - F4: selfStarDiag message no longer says "without end" (true only while the arm is shown; cycles through
   states that cannot co-hold are refused too). c05 (component mounting itself; stack overflow at load,
   confirmed in Chromium on the merged tree) gets its own gap g-boot-component-mounts-self-s483 (LOW).
+
+### r1 gates (head 80b84cb5f vs main 2d40d8407)
+
+| gate | result |
+|---|---|
+| merge proof (795-probe union, 3-way, hash-normalized) | 0 bad; PR's 19 and main's 15 disjoint |
+| 795-probe union, final head vs merged-unfixed | 0 artifact diffs, 0 code changes |
+| Chromium 46-probe set (review p/ + l4) | identical to the reviewer's fix-tree l4-fix.txt; vs main: the PR's list + x01/x01c/x12/x04/x01d/z01/z02/z04, y01/y02/y05 crash → named codes |
+| bootstrap-conformance --json | PASS 851 / FAIL 3 / CRASH 0; per-case JSON identical to main (timing only) |
+| m4 slices (9 files incl. write-only-secret) | 276 pass / 0 fail |
+| Chromium s482 browser files (11, SCRML_BROWSER_TESTS=1) | 78 pass / 0 fail |
+| corpus differential + byte-compare (2977) | 0 / 0 / 0 code changes / 0 output diffs (326 ok) |
+| types-gate --check | OK, 182 unchanged |
+| retired-forms-lint --base-ref origin/main | every count equals baseline |
+| s34-census --check-new --base origin/main | PASS |
