@@ -172,11 +172,17 @@ ${
 
     // s479: a READ (`Local(sym)`, a place rooted at it) or a WRITE (a file-scope `let`'s
     // `Assign`) — an artifact that only writes the binding still declares it.
+    // s482 r2 (#2113 r1 review MED-A): a kept condition-head assignment (`if ((x = v) == …)`,
+    // Expr.Assigned, §50) is a write too, exactly as `x = v` is. A server-run initializer may call a
+    // function that writes a file-scope `let` this way (rule (c) exempts writes made at module
+    // initialization), so the server artifact must declare that binding — without it the module
+    // threw `ReferenceError` at load (probes q76 / q77 / q78).
     fn constReads(p: CoreProgram, root: Node, acc: int[]) -> int[] {
         let out: int[] = acc;
         for (const n of allNodes(root)) {
             let id: int = localReadOf(n);
             if (id < 0) id = assignedLocalOf(n);
+            if (id < 0) id = assignedExprLocalOf(n);
             // s482 r1 (#2105 review HIGH-1): a reference to the shared instance of a cell declared
             // outside the body that outerPlaced classifies as a binding (its id is then a constant's
             // — never otherwise: a declaration's Sym is not a constant's) reads that binding
@@ -214,8 +220,8 @@ ${
     // uses the binding, so it is a root (constUse).
     // With every binding in `noInit` (constsOnlyRead), `reads` is constsReadIn's set less the
     // bindings that are only overwritten whole (and those only their initializers name); a kept
-    // condition-head assignment (Expr.Assigned) is a whole-value write here, which constReads does
-    // not count (#2113 review PRE-2: it is on this path only).
+    // condition-head assignment (Expr.Assigned) is a whole-value write here (#2113 review PRE-2),
+    // and constReads counts it as the write it is (#2113 r1 review MED-A).
     // =========================================================================
     type ConstUse:struct = { reads: int[], writes: int[] }
 
