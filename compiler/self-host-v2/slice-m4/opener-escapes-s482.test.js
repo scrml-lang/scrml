@@ -130,13 +130,16 @@ describe("in `^{ emit }` output the E-PARSE-001 advice is emit-specific", () => 
     expect(e.map((d) => d.code)).toEqual(["E-META-EVAL-002"]);
     expect(e[0].message).toContain("[E-PARSE-001]");
     expect(e[0].message).toContain("in a quoted value of the `^{}` block's emitted markup is not an escape");
-    expect(e[0].message).toContain("four backslashes in the string handed to emit() (two with emit.raw())");
-    expect(e[0].message).toContain("not available in emitted markup");
+    // #2115 review MED: counted as the author types them in a `"…"` literal, not in its value
+    expect(e[0].message).toContain('eight backslashes in a `"…"` string literal handed to emit() (four in its value) and four with emit.raw() (two in its value)');
+    expect(e[0].message).not.toContain("four backslashes in the string handed to emit()");
+    expect(e[0].message).toContain('the expression form `name=("…")` is refused in emitted markup (§22.4 "Plain markup only"');
+    expect(e[0].message).not.toContain("every value there is literal");
     expect(e[0].message).not.toContain("for a literal backslash, or write the value as an expression");
   }, 120000);
 
-  test("the advice holds: four backslashes in the emit() string, two in the emit.raw() string, are one `\\` in the value", async () => {
-    // emit(): the logic string's value holds four; emit.raw(): two
+  test("the advice holds as typed: eight backslashes in the emit() literal, four in the emit.raw() literal, are one `\\` in the value", async () => {
+    // emit(): eight in the `"…"` literal (its value holds four); emit.raw(): four (its value holds two)
     for (const src of [
       String.raw`<div>^{ emit("<p id=\"o\" title=\"a\\\\\\\\b\">x</p>"); }</div>`,
       String.raw`<div>^{ emit.raw("<p id=\"o\" title=\"a\\\\b\">x</p>"); }</div>`,
@@ -146,6 +149,34 @@ describe("in `^{ emit }` output the E-PARSE-001 advice is emit-specific", () => 
       expect(r.ok).toBe(true);
       expect(JSON.stringify([r.client.html, r.client.js])).toContain(String.raw`a\\b`);
     }
+  }, 120000);
+
+  test("the counts the old wording gave, typed in source, stay refused (four for emit(), two for emit.raw())", async () => {
+    for (const src of [
+      String.raw`<div>^{ emit("<p id=\"o\" title=\"a\\\\b\">x</p>"); }</div>`,
+      String.raw`<div>^{ emit.raw("<p id=\"o\" title=\"a\\b\">x</p>"); }</div>`,
+    ]) {
+      const e = errs(await result(prog(src)));
+      expect(e.map((d) => d.code)).toEqual(["E-META-EVAL-002"]);
+      expect(e[0].message).toContain("[E-PARSE-001]");
+    }
+  }, 120000);
+
+  test("a newline is `\\n` in the string literal for emit() and emit.raw() alike", async () => {
+    for (const src of [
+      String.raw`<div>^{ emit("<p id=\"o\" title=\"a\nb\">x</p>"); }</div>`,
+      String.raw`<div>^{ emit.raw("<p id=\"o\" title=\"a\nb\">x</p>"); }</div>`,
+    ]) {
+      const r = await result(prog(src));
+      expect(errs(r)).toEqual([]);
+      expect(r.ok).toBe(true);
+    }
+  }, 120000);
+
+  test("the expression form is refused in emitted markup, as the advice says (§22.4 Plain markup only)", async () => {
+    const e = errs(await result(prog(String.raw`<div>^{ emit("<p id=\"o\" title=(\"a\")>x</p>"); }</div>`)));
+    expect(e.map((d) => d.code)).toEqual(["E-META-EVAL-002"]);
+    expect(e[0].message).toContain("an attribute value that is not quoted");
   }, 120000);
 
   test("source markup keeps the source advice (not the emit one)", async () => {

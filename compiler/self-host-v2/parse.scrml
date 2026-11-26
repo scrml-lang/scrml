@@ -11032,7 +11032,9 @@ ${
     // The E-PARSE-001 message for `\` + `n` in a value quoted with `q`. `emitted`:
     // the text is `^{}` emit() output (FRAGMENT MODE, parseFragment), which
     // emit() has already read its own escapes in (§22.4.1) and where the
-    // expression form is not available — the advice differs there.
+    // expression form is refused (§22.4 "Plain markup only") — the advice differs
+    // there. Backslashes are counted as the author types them in a `"…"` literal
+    // (s482 #2115 review MED: counting the value's misled).
     fn quotedEscMsg(n: string, q: string, emitted: boolean) -> string {
         let shown: string = n;
         if (n == "\n" || n == "\r") shown = "⏎";
@@ -11040,7 +11042,7 @@ ${
         if (emitted) place = "a quoted value of the `^{}` block's emitted markup";
         const head: string = "`\\" + shown + "` in " + place + " is not an escape: a quoted attribute or declaration value has only the §4.18.3 escapes `\\\"`, `\\\\` and `\\$" + "{` (SPEC §5.2)";
         let fix: string = " — write `\\\\` for a literal backslash, or write the value as an expression, `name=(\"…\")`, where a string has the ordinary escapes (`\\n` is a newline)";
-        if (emitted) fix = " — emit() reads `\\\\`, `\\n`, `\\\"` and `\\t` in its text before the markup reader does (emit.raw() reads none, §22.4.1), so a literal backslash in an emitted quoted value is four backslashes in the string handed to emit() (two with emit.raw()), and a newline or tab is the character itself; the expression form `name=(\"…\")` is not available in emitted markup (§22.4.1: every value there is literal)";
+        if (emitted) fix = " — emit() reads the escapes `\\\\`, `\\n`, `\\\"` and `\\t` in its argument's value before the markup reader does (emit.raw() reads none, §22.4.1), so a literal backslash in an emitted quoted value is eight backslashes in a `\"…\"` string literal handed to emit() (four in its value) and four with emit.raw() (two in its value), and a newline or tab is `\\n` or `\\t` in the string literal (the character itself in its value); the expression form `name=(\"…\")` is refused in emitted markup (§22.4 \"Plain markup only\": an attribute value that is not quoted is E-META-EVAL-002)";
         if (n == "'" && q == "'") fix = " — to put a `'` in the value, write it double-quoted, `name=\"it's\"`: a `'` needs no escape there, and `\"` is the attribute-string delimiter (§5.1)";
         if (n == "'" && q != "'") fix = " — a `'` needs no escape in a `\"`-quoted value: write it alone, `name=\"it's\"`";
         return head + fix;
