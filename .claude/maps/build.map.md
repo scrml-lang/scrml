@@ -1,6 +1,6 @@
 # build.map.md
 # project: scrml
-# updated: 2026-11-08T16:47:39Z  commit: f92d1a8fb
+# updated: 2026-11-26T22:24:19Z  commit: fa24c93bb
 # `facts-regen.yml` no longer exists. It was deleted in S474 and replaced by `generated-regen.yml` (below).
 
 ## Development Commands (package.json scripts)

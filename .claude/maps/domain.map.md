@@ -1,7 +1,7 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-11-08T16:47:39Z  commit: f92d1a8fb
-# The domain is the scrml LANGUAGE. Authority: compiler/SPEC.md (55,500 lines; 68 numbered sections + appendices A–E, H). Section line numbers are at f92d1a8fb.
+# updated: 2026-11-26T22:24:19Z  commit: fa24c93bb
+# The domain is the scrml LANGUAGE. Authority: compiler/SPEC.md (57,564 lines by wc -l; 68 numbered sections + appendices A–E, H). Section line numbers are at f92d1a8fb.
 
 ## Core Concepts
 Program — a `.scrml` file / `<program>` root; one program per application (§40.8); kinds: default web, `kind="tool"` (§64), `kind="service"` (§68, DRAFT, unimplemented)
@@ -777,7 +777,7 @@ still fires (an over-fire, never a leak), and a word-boundary scan of escape-hat
 inside a string literal in that text (same direction).
 
 **⚠ SCOPE — THE TRIGGER IS DEFINED PER-FUNCTION, AND EVERY NON-FUNCTION POSITION IS OUTSIDE IT
-(NEW S331, SPEC.md:7312).** This is the correction that matters most in this section and it is
+(NEW S331, SPEC.md:7371).** This is the correction that matters most in this section and it is
 stated normatively in SPEC now, not just here. §12.4 says *"Route inference SHALL be per-function"*,
 and `collectFileFunctions` honours it LITERALLY — it yields `function-decl` nodes only. A function
 is the only unit that HAS a placement to change, so:
@@ -805,7 +805,7 @@ follow, not this trigger."*
 > _Carried from the pre-f92d1a8fb map; checked at f92d1a8fb: 7/7 code identifiers found in source; symbol line anchors: 0 confirmed, 5 re-derived to the current definition. Bare `file:line` anchors were NOT re-derived — grep. Paths cited that do NOT exist at f92d1a8fb: `conformance/conf-DERIVED-SERVER-ONLY-REACH-artifacts.test.js`._
 
 **Where it lives.** SPEC `§6.6.19`, §34 catalog row + the long row, and a §12.2 Trigger-3 scope block
-at `SPEC.md:7312`. Emitted from `route-inference.ts` **Step 3b** (`:4526`, push at `:4572`), a pass
+at `SPEC.md:7371`. Emitted from `route-inference.ts` **Step 3b** (`:4526`, push at `:4572`), a pass
 that runs after the per-function Step 3 loop.
 
 > ⚠ **READ THIS BEFORE ANYTHING ELSE IN THIS SECTION. #486 SHIPPED THE REFUSAL; #500 SHIPPED ITS
@@ -1617,7 +1617,7 @@ await the IIFE AND keep its `.catch`, §13.2 vs §19.6) is **RULED but NOT BUILT
 
 **⚠ NORMATIVE STATUS FIRST — and it CHANGED at #460 (`603ec12f`, S328 window).** The prior stamp of
 this map recorded the obligation as *derived, not stated*: the SHALL lived only in an `emit-server.ts`
-comment and `ec0142aa`'s commit subject, and §12.5 did not contain it. **`SPEC.md:7353` now does.** The
+comment and `ec0142aa`'s commit subject, and §12.5 did not contain it. **`SPEC.md:7412` now does.** The
 bullet reads "**A generated route handler SHALL produce a COMPLETE HTTP RESPONSE, not a bare value**",
 binding on every path including every combination of `auth=` / `protect=` / tenant-context / `csrf=` /
 `<endpoint>` (§61) / SSE (§37). Handing the host a bare value is **NON-CONFORMANT**.
@@ -1911,7 +1911,7 @@ markup context (SPEC §4)"*). **What it did not say is what HAPPENS to the state
 the author's initialization silently never happened.
 
 **As of #718 it is `E-STATE-BLOCK-STATEMENT-FORM`, severity error, CLI exit 1** (§34 row at
-`SPEC.md:19729`; emitter `compiler/src/lint-e-state-block-statement-form.js` at `api.js` Stage 2.5c).
+`SPEC.md:20384`; emitter `compiler/src/lint-e-state-block-statement-form.js` at `api.js` Stage 2.5c).
 PA-VERIFIED at this watermark by compiling the landed reproducer.
 
 **⚑ THE MESSAGE HAD TO BE MADE TRUE AT ALL THREE LOCI, AND ITS FIRST CUT WAS NOT.** It asserted flatly
@@ -2575,7 +2575,7 @@ of it resolved to a cell that never syncs — **at exit 0**. The originating gap
 `g-state-undeclared-over-fires-on-imported-channel-cell-read-inside-a-match-arm`.
 
 **Now refused by name:** `E-CHANNEL-MOUNT-IN-CONDITIONAL` (§38.1, §38.4, §38.12.2), §34 catalog row
-`SPEC.md:19629`, second table row `SPEC.md:21701`. Emitter
+`SPEC.md:20261`, second table row `SPEC.md:22456`. Emitter
 `component-expander.ts:4968`, sole call site `:4687` in `runCEFile` — **run BEFORE `expandChannels`,
 so the file fails CLOSED rather than half-wired.**
 
@@ -2785,7 +2785,7 @@ the `count: 0` short-circuit had to be preserved rather than reasoned away.
 
 **THE SURFACE.** §17.6 makes an `if` an EXPRESSION when it is the RHS of a `const`/`let` (§17.6.1's
 `if-binding ::= ('const'|'let') identifier '=' if-as-expr`) or a self-contained operand. An arm body
-produces its value in exactly **two** ways, and `SPEC.md:11888` says so normatively:
+produces its value in exactly **two** ways, and `SPEC.md:12340` says so normatively:
 
 > *"An if-as-expression arm body SHALL produce its result value via a `lift` statement, **or** by
 > being exactly one expression, which is sugar for `lift` of that expression (§17.6.10). These are
@@ -2793,8 +2793,8 @@ produces its value in exactly **two** ways, and `SPEC.md:11888` says so normativ
 
 **#802 (`79bd992b`) IS THE ONLY COMMIT THAT TOUCHED `SPEC.md` IN THIS 25-COMMIT WINDOW** (+108
 lines, ZERO new §34 rows). It added the `arm-body ::= '{' expression '}'` alternative to the §17.6.1
-grammar (`SPEC.md:11851`), rewrote §17.6.2 item 3 (`:11874`), and added a whole new subsection
-**§17.6.10 "Value-Form Control Flow in a Markup Interpolation" (`SPEC.md:12143`)** naming the shape
+grammar (`SPEC.md:12303`), rewrote §17.6.2 item 3 (`:11874`), and added a whole new subsection
+**§17.6.10 "Value-Form Control Flow in a Markup Interpolation" (`SPEC.md:12595`)** naming the shape
 normatively for both the `if` and `match` limbs, with the trailing `else` OPTIONAL and a missing
 `else` contributing `not` (§17.6.4) — the compiler SHALL NOT warn about it.
 
@@ -2804,7 +2804,7 @@ AND THAT IS THE INSTRUCTIVE PART.** Under the PRE-amendment §17.6.2 a lift-less
 edit landed. **This is the over-claiming-row shape in mirror image:** normally a §34 row promises
 behaviour the code does not have; here an amendment retroactively converted correct output into a
 HIGH defect. ⚠ **And the only diagnostic that could have surfaced it was normatively RETIRED in the
-same edit** — `SPEC.md:11893` states an exactly-one-expression arm SHALL NOT surface `W-LIFT-001`, a
+same edit** — `SPEC.md:12345` states an exactly-one-expression arm SHALL NOT surface `W-LIFT-001`, a
 code with **zero** fire sites in `compiler/src/` against a live §34 catalog row.
 
 **WHAT #815 (`908a631c`) ACTUALLY DID — `emit-logic.ts` ONLY, +116/-17, and it is a REDIRECT.**
@@ -2825,7 +2825,7 @@ Two redirects now sit on the same leaf and that is correct:
 |---|---|---|
 | **shared** | `_blockTailIsValueExpr` (`emit-logic.ts:5130`, exported) — *"is this bare-expr a value at all?"* | same function, same call |
 | **consumed at** | `emit-control-flow.ts:2479` (structuredBody path) · `emit-logic.ts:4938`/`:5100` (raw-string twin) | `emit-logic.ts:4581` |
-| **SHAPE rule — NOT shared** | result is the **LAST** expression: a tail after N statements. *Positional.* | the arm is **EXACTLY ONE** expression (`arm-body ::= '{' expression '}'`, `SPEC.md:11851`): `body.length !== 1 -> decline`. *Local.* |
+| **SHAPE rule — NOT shared** | result is the **LAST** expression: a tail after N statements. *Positional.* | the arm is **EXACTLY ONE** expression (`arm-body ::= '{' expression '}'`, `SPEC.md:12303`): `body.length !== 1 -> decline`. *Local.* |
 
 Routing the sugar arm through §18.5's tail rule would silently admit `{ doWork()  "pos" }` as a
 value-form — **a shape the grammar does not define.** The markup-interpolation twin
@@ -2834,7 +2834,7 @@ positions agree. **The general rule: when two constructs converge, converge on t
 never on the ENCLOSING SHAPE** (invariant 75, second measured instance).
 
 ⚠ **A DERIVED CELL IS AN UNSPECIFIED SHAPE THAT FAILS LOUD, AND THAT IS THE SAFE DIRECTION
-(invariant 85).** §17.6.3 (`SPEC.md:11898`) names the binding site as a `const`/`let` **declaration**
+(invariant 85).** §17.6.3 (`SPEC.md:12350`) names the binding site as a `const`/`let` **declaration**
 and nothing else. `const <label> = if (…) { … }` — a derived STATE cell — fails with
 `E-CODEGEN-INVALID-LOGIC` in **both** the sugar form and the explicit-`lift` form. ⚑ **The #815 gap
 entry as originally filed said "the explicit-`lift` twin is the control and is correct"; that holds

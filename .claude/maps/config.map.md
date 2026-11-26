@@ -1,6 +1,6 @@
 # config.map.md
 # project: scrml
-# updated: 2026-11-08T16:47:39Z  commit: f92d1a8fb
+# updated: 2026-11-26T22:24:19Z  commit: fa24c93bb
 # Key names only. No `.env.example` / `.env.template` exists in the repo; keys below come from `process.env.*` greps of tracked source.
 
 ## Environment Variables — read by emitted programs (impl#1 output)
