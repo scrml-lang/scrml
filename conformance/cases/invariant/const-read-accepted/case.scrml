@@ -1,0 +1,22 @@
+// Ruling S483-invariant-const-read — an invariant may read a file-scope const whose initializer is a
+// compile-time constant, directly and through a `fn` chain; the write is checked at run time.
+<program>
+    ${
+        const MAX_NIGHTS = 14;
+        const LIMIT = MAX_NIGHTS;
+        fn fits(a: int, b: int) -> bool { return b - a <= LIMIT; }
+    }
+    <dateRange:struct>
+        let <start:int=0/>
+        let <end:int=10/>
+    </>
+    invariant (start <= end) [ordered]
+    invariant (end - start <= MAX_NIGHTS) [maxNights]
+    invariant (fits(start, end))
+    function setEnd(v: int) { @dateRange.end = v; }
+    <main>
+        <button id="ok" onclick=setEnd(14)>ok</button>
+        <button id="bad" onclick=setEnd(30)>bad</button>
+        <p id="e">${@dateRange.end}</p>
+    </main>
+</program>

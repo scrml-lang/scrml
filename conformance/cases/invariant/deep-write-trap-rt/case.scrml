@@ -1,0 +1,14 @@
+// §66.13.5 — a deep write into a value of a `type X:struct` with an invariant checks the enclosing value's
+// invariant on its candidate; a genuine replace is checked too. Both traps write nothing.
+type Range:struct = { lo: int, hi: int } invariant (lo <= hi) [rng]
+<program>
+    let <r:Range=({ lo: 1, hi: 2 })/>
+    function deep(n: int) { @r.lo = n; }
+    function whole(n: int) { @r = { lo: n, hi: 5 }; }
+    <main>
+        <button id="d" onclick=deep(9)>deep</button>
+        <button id="w" onclick=whole(9)>whole</button>
+        <p id="lo">${@r.lo}</p>
+        <p id="hi">${@r.hi}</p>
+    </main>
+</program>

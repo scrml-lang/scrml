@@ -1,0 +1,26 @@
+{
+  "id": "invariant-lone-literal-write-neg",
+  "description": "`@counter.n = -1` under `invariant (n >= 0)`: the literal decides the invariant, so the write is the compile-time E-WRITE-INVARIANT.",
+  "language-version": "1.0",
+  "spec": "§66.13.5",
+  "provenance": "ruling:user-voice-scrml.md-S483-struct-invariant-syntax (\"yes, your recommendations on all three plus the follow-up\"); ruling:user-voice-scrml.md-S482-struct-invariant-contract (\"RULED yes (a)\")",
+  "rationale": "Ruling S483 item 2: \"Provable violation E-WRITE-INVARIANT\"; §66.13.5 rule 9.",
+  "expect": {
+    "codes": [
+      "E-WRITE-INVARIANT"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-decl-invariant-unimplemented-s483",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=2",
+          "emitted:E-SCOPE-001=4",
+          "emitted:E-STATE-UNDECLARED=1",
+          "missing:E-WRITE-INVARIANT"
+        ]
+      }
+    }
+  }
+}

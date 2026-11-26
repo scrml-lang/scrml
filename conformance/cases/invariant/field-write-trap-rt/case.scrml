@@ -1,0 +1,20 @@
+// §66.13.5 (S483 item 2) — a direct field write the compiler cannot prove is checked at run time on the
+// candidate value; one that breaks the invariant traps (E-WRITE-INVARIANT-RT) before the write: nothing is
+// written, and the rest of the handler does not run.
+<program>
+    <dateRange:struct>
+        let <start:int=0/>
+        let <end:int=10/>
+    </>
+    invariant (start <= end) [ordered]
+    let <n:int=0/>
+    function setStart(v: int) {
+        @dateRange.start = v;
+        @n = 1;
+    }
+    <main>
+        <button id="go" onclick=setStart(20)>go</button>
+        <p id="s">${@dateRange.start}</p>
+        <p id="n">${@n}</p>
+    </main>
+</program>

@@ -1,0 +1,27 @@
+{
+  "id": "invariant-position-write-neg",
+  "description": "`@bag.tags[0] = \"\"` writes a position of a tape `invariant (tags.every(…))` reads: refused E-BOOTSTRAP-UNSUPPORTED (INTERIM) rather than written unchecked.",
+  "language-version": "1.0",
+  "spec": "§66.13.5",
+  "provenance": "ruling:user-voice-scrml.md-S483-struct-invariant-syntax (\"yes, your recommendations on all three plus the follow-up\"); ruling:user-voice-scrml.md-S482-struct-invariant-contract (\"RULED yes (a)\")",
+  "rationale": "§66.13.5 \"When it is checked\": every write that changes a field in the read set is checked; until the bootstrap builds the candidate of a position write, the write is refused (fail closed).",
+  "expect": {
+    "codes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-decl-invariant-unimplemented-s483",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=2",
+          "emitted:E-SCOPE-001=3",
+          "emitted:E-STATE-UNDECLARED=1",
+          "emitted:E-STMT-NO-EFFECT=1",
+          "missing:E-BOOTSTRAP-UNSUPPORTED"
+        ]
+      }
+    }
+  }
+}

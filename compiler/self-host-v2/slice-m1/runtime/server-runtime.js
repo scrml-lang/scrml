@@ -92,6 +92,9 @@ export { hostResult };
 export { lengthCheck, tapeInsert } from "./runtime.js";
 // s478 (s478-boot-refinement-runtime) — a boundary-zone refinement's runtime check (§53.4.5, §53.9.4): the SAME function
 export { refineCheck } from "./runtime.js";
+// s483 (Q21 lane 2) — a declaration invariant on a value server code builds or edits (a construction `{ … }`
+// of an invariant-bearing type, a local's part write — §66.13.5): the SAME functions
+export { invariantValue, invariantGuard } from "./runtime.js";
 // s478 (s478-ruled-stdlib-data): the §41.13 `parseVariant` intrinsic — "callable in both server-side and client-side contexts"
 export { parseVariant } from "./runtime.js";
 // S479 (#1962 ruling item 5): the §61.3 repeated-key detector moved to runtime.js, shared

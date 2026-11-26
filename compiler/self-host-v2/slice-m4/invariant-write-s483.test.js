@@ -329,18 +329,26 @@ ${RANGE}
     expect(errs(r2)[0].message).toContain("not a compile-time constant");
   }, 120000);
 
-  test("a constant server code reads stays refused, and its value never reaches the client", async () => {
-    const r = await result(prog(`    \${ const SECRET_LIMIT = "zz-sk-live-777";
-       server function check(s: string) -> bool { return s == SECRET_LIMIT; } }
+  test("a constant server code reads stays refused; without the invariant its value stays out of the client", async () => {
+    const SRC = (inv) => prog(`    \${
+        const SECRET_TAG = "zz-sk-live-777";
+        function tagged() {
+            ?{\`DELETE FROM tags WHERE name = \${SECRET_TAG}\`}.run() !{ _ :> return };
+        }
+    }
     <tok:struct>
         let <v:string=""/>
     </>
-    invariant (v != SECRET_LIMIT)
-    <main><p>\${@tok.v}</p></main>`));
+${inv}
+    <main><p>\${@tok.v}</p><button onclick={ tagged() !{ .Transport(_) :> return }; }>t</button></main>`).replace("<program>", '<program db="sqlite:./tags.db">');
+    const r = await result(SRC("    invariant (v != SECRET_TAG)"));
     expect(codes(r)).toEqual(["E-DECL-INVARIANT-IMPURE"]);
-    expect(errs(r)[0].message).toContain("server code reads");
-    // nothing is printed for a refused program; the client of the same program without the invariant holds no secret
-    expect(r.client?.js ?? "").not.toContain("zz-sk-live-777");
+    expect(errs(r)[0].message).toContain("which server code reads (the server function `tagged`)");
+    // the same program without the clause: the constant is server-only — in the server artifact, not the client's
+    const r2 = await result(SRC(""));
+    expect(codes(r2)).toEqual([]);
+    expect(r2.client.js).not.toContain("zz-sk-live-777");
+    expect(JSON.stringify(r2)).toContain("zz-sk-live-777");
   }, 120000);
 });
 

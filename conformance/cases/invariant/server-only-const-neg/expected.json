@@ -1,0 +1,26 @@
+{
+  "id": "invariant-server-only-const-neg",
+  "description": "An invariant reading a constant that a server-placed function reads (`tagged` holds a `?{}` query, §12.2): E-DECL-INVARIANT-IMPURE (the constant is server-only, §7.6 (b); reading it in a check the client runs would ship it).",
+  "language-version": "1.0",
+  "spec": "§66.13.5, §7.6",
+  "provenance": "ruling:user-voice-scrml.md-S483-invariant-const-read (\"Allow compile-time consts (Recommended)\")",
+  "rationale": "Ruling S483-invariant-const-read: \"A `let`, a host-derived const, or a server-only const stays refused.\"",
+  "expect": {
+    "codes": [
+      "E-DECL-INVARIANT-IMPURE"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-decl-invariant-unimplemented-s483",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=2",
+          "emitted:E-SCOPE-001=2",
+          "emitted:E-STATE-UNDECLARED=1",
+          "missing:E-DECL-INVARIANT-IMPURE"
+        ]
+      }
+    }
+  }
+}

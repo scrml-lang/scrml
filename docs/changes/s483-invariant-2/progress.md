@@ -42,3 +42,20 @@ impl#1 frozen (§66 Nominal there, §34.0).
   reads a field with no write capability whose value tracks (a derived field; a locked attribute given a live
   use-site value) is E-BOOTSTRAP-UNSUPPORTED (INTERIM, g-boot-invariant-derived-field-s483).
 - New slice test slice-m4/invariant-write-s483.test.js (25).
+- server-runtime.js re-exports `invariantValue` / `invariantGuard` (a construction `{ … }` of an invariant-bearing
+  type in server code — e.g. a server function's return value — is checked there too).
+- Probes (.tmp/p1–p7): field write / spread / reset / tape append / pop / filter / sequence shape / deep write /
+  replace / local part write / construction / request reload — each prints a readable guard and traps on the
+  candidate in happy-dom; the request reload's guard is rebuilt around the load (`settled`).
+- r0 wip 3 (after commit 2b99a4cb6, hook 58705 pass / 0 fail / 255 skip): SPEC §66.13.5 (scope; rule 2 —
+  CAPTURES-CALL only for a callable binding; rule 7 / new rule 7a compile-time constants; rule 9 the lone literal
+  write and the folded constants; Status), §53.8.2 bootstrap order note, §19.17 / §34 / §66.20 rows
+  (E-WRITE-INVARIANT-RT emitters; E-WRITE-INVARIANT provable cases; E-DECL-INVARIANT-IMPURE /
+  -CAPTURES-CALL). known-gaps: g-boot-invariant-write-checks-s483 RESOLVED; filed g-boot-invariant-position-
+  writes-s483 and g-boot-invariant-derived-field-s483 (INTERIM, owner question); boundaries-lints notes the bind
+  refusal; the impl#1 carried gap counts 21 cases. 8 new conformance cases (all PASS on the bootstrap; impl#1
+  xfail signatures captured with `conformance/run.ts --xfail-signature`). Chromium file
+  compiler/tests/browser/invariant-write-chromium-s483.browser.test.js (6 pass).
+- PA reading filed in SPEC (open to owner veto): prov=pa-ruled:S483-const-initializer-list — the ruling's
+  "(literals, enum variants, other such consts)" read as the whole list (`const LIM = 1 + 2` stays refused);
+  a negated number literal counts as a literal.

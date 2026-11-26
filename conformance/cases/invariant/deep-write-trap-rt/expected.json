@@ -1,0 +1,45 @@
+{
+  "id": "invariant-deep-write-trap-rt",
+  "description": "`@r.lo = 9` (hi 2) and `@r = { lo: 9, hi: 5 }` both break `Range`'s `lo <= hi` and trap before the write: r stays { lo: 1, hi: 2 }.",
+  "language-version": "1.0",
+  "spec": "§66.13.5",
+  "provenance": "ruling:user-voice-scrml.md-S483-struct-invariant-syntax (\"yes, your recommendations on all three plus the follow-up\"); ruling:user-voice-scrml.md-S482-struct-invariant-contract (\"RULED yes (a)\")",
+  "rationale": "§66.13.5: \"A deep write (`@trip.range.end = x`) checks every enclosing invariant whose read set holds the path\"; a genuine replace is checked (O58: \"the invariants apply to it as to every write\").",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-WRITE-INVARIANT",
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "input": [
+      {
+        "click": "#d"
+      },
+      {
+        "click": "#w"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#lo",
+        "text": "1"
+      },
+      {
+        "selector": "#hi",
+        "text": "2"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-decl-invariant-unimplemented-s483",
+      "fails": {
+        "codes": [
+          "emitted:E-SCOPE-001=4",
+          "emitted:E-STATE-UNDECLARED=2"
+        ],
+        "runtime": "sha256:6a7bd15b29286996"
+      }
+    }
+  }
+}
