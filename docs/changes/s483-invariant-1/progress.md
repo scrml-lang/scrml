@@ -81,3 +81,38 @@ TypeInfo.invs: InvInfo[]      // a `type X:struct`'s clauses, source order
   retired-forms-lint --base-ref origin/main OK; spec-coverage-check 0 violations; state.ts --check exit 4
   (generated block stale — bot-owned); gen-bootstrap-severity --check exit 4 (stale; severity.test.js passes, so
   the bot owns the regen, B7); regen-spec-index --check exit 4 (bot-owned).
+
+## r1 — fix round for the #2120 review (verdict FIX; review at ~/.cache/scrml/review/s483-2120/review.md)
+
+Each decision below is a PA reading (`prov=pa-ruled:…`), open to owner veto — not owner-ruled.
+
+- F1 HIGH (prov=pa-ruled:S483-fn-chain-purity) — `invReachPass` (analyze.scrml, after the binder, in sinkDiags):
+  a `fn` called from an invariant, directly or through other `fn`s (breadth-first over NFn facts, each once), that
+  reads a cell (`@x`, `@.` — E-CONTRACT-003, the direct read's code) or an outer binding (a file-scope `let` or
+  constant, a `<request>` / validity read, a declared value, a `<#id>` — E-DECL-INVARIANT-IMPURE) is refused at the
+  call, naming the chain (`ok` → `inner`). Same set as the direct-read rule, exactly (a `fn` reading a const is
+  refused, as a direct const read is). A called function whose body is not visible: refused (fail closed). SPEC
+  §66.13.5 rules 6/7 rewritten; the "identically on client and server" sentence now true as shipped.
+- F2 MED (prov=pa-ruled:S483-capture-never-silent) — new code E-DECL-INVARIANT-CAPTURES-CALL (`invCaptureWhy`):
+  a binding named `invariant` (fn / function / const / file `let` / host binding) in scope at a clause position
+  refuses the clause, fail closed (not purity-checked, not resolved, not typed or folded — `literalInvs` now skips a
+  clause with an error in it, as `useInvs` did). SPEC rule 2 spells out the capture. Corpus: 0 files write a clause
+  with such a binding (the corpus differential shows no change outside the invariant cases).
+- F3 MED (prov=pa-ruled:S483-direct-equals-fn-purity) — a method call is no longer refused syntactically: its
+  receiver is judged as any read; once resolved it must be a deterministic built-in (VMethod, VAt, VSeqCall,
+  VToEnum, VConstruct, VParseVariant) with no write effect. A method on a host global (`Date.now()`,
+  `Math.random()`) is refused before resolution (`invHostRoot`). A `x => expr` callback argument is judged as its
+  body with its parameters bound; a block-bodied one is refused INTERIM (g-boot-invariant-block-lambda-s483).
+- F4 MED — §53.8.1 Booking example uses `int` day numbers (`checkIn`, `checkOut`); the invariant half is proven by
+  conformance `invariant/booking-accepted` and a slice test; its field refinement is the bootstrap's existing
+  run-time-refinement INTERIM (g-boot-refinement-runtime-checks-s478).
+- F5 LOW — §53.8.3 SHOULD marked prov=pa-ruled:S483-sibling-advice. F6 LOW — `constShown`: a file-scope `let` is
+  "the file-scope `let` `x` (a mutable binding — a write can change it)". F7 LOW — the read set is not
+  prefix-normalized (`range` and `range.lo` can both appear); lane 2's equal/prefix/extension rule tolerates it;
+  noted in g-boot-invariant-write-checks-s483. Correction to the r0 note above: "LONGEST member path … deduped"
+  means per read site — a whole-field read and its sub-path from another site coexist. F8 LOW — filed
+  g-boot-invariant-malformed-tail-cascade-s483 (three parse sites; more than a small change).
+- Tests: slice-m4/invariant-decl-s483.test.js 44 pass (26 → 44; two r0 tests re-pinned: the in-scope `fn invariant`
+  test now has no clause position, the method-call IMPURE test is now a host-call test). Conformance: `accepted`
+  re-authored (no `fn invariant`; adds a fn chain + `.every(x => …)`), 4 new cases (booking-accepted,
+  captures-call-neg, fn-chain-cell-neg, fn-chain-let-neg); impl#1 xfail signatures recaptured.
