@@ -366,7 +366,7 @@ function drainQueues() {
     const node = lapNode(cause, e);
     if (capped && node.n > maxEffectRuns) {
       if (node.n === maxEffectRuns + 1 && !lapTripped.has(e)) {
-        console.error("[scrml] " + (e instanceof Effect ? "render effect" : "effect") + " exceeded " + maxEffectRuns + " runs in one chain of updates that never yielded to the event loop — possible infinite loop (a value it reads is written, through an awaited result, after it runs); the run is skipped");
+        console.error("[scrml] " + (e instanceof Effect ? "render effect" : e instanceof Request ? "<request>" : "effect") + " exceeded " + maxEffectRuns + " runs in one chain of updates that never yielded to the event loop — possible infinite loop (a value it reads is written, through an awaited result, after it runs); the run is skipped");
       }
       noteTripped(e);
       continue;
