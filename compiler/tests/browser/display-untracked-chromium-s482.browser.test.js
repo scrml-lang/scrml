@@ -150,7 +150,7 @@ let <seen:int=0/>
   }, 120000);
 
   // r2 of #2107 (F-A): the string fix-it is parenthesized, so applying it keeps the value — a newline, a tab /
-  // CR and `${` (the quoted opener form turns `\n` into `n`, g-boot-opener-string-escapes-s482; the reviewer's
+  // CR and `${` (the quoted opener form has only the §4.18.3 escapes — `\n` is E-PARSE-001, §5.2, and was dropped to `n` before #2110, g-boot-opener-string-escapes-s482; the reviewer's
   // probes11 q1 → q2 LETTER-N, q3 NEWLINE)
   test("a string fix-it, applied as printed, keeps the value (newline, tab / CR, `${`)", async () => {
     if (skip()) return;

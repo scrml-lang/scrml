@@ -151,7 +151,7 @@ describe("W-DISPLAY-UNTRACKED — a display of a `let` that a later writer write
     expect(w[0].message).toContain("replace `let m: int = …;` with `let <m:int=(…)/>` (the same initializer, in the parentheses)");
   }, 120000);
 
-  // r2 of #2107 (F-A): a string is always parenthesized — the opener's quoted value drops `\n` to `n` and
+  // r2 of #2107 (F-A): a string is always parenthesized — the opener's quoted value has only the §4.18.3 escapes (`\n` is E-PARSE-001, §5.2 RULED S482; it was dropped to `n` before #2110) and
   // reads `${…}` as a reactive template (g-boot-opener-string-escapes-s482), so only `=("…")` keeps the value
   // (the reviewer's q1 → q3, x2p; Chromium: display-untracked-chromium-s482.browser.test.js)
   test("the fix-it quotes a string literal re-escaped, parenthesized (r1 F4, r2 F-A)", async () => {
@@ -220,6 +220,30 @@ describe("W-DISPLAY-UNTRACKED — a display of a `let` that a later writer write
       expect(m).toContain("with `" + fix + "`");
       // the fix-it applied compiles, with no warning
       expect(await warns(`<program>\n${cell}\n<p>\${@xs.length}</p>\n<button onclick=\${ ${cellWrite} }>+</button>\n</program>\n`)).toEqual([]);
+    }
+  }, 240000);
+
+  // #2110 review L1 (lane s482-escapes-ruled): a position write the `let`'s type does not grant is refused
+  // (E-WRITE-NOT-GRANTED) — its write is still recorded, so the fix-it adds `write` for it (it used to be
+  // missing: `[free, append]` applied was the next E-WRITE-NOT-GRANTED, naming `write`)
+  test("a refused position write adds `write` to the tape fix-it (#2110 L1)", async () => {
+    const cases = [
+      ["let xs: int[] = [1, 2];", "xs = [...xs, 4]; xs[0] = 7;", "int[free, append, write]", "@xs = [...@xs, 4]; @xs[0] = 7;"],
+      ["let xs: int[] = [1, 2];", "xs.append(4); xs[0] = 7;", "int[free, append, write]", "@xs.append(4); @xs[0] = 7;"],
+      ["let xs: int[] = [1, 2];", "xs = xs.filter((x) => x > 1); xs[1] = 7;", "int[free, remove, write]", "@xs = @xs.filter((x) => x > 1); @xs[1] = 7;"],
+      ["let xs: int[free, append] = [1, 2];", "xs.append(4); xs[0] = 7;", "int[free, append, write]", "@xs.append(4); @xs[0] = 7;"],
+      // a refused position write alone: the warning (and its fix-it) is now given too
+      ["let xs: int[] = [1, 2];", "xs[0] = 7;", "int[write]", "@xs[0] = 7;"],
+    ];
+    for (const [decl, write, ty, cellWrite] of cases) {
+      const r = await result(`<program>\n\${ ${decl} }\n<p>\${xs.length}</p>\n<button onclick=\${ ${write} }>+</button>\n</program>\n`);
+      // the original is refused for the ungranted write — and only for that (no new diagnostic)
+      expect(r.diagnostics.filter((d) => d.severity === "error").every((d) => d.code === "E-WRITE-NOT-GRANTED")).toBe(true);
+      const w = r.diagnostics.filter((d) => d.code === W);
+      expect(w.length).toBe(1);
+      expect(w[0].message).toContain("with `<xs:" + ty + "=(…)/>`");
+      // the fix-it applied compiles, with no warning
+      expect(await warns(`<program>\n<xs:${ty}=([1, 2])/>\n<p>\${@xs.length}</p>\n<button onclick=\${ ${cellWrite} }>+</button>\n</program>\n`)).toEqual([]);
     }
   }, 240000);
 

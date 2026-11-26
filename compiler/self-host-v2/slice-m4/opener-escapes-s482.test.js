@@ -1,10 +1,11 @@
-// opener-escapes-s482.test.js — lane s482-opener-escapes: gap g-boot-opener-string-escapes-s482.
+// opener-escapes-s482.test.js — lanes s482-opener-escapes + s482-escapes-ruled: gap
+// g-boot-opener-string-escapes-s482 (resolved).
 //
-// INTERIM (fail closed — NOT RULED). What a backslash means in a quoted attribute value (`title="…"`, SPEC §5.2)
-// or a declaration's quoted own value (`let <s:string="…"/>`, §66.2.4) is not ruled. The bootstrap used to drop
-// the backslash and keep the next character (`"a\nb"` → `anb`, a silent wrong value). Now `\"` and `\\` keep the
-// meaning every candidate reading gives them (the §4.18.3 catalog's `"` and `\`, RULED S444 for display-text
-// literals); any other `\` + character is E-PARSE-001. The Chromium pin:
+// RULED (user-voice-scrml.md-S482-quoted-value-escapes-catalog, "B"): a backslash in a quoted attribute value
+// (`title="…"`, SPEC §5.2) or a declaration's quoted own value (`let <s:string="…"/>`, §66.2.4) follows the
+// §4.18.3 escape catalog — `\"` a literal `"`, `\\` a literal `\`, `\${` a literal `${`; any other `\` + character
+// is E-PARSE-001. (#2110 built it as a fail-closed INTERIM; before that the reader dropped the backslash and kept
+// the next character — `"a\nb"` → `anb`, a silent wrong value.) The Chromium pin:
 // compiler/tests/browser/opener-escapes-chromium-s482.browser.test.js.
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
@@ -37,7 +38,6 @@ describe("a quoted value: `\\` + a character the catalog does not cover is E-PAR
     ["an attribute value, `\\t`", '<p title="a\\tb">x</p>', "\\t"],
     ["an attribute value, `\\d` (a regex pattern)", '<input pattern="\\d+"/>', "\\d"],
     ["an attribute value, `\\$` not before `{`", '<p title="a\\$b">x</p>', "\\$"],
-    ["a single-quoted value, `\\'`", "<p title='it\\'s'>x</p>", "\\'"],
   ];
   for (const [name, body, esc] of refused) {
     test(name, async () => {
@@ -46,10 +46,35 @@ describe("a quoted value: `\\` + a character the catalog does not cover is E-PAR
       const e = errs(r);
       expect(e.map((d) => d.code)).toEqual(["E-PARSE-001"]);
       expect(e[0].message).toContain("`" + esc + "` in a quoted value");
-      expect(e[0].message).toContain("not decided yet (SPEC §5.2, §66.2.4)");
+      expect(e[0].message).toContain("is not an escape: a quoted attribute or declaration value has only the §4.18.3 escapes");
+      expect(e[0].message).toContain("(SPEC §5.2)");
+      expect(e[0].message).not.toContain("not decided");
       expect(e[0].message).toContain('name=("…")');
     }, 120000);
   }
+
+  test("`\\'` in a single-quoted value: E-PARSE-001 with the hint to write the value double-quoted", async () => {
+    const r = await result(prog("<p title='it\\'s'>x</p>"));
+    const e = errs(r);
+    expect(e.map((d) => d.code)).toEqual(["E-PARSE-001"]);
+    expect(e[0].message).toContain("`\\'` in a quoted value is not an escape");
+    expect(e[0].message).toContain('write it double-quoted, `name="it\'s"`');
+    expect(e[0].message).not.toContain('name=("…")');
+  }, 120000);
+
+  test("`\\'` in a double-quoted value: E-PARSE-001 with the hint that a `'` needs no escape there", async () => {
+    const r = await result(prog('<p title="it\\\'s">x</p>'));
+    const e = errs(r);
+    expect(e.map((d) => d.code)).toEqual(["E-PARSE-001"]);
+    expect(e[0].message).toContain('a `\'` needs no escape in a `"`-quoted value: write it alone, `name="it\'s"`');
+  }, 120000);
+
+  test("a malformed escape at a line end names the line end (⏎)", async () => {
+    const r = await result(prog('<p title="a\\\nb">x</p>'));
+    const e = errs(r);
+    expect(e.map((d) => d.code)).toEqual(["E-PARSE-001"]);
+    expect(e[0].message).toContain("`\\⏎` in a quoted value");
+  }, 120000);
 
   test("each malformed escape is reported, and recovery keeps the value's extent (the `\"` after `\\q` still closes)", async () => {
     const r = await result(prog('<p title="a\\qb\\rc" class="k">x</p>'));
@@ -91,5 +116,73 @@ describe("a quoted value: `\\\"` and `\\\\` are kept (their meaning under every 
     const r = await result(prog('let <s:string=("a\\nb")/>\n<p>${@s}</p>'));
     expect(errs(r)).toEqual([]);
     expect(r.ok).toBe(true);
+  }, 120000);
+});
+
+// s482-escapes-ruled (#2110 review INFO-b): in `^{ emit }` output, emit() has already read its own escapes
+// (§22.4.1) and the expression form `name=("…")` is refused (literal values only), so the source advice is wrong
+// there. The sources below are String.raw: what is shown is the scrml text.
+describe("in `^{ emit }` output the E-PARSE-001 advice is emit-specific", () => {
+  test("a `\\\\` in the emit() string is one `\\` for the reader: E-META-EVAL-002 wrapping the emit-context E-PARSE-001", async () => {
+    // the logic string's value holds `a\\b`; emit() reads `\\` as `\`, so the markup reader sees `a\b`
+    const r = await result(prog(String.raw`<div>^{ emit("<p id=\"o\" title=\"a\\\\b\">x</p>"); }</div>`));
+    const e = errs(r);
+    expect(e.map((d) => d.code)).toEqual(["E-META-EVAL-002"]);
+    expect(e[0].message).toContain("[E-PARSE-001]");
+    expect(e[0].message).toContain("in a quoted value of the `^{}` block's emitted markup is not an escape");
+    // #2115 review MED: counted as the author types them in a `"…"` literal, not in its value
+    expect(e[0].message).toContain('eight backslashes in a `"…"` string literal handed to emit() (four in its value) and four with emit.raw() (two in its value)');
+    expect(e[0].message).not.toContain("four backslashes in the string handed to emit()");
+    expect(e[0].message).toContain('the expression form `name=("…")` is refused in emitted markup (§22.4 "Plain markup only"');
+    expect(e[0].message).not.toContain("every value there is literal");
+    expect(e[0].message).not.toContain("for a literal backslash, or write the value as an expression");
+  }, 120000);
+
+  test("the advice holds as typed: eight backslashes in the emit() literal, four in the emit.raw() literal, are one `\\` in the value", async () => {
+    // emit(): eight in the `"…"` literal (its value holds four); emit.raw(): four (its value holds two)
+    for (const src of [
+      String.raw`<div>^{ emit("<p id=\"o\" title=\"a\\\\\\\\b\">x</p>"); }</div>`,
+      String.raw`<div>^{ emit.raw("<p id=\"o\" title=\"a\\\\b\">x</p>"); }</div>`,
+    ]) {
+      const r = await result(prog(src));
+      expect(errs(r)).toEqual([]);
+      expect(r.ok).toBe(true);
+      expect(JSON.stringify([r.client.html, r.client.js])).toContain(String.raw`a\\b`);
+    }
+  }, 120000);
+
+  test("the counts the old wording gave, typed in source, stay refused (four for emit(), two for emit.raw())", async () => {
+    for (const src of [
+      String.raw`<div>^{ emit("<p id=\"o\" title=\"a\\\\b\">x</p>"); }</div>`,
+      String.raw`<div>^{ emit.raw("<p id=\"o\" title=\"a\\b\">x</p>"); }</div>`,
+    ]) {
+      const e = errs(await result(prog(src)));
+      expect(e.map((d) => d.code)).toEqual(["E-META-EVAL-002"]);
+      expect(e[0].message).toContain("[E-PARSE-001]");
+    }
+  }, 120000);
+
+  test("a newline is `\\n` in the string literal for emit() and emit.raw() alike", async () => {
+    for (const src of [
+      String.raw`<div>^{ emit("<p id=\"o\" title=\"a\nb\">x</p>"); }</div>`,
+      String.raw`<div>^{ emit.raw("<p id=\"o\" title=\"a\nb\">x</p>"); }</div>`,
+    ]) {
+      const r = await result(prog(src));
+      expect(errs(r)).toEqual([]);
+      expect(r.ok).toBe(true);
+    }
+  }, 120000);
+
+  test("the expression form is refused in emitted markup, as the advice says (§22.4 Plain markup only)", async () => {
+    const e = errs(await result(prog(String.raw`<div>^{ emit("<p id=\"o\" title=(\"a\")>x</p>"); }</div>`)));
+    expect(e.map((d) => d.code)).toEqual(["E-META-EVAL-002"]);
+    expect(e[0].message).toContain("an attribute value that is not quoted");
+  }, 120000);
+
+  test("source markup keeps the source advice (not the emit one)", async () => {
+    const r = await result(prog(String.raw`<p title="a\qb">x</p>`));
+    const e = errs(r);
+    expect(e.map((d) => d.code)).toEqual(["E-PARSE-001"]);
+    expect(e[0].message).not.toContain("emitted markup");
   }, 120000);
 });

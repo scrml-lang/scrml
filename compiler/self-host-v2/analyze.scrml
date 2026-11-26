@@ -21506,7 +21506,11 @@ ${
                 tyText = "inferred: no grants — §66.12.6 rule 1; annotate it, `let " + l.name + ": T[write…] = …`";
             }
             const pd: TapeDiag[] = tapePositionProblem(judged, label, tyText);
-            if (pd.length > 0) return addDiag(st, env.file, e.span, pd[0].code, pd[0].msg);
+            // s482-escapes-ruled (#2110 review L1): a refused position write is still a write of the
+            // local — its effect is recorded with the grant error, as a refused whole-value write's is
+            // (the typer judges those after the binder recorded them), so W-DISPLAY-UNTRACKED's tape
+            // fix-it (writeGrantsOf) adds the `write` this write needs
+            if (pd.length > 0) return addDiag(addEffect(st, e.nid, EffectFact.EAssignLocal(l.s, steps, t, 0)), env.file, e.span, pd[0].code, pd[0].msg);
             // r1 F1: an element that is itself a tape is replaced — its own grants
             const ed: TapeDiag[] = elemTapeReplaceProblem(t, label);
             if (ed.length > 0) return addDiag(st, env.file, e.span, ed[0].code, ed[0].msg);
