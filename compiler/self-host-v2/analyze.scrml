@@ -297,8 +297,12 @@ ${
         EReset(w: WriteFact, decl: Sym, idx: int),        // reset(@x): a replace with x's initializer (L4)
         // a local rebinding (§66.11.5) — `path` empty; s472: `path` non-empty is a
         // write to a PART of the local (`p.f = v`, `xs[i] = v`; Core Assign with a
-        // path), `ty` the type of the part written (the typer checks the value)
-        EAssignLocal(sym: Sym, path: LStep[], ty: Type | not),
+        // path), `ty` the type of the part written (the typer checks the value).
+        // s482-opener-escapes (#2107 r2 F1): `shape` — a whole rebinding's §66.11.2
+        // recognized edit shape (seqEditShapeKey: 1 end-append, 2 front-prepend,
+        // 3 filter, 4 map / sort / reverse; 0 none, and always 0 for a part write),
+        // so THE TAPE GRANT READER can say which grant the write needs (shapeGrant)
+        EAssignLocal(sym: Sym, path: LStep[], ty: Type | not, shape: int),
         EEdits(w: WriteFact, elems: AExpr[], tmps: Sym[], snap: SeqSnap), // s442: `@x = [...@x, a, b]` — one edit per element (§66.11.2); r1: each element evaluated into `tmps[i]` first; r2: reads of `@x` see `snap`
         ERemove(w: WriteFact, taken: SeqSnap | not),                          // s444: `@x.pop()` / `@x.shift()` — a removal of one element (RemoveEnd / RemoveFront)
         EElemAt(cap: Sym, inst: InstRef, index: AExpr, path: FieldRef[], loc: string), // s444: `@xs[i].f = v` — an element-field write (Core ElemAt; dpa-052 Q3); s473: `loc` "file:line" for the trap
@@ -9782,7 +9786,7 @@ ${
         if (l is given && exprName(t) != "") {
             let st1: AS = rp.st;
             if (!l.mutable) st1 = addDiag(st1, env.file, t.span, "E-ASSIGN-CONST", "`" + l.name + "` is not a `let` local");
-            st1 = addEffect(capWrite(env, l, t.span, st1), e.nid, EffectFact.EAssignLocal(l.s, [], not));
+            st1 = addEffect(capWrite(env, l, t.span, st1), e.nid, EffectFact.EAssignLocal(l.s, [], not, seqEditShapeKey(exprName(t), v)));
             return resolveExpr(env, v, l.ty, st1);
         }
         if (rp.place is given) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "a CELL as the target of a condition-head assignment (`((" + placeKey(t) + " = …))`, §50.3.4) is not in the bootstrap yet — write the cell in a statement before the test (`" + placeKey(t) + " = …;` then `if (" + placeKey(t) + " …)`); a `let` local is built (`((x = e))`)", resolveExpr(env, v, not, rp.st).st);
@@ -12304,33 +12308,6 @@ ${
         return not;
     }
 
-    // The grants a tape cell needs for the writes of `let` `sym` (every write the binder recorded): a
-    // whole-value write `replace`, a position write `write`, an edit its own grant (§66.12.3).
-    fn writeGrantsOf(t: Tables, sym: int) -> string[] {
-        let out: string[] = [];
-        for (const f of t.effects.facts) {
-            const gr: string = writeGrantOf(f, sym);
-            if (gr != "" && out.indexOf(gr) < 0) out = out.concat([gr]);
-        }
-        return out;
-    }
-
-    fn writeGrantOf(f: EffectFact, sym: int) -> string {
-        return match f {
-            .EAssignLocal(sym: s, path: pa) :> (s.id != sym ? "" : (pa.length == 0 ? "replace" : stepGrant(pa[0]))),
-            .ELocalEdit(sym: s, op: o, path: pa) :> (s.id != sym || pa.length > 0 ? "" : localEditMethodName(o)),
-            // no-default-arm: one question of a write — does it write the `let`'s own tape
-            _ :> ""
-        };
-    }
-
-    fn stepGrant(s: LStep) -> string {
-        return match s {
-            .LIndex(index: x) :> "write",
-            .LField(ref: x) :> ""
-        };
-    }
-
     // r2 (#2107 F-E) — the first write of `let` `sym` whose cell form this compiler does not build yet
     // ("" — none): `.remove(…)` / `.insert(…)` of a cell tape, an edit of a part (`b.xs.append(v)`,
     // `g[i].pop()`), a write through a position (`m[i][j] = v`, `xs[i].a.b = v`) or a position of a
@@ -12409,12 +12386,39 @@ ${
                 out = out + "\\t";
             } else if (code < 32 || code == 127) {
                 out = out + "\\x" + "0123456789abcdef".charAt(Math.floor(code / 16)) + "0123456789abcdef".charAt(code % 16);
+            } else if (code == 8232 || code == 8233 || loneSurrogateAt(s, i)) {
+                // s482-opener-escapes (#2107 r2 INFO-1): U+2028 / U+2029 and a lone surrogate are
+                // spelled `\uXXXX` — printed raw, a line separator splits the message line and a lone
+                // surrogate reaches the terminal as U+FFFD, so the fix-it would not keep the value
+                out = out + "\\u" + hexUnit4(code);
             } else {
                 out = out + c;
             }
             i = i + 1;
         }
         return out;
+    }
+
+    // Whether the UTF-16 code unit at `i` is a surrogate with no partner (a high one not followed by a low
+    // one, or a low one not preceded by a high one).
+    fn loneSurrogateAt(s: string, i: int) -> boolean {
+        const c: int = s.charCodeAt(i);
+        if (c >= 55296 && c <= 56319) {
+            if (i + 1 >= s.length) return true;
+            const n: int = s.charCodeAt(i + 1);
+            return n < 56320 || n > 57343;
+        }
+        if (c >= 56320 && c <= 57343) {
+            if (i == 0) return true;
+            const p: int = s.charCodeAt(i - 1);
+            return p < 55296 || p > 56319;
+        }
+        return false;
+    }
+
+    fn hexUnit4(code: int) -> string {
+        const d: string = "0123456789ABCDEF";
+        return d.charAt(Math.floor(code / 4096) % 16) + d.charAt(Math.floor(code / 256) % 16) + d.charAt(Math.floor(code / 16) % 16) + d.charAt(code % 16);
     }
 
     // The writers in one markup node, at any depth.
@@ -12489,7 +12493,7 @@ ${
     // in a function the body calls, is not a dependency. … They are dependencies only while the run is in
     // progress. A `meta.get` in a timer or cleanup callback reads the cell and subscribes nothing."
     // meta.scrml respells both `^.get(@x)`. r2 (#2107 F-B): only the function value handed DIRECTLY to
-    // `^.timeout` / `^.interval` / `^.cleanup` (or `^.subscribe`, whose callback runs on a later change)
+    // `^.timeout` / `^.interval` / `^.cleanup` (or `^.subscribe`, whose callback runs on a later change — a PA reading, prov=pa-ruled: the quote names timer and cleanup callbacks only, #2107 r2 INFO-2)
     // is such a callback; any other function value — one the body calls, or hands to a function that
     // calls it — may run while the run is in progress, so its `^.get` counts (failing toward the warning).
     fn rerunsOnDeps(b: ABlock) -> boolean {
@@ -12819,7 +12823,14 @@ ${
     // s482 (lane s482-seed-reach) — the context of the body-run judgment: the program body's
     // file-scope bindings with their places (`places`), and its cells (`cells`, BodyCell) — a
     // cell read runs its seed (or its formula) where it is read when the seed has not run yet.
-    type BodyCx:struct = { g: Globals, t: Tables, sum: Summary, usesD: FxAtom[][], binds: int[], file: string, places: BodyPlace[], cells: BodyCell[], prog: int, pfields: FieldInfo[] }
+    // s482 (lane s482-instance-mount-reach, g-boot-instance-mount-reach-later-binding-s482) — the
+    // MOUNT of a component instance (mountReach): `at` — the place the code runs at (the use's place:
+    // an instance's field seeds and its renders run at its mount, §66.7.6 rule 5 / §7.6 R1), -1 for
+    // body code judged at its own position; `mfile` / `mspan` / `mount` — the outermost use being
+    // judged (where the diagnostic points, and how it is named); `dname` — the declaration whose code
+    // is walked; `stack` — the declarations on the mount path (a cycle guard); `idecl` / `ifields` —
+    // that declaration and its fields (a read of a DERIVED field runs its formula where it is read).
+    type BodyCx:struct = { g: Globals, t: Tables, sum: Summary, usesD: FxAtom[][], binds: int[], file: string, places: BodyPlace[], cells: BodyCell[], prog: int, pfields: FieldInfo[], at: int, mfile: string, mspan: ASpan, mount: string, dname: string, stack: int[], idecl: int, ifields: FieldInfo[] }
 
     // s482 (lane s482-seed-reach) — a program cell, for the later-place judgment: its place
     // (`pos`, where its declaration stands — a seeded cell's seed is computed there, §7.6 rule (b)
@@ -12851,7 +12862,7 @@ ${
                 };
                 const places: BodyPlace[] = bodyPlaces(g, f.path, ps);
                 if (places.length > 0) {
-                    const cx: BodyCx = { g: g, t: t, sum: sum, usesD: usesD, binds: binds, file: f.path, places: places, cells: bodyCells(g, t, ps), prog: g.program.id, pfields: programCells(g) };
+                    const cx: BodyCx = { g: g, t: t, sum: sum, usesD: usesD, binds: binds, file: f.path, places: places, cells: bodyCells(g, t, ps), prog: g.program.id, pfields: programCells(g), at: -1, mfile: f.path, mspan: { start: 0, end: 0 }, mount: "", dname: "", stack: [], idecl: -1, ifields: [] };
                     for (const pi of ps) {
                         const n: ANode | not = markupOfItem(pi);
                         if (n is given) out = out.concat(bodyNodeReach(cx, n));
@@ -12957,7 +12968,7 @@ ${
         let ci: int = 0;
         for (const c of cells) {
             if (!c.derived) {
-                const cx: BodyCx = { g: g, t: t, sum: sum, usesD: usesD, binds: binds, file: files[ci], places: places, cells: cells, prog: g.program.id, pfields: programCells(g) };
+                const cx: BodyCx = { g: g, t: t, sum: sum, usesD: usesD, binds: binds, file: files[ci], places: places, cells: cells, prog: g.program.id, pfields: programCells(g), at: -1, mfile: files[ci], mspan: { start: 0, end: 0 }, mount: "", dname: "", stack: [], idecl: -1, ifields: [] };
                 const r: SeedReach | not = cellReach(cx, c, c.pos, [c.sym]);
                 if (r is given) out = out.concat([outerLaterDiag(r, c.name, r.bp.pos == late)]);
             }
@@ -13074,12 +13085,30 @@ ${
         return out;
     }
 
+    // s482 r1 (#2112 MED-4) — a field read through a shared instance (`@card.v`: the member carries
+    // NField(card, Shared, v)) counts too: a derived field's formula runs at that read (sharedReach).
     fn atUsesInExpr(t: Tables, e: AExpr) -> AExpr[] {
         let out: AExpr[] = [];
-        if (atName(e) != "" || writeCapOf(effectFact(t.effects, e.nid)) >= 0) out = [e];
+        if (atName(e) != "" || writeCapOf(effectFact(t.effects, e.nid)) >= 0 || sharedMember(t, e)) out = [e];
         for (const x of exprKids(e)) { out = out.concat(atUsesInExpr(t, x)); }
         for (const b of exprBlocksIn(e)) { out = out.concat(atUsesIn(t, b)); }
         return out;
+    }
+
+    fn sharedMember(t: Tables, e: AExpr) -> boolean {
+        const k: AExprK = e.k;
+        const isMember: boolean = match k {
+            .Member(obj: o) :> true,
+            // no-default-arm: only a member access reads a field through an instance
+            _ :> false
+        };
+        if (!isMember) return false;
+        const f: NameFact | not = nameFact(t.names, e.nid);
+        return match f {
+            .NField(decl: d, inst: i, idx: x) :> sharedDeclId(d, i) >= 0,
+            // no-default-arm: one question — is it a field of a shared instance
+            _ :> false
+        };
     }
 
     // The write capability (its Sym id) a cell write's effect names, else -1.
@@ -13207,6 +13236,13 @@ ${
             if (!spanInAny(ne.span, defer)) {
                 const bp: BodyPlace | not = placeOfBinding(cx.places, constSymOfFact(nameFact(cx.t.names, ne.nid)));
                 if (bp is given && bp.pos > pos) return { bp: bp, how: " reads `" + bp.name + "`,", file: cx.file, span: ne.span };
+                // s482 (lane s482-instance-mount-reach) — a read of a DERIVED field of the instance being
+                // mounted runs its formula here (§7.6 R4; mountReach lists the fields as cells)
+                const ic: BodyCell | not = cellOfSym(cx.cells, instCellOf(cx, ne));
+                if (ic is given && seen.indexOf(ic.sym) < 0 && cellRunsAt(ic, pos)) {
+                    const iin: SeedReach | not = cellReach(cx, ic, pos, seen.concat([ic.sym]));
+                    if (iin is given) return { bp: iin.bp, how: cellHop(ic, iin), file: cx.file, span: ne.span };
+                }
             }
         }
         for (const w of writes) {
@@ -13215,8 +13251,12 @@ ${
         }
         for (const a of ats) {
             if (!spanInAny(a.span, defer)) {
+                // s482 r1 (#2112 MED-4) — a read of a declaration's shared instance constructs it here (R4)
+                const sr: SeedReach | not = sharedReach(cx, a, pos, seen);
+                if (sr is given) return sr;
                 let cid: int = progCellOf(cx.t, a, cx.prog, cx.pfields);
                 if (cid < 0) cid = outerCellOf(cx, a);     // s482 r1: a cell declared outside the body (outerSeedReachDiags)
+                if (cid < 0) cid = instCellOf(cx, a);      // s482: a field of the instance being mounted (mountReach)
                 const c: BodyCell | not = cellOfSym(cx.cells, cid);
                 if (c is given && seen.indexOf(c.sym) < 0 && cellRunsAt(c, pos)) {
                     const inner: SeedReach | not = cellReach(cx, c, pos, seen.concat([c.sym]));
@@ -13295,8 +13335,8 @@ ${
         const k: ANodeK = n.k;
         return match k {
             .Elem(e: e) :> bodyElemReach(cx, e),
-            .Interp(e: x) :> bodyExprReach(cx, x, n.span.start, "this display"),
-            .Run(b: rb) :> bodyBlockReach(cx, rb, n.span.start),
+            .Interp(e: x) :> bodyExprReach(cx, x, posOf(cx, n.span.start), "this display"),
+            .Run(b: rb) :> bodyBlockReach(cx, rb, posOf(cx, n.span.start)),
             .Text(text: x) :> [],
             .DeclNode(d: x) :> [],
             // §7.6 rule (b) S482: "Code that does not run in the body is not judged: an event
@@ -13309,7 +13349,7 @@ ${
             // s482 (lane s482-seed-reach r1, #2063 review MED-1) — a Tier-0 gather
             // `${ for (…) { … lift <li/>; … } }` is a display (an interpolation, §17.4): its
             // loop runs where it stands, and every lifted row is markup rendered there
-            .Gather(f: gf) :> bodyGatherReach(cx, gf, n.span.start)
+            .Gather(f: gf) :> bodyGatherReach(cx, gf, posOf(cx, n.span.start))
         };
     }
 
@@ -13338,11 +13378,68 @@ ${
                     // no-default-arm: only an expression value is a display of its value
                     _ :> not
                 };
-                if (x is given) out = out.concat(bodyExprReach(cx, x, a.span.start, "this attribute value"));
+                // s482 r1 (#2112 review NIT-1) — inside an instance's mount the message names the
+                // element the attribute is on (it may be a use nested in the render, not the outer one)
+                let what: string = "this attribute value";
+                if (cx.at >= 0) what = "this attribute value (`" + a.name + "=` on `<" + e.tag + ">`)";
+                if (x is given) out = out.concat(bodyExprReach(cx, x, posOf(cx, a.span.start), what));
                 if (a.name.substring(0, 5) == "bind:") out = out.concat(bodyBindReach(cx, a));
             }
         }
         for (const kid of e.kids) { out = out.concat(bodyNodeReach(cx, kid)); }
+        // s482 r1 (#2112 review MED-1 / MED-2) — `<*f/>` renders markup here
+        out = out.concat(starReach(cx, e));
+        // s482 (lane s482-instance-mount-reach) — a use of a declaration mounts an instance here
+        out = out.concat(mountReach(cx, e));
+        return out;
+    }
+
+    // s482 r1 (#2112 review MED-1 / MED-2; §7.6 R1 — every display and mount has one place in the
+    // body; O5 (1i) RULED — "a state-child's body is that variant's markup, rendered wherever the field
+    // renders"; §66.6.2 — `<*f/>` of a child field renders its own `renders`). `<*f/>` renders, at its
+    // own place, markup written elsewhere — a child field's own `renders` (MInline), or the state-child
+    // bodies of a `rule=` graph field (MStateView: a body-level engine `<ph:Ph=.A single>` shown by
+    // `<*ph/>`, or a declaration's field shown in its render). That markup — its displays, attribute
+    // values, statements, the instances it mounts — runs where `<*f/>` stands, so it is judged there:
+    // inside an instance's mount at the use's place (cx.at), in the body at the `<*f/>`'s own place
+    // (not where the markup is written: the declaration may stand anywhere). Every arm of a state view
+    // is judged, not only the variant held at mount — an arm first shown by a transition after the body
+    // would run with every binding placed, but which arms the body shows is not known at compile time:
+    // the `<*f/>`'s place is the bound, as for `if=` content (⚑ INTERIM, g-boot-conditional-mount-bound-s482).
+    // The shared instance's `<*x/>` (MInline with `subst`, MStar) is not walked here.
+    fn starReach(cx: BodyCx, e: AElem) -> Diag[] {
+        const f: ElemFact | not = elemFact(cx.t.elems, e.nid);
+        const nodes: ANode[] = match f {
+            .MInline(v: iv) :> inlineOwnNodes(iv),
+            .MStateView(v: sv) :> stateArmBodies(sv),
+            // no-default-arm: only `<*f/>` of a field renders markup written elsewhere
+            _ :> []
+        };
+        if (nodes.length == 0) return [];
+        let scx: BodyCx = cx;
+        if (cx.at < 0) {
+            // in the body: the markup runs at this `<*f/>`'s place; `dname` "" marks a body-level
+            // `<*f/>` for reachDiag's wording (no instance is mounted by it)
+            scx = { g: cx.g, t: cx.t, sum: cx.sum, usesD: cx.usesD, binds: cx.binds, file: cx.file, places: cx.places, cells: cx.cells, prog: cx.prog, pfields: cx.pfields, at: e.span.start, mfile: cx.file, mspan: e.span, mount: "this `<*" + e.tag + "/>`", dname: "", stack: cx.stack, idecl: cx.idecl, ifields: cx.ifields };
+        }
+        let out: Diag[] = [];
+        for (const n of nodes) { out = out.concat(bodyNodeReach(scx, n)); }
+        // one report per `<*f/>` in the body, as per mount
+        if (out.length > 0 && cx.at < 0) return [out[0]];
+        return out;
+    }
+
+    // A child field's own `renders` inlined by `<*f/>` (no `subst`); the shared instance's renders
+    // (`subst` given) are not this construct's.
+    fn inlineOwnNodes(iv: InlineView) -> ANode[] {
+        const s: InstRef | not = iv.subst;
+        if (s is given) return [];
+        return iv.nodes;
+    }
+
+    fn stateArmBodies(sv: StateView) -> ANode[] {
+        let out: ANode[] = [];
+        for (const a of sv.arms) { out = out.concat(a.body); }
         return out;
     }
 
@@ -13354,10 +13451,10 @@ ${
     fn bodyBindReach(cx: BodyCx, a: AAttr) -> Diag[] {
         const c: BodyCell | not = cellOfSym(cx.cells, bindCellOf(cx.t, cx.g.program, cx.pfields, a));
         if (c is not) return [];
-        const pos: int = a.span.start;
+        const pos: int = posOf(cx, a.span.start);
         if (!cellRunsAt(c, pos)) return [];
         const inner: SeedReach | not = cellReach(cx, c, pos, [c.sym]);
-        if (inner is given) return [laterPlaceDiagHow(inner.bp, "this `" + a.name + "=`", cellHop(c, inner), cx.file, a.span)];
+        if (inner is given) return [reachDiag(cx, inner.bp, "this `" + a.name + "=`", cellHop(c, inner), cx.file, a.span)];
         return [];
     }
 
@@ -13377,7 +13474,7 @@ ${
     // here (s482 lane s482-seed-reach), or a function named whose reach (usesR) holds one.
     fn bodyExprReach(cx: BodyCx, e: AExpr, pos: int, what: string) -> Diag[] {
         const r: SeedReach | not = codeReach(cx, nameExprsInExpr(e), letWritesInExpr(cx.t, e, cx.binds, cx.file), atUsesInExpr(cx.t, e), scanExpr({ t: cx.t, file: cx.file }, e, emptyScan()).refs, heldSpansInExpr(e), pos, []);
-        if (r is given) return [laterPlaceDiagHow(r.bp, what, r.how, r.file, r.span)];
+        if (r is given) return [reachDiag(cx, r.bp, what, r.how, r.file, r.span)];
         return [];
     }
 
@@ -13387,8 +13484,226 @@ ${
 
     fn bodyCodeReach(cx: BodyCx, b: ABlock, pos: int, what: string) -> Diag[] {
         const r: SeedReach | not = codeReach(cx, nameExprsIn(b), letWritesIn(cx.t, b, cx.binds, cx.file), atUsesIn(cx.t, b), scanBlock({ t: cx.t, file: cx.file }, b, emptyScan()).refs, heldSpansIn(b), pos, []);
-        if (r is given) return [laterPlaceDiagHow(r.bp, what, r.how, r.file, r.span)];
+        if (r is given) return [reachDiag(cx, r.bp, what, r.how, r.file, r.span)];
         return [];
+    }
+
+    // s482 (lane s482-instance-mount-reach) — where code judged by the body-run walk runs: at its own
+    // position, or — inside an instance's mount (mountReach) — at the use's place.
+    fn posOf(cx: BodyCx, start: int) -> int {
+        if (cx.at >= 0) return cx.at;
+        return start;
+    }
+
+    // A later-place diagnostic for code the body-run walk judged: at the code itself, or — inside an
+    // instance's mount — at the use that mounts it (the code is in the declaration, which may stand
+    // anywhere; the use is what runs it before the binding's place).
+    fn reachDiag(cx: BodyCx, bp: BodyPlace, what: string, how: string, file: string, span: ASpan) -> Diag {
+        if (cx.at < 0) return laterPlaceDiagHow(bp, what, how, file, span);
+        const n: string = bp.name;
+        // s482 r1 (#2112 review NIT-1) — "a display", "an attribute value"
+        let w: string = what;
+        if (what.indexOf("this ") == 0) {
+            const rest: string = what.substring(5);
+            const c0: string = rest.substring(0, 1);
+            w = "a " + rest;
+            if (c0 == "a" || c0 == "e" || c0 == "i" || c0 == "o" || c0 == "u") w = "an " + rest;
+        }
+        let top: string = cx.mount;
+        if (top.indexOf(" (") >= 0) top = top.substring(0, top.indexOf(" ("));
+        // s482 r1 (#2112 review MED-2) — a body-level `<*f/>` (starReach, dname "") renders a field's
+        // markup here; it mounts nothing itself
+        if (cx.dname == "") return newDiag("E-SCOPE-001", "`" + n + "` is used before it is initialized — " + cx.mount + " renders a field's markup here (a state-child's body or a child field's `renders` runs where `<*f/>` renders it, O5 (1i), §7.6 R1 S482), and that markup runs " + w + ", which" + how + " and the `${ }` declaring `" + n + "` comes later in the program body. The body runs once, top to bottom, in source order, so `" + n + "` is not initialized when that markup is rendered (§7.6 R2). Declare `" + n + "` before " + top, cx.mfile, cx.mspan);
+        return newDiag("E-SCOPE-001", "`" + n + "` is used before it is initialized — " + cx.mount + " mounts an instance here, and its mount runs " + w + " of `<" + cx.dname + ">` (an instance's field seeds and its render run at its mount, §66.7.6 rule 5, §7.6 R1 S482), which" + how + " and the `${ }` declaring `" + n + "` comes later in the program body. The body runs once, top to bottom, in source order, so `" + n + "` is not initialized when the instance is mounted (§7.6 R2). Declare `" + n + "` before " + top, cx.mfile, cx.mspan);
+    }
+
+    // s482 (lane s482-instance-mount-reach, g-boot-instance-mount-reach-later-binding-s482; §7.6 R1 —
+    // "Every declaration, statement, display, attribute value and unconditional mount has one place in
+    // the body"; R2 — "Code that runs at place p … may reach … only bindings whose place is before p.
+    // Otherwise E-SCOPE-001"; §66.7.6 rule 5 S482 — an instance's own cells' initializers are
+    // "computed at its place … an instance's at its mount"; ruling:user-voice-scrml.md-S482-locked-field-
+    // derived — a constant locked field's initializer is "a seed computed at its place, meaning the
+    // instance's mount"). A use `<card …/>` in the body mounts an instance at the use's place; the code
+    // that mount runs — the declaration's field seeds (a `let` field's, a constant locked field's, a
+    // prop default's) less the fields the use gives a value (that value is judged as an attribute value,
+    // above), and its render's displays, attribute values and statements, and through them the
+    // instances the render mounts — is judged at the use's place with the same walk (codeReach). A
+    // DERIVED field (it reads a cell) has no place: its formula runs where it is read (R4) — a read in
+    // the render, or in another seed, is judged there (codeReach / instCellOf). Not judged, as for body
+    // code: the render's event handlers, effects and requests (R5). A use inside `if=` content or an
+    // `<each>` row is judged at its place too: its mount runs when its branch shows or its row is
+    // created (§66.7.6 rule 5), which may be during the body, at that place — the same as a display
+    // there (fail closed; a branch first shown after the body would run with every binding placed, but
+    // the compiler cannot tell which branches the body shows). The printer's run order is not changed:
+    // this turns the silent wrong value (the printer ran the later binding at module initialization,
+    // before the body's writes) into the R2 error.
+    fn mountReach(cx: BodyCx, e: AElem) -> Diag[] {
+        const u: Sym | not = useDecl(elemFact(cx.t.elems, e.nid));
+        if (u is not) return [];
+        if (u.id == cx.g.program.id || cx.stack.indexOf(u.id) >= 0) return [];
+        let src: DeclSrc | not = not;
+        for (const gd of cx.g.decls) { if (gd.info.sym.id == u.id && !gd.isProgram) src = gd; }
+        if (src is not) return [];
+        const d: ADecl | not = src.d;
+        if (d is not) return [];
+        const di: DeclInfo = src.info;
+        let at: int = cx.at;
+        let mfile: string = cx.mfile;
+        let mspan: ASpan = cx.mspan;
+        let mount: string = cx.mount;
+        if (at < 0) {
+            at = e.span.start;
+            mfile = cx.file;
+            mspan = e.span;
+            mount = "this `<" + e.tag + ">`";
+        } else if (cx.dname == "") {
+            mount = cx.mount + " (whose markup mounts `<" + e.tag + ">`)";
+        } else {
+            mount = cx.mount + " (whose render mounts `<" + e.tag + ">`)";
+        }
+        const icells: BodyCell[] = declCells(cx, d, di);
+        const icx: BodyCx = { g: cx.g, t: cx.t, sum: cx.sum, usesD: cx.usesD, binds: cx.binds, file: src.file, places: cx.places, cells: cx.cells.concat(icells), prog: cx.prog, pfields: cx.pfields, at: at, mfile: mfile, mspan: mspan, mount: mount, dname: d.name, stack: cx.stack.concat([u.id]), idecl: u.id, ifields: di.fields };
+        let out: Diag[] = [];
+        // its field seeds (a persisted declaration's are computed at construction, as a persisted
+        // cell's — g-boot-persist-seed-at-construction-s482 — and are not judged here)
+        if (attrNamed(d.mods, "persist") is not) {
+            let i: int = 0;
+            for (const c of icells) {
+                const nm2: string = fieldNameOf(d, di.fields[i].nid);
+                if (!c.derived && attrNamed(e.attrs, nm2) is not) {
+                    const r: SeedReach | not = cellReach(icx, c, at, [c.sym]);
+                    if (r is given) out = out.concat([reachDiag(icx, r.bp, "the seed of field `" + nm2 + "`", r.how, r.file, r.span)]);
+                }
+                i = i + 1;
+            }
+        }
+        // its render (and the state-child bodies it renders)
+        const rd: AElem | not = d.renders;
+        if (rd is given) out = out.concat(bodyElemReach(icx, rd));
+        for (const sn of declStateMarkup(d)) { out = out.concat(bodyNodeReach(icx, sn)); }
+        // one report per mount: the first path found names the fix (declare the binding earlier)
+        if (out.length > 0 && cx.at < 0) return [out[0]];
+        return out;
+    }
+
+    // An instance's fields as cells (BodyCell) for the reach walk: a seeded field has no body place
+    // (pos -1 — its seed runs when the instance is constructed, judged there), a DERIVED one runs its
+    // formula where it is read (cellRunsAt).
+    fn declCells(cx: BodyCx, d: ADecl, di: DeclInfo) -> BodyCell[] {
+        let icells: BodyCell[] = [];
+        for (const fi of di.fields) {
+            const nm: string = fieldNameOf(d, fi.nid);
+            icells = icells.concat([{ sym: fi.sym.id, name: d.name + "." + nm, pos: -1, init: fi.init, derived: fi.wcap is not && lockedDerived(cx.g, cx.t, [], fi.init) }]);
+        }
+        return icells;
+    }
+
+    // s482 r1 (#2112 review MED-4; §7.6 R4 — "A lazy shared instance is constructed at its first
+    // reference … judged by R2 at the demand point"; §66.7.1 — `@x` of a declaration reads its SHARED
+    // instance). A read `@card` / `@card.v` of a user declaration's shared instance constructs it there
+    // when it has not been: its field seeds run at the read, so what they reach is judged at `pos`
+    // (every reference is judged — the first one during the body is the demand point, and a later
+    // reference finds only what an earlier one would); a DERIVED field read (`@card.d`) runs its formula
+    // at the read (R4). Not this hop: a declaration whose one field is its own value (a cell outside the
+    // body, `outerSeedReachDiags` / outerCellOf — seeded before the body), the program, a persisted
+    // declaration's seeds (g-boot-persist-seed-at-construction-s482), a declaration already on the
+    // path (cx.stack — a cycle). ⚑ INTERIM (g-boot-shared-instance-reach-hoist-s482): a function that
+    // reads a shared instance's field is not followed here (its summary records no such atom), nor a
+    // `<*x/>` of the shared instance; and the printer runs a body binding a shared instance reaches at
+    // module initialization (bodyInits, constructedElsewhere), so a read AFTER the binding — legal by
+    // R4 — still shows a value computed before the body's writes.
+    fn sharedReach(cx: BodyCx, a: AExpr, pos: int, seen: int[]) -> SeedReach | not {
+        const f: NameFact | not = nameFact(cx.t.names, a.nid);
+        const did: int = match f {
+            .NInst(decl: d, inst: i) :> sharedDeclId(d, i),
+            .NField(decl: d, inst: i, idx: x) :> sharedDeclId(d, i),
+            // no-default-arm: one question — is it a read of a declaration's shared instance
+            _ :> -1
+        };
+        const idx: int = match f {
+            .NField(decl: d, inst: i, idx: x) :> x,
+            // no-default-arm: a whole-instance read names no field
+            _ :> -1
+        };
+        if (did < 0 || did == cx.prog || cx.stack.indexOf(did) >= 0) return not;
+        let src: DeclSrc | not = not;
+        for (const gd of cx.g.decls) { if (gd.info.sym.id == did && !gd.isProgram) src = gd; }
+        if (src is not) return not;
+        const d: ADecl | not = src.d;
+        if (d is not) return not;
+        const di: DeclInfo = src.info;
+        if (di.fields.length == 1 && di.fields[0].nid == di.nid) return not;
+        const icells: BodyCell[] = declCells(cx, d, di);
+        const icx: BodyCx = { g: cx.g, t: cx.t, sum: cx.sum, usesD: cx.usesD, binds: cx.binds, file: src.file, places: cx.places, cells: cx.cells.concat(icells), prog: cx.prog, pfields: cx.pfields, at: cx.at, mfile: cx.mfile, mspan: cx.mspan, mount: cx.mount, dname: cx.dname, stack: cx.stack.concat([did]), idecl: did, ifields: di.fields };
+        const pre: string = " reads `@" + d.name + "`, the shared instance of `<" + d.name + ">`, constructed at its first reference (§7.6 R4), so its seeds run here, and";
+        if (attrNamed(d.mods, "persist") is not) {
+            let i: int = 0;
+            for (const c of icells) {
+                if (!c.derived && seen.indexOf(c.sym) < 0) {
+                    const r: SeedReach | not = cellReach(icx, c, pos, seen.concat([c.sym]));
+                    if (r is given) return { bp: r.bp, how: pre + " the seed of its field `" + fieldNameOf(d, di.fields[i].nid) + "`" + r.how, file: cx.file, span: a.span };
+                }
+                i = i + 1;
+            }
+        }
+        if (idx >= 0 && idx < icells.length) {
+            const dc: BodyCell = icells[idx];
+            if (dc.derived && seen.indexOf(dc.sym) < 0) {
+                const r2: SeedReach | not = cellReach(icx, dc, pos, seen.concat([dc.sym]));
+                if (r2 is given) return { bp: r2.bp, how: cellHop(dc, r2), file: cx.file, span: a.span };
+            }
+        }
+        return not;
+    }
+
+    fn sharedDeclId(d: Sym, i: InstRef) -> int {
+        return match i {
+            .Shared(decl: s) :> (s.id == d.id ? d.id : -1),
+            // no-default-arm: only the shared instance is constructed on demand
+            _ :> -1
+        };
+    }
+
+    // The name of declaration `d`'s field whose node is `nid` (an attribute field, or a child field at
+    // any depth); "" for its own value.
+    fn fieldNameOf(d: ADecl, nid: int) -> string {
+        for (const a of d.attrs) { if (a.nid == nid) return a.name; }
+        for (const c of childFields(d.body)) {
+            if (c.nid == nid) return c.name;
+            const inner: string = fieldNameOf(c, nid);
+            if (inner != "") return inner;
+        }
+        return "";
+    }
+
+    // The markup of a declaration's state-children (O5 (1i): rendered wherever the field renders), at
+    // any depth of its child fields.
+    fn declStateMarkup(d: ADecl) -> ANode[] {
+        let out: ANode[] = [];
+        for (const c0 of d.body) {
+            const c: ADeclChild = c0;
+            const ns: ANode[] = match c {
+                .StateChild(s: s) :> s.body,
+                .ChildField(d: cd) :> declStateMarkup(cd),
+                .Idle(s: x) :> []
+            };
+            out = out.concat(ns);
+        }
+        return out;
+    }
+
+    // s482 (lane s482-instance-mount-reach) — a read (`v`, `@v`) of a field of the instance being
+    // mounted (cx.idecl), as the field's Sym id; else -1.
+    fn instCellOf(cx: BodyCx, e: AExpr) -> int {
+        if (cx.idecl < 0) return -1;
+        const f: NameFact | not = nameFact(cx.t.names, e.nid);
+        const ix: int = match f {
+            .NField(decl: d, inst: x, idx: i) :> (d.id == cx.idecl ? i : -1),
+            // no-default-arm: one question — is it a read of the mounted declaration's field
+            _ :> -1
+        };
+        if (ix >= 0 && ix < cx.ifields.length) return cx.ifields[ix].sym.id;
+        return -1;
     }
 
     fn laterPlaceDiagHow(bp: BodyPlace, what: string, how: string, file: string, span: ASpan) -> Diag {
@@ -17815,7 +18130,7 @@ ${
             // s469-boot-tape-grants: §50 decides whether the name may be rebound (above);
             // whether the tape write the rebinding performs is granted (§66.12.6 rule 4) is
             // the typer's (typeAssign → localTapeProblems), where an inferred type is known
-            st = addEffect(capWrite(env, l, target.span, st), e.nid, EffectFact.EAssignLocal(l.s, [], not));
+            st = addEffect(capWrite(env, l, target.span, st), e.nid, EffectFact.EAssignLocal(l.s, [], not, seqEditShapeKey(exprName(target), value)));
             // s475 (s475-boot-local-tape-edits): the recognized grow shapes of the local
             // itself, `xs = [...xs, e]` / `xs = [e, ...xs]` (§66.11.2; §66.12.6 rule 4 —
             // the typer classifies the edit and judges it by the local's TYPE grants):
@@ -19893,6 +20208,48 @@ ${
         };
     }
 
+    // The grants a tape cell needs for the writes of `let` `sym` (every write the binder recorded): a
+    // whole-value write `replace`, a position write `write`, an edit its own grant (§66.12.3) — and a
+    // whole-value write of a §66.11.2 recognized shape is that edit (s482-opener-escapes, #2107 r2 F1:
+    // `xs = [...xs, e]` needs `append`, `xs = xs.filter(…)` `remove`, `xs = xs.map(…)` `write`), so
+    // tapeCellText adds `free` for the ones that resize the tape. In the reader since #2107 r2 INFO-3:
+    // the write-to-grant mapping is shape knowledge the reader's judges hold (shapeEdit, localTapeEdit).
+    fn writeGrantsOf(t: Tables, sym: int) -> string[] {
+        let out: string[] = [];
+        for (const f of t.effects.facts) {
+            const gr: string = writeGrantOf(f, sym);
+            if (gr != "" && out.indexOf(gr) < 0) out = out.concat([gr]);
+        }
+        return out;
+    }
+
+    fn writeGrantOf(f: EffectFact, sym: int) -> string {
+        return match f {
+            .EAssignLocal(sym: s, path: pa, shape: sh) :> (s.id != sym ? "" : (pa.length == 0 ? shapeGrant(sh) : stepGrant(pa[0]))),
+            .ELocalEdit(sym: s, op: o, path: pa) :> (s.id != sym || pa.length > 0 ? "" : localEditMethodName(o)),
+            // no-default-arm: one question of a write — does it write the `let`'s own tape
+            _ :> ""
+        };
+    }
+
+    // The grant a whole rebinding needs, by its recognized shape (seqEditShapeKey; shapeEdit's edits):
+    // 0 an unclassified whole-value write `replace`, 1 `append`, 2 `prepend`, 3 `remove` (RULED S442:
+    // `filter` shrinks anywhere), 4 `write` (map / sort / reverse keep the length).
+    fn shapeGrant(shape: int) -> string {
+        if (shape == 1) return "append";
+        if (shape == 2) return "prepend";
+        if (shape == 3) return "remove";
+        if (shape == 4) return "write";
+        return "replace";
+    }
+
+    fn stepGrant(s: LStep) -> string {
+        return match s {
+            .LIndex(index: x) :> "write",
+            .LField(ref: x) :> ""
+        };
+    }
+
     // s482 r2 (#2107 F-C, W-DISPLAY-UNTRACKED's fix-it) — a tape cell's type as source text: the grants
     // written on `at` (none: the element `elem` with an empty bracket), plus the ones `need` (the grants
     // its writes need, writeGrantsOf) adds — and `free` when an edit grows or shrinks the tape and no
@@ -21167,7 +21524,7 @@ ${
                 if (stt.diags.length > st.diags.length) return stt;
             }
         }
-        return addEffect(capWrite(env, l, e.span, st), e.nid, EffectFact.EAssignLocal(l.s, steps, t));
+        return addEffect(capWrite(env, l, e.span, st), e.nid, EffectFact.EAssignLocal(l.s, steps, t, 0));
     }
 
     fn resolveBlock(env: Env, b: ABlock, st0: AS) -> AS {

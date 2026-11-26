@@ -175,3 +175,19 @@ Conflicted hunks:
 | docs/known-gaps.md | (generated-content) | `scrml-generated-merge` driver: 0 markers. Verified both sides' entries present: ours' 3 resolved (imported-cell-seed-time, locked-field-acting-init-place, use-site-value-seed) + open outer-cell-server-seed-reads-cell; main's opener-string-escapes (HIGH open) + display-untracked-later-mount-spine. Count block is bot-owned post-merge. |
 
 Auto-merged without conflict: compiler/SPEC.md (main's §6.15 A5 paragraph + §7.6 R5 note; ours §7.6 R1 note — disjoint), severity.scrml / SPEC-INDEX.md / FACTS.md / gap-counts.md / bootstrap-conformance.md (main-only; generated blocks bot-owned post-merge). Callers of the signatures this PR changed (`cellUsesDirect` +outer, `readsCellReach`) — main adds none.
+
+### sync gates (merged head d3dd80d5f; base = origin/main e78f8d123; reference = c18852e81)
+
+Probes + harness: ~/.cache/scrml/review/s482-2105-sync/ (`h/run.sh`, `old.txt` / `new.txt`).
+
+| gate | result |
+|---|---|
+| pre-commit (merge commit) | PASS (58402 pass / 0 fail) |
+| probes, merged head vs c18852e81 — 138: r3rev n/s/b, r2rev m/v/w, e/, leak table (s10–s14, s20, t1–t11 incl. t6/t6c), r1rev x/ (o1–o10 incl. o9, i3*, j*) | identical: exit, error/warning codes + text, client/server `zz-` presence, every LOAD/CLICK errs + body; all 393 emitted .js/.html byte-identical. No W-DISPLAY-UNTRACKED newly fires on any probe. |
+| pretest | exit 0 |
+| bootstrap-conformance --json | head = base (e78f8d123): PASS 851 / FAIL 3 / NOT-TWINNED 628 / UNSUPPORTED 491 / CRASH 0; 0 per-case bucket / emitted diffs (1973) |
+| slices outer-cell-place, client-roots, registry-client, seed-reach, display-untracked | 137 pass / 5 skip / 0 fail |
+| Chromium SCRML_BROWSER_TESTS=1: seed-timing + use-site-row + display-untracked | 27 pass / 0 fail |
+| corpus differential (2977) vs e78f8d123 | 0 newly rejected / accepted / code changes; 1 client diff (own-value-type/unproven-annotation-pos, Q13 names — the same one as r3); 0 server diffs |
+| s34-census --check-new --base e78f8d123 | PASS |
+| types-gate --check | OK, 182 unchanged |
