@@ -56,3 +56,13 @@ R4 fixes), 2 crash → named refusal, the rest unchanged. Results: B.txt / F.txt
 | host-global-scan 1/2, 2/2 | 0 violations (1/2: 2 threw, 2/2: 162 threw — impl#1, untouched) |
 | e2e-render-map | 259 pass / 0 fail |
 | retired-forms-lint --base-ref 3535bad9b | OK, counts equal baseline |
+
+## r1 (S483) — fix round on review s482-2116 (FIX-small)
+
+- Merged origin/main (2d40d8407) into the branch, no conflicts. Merge proof: 3-way over the review's
+  795-probe union (475 compile), hash-normalized artifacts: every probe the PR changed (19) and every
+  probe main changed (15, #2113 write-only-secret family) is disjoint; merged == the changing side for
+  each, == base for the rest. 0 bad.
+- F1 reproduced on the merged tree (Chromium): x01 1|1, x01c 1|1 1, x12 1|1. Locus confirmed: reachOf's
+  shared-ref branch pushed every field incl. derived. Fix: filter by `f3.wcap is given || constSeedField(p, f3)`
+  (bodyInits' `pre` predicate). After: x01 1|5, x01c 1|5 5, x12 1|5; controls x01b 1|5, x01d 1|5 5 unchanged.

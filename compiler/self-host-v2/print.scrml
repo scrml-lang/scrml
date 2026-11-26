@@ -6887,8 +6887,13 @@ ${
                         }
                     }
                     // s482 (lane s482-mount-reach-fu; §7.6 R4) — a reference to a declaration's shared
-                    // instance constructs it (its first one): every seed of the record runs there
-                    // (rt.seeded is owed until the construction ends), so every field is reached
+                    // instance constructs it (its first one): every SEED of the record runs there
+                    // (rt.seeded is owed until the construction ends), so every seeded field is reached
+                    // — the same "has a seed" test as bodyInits' `pre` (a writable cell's, or a
+                    // constant's with a live seed, constSeedField). A derived field is lazy
+                    // (rt.derived): its formula runs where it is READ, and the cellReadOf branch
+                    // above reaches it there (`@card.d`, or the whole record), not at the
+                    // construction (S483 review F1 of #2116: an unread derived field hoisted).
                     const sh: Sym | not = sharedRefOf(n);
                     if (sh is given && sh.id != p.program.id) {
                         for (const d3 of p.decls) {
@@ -6896,7 +6901,7 @@ ${
                                 let k3: int = 0;
                                 for (const f3 of d3.fields) {
                                     const key3: string = sh.id + ":" + k3;
-                                    if (seenF.indexOf(key3) < 0) {
+                                    if (seenF.indexOf(key3) < 0 && (f3.wcap is given || constSeedField(p, f3))) {
                                         seenF = seenF.concat([key3]);
                                         next = next.concat([Node.NField(f3)]);
                                     }
