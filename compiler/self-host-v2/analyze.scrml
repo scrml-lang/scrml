@@ -33424,16 +33424,22 @@ ${
 
     // ---- scope and purity (phaseB) --------------------------------------------
     // What an invariant may read (ruling S483 item 1; §66.13.5): the value's own
-    // fields (bare, nested paths included), literals, enum variants and calls of a
-    // pure `fn`. An `@` read is E-CONTRACT-003 (the S482 derived-check advice); any
-    // other outer binding, a `function` call, a method or host call, a write, a
-    // function value, a query or a handled failable is E-DECL-INVARIANT-IMPURE. A
-    // name that is nothing in scope is left to the resolver (E-SCOPE-001). An
-    // expression that fails here is not resolved further (no cascade).
+    // fields (bare, nested paths included), literals, enum variants, calls of a
+    // pure `fn`, and the deterministic built-in methods and properties a `fn` body
+    // may use on its own values (`.trim()`, `.length`, a `seq.filter(x => …)`
+    // callback) — r1 (#2120 review F3, prov=pa-ruled:S483-direct-equals-fn-purity:
+    // the purity of a direct expression equals the purity of a pure `fn` body). An
+    // `@` read is E-CONTRACT-003 (the S482 derived-check advice); any other outer
+    // binding, a `function` call, a write, a function value held as a value, a
+    // query or a handled failable is E-DECL-INVARIANT-IMPURE. Which built-in a
+    // method call IS (a host call is refused) is known once it is resolved:
+    // invReachPass. A name that is nothing in scope is left to the resolver
+    // (E-SCOPE-001). An expression that fails here is not resolved further (no
+    // cascade).
     type RInvP:struct = { ok: boolean, st: AS }
 
     fn invImpure(env: Env, e: AExpr, why: string, st: AS) -> RInvP {
-        return { ok: false, st: addDiag(st, env.file, e.span, "E-DECL-INVARIANT-IMPURE", why + " — an invariant reads only the value's own fields, literals, enum variants and calls of a pure `fn` (§66.13.5), so it is evaluated identically wherever the value is written. Compute the value in a `fn` that takes the fields as parameters: `invariant (ok(start, end))`") };
+        return { ok: false, st: addDiag(st, env.file, e.span, "E-DECL-INVARIANT-IMPURE", why + " — an invariant reads only the value's own fields, literals, enum variants, deterministic built-in methods and calls of a pure `fn` that computes only from its arguments (§66.13.5), so it is evaluated identically wherever the value is written. Compute the value in a `fn` that takes the fields as parameters: `invariant (ok(start, end))`") };
     }
 
     fn invPurity(env: Env, e: AExpr, names: string[], what: string, st0: AS) -> RInvP {
@@ -33448,20 +33454,32 @@ ${
             const n: string = nameOfExpr(e);
             if (names.indexOf(n) >= 0) return { ok: true, st: st0 };
             if (fnNamedIn(env, n) is given) return invImpure(env, e, shown + " names the function `" + n + "` as a value", st0);
-            if (constNamed(env.g, env.file, n) is given) return invImpure(env, e, shown + " reads the file-scope constant `" + n + "`, an outer binding", st0);
+            const kc: ConstInfo | not = constNamed(env.g, env.file, n);
+            if (kc is given) return invImpure(env, e, shown + " reads " + constShown(kc) + ", an outer binding", st0);
             if (hostBinding(env.g, env.file, n) is given) return invImpure(env, e, shown + " reads the host binding `" + n + "`, an outer binding", st0);
             return { ok: true, st: st0 };
         }
         if (exprTag(e) == "Call") {
             const callee: AExpr = callCallee(e);
             const cn: string = nameOfExpr(callee);
-            if (cn == "" || names.indexOf(cn) >= 0) return invImpure(env, e, shown + " calls something that is not a declared `fn` (a method, a host function or a field)", st0);
-            const cf: FnInfo | not = fnNamedIn(env, cn);
-            if (cf is given && !cf.pure) return invImpure(env, e, shown + " calls `" + cn + "`, which is declared `function` — it carries no purity guarantee (§48.6.2); declare it with `fn`", st0);
+            if (cn != "" && names.indexOf(cn) >= 0) return invImpure(env, e, shown + " calls the field `" + cn + "` — a field is a value, not a function", st0);
+            if (cn != "") {
+                const cf: FnInfo | not = fnNamedIn(env, cn);
+                if (cf is given && !cf.pure) return invImpure(env, e, shown + " calls `" + cn + "`, which is declared `function` — it carries no purity guarantee (§48.6.2); declare it with `fn`", st0);
+            }
             let st: AS = st0;
             let ok = true;
+            // r1 (F3): a method call — its receiver is read as any value is; which
+            // built-in it is (a host call is refused) is judged once resolved (invReachPass)
+            if (cn == "") {
+                const hn: string = invHostRoot(env, callee, names);
+                if (hn != "") return invImpure(env, e, shown + " calls `" + invCallText(callee) + "(…)` on `" + hn + "`, a host global — a host call is not a value computed from the fields", st0);
+                const rc: RInvP = invPurity(env, callee, names, what, st);
+                st = rc.st;
+                if (!rc.ok) ok = false;
+            }
             for (const a of invCallArgs(e)) {
-                const r: RInvP = invPurity(env, a, names, what, st);
+                const r: RInvP = invCallArg(env, a, cn == "", names, what, st);
                 st = r.st;
                 if (!r.ok) ok = false;
             }
@@ -33506,6 +33524,48 @@ ${
         return { ok: ok2, st: st2 };
     }
 
+    // r1 (#2120 review F6) — a file-scope binding as a message names it: a `let` is
+    // mutable (a write can change it), not a constant.
+    fn constShown(kc: ConstInfo) -> string {
+        if (kc.mutable) return "the file-scope `let` `" + kc.name + "` (a mutable binding — a write can change it)";
+        return "the file-scope constant `" + kc.name + "`";
+    }
+
+    // r1 (F3) — a method call's receiver that is a bare name bound to nothing the
+    // program declares (not a field, a callback parameter or a type — `E.toEnum(s)`
+    // stays): a host global (`Date.now()`, `Math.random()`). Its name, else "".
+    fn invHostRoot(env: Env, callee: AExpr, names: string[]) -> string {
+        const k: AExprK = callee.k;
+        const o: AExpr | not = match k {
+            .Member(obj: x) :> x,
+            // no-default-arm: one question — is the callee a member access
+            _ :> not
+        };
+        if (o is not) return "";
+        const n: string = nameOfExpr(o);
+        if (n == "" || names.indexOf(n) >= 0) return "";
+        if (scopeFrom(env.g.te.link, env.file, NameKind.KType, n) != "") return "";
+        if (fnNamedIn(env, n) is given || constNamed(env.g, env.file, n) is given || hostBinding(env.g, env.file, n) is given) return "";
+        return n;
+    }
+
+    // r1 (F3) — one argument of a call. A method's callback written `x => e` (a
+    // `seq.filter` / `.some` / `.map` argument, as a `fn` body may write it) is
+    // judged as its body, with its parameters bound; a block-bodied callback is not
+    // judged by the bootstrap yet (INTERIM, g-boot-invariant-block-lambda-s483).
+    fn invCallArg(env: Env, a: AExpr, method: boolean, names: string[], what: string, st: AS) -> RInvP {
+        if (!method) return invPurity(env, a, names, what, st);
+        const k: AExprK = a.k;
+        const lam: RInvP | not = match k {
+            .Lambda(params: lp, body: b) :> invPurity(env, b, names.concat(lp), what, st),
+            .BlockLambda(params: lp) :> invImpure(env, a, "`invariant (…)` on " + what + " holds a block-bodied callback (`x => { … }`) — not judged in an invariant by the bootstrap yet (INTERIM, g-boot-invariant-block-lambda-s483); write it as `x => expr`, or move the computation into a `fn` that takes the fields as parameters", st),
+            // no-default-arm: one question — is the argument a callback
+            _ :> not
+        };
+        if (lam is given) return lam;
+        return invPurity(env, a, names, what, st);
+    }
+
     fn callCallee(e: AExpr) -> AExpr {
         const kids: AExpr[] = exprKids(e);
         return kids[0];
@@ -33532,11 +33592,35 @@ ${
         for (const f of ds.info.fields) { names = names.concat([f.sym.hint]); }
         const env: Env = declEnv(g, ds, true);
         for (const iv of ds.info.invs) {
-            const r: RInvP = invPurity(env, iv.e, names, "`<" + d.name + ">`", st);
-            st = r.st;
-            if (r.ok) st = resolveExpr(env, iv.e, Type.Bool, st).st;
+            const cap: string = invCaptureWhy(env);
+            if (cap != "") {
+                st = addDiag(st, env.file, iv.span, "E-DECL-INVARIANT-CAPTURES-CALL", invCaptureMsg(iv, "`<" + d.name + ">`", cap));
+            } else {
+                const r: RInvP = invPurity(env, iv.e, names, "`<" + d.name + ">`", st);
+                st = r.st;
+                if (r.ok) st = resolveExpr(env, iv.e, Type.Bool, st).st;
+            }
         }
         return st;
+    }
+
+    // r1 (#2120 review F2, prov=pa-ruled:S483-capture-never-silent) — `invariant (` right
+    // after a declaration's closer or a `:struct` type body is the clause (§66.13.5
+    // rule 2), so a CALL `invariant(x);` written there is read as a clause. That
+    // reading is never silent: when a binding named `invariant` (a function, a
+    // constant, a host binding) is in scope at the clause, the clause is refused —
+    // E-DECL-INVARIANT-CAPTURES-CALL — and not judged further (fail closed). "" — none.
+    fn invCaptureWhy(env: Env) -> string {
+        const f: FnInfo | not = fnNamedIn(env, "invariant");
+        if (f is given) return "the " + (f.pure ? "`fn`" : "`function`") + " `invariant`";
+        const kc: ConstInfo | not = constNamed(env.g, env.file, "invariant");
+        if (kc is given) return constShown(kc);
+        if (hostBinding(env.g, env.file, "invariant") is given) return "the host binding `invariant`";
+        return "";
+    }
+
+    fn invCaptureMsg(iv: InvInfo, what: string, cap: string) -> string {
+        return "`invariant (" + iv.text + ")` here is read as an invariant clause on " + what + " — `invariant` followed by `(` right after a declaration's closer or a `:struct` type body is the clause (§66.13.5 rule 2) — but " + cap + " is in scope, so the line may be meant as a call or a use of that binding, not a clause. To call the function, rename it or move the call (put another statement between the declaration and the call); to state an invariant here, rename the binding";
     }
 
     // A `type X:struct`'s invariants: its fields are bound as read-only locals of
@@ -33552,11 +33636,212 @@ ${
                 st = rs.st;
                 env = withLocal(env, { name: fd.sym.hint, s: rs.s, ty: fd.ty, mutable: false, narrowed: not, nDecl: not, fresh: false, via: "", foreign: false });
             }
-            const r: RInvP = invPurity(env, iv.e, names, "`type " + ti.name + "`", st);
-            st = r.st;
-            if (r.ok) st = resolveExpr(env, iv.e, Type.Bool, st).st;
+            const cap: string = invCaptureWhy(env);
+            if (cap != "") {
+                st = addDiag(st, env.file, iv.span, "E-DECL-INVARIANT-CAPTURES-CALL", invCaptureMsg(iv, "`type " + ti.name + "`", cap));
+            } else {
+                const r: RInvP = invPurity(env, iv.e, names, "`type " + ti.name + "`", st);
+                st = r.st;
+                if (r.ok) st = resolveExpr(env, iv.e, Type.Bool, st).st;
+            }
         }
         return st;
+    }
+
+    // ---- what a resolved invariant reaches (after the binder) -------------------
+    // r1 (#2120 review F1 HIGH, prov=pa-ruled:S483-fn-chain-purity) — a `fn` called
+    // from an invariant, directly or through other `fn`s, reads exactly what the
+    // invariant may read directly: no cell (`@x`, `@.`: E-CONTRACT-003, naming the
+    // chain — the direct read's code) and no outer binding (a file-scope `let` or
+    // constant, a `<request>` / validity read, a lifecycle element:
+    // E-DECL-INVARIANT-IMPURE, naming the chain). §48.5.3 lets a `fn` read `@x` as a
+    // value, so "pure `fn`" alone does not make the invariant a function of the
+    // value's fields: without this, a write to `@limit` could break a stored value's
+    // invariant with nothing re-checking it (its read set never names `@limit`), and
+    // the client and the server could disagree. A function whose body the compiler
+    // cannot see is refused (fail closed).
+    // r1 (F3) — a call that is not a `fn` call is admitted only as a deterministic
+    // built-in (a typed method, `.at`, a sequence callback call, `E.toEnum`, a
+    // payload-variant construction, `parseVariant`) that writes nothing; a host
+    // call, `print`, a call through a value is E-DECL-INVARIANT-IMPURE.
+    // A clause with an error already inside it is not judged again (no cascade).
+    type InvHit:struct = { code: string, what: string, chain: string }
+
+    fn invReachPass(g: Globals, t: Tables, prior: Diag[]) -> Diag[] {
+        let out: Diag[] = [];
+        for (const ds of g.decls) {
+            const d: ADecl | not = ds.d;
+            if (d is given && !ds.isProgram) {
+                for (const iv of ds.info.invs) { out = out.concat(invReachDiags(g, t, ds.file, iv, "`<" + d.name + ">`", prior)); }
+            }
+        }
+        for (const ti of g.types) {
+            for (const iv of ti.invs) { out = out.concat(invReachDiags(g, t, ti.file, iv, "`type " + ti.name + "`", prior)); }
+        }
+        return out;
+    }
+
+    fn invErrIn(prior: Diag[], file: string, span: ASpan) -> boolean {
+        for (const d of prior) {
+            if (d.file == file && d.code.startsWith("E-") && d.span.start >= span.start && d.span.end <= span.end) return true;
+        }
+        return false;
+    }
+
+    fn invReachDiags(g: Globals, t: Tables, file: string, iv: InvInfo, what: string, prior: Diag[]) -> Diag[] {
+        if (invErrIn(prior, file, iv.span)) return [];
+        const shown: string = "`invariant (" + iv.text + ")` on " + what;
+        let out: Diag[] = [];
+        for (const c of invCallsIn(iv.e)) {
+            const callee: AExpr = callCallee(c);
+            const sym: int = invFnSymOf(nameFact(t.names, callee.nid));
+            if (sym >= 0) {
+                const fs: FnSrc | not = fnSrcOfSym(g, sym);
+                if (fs is not) {
+                    out = out.concat([newDiag("E-DECL-INVARIANT-IMPURE", shown + " calls `" + exprName(callee) + "`, whose body the compiler cannot see, so it cannot prove the call reads no cell and no outer binding (§66.13.5 rule 7) — compute the value in a `fn` declared in this program that takes the fields as parameters", file, c.span)]);
+                } else {
+                    const h: InvHit | not = invChainHit(g, t, fs);
+                    if (h is given) out = out.concat([newDiag(h.code, invChainMsg(shown, fs.info.name, h), file, c.span)]);
+                }
+            } else if (!invBuiltinOk(valueFact(t.values, c.nid)) || effectFact(t.effects, c.nid) is given) {
+                out = out.concat([newDiag("E-DECL-INVARIANT-IMPURE", shown + " calls `" + invCallText(callee) + "(…)`, which is not a pure `fn` or a deterministic built-in method on a value (a host function, `print`, a call through a function value, or an edit that writes) — an invariant reads only the value's own fields, literals, enum variants, deterministic built-in methods and calls of a pure `fn` that computes only from its arguments (§66.13.5 rule 7). Compute the value in a `fn` that takes the fields as parameters", file, c.span)]);
+            }
+        }
+        return out;
+    }
+
+    fn invChainMsg(shown: string, first: string, h: InvHit) -> string {
+        const via: string = h.chain.indexOf(" → ") >= 0 ? " (through " + h.chain + ")" : "";
+        const tail: string = " — a `fn` called from an invariant must compute only from its arguments, at any depth of calls: it reads no cell and no outer binding, exactly as the invariant itself (§66.13.5 rules 6 and 7; prov=pa-ruled:S483-fn-chain-purity). Otherwise a write to what it reads could break a stored value's invariant with nothing re-checking it, and the client and the server could disagree. Pass what it needs in as an argument computed from the fields";
+        if (h.code == "E-CONTRACT-003") return shown + " calls `" + first + "`" + via + ", which " + h.what + tail + ". A type's rule checks only its own value; to compare against a cell, write a derived check (e.g. `<over=(@x.end > @limit)/>`, where `@x` is the declared value) and use it in markup or the handler that changes the value";
+        return shown + " calls `" + first + "`" + via + ", which " + h.what + tail;
+    }
+
+    // The first forbidden read a `fn` reaches — in its own body or through the
+    // functions it names (breadth-first, each once) — with the call chain to it.
+    fn invChainHit(g: Globals, t: Tables, start: FnSrc) -> InvHit | not {
+        let queue: FnSrc[] = [start];
+        let chains: string[] = ["`" + start.info.name + "`"];
+        let seen: int[] = [start.info.sym.id];
+        let i: int = 0;
+        for (; i < queue.length; ) {
+            const fs: FnSrc = queue[i];
+            const ch: string = chains[i];
+            for (const x of invBodyExprs(fs.f.body)) {
+                const h: InvHit | not = invBodyRead(g, t, x, ch);
+                if (h is given) return h;
+                const sym: int = invFnSymOf(nameFact(t.names, x.nid));
+                if (sym >= 0 && seen.indexOf(sym) < 0) {
+                    seen = seen.concat([sym]);
+                    const nx: FnSrc | not = fnSrcOfSym(g, sym);
+                    if (nx is not) return { code: "E-DECL-INVARIANT-IMPURE", what: "calls `" + exprName(x) + "`, whose body the compiler cannot see", chain: ch };
+                    queue = queue.concat([nx]);
+                    chains = chains.concat([ch + " → `" + nx.info.name + "`"]);
+                }
+            }
+            i = i + 1;
+        }
+        return not;
+    }
+
+    // One node of a reached `fn` body: a read an invariant may not make, else `not`.
+    fn invBodyRead(g: Globals, t: Tables, x: AExpr, chain: string) -> InvHit | not {
+        const tag: string = exprTag(x);
+        if (tag == "At") return { code: "E-CONTRACT-003", what: "reads the cell `@" + atName(x) + "`", chain: chain };
+        if (tag == "AtItem") return { code: "E-CONTRACT-003", what: "reads the row value `@.`", chain: chain };
+        if (tag == "HashRef") return { code: "E-DECL-INVARIANT-IMPURE", what: "reads a lifecycle element (`<#id>`)", chain: chain };
+        const f: NameFact | not = nameFact(t.names, x.nid);
+        const what: string = match f {
+            .NConst(sym: s) :> invConstRead(g, s.id),
+            .NField(decl: d) :> "reads a field of a declared value",
+            .NInst(decl: d) :> "reads a declared value",
+            .NSurface(of: o) :> "reads a validity surface",
+            .NReq(id: r) :> "reads a `<request>`'s state",
+            .NLocal(sym: s) :> "",
+            .NStruct(owner: o) :> "",
+            .NFn(sym: s) :> "",
+            .NLength :> "",
+            not :> ""
+        };
+        if (what == "") return not;
+        return { code: "E-DECL-INVARIANT-IMPURE", what: what, chain: chain };
+    }
+
+    fn invConstRead(g: Globals, id: int) -> string {
+        for (const c of g.consts) {
+            if (c.sym.id == id) return "reads " + constShown(c) + ", an outer binding";
+        }
+        return "reads a file-scope binding, an outer binding";
+    }
+
+    fn invFnSymOf(f: NameFact | not) -> int {
+        return match f {
+            .NFn(sym: s) :> s.id,
+            .NConst(sym: x) :> -1,
+            .NLocal(sym: x) :> -1,
+            .NField(decl: x) :> -1,
+            .NInst(decl: x) :> -1,
+            .NStruct(owner: x) :> -1,
+            .NLength :> -1,
+            .NSurface(of: x) :> -1,
+            .NReq(id: x) :> -1,
+            not :> -1
+        };
+    }
+
+    // r1 (F3) — the deterministic built-in calls an invariant may make (what a `fn`
+    // body may call on its own values).
+    fn invBuiltinOk(v: ValueFact | not) -> boolean {
+        return match v {
+            .VMethod(op: o) :> true,
+            .VAt :> true,
+            .VSeqCall(op: o) :> true,
+            .VToEnum(enumSym: s) :> true,
+            .VConstruct(enumSym: s) :> true,
+            .VParseVariant(en: x) :> true,
+            // no-default-arm: every other fact on a call node (a host call, `print`, a call through a value) is refused
+            _ :> false
+        };
+    }
+
+    fn invCallText(callee: AExpr) -> string {
+        const k: AExprK = callee.k;
+        const t: string = match k {
+            .Name(name: n) :> n,
+            .Member(obj: o, name: m) :> (exprName(o) != "" ? exprName(o) + "." + m : "…." + m),
+            // no-default-arm: a message's name for the callee, any other shape unnamed
+            _ :> ""
+        };
+        if (t == "") return "…";
+        return t;
+    }
+
+    // Every call node of an invariant (a callback's body included).
+    fn invCallsIn(e: AExpr) -> AExpr[] {
+        let out: AExpr[] = [];
+        if (exprTag(e) == "Call") out = [e];
+        for (const x of exprKids(e)) { out = out.concat(invCallsIn(x)); }
+        return out;
+    }
+
+    // Every expression node of a body, at any depth (nested blocks, nested
+    // functions' bodies and callbacks included).
+    fn invBodyExprs(b: ABlock) -> AExpr[] {
+        let out: AExpr[] = [];
+        for (const s of b.stmts) {
+            for (const e of stmtExprs(s)) { out = out.concat(invExprsDeep(e)); }
+            for (const nb of nestedBlocks(s)) { out = out.concat(invBodyExprs(nb)); }
+            const lf: AFn | not = localFnOf(s);
+            if (lf is given) out = out.concat(invBodyExprs(lf.body));
+        }
+        return out;
+    }
+
+    fn invExprsDeep(e: AExpr) -> AExpr[] {
+        let out: AExpr[] = [e];
+        for (const x of exprKids(e)) { out = out.concat(invExprsDeep(x)); }
+        for (const b of exprBlocksIn(e)) { out = out.concat(invBodyExprs(b)); }
+        return out;
     }
 
     // ---- the `bool` type and the declaration's defaults (the typer) -------------
@@ -34008,7 +34293,9 @@ ${
         if (invs.length == 0) return ts;
         const ents: FEnt[] = fvObject(x);
         let out: TypeState = ts;
-        for (const iv of invs) { out = invVerdict(env, iv, ents, x.span, what, out); }
+        for (const iv of invs) {
+            if (!hasErrIn(env.blame.spans, iv.span)) out = invVerdict(env, iv, ents, x.span, what, out);
+        }
         return out;
     }
 
@@ -57888,7 +58175,7 @@ ${
         // s444 Phase B: dead validators (RULED S442 (5)) and the forms that take `novalidate` (RULED S442 (3))
         const vp: ValPass = validatorPass(ra.g, bound);
         // s468: static executable attribute values (§5.2 S464) and impure `fn` bodies (§48.3.3)
-        const sinkDiags: Diag[] = staticExecPass(ra.g, bound).concat(fnWritePass(ra.g, sum)).concat(fileScopePass(ra.g, bound, sum)).concat(fallOffPass(ra.g, bound)).concat(txRulesPass(ra.g)).concat(css.diags).concat(styleOverlaps(ra.g));
+        const sinkDiags: Diag[] = staticExecPass(ra.g, bound).concat(fnWritePass(ra.g, sum)).concat(fileScopePass(ra.g, bound, sum)).concat(fallOffPass(ra.g, bound)).concat(invReachPass(ra.g, bound, st.diags)).concat(txRulesPass(ra.g)).concat(css.diags).concat(styleOverlaps(ra.g));
         const typed: RTyping = typeProgram(files, withWaits(bound, waitingFns(sum)), st.diags.concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags), ra.g.te.link);
         // s451 (U1a): route placement, the queries and the databases
         const pp: RPlaced = placePass(ra.g, bound, st, sum);

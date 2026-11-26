@@ -50,8 +50,12 @@ describe("accepted: the clause after a declaration's closer and after a `type :s
       "type Band:struct = { low: int, mid: int, high: int } invariant (low <= mid) [lowMid] invariant (mid <= high)\n" + prog(`    let <b:Band=({ low: 1, mid: 2, high: 3 })/>\n    <main><p>\${@b.low}</p></main>`)],
     ["the type form inside a logic block",
       prog("    ${ type Range:struct = { lo: int, hi: int } invariant (lo <= hi) }\n    let <r:Range=({ lo: 1, hi: 2 })/>\n    <main><p>${@r.lo}</p></main>")],
-    ["a function named `invariant` is still called anywhere else",
-      `    fn invariant(x: int) -> bool { return x > 0; }\n${RANGE}\n    invariant (start <= end)\n    <main><p>\${invariant(3)}</p></main>`],
+    ["a function named `invariant` is still called anywhere else (no clause position)",
+      `    fn invariant(x: int) -> bool { return x > 0; }\n    <main><p>\${invariant(3)}</p></main>`],
+    ["deterministic built-in methods and a `x => expr` callback, directly (r1 F3)",
+      `    <person:struct>\n        let <first:string=""/>\n        let <last:string=""/>\n    </>\n    invariant (first.trim().toUpperCase() != "X" || last.length == 0)\n    invariant ([first, last].some(x => x != ""))\n    <main><p>\${@person.first}</p></main>`],
+    ["a `fn` chain that computes only from its arguments (r1 F1)",
+      `    fn width(a: int, b: int) -> int { return b - a; }\n    fn ok(a: int, b: int) -> bool { return width(a, b) >= 0; }\n${RANGE}\n    invariant (ok(start, end))\n    <main><p>\${@dateRange.start}</p></main>`],
     ["a computed write compiles (its check is run time — lane 2)",
       `${RANGE}\n    invariant (start <= end)\n    function shift(n: int) { @dateRange = { ...@dateRange, start: @dateRange.start + n, end: @dateRange.end + n }; }\n    <main><button onclick=shift(1)>x</button></main>`],
   ];
@@ -101,7 +105,8 @@ describe("refused at the declaration", () => {
 
   const impure = [
     ["a `function` call", "    function check() { return true; }\n", "invariant (check())", "declared `function`"],
-    ["a method call", "", "invariant (start.toString() == \"0\")", "not a declared `fn`"],
+    ["a host call (r1 F3: a method on a host global)", "", "invariant (Date.now() > start)", "a host global"],
+    ["a file-scope `let` (r1 F6: named a `let`, not a constant)", "    ${ let lim = 3; }\n", "invariant (end <= lim)", "the file-scope `let` `lim`"],
     ["a file-scope constant", "    ${ const LIMIT = 3; }\n", "invariant (end <= LIMIT)", "file-scope constant"],
     ["a write", "", "invariant (start = 1)", "writes a value"],
   ];
@@ -163,5 +168,88 @@ describe("static E-WRITE-INVARIANT — a literal value provably breaks the invar
     expect(codes(ok)).toEqual([]);
     const bad = await result(prog("    <slider min:int=0 max:int=100>\n        let <value:int=50/>\n    </>\n    invariant (min <= value && value <= max)\n    renders <span>${value}</span>\n    <main><slider max=10/></main>"));
     expect(codes(bad)).toEqual(["E-WRITE-INVARIANT"]);
+  }, 120000);
+});
+
+// ---- r1 (PR #2120 review) ----------------------------------------------------------------------------
+// F1 HIGH (prov=pa-ruled:S483-fn-chain-purity): a `fn` called from an invariant — directly or through other
+// `fn`s — reads exactly what the invariant may read directly: a cell is E-CONTRACT-003, a file-scope `let` /
+// constant E-DECL-INVARIANT-IMPURE, each naming the call chain. Review probes b03, b04 + adjacent.
+describe("r1 F1 — a `fn` reached from an invariant reads no cell and no outer binding", () => {
+  const cases = [
+    ["b03: a `fn` reading a cell", "    let <limit:int=3/>\n    ${ fn ok(a: int, b: int) -> bool { return b - a <= @limit; } }\n", "invariant (ok(start, end))", "E-CONTRACT-003", ["calls `ok`, which reads the cell `@limit`"]],
+    ["b04: a `fn` reading a mutable file-scope `let`", "    ${ let lim = 3;\n       fn ok(a: int, b: int) -> bool { return b - a <= lim; }\n       function bump() { lim = lim + 1; } }\n", "invariant (ok(start, end))", "E-DECL-INVARIANT-IMPURE", ["the file-scope `let` `lim`", "a write can change it"]],
+    ["a two-deep chain to a cell, naming the chain", "    let <limit:int=3/>\n    ${ fn inner(a: int) -> int { return a + @limit; }\n       fn ok(a: int, b: int) -> bool { return b <= inner(a); } }\n", "invariant (ok(start, end))", "E-CONTRACT-003", ["(through `ok` → `inner`)", "`@limit`"]],
+    ["a `fn` reading a file-scope constant (the direct-read rule, exactly)", "    ${ const MAXW = 30;\n       fn ok(a: int, b: int) -> bool { return b - a <= MAXW; } }\n", "invariant (ok(start, end))", "E-DECL-INVARIANT-IMPURE", ["the file-scope constant `MAXW`"]],
+    ["a `fn` reading a cell on one branch only", "    let <limit:int=3/>\n    ${ fn ok(a: int, b: int) -> bool { if (a > 100) { return b <= @limit; } return a <= b; } }\n", "invariant (ok(start, end))", "E-CONTRACT-003", ["`@limit`"]],
+  ];
+  for (const [name, pre, clause, code, msgs] of cases) {
+    test(name, async () => {
+      const r = await result(prog(`${pre}${RANGE}\n    ${clause}\n    <main><p>\${@dateRange.start}</p></main>`));
+      expect(codes(r)).toEqual([code]);
+      for (const m of msgs) expect(errs(r)[0].message).toContain(m);
+    }, 120000);
+  }
+
+  test("the type form: a `fn` reading a file-scope `let`", async () => {
+    const r = await result(prog("    ${ let lim = 3;\n       fn ok(a: int, b: int) -> bool { return b - a <= lim; }\n       function bump() { lim = lim + 1; }\n       type Range:struct = { lo: int, hi: int } invariant (ok(lo, hi))\n    }\n    let <r:Range=({ lo: 1, hi: 2 })/>\n    <main><button onclick=bump()>${@r.lo}</button></main>"));
+    expect(codes(r)).toEqual(["E-DECL-INVARIANT-IMPURE"]);
+    expect(errs(r)[0].message).toContain("on `type Range` calls `ok`");
+  }, 120000);
+});
+
+// F2 MED (prov=pa-ruled:S483-capture-never-silent): `invariant (` right after a closer / a `:struct` body is the
+// clause; a binding named `invariant` in scope there makes the clause E-DECL-INVARIANT-CAPTURES-CALL — never a
+// silent drop of a call. Review probes a18, a23, a24.
+describe("r1 F2 — a captured `invariant(…)` call is never silent", () => {
+  const cases = [
+    ["a24: a `function invariant` call after a declaration's closer", "    function invariant(x: bool) { @hits = @hits + 1; }\n    let <hits:int=0/>\n    <r:struct>\n        let <a:int=0/>\n    </>\n    invariant(true);\n    <main><p>${@hits}</p></main>", "the `function` `invariant`"],
+    ["a23: a non-bool argument gets the named diagnostic, not E-DECL-INVARIANT-NOT-BOOL", "    function invariant(x: int) { @hits = @hits + x; }\n    let <hits:int=0/>\n    <r:struct>\n        let <a:int=0/>\n    </>\n    invariant(1);\n    <main><p>${@hits}</p></main>", "rename it or move the call"],
+    ["a18: after a `type :struct` body in a logic block", "    ${\n        function invariant(x: bool) { @hits = @hits + 1; }\n        type R:struct = { lo: int, hi: int }\n        invariant(true);\n    }\n    let <hits:int=0/>\n    <main><p>${@hits}</p></main>", "on `type R`"],
+    ["a constant named `invariant` in scope", "    ${ const invariant = 3; }\n    <r2:struct>\n        let <a:int=0/>\n        let <b:int=1/>\n    </>\n    invariant (a <= b)\n    <main><p>${@r2.a}</p></main>", "the file-scope constant `invariant`"],
+  ];
+  for (const [name, body, msg] of cases) {
+    test(name, async () => {
+      const r = await result(prog(body));
+      expect(codes(r)).toEqual(["E-DECL-INVARIANT-CAPTURES-CALL"]);
+      expect(errs(r)[0].message).toContain("is read as an invariant clause");
+      expect(errs(r)[0].message).toContain(msg);
+    }, 120000);
+  }
+});
+
+// F3 MED (prov=pa-ruled:S483-direct-equals-fn-purity): what a pure `fn` body may use on its own values is
+// allowed directly; what it may not stays refused. Review probes b06 (now accepted, as b21 was).
+describe("r1 F3 — direct purity equals pure-`fn` purity", () => {
+  test("b06: `.trim()` directly, as inside a `fn` (b21)", async () => {
+    const r = await result(prog("    <person:struct>\n        let <first:string=\"\"/>\n        let <last:string=\"\"/>\n    </>\n    invariant (first.trim() != \"\" || last.length == 0)\n    <main><p>${@person.first}</p></main>"));
+    expect(codes(r)).toEqual([]);
+  }, 120000);
+
+  test("a callback reading a file-scope constant: E-DECL-INVARIANT-IMPURE", async () => {
+    const r = await result(prog(`    \${ const K = 5; }\n${RANGE}\n    invariant ([start, end].some(x => x > K))\n    <main><p>\${@dateRange.start}</p></main>`));
+    expect(codes(r)).toEqual(["E-DECL-INVARIANT-IMPURE"]);
+    expect(errs(r)[0].message).toContain("`K`");
+  }, 120000);
+
+  test("a block-bodied callback: refused by name (INTERIM)", async () => {
+    const r = await result(prog(`${RANGE}\n    invariant ([start, end].some(x => { return x > 5; }))\n    <main><p>\${@dateRange.start}</p></main>`));
+    expect(codes(r)).toEqual(["E-DECL-INVARIANT-IMPURE"]);
+    expect(errs(r)[0].message).toContain("g-boot-invariant-block-lambda-s483");
+  }, 120000);
+});
+
+// F4 MED: the §53.8.1 Booking example (int-comparable fields) compiles, and a literal that breaks it is caught.
+describe("r1 F4 — the §53.8.1 Booking example", () => {
+  const BOOKING = "    ${\n    type Booking:struct = {\n        checkIn:  int,\n        checkOut: int,\n        nights:   int\n    } invariant (checkIn < checkOut) [validDateRange]\n      invariant (checkOut - checkIn == nights) [nightsMatch]\n    }\n";
+  test("compiles", async () => {
+    const r = await result(prog(BOOKING + "    let <booking:Booking=({ checkIn: 20260601, checkOut: 20260608, nights: 7 })/>\n    <main><p>${@booking.nights}</p></main>"));
+    expect(codes(r)).toEqual([]);
+    expect(r.ok).toBe(true);
+  }, 120000);
+  test("a literal booking that ends before it starts: E-WRITE-INVARIANT naming the label", async () => {
+    const r = await result(prog(BOOKING + "    let <booking:Booking=({ checkIn: 20260608, checkOut: 20260601, nights: 7 })/>\n    <main><p>${@booking.nights}</p></main>"));
+    expect(codes(r)).toContain("E-WRITE-INVARIANT");
+    expect(errs(r).map((d) => d.message).join("\n")).toContain("`[validDateRange]`");
   }, 120000);
 });

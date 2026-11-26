@@ -1,0 +1,26 @@
+{
+  "id": "invariant-captures-call-neg",
+  "description": "A call `invariant(true);` written right after a declaration's closer is read as an invariant clause; with a function named `invariant` in scope that reading is refused by name (E-DECL-INVARIANT-CAPTURES-CALL), never a silently dropped call.",
+  "language-version": "1.0",
+  "spec": "§66.13.5",
+  "provenance": "ruling:user-voice-scrml.md-S483-struct-invariant-syntax (\"yes, your recommendations on all three plus the follow-up\"); ruling:user-voice-scrml.md-S482-struct-invariant-contract (\"RULED yes (a)\")",
+  "rationale": "§66.13.5 rule 2 (r1): `invariant` followed by `(` right after a closer is the clause; when a binding named `invariant` is in scope there, the clause is E-DECL-INVARIANT-CAPTURES-CALL (fail closed).",
+  "expect": {
+    "codes": [
+      "E-DECL-INVARIANT-CAPTURES-CALL"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-decl-invariant-unimplemented-s483",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-SCOPE-001=2",
+          "emitted:E-STATE-UNDECLARED=2",
+          "missing:E-DECL-INVARIANT-CAPTURES-CALL"
+        ]
+      }
+    }
+  }
+}

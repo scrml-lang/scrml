@@ -1,0 +1,14 @@
+// §66.13.5 rules 6-7 (S483 r1, prov=pa-ruled:S483-fn-chain-purity) — `ok` reaches `@limit` through `inner`.
+<program>
+    let <limit:int=3/>
+    ${ fn inner(a: int) -> int { return a + @limit; }
+       fn ok(a: int, b: int) -> bool { return b <= inner(a); } }
+    <dateRange:struct>
+        let <start:int=0/>
+        let <end:int=0/>
+    </>
+    invariant (ok(start, end))
+    <main>
+        <p id="s">${@dateRange.start}</p>
+    </main>
+</program>
