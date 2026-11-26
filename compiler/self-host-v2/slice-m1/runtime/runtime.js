@@ -144,6 +144,8 @@ export function batch(fn) {
 // taken from `effectQueue` runs at most MAX_RUNS (metaMaxRuns: 100, `globalThis.__scrml_max_meta_runs`
 // overrides — the same cap and override as a runtime `^{}` block) times in one flush; past that it
 // logs the cycle once (console.error) and skips the run. The next flush counts afresh.
+// s483 (s483-host-render-request; RULED S483, ruling:user-voice-scrml.md-S483-host-calls-render-request,
+// Q15 (a)) — a render / structure effect taken from `queue` has the same cap (drainQueues).
 //
 // One flush at a time (s449 fix round, MEDIUM-1): a render effect that writes
 // while it runs — `<each>`'s reconcile sets a surviving row's item cell before
@@ -226,11 +228,30 @@ function drainQueues() {
   let failed = false;
   const effectRuns = new Map();        // s482 (s482-effect-host): runs of each queued effect, this flush
   let maxEffectRuns = 0;
+  const renderRuns = new Map();        // s483 (s483-host-render-request): runs of each render effect, this flush
   for (;;) {
     let e = null;
     if (queue.size > 0) {
       [e] = queue;
       queue.delete(e);
+      // s483 — the render queue's backstop (RULED S483, ruling:user-voice-scrml.md-S483-host-calls-render-request,
+      // Q15 (a): "a run cap on the render queue now, matching the S482 effect cap, so no shape can hang").
+      // A render / structure effect (an `Effect`: an interpolation, an attribute, an `if=` / `<each>`)
+      // writes no cell (§6.15), and host code it reaches is refused at compile time (E-VALUE-WRITE-UNPROVEN)
+      // — but host glue that fired a DOM event whose handler wrote the cell an interpolation read re-queued
+      // that render forever in one flush (probe F9). So one runs at most metaMaxRuns() times per flush;
+      // past that the cycle is logged once and the run skipped. A runtime `^{}` block keeps its own cap.
+      if (e instanceof Effect && !e.disposed) {
+        if (maxEffectRuns === 0) maxEffectRuns = metaMaxRuns();
+        const n = (renderRuns.get(e) ?? 0) + 1;
+        renderRuns.set(e, n);
+        if (n > maxEffectRuns) {
+          if (n === maxEffectRuns + 1) {
+            console.error("[scrml] render effect exceeded " + maxEffectRuns + " runs in one update — possible infinite loop (a value it reads is written while it renders); the run is skipped");
+          }
+          continue;
+        }
+      }
     } else if (heldToRestore.size > 0) {
       // s480 — the render effects of this flush have settled: held elements whose every
       // attribute reads again go back now (`restoreHeld`), before the `<effect>` bodies run
