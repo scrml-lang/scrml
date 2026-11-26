@@ -6075,7 +6075,8 @@ ${
         // and so are those of each instance the body mounts unconditionally (liveSeedDecl; its
         // place is its mount) — so neither reaches anything before the body. What still runs
         // before it: the construction of a declaration the body does not mount (a shared
-        // reference, an instance a function lifts — constructedElsewhere), a seed that is not
+        // reference in a function or an unplaced binding, an instance a function lifts —
+        // constructedElsewhere; a shared reference in the body is constructed at it, R4), a seed that is not
         // held (a persisted cell's default), and the §25.7 CSS bridges; and a READ of a seed, or
         // of a lazy derived value, before its place runs its initializer then (reachOf follows
         // cell reads into their initializers, and instances into their declarations).

@@ -13420,7 +13420,7 @@ ${
         // renders (a state-child body showing its own field, a field's `renders` holding its own
         // `<*f/>`): that markup is already being judged, at this place, by the enclosing `<*f/>` —
         // walking it again judges the same code at the same place, without end. (The render itself
-        // has no end: the bootstrap refuses it — selfStarDiags.)
+        // has no end: the resolver refuses it — starRendersSelf.)
         if (cx.stars.indexOf(e.nid) >= 0) return [];
         let scx: BodyCx = { g: cx.g, t: cx.t, sum: cx.sum, usesD: cx.usesD, binds: cx.binds, file: cx.file, places: cx.places, cells: cx.cells, prog: cx.prog, pfields: cx.pfields, at: cx.at, mfile: cx.mfile, mspan: cx.mspan, mount: cx.mount, dname: cx.dname, stack: cx.stack, idecl: cx.idecl, ifields: cx.ifields, stars: cx.stars.concat([e.nid]), via: " in the markup `<" + cx.dname + ">`'s render shows through `<*" + e.tag + "/>`" };
         if (cx.at < 0) {
