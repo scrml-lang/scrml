@@ -12830,7 +12830,7 @@ ${
     // judged (where the diagnostic points, and how it is named); `dname` — the declaration whose code
     // is walked; `stack` — the declarations on the mount path (a cycle guard); `idecl` / `ifields` —
     // that declaration and its fields (a read of a DERIVED field runs its formula where it is read).
-    type BodyCx:struct = { g: Globals, t: Tables, sum: Summary, usesD: FxAtom[][], binds: int[], file: string, places: BodyPlace[], cells: BodyCell[], prog: int, pfields: FieldInfo[], at: int, mfile: string, mspan: ASpan, mount: string, dname: string, stack: int[], idecl: int, ifields: FieldInfo[] }
+    type BodyCx:struct = { g: Globals, t: Tables, sum: Summary, usesD: FxAtom[][], binds: int[], file: string, places: BodyPlace[], cells: BodyCell[], prog: int, pfields: FieldInfo[], at: int, mfile: string, mspan: ASpan, mount: string, dname: string, stack: int[], idecl: int, ifields: FieldInfo[], stars: int[], via: string }
 
     // s482 (lane s482-seed-reach) — a program cell, for the later-place judgment: its place
     // (`pos`, where its declaration stands — a seeded cell's seed is computed there, §7.6 rule (b)
@@ -12862,7 +12862,7 @@ ${
                 };
                 const places: BodyPlace[] = bodyPlaces(g, f.path, ps);
                 if (places.length > 0) {
-                    const cx: BodyCx = { g: g, t: t, sum: sum, usesD: usesD, binds: binds, file: f.path, places: places, cells: bodyCells(g, t, ps), prog: g.program.id, pfields: programCells(g), at: -1, mfile: f.path, mspan: { start: 0, end: 0 }, mount: "", dname: "", stack: [], idecl: -1, ifields: [] };
+                    const cx: BodyCx = { g: g, t: t, sum: sum, usesD: usesD, binds: binds, file: f.path, places: places, cells: bodyCells(g, t, ps), prog: g.program.id, pfields: programCells(g), at: -1, mfile: f.path, mspan: { start: 0, end: 0 }, mount: "", dname: "", stack: [], idecl: -1, ifields: [], stars: [], via: "" };
                     for (const pi of ps) {
                         const n: ANode | not = markupOfItem(pi);
                         if (n is given) out = out.concat(bodyNodeReach(cx, n));
@@ -12968,7 +12968,7 @@ ${
         let ci: int = 0;
         for (const c of cells) {
             if (!c.derived) {
-                const cx: BodyCx = { g: g, t: t, sum: sum, usesD: usesD, binds: binds, file: files[ci], places: places, cells: cells, prog: g.program.id, pfields: programCells(g), at: -1, mfile: files[ci], mspan: { start: 0, end: 0 }, mount: "", dname: "", stack: [], idecl: -1, ifields: [] };
+                const cx: BodyCx = { g: g, t: t, sum: sum, usesD: usesD, binds: binds, file: files[ci], places: places, cells: cells, prog: g.program.id, pfields: programCells(g), at: -1, mfile: files[ci], mspan: { start: 0, end: 0 }, mount: "", dname: "", stack: [], idecl: -1, ifields: [], stars: [], via: "" };
                 const r: SeedReach | not = cellReach(cx, c, c.pos, [c.sym]);
                 if (r is given) out = out.concat([outerLaterDiag(r, c.name, r.bp.pos == late)]);
             }
@@ -13416,11 +13416,17 @@ ${
             _ :> []
         };
         if (nodes.length == 0) return [];
-        let scx: BodyCx = cx;
+        // s482 (lane s482-mount-reach-fu, #2112 r1 re-review F/U-2) — a `<*f/>` inside the markup it
+        // renders (a state-child body showing its own field, a field's `renders` holding its own
+        // `<*f/>`): that markup is already being judged, at this place, by the enclosing `<*f/>` —
+        // walking it again judges the same code at the same place, without end. (The render itself
+        // has no end: the resolver refuses it — starRendersSelf.)
+        if (cx.stars.indexOf(e.nid) >= 0) return [];
+        let scx: BodyCx = { g: cx.g, t: cx.t, sum: cx.sum, usesD: cx.usesD, binds: cx.binds, file: cx.file, places: cx.places, cells: cx.cells, prog: cx.prog, pfields: cx.pfields, at: cx.at, mfile: cx.mfile, mspan: cx.mspan, mount: cx.mount, dname: cx.dname, stack: cx.stack, idecl: cx.idecl, ifields: cx.ifields, stars: cx.stars.concat([e.nid]), via: " in the markup `<" + cx.dname + ">`'s render shows through `<*" + e.tag + "/>`" };
         if (cx.at < 0) {
             // in the body: the markup runs at this `<*f/>`'s place; `dname` "" marks a body-level
             // `<*f/>` for reachDiag's wording (no instance is mounted by it)
-            scx = { g: cx.g, t: cx.t, sum: cx.sum, usesD: cx.usesD, binds: cx.binds, file: cx.file, places: cx.places, cells: cx.cells, prog: cx.prog, pfields: cx.pfields, at: e.span.start, mfile: cx.file, mspan: e.span, mount: "this `<*" + e.tag + "/>`", dname: "", stack: cx.stack, idecl: cx.idecl, ifields: cx.ifields };
+            scx = { g: cx.g, t: cx.t, sum: cx.sum, usesD: cx.usesD, binds: cx.binds, file: cx.file, places: cx.places, cells: cx.cells, prog: cx.prog, pfields: cx.pfields, at: e.span.start, mfile: cx.file, mspan: e.span, mount: "this `<*" + e.tag + "/>`", dname: "", stack: cx.stack, idecl: cx.idecl, ifields: cx.ifields, stars: cx.stars.concat([e.nid]), via: "" };
         }
         let out: Diag[] = [];
         for (const n of nodes) { out = out.concat(bodyNodeReach(scx, n)); }
@@ -13514,7 +13520,11 @@ ${
         // s482 r1 (#2112 review MED-2) — a body-level `<*f/>` (starReach, dname "") renders a field's
         // markup here; it mounts nothing itself
         if (cx.dname == "") return newDiag("E-SCOPE-001", "`" + n + "` is used before it is initialized — " + cx.mount + " renders a field's markup here (a state-child's body or a child field's `renders` runs where `<*f/>` renders it, O5 (1i), §7.6 R1 S482), and that markup runs " + w + ", which" + how + " and the `${ }` declaring `" + n + "` comes later in the program body. The body runs once, top to bottom, in source order, so `" + n + "` is not initialized when that markup is rendered (§7.6 R2). Declare `" + n + "` before " + top, cx.mfile, cx.mspan);
-        return newDiag("E-SCOPE-001", "`" + n + "` is used before it is initialized — " + cx.mount + " mounts an instance here, and its mount runs " + w + " of `<" + cx.dname + ">` (an instance's field seeds and its render run at its mount, §66.7.6 rule 5, §7.6 R1 S482), which" + how + " and the `${ }` declaring `" + n + "` comes later in the program body. The body runs once, top to bottom, in source order, so `" + n + "` is not initialized when the instance is mounted (§7.6 R2). Declare `" + n + "` before " + top, cx.mfile, cx.mspan);
+        // s482 (lane s482-mount-reach-fu, #2112 r1 re-review NIT-2) — code in the markup a `<*f/>` of the
+        // render shows (a state-child body, a field's `renders`) is named so, not as the render's own
+        let whose: string = " of `<" + cx.dname + ">`";
+        if (cx.via != "") whose = cx.via;
+        return newDiag("E-SCOPE-001", "`" + n + "` is used before it is initialized — " + cx.mount + " mounts an instance here, and its mount runs " + w + whose + " (an instance's field seeds and its render run at its mount, §66.7.6 rule 5, §7.6 R1 S482), which" + how + " and the `${ }` declaring `" + n + "` comes later in the program body. The body runs once, top to bottom, in source order, so `" + n + "` is not initialized when the instance is mounted (§7.6 R2). Declare `" + n + "` before " + top, cx.mfile, cx.mspan);
     }
 
     // s482 (lane s482-instance-mount-reach, g-boot-instance-mount-reach-later-binding-s482; §7.6 R1 —
@@ -13562,7 +13572,7 @@ ${
             mount = cx.mount + " (whose render mounts `<" + e.tag + ">`)";
         }
         const icells: BodyCell[] = declCells(cx, d, di);
-        const icx: BodyCx = { g: cx.g, t: cx.t, sum: cx.sum, usesD: cx.usesD, binds: cx.binds, file: src.file, places: cx.places, cells: cx.cells.concat(icells), prog: cx.prog, pfields: cx.pfields, at: at, mfile: mfile, mspan: mspan, mount: mount, dname: d.name, stack: cx.stack.concat([u.id]), idecl: u.id, ifields: di.fields };
+        const icx: BodyCx = { g: cx.g, t: cx.t, sum: cx.sum, usesD: cx.usesD, binds: cx.binds, file: src.file, places: cx.places, cells: cx.cells.concat(icells), prog: cx.prog, pfields: cx.pfields, at: at, mfile: mfile, mspan: mspan, mount: mount, dname: d.name, stack: cx.stack.concat([u.id]), idecl: u.id, ifields: di.fields, stars: cx.stars, via: "" };
         let out: Diag[] = [];
         // its field seeds (a persisted declaration's are computed at construction, as a persisted
         // cell's — g-boot-persist-seed-at-construction-s482 — and are not judged here)
@@ -13609,9 +13619,12 @@ ${
     // declaration's seeds (g-boot-persist-seed-at-construction-s482), a declaration already on the
     // path (cx.stack — a cycle). ⚑ INTERIM (g-boot-shared-instance-reach-hoist-s482): a function that
     // reads a shared instance's field is not followed here (its summary records no such atom), nor a
-    // `<*x/>` of the shared instance; and the printer runs a body binding a shared instance reaches at
-    // module initialization (bodyInits, constructedElsewhere), so a read AFTER the binding — legal by
-    // R4 — still shows a value computed before the body's writes.
+    // `<*x/>` of the shared instance; and when a FUNCTION reads the shared instance, the printer still
+    // runs a body binding the instance reaches at module initialization (print.scrml
+    // constructedElsewhere), so a read AFTER the binding shows a value computed before the body's
+    // writes. (s482 lane s482-mount-reach-fu: a read in the body itself — a display, an attribute, a
+    // statement, a seed, an instance's render, a handler — constructs the instance at that read, and
+    // the binding runs at its own place: R4.)
     fn sharedReach(cx: BodyCx, a: AExpr, pos: int, seen: int[]) -> SeedReach | not {
         const f: NameFact | not = nameFact(cx.t.names, a.nid);
         const did: int = match f {
@@ -13634,8 +13647,14 @@ ${
         const di: DeclInfo = src.info;
         if (di.fields.length == 1 && di.fields[0].nid == di.nid) return not;
         const icells: BodyCell[] = declCells(cx, d, di);
-        const icx: BodyCx = { g: cx.g, t: cx.t, sum: cx.sum, usesD: cx.usesD, binds: cx.binds, file: src.file, places: cx.places, cells: cx.cells.concat(icells), prog: cx.prog, pfields: cx.pfields, at: cx.at, mfile: cx.mfile, mspan: cx.mspan, mount: cx.mount, dname: cx.dname, stack: cx.stack.concat([did]), idecl: did, ifields: di.fields };
-        const pre: string = " reads `@" + d.name + "`, the shared instance of `<" + d.name + ">`, constructed at its first reference (§7.6 R4), so its seeds run here, and";
+        const icx: BodyCx = { g: cx.g, t: cx.t, sum: cx.sum, usesD: cx.usesD, binds: cx.binds, file: src.file, places: cx.places, cells: cx.cells.concat(icells), prog: cx.prog, pfields: cx.pfields, at: cx.at, mfile: cx.mfile, mspan: cx.mspan, mount: cx.mount, dname: cx.dname, stack: cx.stack.concat([did]), idecl: did, ifields: di.fields, stars: cx.stars, via: cx.via };
+        // s482 (lane s482-mount-reach-fu, #2112 r1 re-review NIT-2) — named as the source reads it
+        // (`@card.v`: a field of the shared instance; `@card`: the instance)
+        let pre: string = " reads `@" + d.name + "`, the shared instance of `<" + d.name + ">`, constructed at its first reference (§7.6 R4), so its seeds run here, and";
+        if (idx >= 0 && idx < di.fields.length) {
+            const mn: string = fieldNameOf(d, di.fields[idx].nid);
+            if (mn != "") pre = " reads `@" + d.name + "." + mn + "`, a field of the shared instance of `<" + d.name + ">`, which is constructed at its first reference (§7.6 R4), so its seeds run here, and";
+        }
         if (attrNamed(d.mods, "persist") is not) {
             let i: int = 0;
             for (const c of icells) {
@@ -31090,6 +31109,7 @@ ${
         // needs its own … `renders` … is a CHILD declaration") renders it here,
         // for THIS instance (§66.6.2) — resolved in this declaration's context.
         const own: ANode[] = fieldRenders(sf.src, f.nid);
+        if (own.length > 0 && fileErrs(env.g.files, env.file).length == 0 && starRendersSelf(st, e.nid, own, [])) return selfStarDiag(st, env, e);
         if (own.length > 0) return addElem(st, e.nid, ElemFact.MInline({ nodes: own, subst: not }));
         const g: TransitionGraph | not = f.graph;
         const children: AStateChild[] = fieldStateChildren(sf.src, f.nid);
@@ -31100,11 +31120,61 @@ ${
                 if (v >= 0 && c.body.length > 0) arms = arms.concat([{ variant: v, body: c.body }]);
             }
             if (arms.length > 0) {
-                const sv: StateView = { decl: sf.decl.sym, inst: sf.inst, idx: sf.idx, enumSym: g.enumSym, arms: arms };
+                let armNodes: ANode[] = [];
+                for (const am of arms) { armNodes = armNodes.concat(am.body); }
+                if (fileErrs(env.g.files, env.file).length == 0 && starRendersSelf(st, e.nid, armNodes, [])) return selfStarDiag(st, env, e);
+                const sv: StateView ={ decl: sf.decl.sym, inst: sf.inst, idx: sf.idx, enumSym: g.enumSym, arms: arms };
                 return addElem(st, e.nid, ElemFact.MStateView(sv));
             }
         }
         return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<*" + e.tag + "/>` — rendering a field is in the bootstrap only for a `rule=` graph field whose state-children have bodies (O5 (1i)); `" + e.tag + "` has none (a field with no markup of its own is ⚑ O51)");
+    }
+
+    // s482 (lane s482-mount-reach-fu, #2112 r1 re-review F/U-2) — does the markup a `<*f/>` renders
+    // (`nodes`) hold that same `<*f/>` (`start`) — directly (a state-child body showing its own field,
+    // a field's `renders` holding its own `<*f/>`), or through the markup of another `<*g/>` already
+    // resolved (two fields that render each other: the second one resolved sees the cycle)? Such a
+    // render has no end: each `<*f/>` renders the markup that holds it again. `seen`: the `<*g/>`s
+    // already walked (each at most once — the walk ends). Not judged in a file holding a parse error
+    // (Rule C: an unclosed state child swallows what follows it — recovery debris, not a render; the
+    // build fails on the parse error and nothing is lowered).
+    fn starRendersSelf(st: AS, start: int, nodes: ANode[], seen: int[]) -> boolean {
+        let sn: int[] = seen;
+        let todo: ANode[] = nodes;
+        for (; todo.length > 0; ) {
+            let next: ANode[] = [];
+            for (const n of todo) {
+                const k: ANodeK = n.k;
+                const more: ANode[] = match k {
+                    .Elem(e: el) :> el.kids,
+                    .Gather(f: gf) :> gatherRows(gf),
+                    // no-default-arm: only an element's children and a gather's rows hold markup the render walks
+                    _ :> []
+                };
+                next = next.concat(more);
+                const ne: AElem | not = nodeElem(n);
+                if (ne is given && ne.star) {
+                    if (ne.nid == start) return true;
+                    if (sn.indexOf(ne.nid) < 0) {
+                        sn = sn.concat([ne.nid]);
+                        const f: ElemFact | not = elemFactNow(st, ne.nid);
+                        const inner: ANode[] = match f {
+                            .MInline(v: iv) :> inlineOwnNodes(iv),
+                            .MStateView(v: sv) :> stateArmBodies(sv),
+                            // no-default-arm: only `<*f/>` of a field renders markup written elsewhere
+                            _ :> []
+                        };
+                        next = next.concat(inner);
+                    }
+                }
+            }
+            todo = next;
+        }
+        return false;
+    }
+
+    fn selfStarDiag(st: AS, env: Env, e: AElem) -> AS {
+        return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<*" + e.tag + "/>` stands inside the markup it renders (a state-child body that shows its own field, or a field's `renders` that holds its own `<*" + e.tag + "/>`, directly or through another `<*f/>`): while the arm holding it is shown, each one renders that markup again; every such cycle is refused, even one through states that cannot hold at the same time — not in the bootstrap (§66.6.2, O5 (1i); no ruling gives such a render an end). Render the field from outside its own markup");
     }
 
     // The state-children of the field declared by the ADecl `fieldNid` inside

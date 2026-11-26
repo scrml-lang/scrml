@@ -6318,7 +6318,8 @@ ${
         // and so are those of each instance the body mounts unconditionally (liveSeedDecl; its
         // place is its mount) — so neither reaches anything before the body. What still runs
         // before it: the construction of a declaration the body does not mount (a shared
-        // reference, an instance a function lifts — constructedElsewhere), a seed that is not
+        // reference in a function or an unplaced binding, an instance a function lifts —
+        // constructedElsewhere; a shared reference in the body is constructed at it, R4), a seed that is not
         // held (a persisted cell's default), and the §25.7 CSS bridges; and a READ of a seed, or
         // of a lazy derived value, before its place runs its initializer then (reachOf follows
         // cell reads into their initializers, and instances into their declarations).
@@ -6333,7 +6334,7 @@ ${
             const od: Decl | not = findDecl(p0, oc.decl);
             if (od is given) pre = pre.concat([Node.NField(od.fields[0])]);
         }
-        const elsewhere: int[] = constructedElsewhere(p0);
+        const elsewhere: int[] = constructedElsewhere(p0, marked);
         for (const d1 of p0.decls) { if (hasInt(elsewhere, d1.sym.id)) pre = pre.concat([Node.NDecl(d1)]); }
         const css: CoreCss | not = p0.css;
         if (css is given) { for (const cv of css.vars) { pre = pre.concat([Node.NExpr(cv.read)]); } }
@@ -6566,16 +6567,32 @@ ${
     // (unconditionally, or in a branch / row) is constructed and rendered at its place in the
     // run, so its declaration's code is reached there (reachOf, as the order walk passes it).
     // One nothing names is never constructed, so its code never runs.
-    fn constructedElsewhere(p: CoreProgram) -> int[] {
+    // s482 (lane s482-mount-reach-fu, #2112 r1 re-review F/U-1; §7.6 R4: "A lazy shared instance is
+    // constructed at its first reference. Each is judged by R2 at the demand point.") — a shared
+    // reference counts here only where it stands in code that may run BEFORE the body or outside its
+    // order: a function (it may be called before a place, or through a value), a file-scope binding
+    // the body does not place (not `marked`: module initialization), and a declaration constructed
+    // elsewhere (transitively). One in the program's body — a display, an attribute, a statement, a
+    // placed binding's initializer, a program cell's seed, the code of an instance the body mounts —
+    // constructs the instance where it stands (`shared_<decl>()` is printed at the reference); the
+    // order walk reaches its seeds there (reachOf follows a shared reference into every seeded
+    // field; a derived field is reached where it is read — S483 #2116 review F1), so
+    // a body binding the instance reads is computed at its own place, before the reference (R2
+    // refuses a reference before it — analyze sharedReach), not hoisted to module initialization.
+    fn constructedElsewhere(p: CoreProgram, marked: int[]) -> int[] {
+        let roots: Node[] = [];
+        for (const f0 of p.fns) { roots = roots.concat([Node.NFn(f0)]); }
+        for (const sf of p.server) { roots = roots.concat([Node.NServerFn(sf)]); }
+        for (const k0 of p.consts) { if (!hasInt(marked, k0.sym.id)) roots = roots.concat([Node.NExpr(k0.init)]); }
         let out: int[] = [];
-        for (const s of sharedRefs(Node.NProgram(p))) { if (s.id != p.program.id && !hasInt(out, s.id)) out = out.concat([s.id]); }
+        for (const r of roots) { out = unionInts(out, sharedIdsIn(p, r)); }
         for (const f of p.fns) { out = unionInts(out, instancedIn(Node.NFn(f))); }
         let changed = true;
         for (; changed; ) {
             changed = false;
             for (const d of p.decls) {
                 if (hasInt(out, d.sym.id)) {
-                    const more: int[] = unionInts(out, instancedIn(Node.NDecl(d)));
+                    const more: int[] = unionInts(unionInts(out, instancedIn(Node.NDecl(d))), sharedIdsIn(p, Node.NDecl(d)));
                     if (more.length != out.length) {
                         out = more;
                         changed = true;
@@ -6586,6 +6603,14 @@ ${
         let res: int[] = [];
         for (const x of out) { if (x != p.program.id) res = res.concat([x]); }
         return res;
+    }
+
+    // s482 (lane s482-mount-reach-fu) — the declarations whose shared instance code under `root`
+    // references (sharedRefs), the program's own left out.
+    fn sharedIdsIn(p: CoreProgram, root: Node) -> int[] {
+        let out: int[] = [];
+        for (const s of sharedRefs(root)) { if (s.id != p.program.id && !hasInt(out, s.id)) out = out.concat([s.id]); }
+        return out;
     }
 
     // s482 — the program cells whose seed is HELD for its place (§7.6 rule (b) S482): a writable
@@ -6858,6 +6883,30 @@ ${
                                 if (cf.decl != p.program.id && !hasInt(seenD, -1 - cf.decl)) {
                                     seenD = seenD.concat([-1 - cf.decl]);
                                     for (const iv of insts) { if (viewInstanced(iv) == cf.decl) next = next.concat([Node.NView(iv)]); }
+                                }
+                            }
+                        }
+                    }
+                    // s482 (lane s482-mount-reach-fu; §7.6 R4) — a reference to a declaration's shared
+                    // instance constructs it (its first one): every SEED of the record runs there
+                    // (rt.seeded is owed until the construction ends), so every seeded field is reached
+                    // — the same "has a seed" test as bodyInits' `pre` (a writable cell's, or a
+                    // constant's with a live seed, constSeedField). A derived field is lazy
+                    // (rt.derived): its formula runs where it is READ, and the cellReadOf branch
+                    // above reaches it there (`@card.d`, or the whole record), not at the
+                    // construction (S483 review F1 of #2116: an unread derived field hoisted).
+                    const sh: Sym | not = sharedRefOf(n);
+                    if (sh is given && sh.id != p.program.id) {
+                        for (const d3 of p.decls) {
+                            if (d3.sym.id == sh.id) {
+                                let k3: int = 0;
+                                for (const f3 of d3.fields) {
+                                    const key3: string = sh.id + ":" + k3;
+                                    if (seenF.indexOf(key3) < 0 && (f3.wcap is given || constSeedField(p, f3))) {
+                                        seenF = seenF.concat([key3]);
+                                        next = next.concat([Node.NField(f3)]);
+                                    }
+                                    k3 = k3 + 1;
                                 }
                             }
                         }
