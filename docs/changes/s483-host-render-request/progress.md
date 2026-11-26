@@ -36,3 +36,27 @@ happy-dom cap tests are not run on base (they never return there).
 
 ## Corpus (Q14 + (a))
 Q14 alone (this branch, base 2d40d8407 vs head, 2977 files): 0 changed results — 0 newly rejected, 0 newly accepted, 0 output diffs, 0 error-code changes.
+
+## SPEC + gaps
+§6.15 (the host-call bullet: S483 Q15 (b) rule text, Provenance, held status; "The render self-write hang":
+Q15 (a) run bound; a normative statement), §6.7.4 rule 5 (cross-reference), §6.7.7 (Q14 normative statement
++ the code table row), §6.7.7.1 O-059-3 (host-call limb settled; the rest open), §6.7.7.3 (note), §34
+(E-VALUE-WRITE-UNPROVEN amended — also its stale "not yet emitted" status; E-REQUEST-WRITE-UNPROVEN new).
+known-gaps: g-boot-request-host-call-s482 RESOLVED; g-boot-render-host-call-hang-s482 NARROWED (owner
+question with options and a rec). severity.scrml not regenerated (answer-neutral: the new code is an
+Error both by its row and by the fail-closed default; the post-merge bot owns it).
+
+## Gates (head)
+- hook (unit + integration + conformance + slices): 58604 pass / 0 fail.
+- host-render-request-s483 (after the (b) split): 9/9, Chromium on; the other s482 Chromium
+  slice files: 147/1 — the 1 (meta-runtime-s482 "r1 MED-3: a block mounted by a click…", E-VALUE-WRITES-STATE
+  on its fixture) fails identically on base 2d40d8407 (pre-existing; Chromium-only, so the hook skips it).
+- compiler/tests/browser *-chromium-s482: 75/0.
+- bootstrap-conformance --json base vs head: PASS 851 / FAIL 3 / NOT-TWINNED 628 / UNSUPPORTED 491 / CRASH 0
+  both; 0 differing verdict records of 1973; runtimeExecuted 289 both.
+- corpus differential + byte-compare (bootstrap, 2977 files): 0 changed results.
+- s34-census --check-new PASS (3 rows); types-gate --check OK 182 unchanged; host-global-scan 1/2 and 2/2
+  0 violations (throws are impl#1, pre-existing); retired-forms-lint OK (hook); runtime-size-ratchet 11/0
+  (impl#1 — unaffected). Bootstrap runtime.js: +1,588 B raw, +351 B gzip -9 (no gate on it).
+- Chromium probes (s482 chrom.ts driver): F9 base UNRESPONSIVE → head responsive o=101 c=101, one cap log;
+  H2 (`title=` through a wrapper) base UNRESPONSIVE → head responsive c=101; H4 (derived formula) c=2 both.
