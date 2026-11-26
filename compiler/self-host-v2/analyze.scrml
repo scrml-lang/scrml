@@ -11883,6 +11883,9 @@ ${
         // closures (`writes`: the file-scope `let`s a callable writes, at any depth; `uses`: the
         // file-scope bindings it reads or writes, at any depth)
         out = out.concat(valueLetDiags(g, t, sum, writes, sites, lets));
+        // s483 (lane s483-trapping-construct-init) — a construct's initializer that can trap, on the
+        // references of every callable (the same edges as `writes`)
+        out = out.concat(constructTrapDiags(g, t, sum, fnE));
         out = out.concat(derivedUntrackedDiags(g, t, sum, reads, lets));
         // s482 (lane s482-display-untracked) — §6.15 A5, W-DISPLAY-UNTRACKED, on the same closures
         out = out.concat(displayUntrackedDiags(g, t, sum, writes, sites, reads, lets));
@@ -12726,6 +12729,26 @@ ${
     // =========================================================================
     fn constructInitDiags(g: Globals, t: Tables) -> Diag[] {
         let out: Diag[] = [];
+        for (const ci of constructInits(g, t)) {
+            const c: AConst = ci.c;
+            const acts: string = initActWhat(c.init);
+            if (acts != "") {
+                let kw: string = "const";
+                if (c.mutable) kw = "let";
+                out = out.concat([newDiag("E-FILE-SCOPE-INIT-IN-CONSTRUCT", "the initializer of `" + kw + " " + c.name + "` " + acts + ", and it is written inside " + ci.where + " — a file-scope initializer runs once, in the program body's one run (§7.6 rule (b)), not when, or each time, that content renders, so it has no place here. Declare `" + c.name + "` before that element, or compute the value where the content needs it", ci.file, c.span)]);
+            }
+        }
+        return out;
+    }
+
+    // s483 (lane s483-trapping-construct-init) — a file-scope `let` / `const` written inside a
+    // construct's content (constructAt: `if=` / `else-if=` / `else` content, a component's slot
+    // content, a `<match>` arm), with the construct named for a message. Shared by the acting
+    // refusal (constructInitDiags) and the trapping one (constructTrapDiags).
+    type CtorInit:struct = { c: AConst, where: string, file: string }
+
+    fn constructInits(g: Globals, t: Tables) -> CtorInit[] {
+        let out: CtorInit[] = [];
         for (const f of g.files) {
             for (const it of f.items) {
                 const k: AItemK = it.k;
@@ -12756,14 +12779,7 @@ ${
                     };
                     if (c is given) {
                         const where: string = constructAt(t, tops, ci.span.start);
-                        if (where != "") {
-                            const acts: string = initActWhat(c.init);
-                            if (acts != "") {
-                                let kw: string = "const";
-                                if (c.mutable) kw = "let";
-                                out = out.concat([newDiag("E-FILE-SCOPE-INIT-IN-CONSTRUCT", "the initializer of `" + kw + " " + c.name + "` " + acts + ", and it is written inside " + where + " — a file-scope initializer runs once, in the program body's one run (§7.6 rule (b)), not when, or each time, that content renders, so it has no place here. Declare `" + c.name + "` before that element, or compute the value where the content needs it", f.path, c.span)]);
-                            }
-                        }
+                        if (where != "") out = out.concat([{ c: c, where: where, file: f.path }]);
                     }
                 }
             }
@@ -12838,6 +12854,274 @@ ${
             if (w != "") return w;
         }
         return "";
+    }
+
+    // =========================================================================
+    // s483 (lane s483-trapping-construct-init; RULED S482, ruling:user-voice-scrml.md-S482-trapping-
+    // construct-init — owner: *"yes, interim refusal now and the feature later"*; recs ruled:
+    // *"INTERIM — extend E-FILE-SCOPE-INIT-IN-CONSTRUCT to an initializer inside a construct that can
+    // fail at run time (indexing, `.value` on a maybe value, checked conversions, division by a
+    // possibly-zero value) … PERMANENT — branch-scoped declarations (run each time the branch shows,
+    // after its test), its own design item, lifting the refusal"*). ⚑ INTERIM,
+    // g-boot-trapping-construct-init-s482.
+    // A non-acting initializer inside a construct (constructInits) runs ONCE, just before the
+    // construct, whether or not the construct shows (§7.6 R3) — so the construct's own test does not
+    // guard it: `${ const first: int = items[0]; }` under `if=(items.length > 0)` reads an empty tape
+    // and the E-INDEX-OUT-OF-RANGE-RT trap stops the mount. Refused when the initializer CAN TRAP: its
+    // own expression, or a function / formula / construction it reaches (a call, a function value
+    // handed on — §6.7.4 rule 3 —, a derived cell read), at any depth, holds a §19.17 trap site
+    // (trapSiteWhat): an index read or an index write (`xs[i]`, `s[i]`, E-INDEX-OUT-OF-RANGE-RT); a
+    // `slice` / `repeat` / `padStart` / `padEnd` position that is not a literal, or an `insert`
+    // (isPositionArg, E-INDEX-OUT-OF-RANGE-RT); a length the typer could not prove inside a tape's
+    // bound (boundCheckAt, E-WRITE-INVARIANT-RT); a `/` or `%` whose divisor is not a non-zero number
+    // literal (the ruling's "division by a possibly-zero value"); a refinement checked at run time (a
+    // refined parameter, a refined `const` local whose value is not a literal the static zone passes —
+    // lower.scrml paramRefineChecks / localRefineCheck, E-CONTRACT-001-RT); and a host-backed function
+    // (§21.3.1: E-HOST-VALUE-MISMATCH-RT / E-HOST-THROW-RT; scrml:math's `floor` / `ceil` / `trunc` /
+    // `round` are E-INT-CONVERSION-RT; the other exports of a PURE_HOST_FILES file are not traps —
+    // pureHostFile's reading of that JS). A `.value` (any member) read of a `T | not` value is
+    // refused already, by the typer (E-TYPE-046: the construct's test does not narrow an initializer
+    // that runs before it), and an unresolvable call by rule (b) (initReachDiags). Fail closed: a site
+    // the walk reaches is counted whether or not that path runs.
+    // =========================================================================
+    type TrapSite:struct = { what: string, file: string, span: ASpan }
+
+    // The §19.17 trap a single expression node can raise, described for a message; "" — none.
+    fn trapSiteWhat(t: Tables, e: AExpr) -> string {
+        const k: AExprK = e.k;
+        const own: string = match k {
+            .Index(obj: o, idx: ix) :> "reads `" + trapShown(e) + "` by position (a position outside it is the E-INDEX-OUT-OF-RANGE-RT trap, §19.17)",
+            .Binary(op: o, l: l, r: r) :> divTrapWhat(o, r),
+            .Call(callee: c, args: a) :> callTrapWhat(t, e, c, a),
+            // no-default-arm: every other expression traps only through its parts
+            _ :> ""
+        };
+        if (own != "") return own;
+        if (boundCheckAt(t, e.nid) is given) return "makes a tape whose length the compiler could not prove inside its type's bound (it is checked when it runs: the E-WRITE-INVARIANT-RT trap, §19.17)";
+        return "";
+    }
+
+    fn divTrapWhat(o: BinOp, r: AExpr) -> string {
+        if (o != BinOp.Div && o != BinOp.Mod) return "";
+        if (positiveLit(r) || negLiteral(r)) return "";
+        let sign: string = "/";
+        if (o == BinOp.Mod) sign = "%";
+        return "divides by `" + trapShown(r) + "` (`" + sign + "`), which is not proven non-zero";
+    }
+
+    fn callTrapWhat(t: Tables, e: AExpr, c: AExpr, args: AExpr[]) -> string {
+        const ck: AExprK = c.k;
+        const meth: string = match ck {
+            .Member(obj: o, name: n) :> n,
+            // no-default-arm: only a method call has a position argument
+            _ :> ""
+        };
+        if (meth == "insert") return "calls `" + trapShown(c) + "(…)` (a position outside `0..=length` is the E-INDEX-OUT-OF-RANGE-RT trap, §19.17)";
+        const f: ValueFact | not = valueFact(t.values, e.nid);
+        const op: PrimOp | not = match f {
+            .VMethod(op: x) :> x,
+            // no-default-arm: only a typed built-in method has a position argument
+            _ :> not
+        };
+        if (op is not) return "";
+        let i: int = 0;
+        for (const a of args) {
+            if (isPositionArg(op, i) && !nonNegIntLit(a)) return "calls `" + trapShown(c) + "(…)` with the computed position `" + trapShown(a) + "` (a negative one is the E-INDEX-OUT-OF-RANGE-RT trap, §19.17)";
+            i = i + 1;
+        }
+        return "";
+    }
+
+    // A non-negative integer literal as written (`0`, `3`).
+    fn nonNegIntLit(x: AExpr) -> boolean {
+        const k: AExprK = x.k;
+        const raw: string = match k {
+            .Num(raw: r) :> r,
+            // no-default-arm: only a number literal is a literal position
+            _ :> ""
+        };
+        if (raw == "") return false;
+        return Number(raw) >= 0;
+    }
+
+    // An expression as written, for a message (a name, a member path, a number, an index read).
+    fn trapShown(e: AExpr) -> string {
+        const k: AExprK = e.k;
+        const pk: string = placeKey(e);
+        if (pk != "") return pk;
+        return match k {
+            .Num(raw: r) :> r,
+            .Index(obj: o, idx: ix) :> trapShown(o) + "[" + trapShown(ix) + "]",
+            .Member(obj: o, name: n) :> trapShown(o) + "." + n,
+            .Call(callee: c) :> trapShown(c) + "(…)",
+            // no-default-arm: anything else is shown by its shape
+            _ :> "…"
+        };
+    }
+
+    // A refined `const` local whose value the static zone does not pass (lower.scrml
+    // localRefineCheck checks it as it binds: E-CONTRACT-001-RT).
+    fn refinedLocalWhat(s: AStmt) -> string {
+        const k: AStmtK = s.k;
+        return match k {
+            .Local(name: n, mutable: m, ty: y, init: i) :> refinedLocalOf(n, m, y, i),
+            // no-default-arm: only a local binds a refined value
+            _ :> ""
+        };
+    }
+
+    fn refinedLocalOf(name: string, mutable: boolean, y: AType | not, init: AExpr) -> string {
+        if (mutable) return "";
+        const top: RefineTop = refineTopOf(y);
+        if (top.base == "") return "";
+        if (refineLitVerdict(top.base, top.pred, init) == "pass") return "";
+        return "binds `" + name + "`, whose refinement `" + top.base + "(" + top.pred + ")` is checked when it runs (a value outside it is the E-CONTRACT-001-RT trap, §53.4.5)";
+    }
+
+    // Every statement of a block, at any depth: nested statement blocks, the blocks inside its
+    // expressions (handling-form arms, lambda bodies), a nested function's body.
+    fn allStmtsIn(b: ABlock) -> AStmt[] {
+        let out: AStmt[] = [];
+        for (const s of b.stmts) {
+            out = out.concat([s]);
+            for (const e of stmtExprs(s)) {
+                for (const x of allExprsOf(e)) {
+                    for (const bb of exprBlocksIn(x)) { out = out.concat(allStmtsIn(bb)); }
+                }
+            }
+            for (const nb of nestedBlocks(s)) { out = out.concat(allStmtsIn(nb)); }
+            for (const kb of stmtKidBlocks(s)) { out = out.concat(allStmtsIn(kb)); }
+            const lf: AFn | not = localFnOf(s);
+            if (lf is given) out = out.concat(allStmtsIn(lf.body));
+        }
+        return out;
+    }
+
+    // The trap sites of the expressions `es` (each node once, its own trap only).
+    fn exprTrapSites(t: Tables, es: AExpr[], file: string) -> TrapSite[] {
+        let out: TrapSite[] = [];
+        let seen: int[] = [];
+        for (const e of es) {
+            if (e.nid < 0 || seen.indexOf(e.nid) < 0) {
+                seen = seen.concat([e.nid]);
+                const w: string = trapSiteWhat(t, e);
+                if (w != "") out = out.concat([{ what: w, file: file, span: e.span }]);
+            }
+        }
+        return out;
+    }
+
+    // A function's own trap sites: its host call (a host-backed function), its parameters'
+    // run-time refinement checks, its body's statements and expressions.
+    fn fnTrapSites(t: Tables, fs: FnSrc) -> TrapSite[] {
+        let out: TrapSite[] = [];
+        const hw: string = hostTrapWhat(fs.info.host);
+        if (hw != "") out = out.concat([{ what: hw, file: fs.info.file, span: fs.f.span }]);
+        for (const p of fs.f.params) {
+            const top: RefineTop = refineTopOf(p.ty);
+            if (top.base != "") out = out.concat([{ what: "checks its parameter `" + p.name + "` against the refinement `" + top.base + "(" + top.pred + ")` when it is called (a value outside it is the E-CONTRACT-001-RT trap, §53.4.5)", file: fs.info.file, span: p.span }]);
+        }
+        for (const s of allStmtsIn(fs.f.body)) {
+            const rw: string = refinedLocalWhat(s);
+            if (rw != "") out = out.concat([{ what: rw, file: fs.info.file, span: s.span }]);
+        }
+        return out.concat(exprTrapSites(t, allExprsIn(fs.f.body), fs.info.file));
+    }
+
+    // A host-backed function's trap (§19.17): "" — not host-backed, or a PURE_HOST_FILES export
+    // that cannot trap.
+    fn hostTrapWhat(h: HostFn | not) -> string {
+        if (h is not) return "";
+        if (h.bind is given) return "calls a `<host>` binding (a host that throws, or returns a value outside its declared type, is the E-HOST-THROW-RT / E-HOST-VALUE-MISMATCH-RT trap, §19.17)";
+        if (h.module != "" && pureHostFile(h.module, h.file)) {
+            if (h.module == "math" && (h.name == "floor" || h.name == "ceil" || h.name == "trunc" || h.name == "roundHalfEven" || h.name == "roundHalfUp")) return "converts a `number` to an `int` (`scrml:math`; NaN, ±∞ or a value outside ±(2^53−1) is the E-INT-CONVERSION-RT trap, §19.17)";
+            return "";
+        }
+        return "calls a host-backed function (§21.3.1; a host value outside its declared type is the E-HOST-VALUE-MISMATCH-RT trap, §19.17)";
+    }
+
+    // The trap sites of a value (a field's initializer, a formula).
+    fn valueTrapSites(t: Tables, v: AAttrValue, file: string) -> TrapSite[] {
+        let es: AExpr[] = [];
+        for (const b of seedBlocks(v)) { es = es.concat(allExprsIn(b)); }
+        return exprTrapSites(t, es, file);
+    }
+
+    // Each callable's own trap sites (the summary's nodes, in order): a function's body; a formula's
+    // expression; a construction's field initializers.
+    fn ownTrapSites(g: Globals, t: Tables, sum: Summary) -> TrapSite[][] {
+        let out: TrapSite[][] = [];
+        for (const c of sum.nodes) {
+            let ts: TrapSite[] = [];
+            if (c.kind == CallableK.KFn) {
+                const fsrc: FnSrc | not = fnSrcOfSym(g, c.f.sym);
+                if (fsrc is given) ts = fnTrapSites(t, fsrc);
+            } else {
+                for (const ds of g.decls) {
+                    for (const fi of ds.info.fields) {
+                        const isFormula: boolean = c.kind == CallableK.KFormula && fi.sym.id == c.f.sym;
+                        const inCtor: boolean = c.kind == CallableK.KConstruct && ds.info.sym.id == c.f.sym;
+                        if (isFormula || inCtor) ts = ts.concat(valueTrapSites(t, fi.init, ds.file));
+                    }
+                }
+            }
+            out = out.concat([ts]);
+        }
+        return out;
+    }
+
+    fn constructTrapDiags(g: Globals, t: Tables, sum: Summary, fnE: int[][]) -> Diag[] {
+        let cis: CtorInit[] = [];
+        for (const ci of constructInits(g, t)) {
+            if (initActWhat(ci.c.init) == "" && !isLambda(ci.c.init)) cis = cis.concat([ci]);
+        }
+        if (cis.length == 0) return [];
+        const sites: TrapSite[][] = ownTrapSites(g, t, sum);
+        let own: FxAtom[][] = [];
+        let i: int = 0;
+        for (const ts of sites) {
+            let ats: FxAtom[] = [];
+            let k: int = 0;
+            for (const s of ts) {
+                ats = ats.concat([ownAtom("t:" + s.file + ":" + s.span.start, i, k)]);
+                k = k + 1;
+            }
+            own = own.concat([ats]);
+            i = i + 1;
+        }
+        const traps: FxAtom[][] = closeDim(own, fnE);
+        const six: SymIx = nodeSymIx(sum.nodes);
+        let out: Diag[] = [];
+        for (const ci of cis) {
+            const c: AConst = ci.c;
+            let how: string = "";
+            const mine: TrapSite[] = exprTrapSites(t, allExprsOf(c.init), ci.file);
+            if (mine.length > 0) how = mine[0].what;
+            if (how == "") {
+                for (const r of scanExpr({ t: t, file: ci.file }, c.init, emptyScan()).refs) {
+                    const j: int = ixGet(six, r.sym);
+                    if (how == "" && j >= 0) {
+                        const a: FxAtom | not = witnessOf(traps[j]);
+                        if (a is given) {
+                            const s: TrapSite = sites[a.root][a.pos];
+                            const labels: string[] = fxChain(sum, traps, j, a);
+                            let chain: string = "";
+                            if (labels.length > 1) chain = " (`" + chainText(labels) + "`)";
+                            let verb: string = "calls `" + r.name + "`";
+                            if (r.asValue) verb = "hands `" + r.name + "` on as a function value (whatever receives it may call it, §6.7.4 rule 3)";
+                            if (sum.nodes[j].kind == CallableK.KFormula) verb = "reads `" + r.name + "`, whose formula is computed where it is read";
+                            how = verb + ", which " + s.what + chain;
+                        }
+                    }
+                }
+            }
+            if (how != "") {
+                let kw: string = "const";
+                if (c.mutable) kw = "let";
+                out = out.concat([newDiag("E-FILE-SCOPE-INIT-IN-CONSTRUCT", "the initializer of `" + kw + " " + c.name + "` can stop at run time: it " + how + ", and it is written inside " + ci.where + ". A file-scope initializer there runs once, just before that construct, whether or not the construct shows (§7.6 R3), so the construct's own test does not guard it: when it traps, the page's mount stops. Declare `" + c.name + "` before that element and guard it there (a test before the read, or a form that cannot trap, such as `xs.at(i)`, which is `T | not`), or compute the value in a function the content calls (a `${ f(…) }` in the content runs only when it renders). ⚑ INTERIM (g-boot-trapping-construct-init-s482): branch-scoped declarations — run each time the branch shows, after its test — are the planned feature that lifts this refusal", ci.file, c.span)]);
+            }
+        }
+        return out;
     }
 
     // s482 (lane s482-seed-reach) — the context of the body-run judgment: the program body's
