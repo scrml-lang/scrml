@@ -22,3 +22,7 @@ Ruling (user-voice-scrml.md, verbatim heading): "⭐ RULED — a backslash in a 
 - [x] items 2+3: parseQuoted comment rewritten to the ruled rule; quotedEscMsg(n, q, emitted) — no "not decided",
       a `\'` hint per quote style, emit-specific advice in FRAGMENT MODE (fragOn). `\'` is NOT in the §4.18.3 catalog
       ("exactly three escape sequences, and no others") — kept refused. opener-escapes-s482.test.js 20/20.
+- [x] item 4 (#2110 L1): resolveLocalPartWrite records the EAssignLocal effect with a refused position write's
+      grant error, so writeGrantsOf adds `write`. Probes (tools/l1.ts, base vs head): append/method/filter + position
+      write fix-its now `[free, append|remove, write]` and compile applied; same error codes; a lone refused position
+      write now also gets W-DISPLAY-UNTRACKED (`int[write]`). Tape slices 560/560; display-untracked 34/34.
