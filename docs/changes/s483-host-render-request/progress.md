@@ -60,3 +60,11 @@ Error both by its row and by the fail-closed default; the post-merge bot owns it
   (impl#1 — unaffected). Bootstrap runtime.js: +1,588 B raw, +351 B gzip -9 (no gate on it).
 - Chromium probes (s482 chrom.ts driver): F9 base UNRESPONSIVE → head responsive o=101 c=101, one cap log;
   H2 (`title=` through a wrapper) base UNRESPONSIVE → head responsive c=101; H4 (derived formula) c=2 both.
+
+## Fix round r1 (#2123 review, verdict FIX)
+- HIGH-1 reproduced on 6bbc1565d: p-R10_req_settle / p-R11 UNRESPONSIVE after the click.
+- Built the lap cap (runtime.js RunQueue causes + lapNode + suspend carries runCause; epoch on a macrotask
+  tick). R10/R11 responsive c=101, one log. All other reviewer p-* probes byte-identical vs 6bbc1565d runtime.
+- Tests: host-render-request-s483 15/15 with Chromium (compiled F9 + R10).
+- Text: gap kept HIGH (narrowed; MED rec withdrawn; X2 glue-microtask shape still hangs), SPEC §6.15 / §6.7.4 /
+  §34 ruled-not-built markers; q15b patch moved to ~/.cache/scrml/review/s483-briefs/q15b-as-ruled.patch.

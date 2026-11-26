@@ -216,7 +216,8 @@ export function batch(fn) {
 // overrides — the same cap and override as a runtime `^{}` block) times in one flush; past that it
 // logs the cycle once (console.error) and skips the run. The next flush counts afresh.
 // s483 (s483-host-render-request; RULED S483, ruling:user-voice-scrml.md-S483-host-calls-render-request,
-// Q15 (a)) — a render / structure effect taken from `queue` has the same cap (drainQueues).
+// Q15 (a)) — a render / structure effect taken from `queue` has the same cap (drainQueues); and
+// (s483 fix r1) both queues have a second bound ACROSS flushes, the lap cap (`runCause`).
 //
 // One flush at a time (s449 fix round, MEDIUM-1): a render effect that writes
 // while it runs — `<each>`'s reconcile sets a surviving row's item cell before
@@ -311,8 +312,8 @@ function drainQueues() {
       // s483 — the render queue's backstop (RULED S483, ruling:user-voice-scrml.md-S483-host-calls-render-request,
       // Q15 (a): "a run cap on the render queue now, matching the S482 effect cap, so no shape can hang").
       // A render / structure effect (an `Effect`: an interpolation, an attribute, an `if=` / `<each>`)
-      // writes no cell (§6.15). Refusing the host code it reaches at compile time is ruled (Q15 (b)) and
-      // queued, not built (lane s483-q15b-pure-marker); today host glue that fires a DOM event whose
+      // writes no cell (§6.15). Refusing the host code it reaches at compile time (E-VALUE-WRITE-UNPROVEN)
+      // is NOT built: ruled (Q15 b), queued: lane s483-q15b-pure-marker. Today host glue that fires a DOM event whose
       // handler writes the cell an interpolation reads re-queues that render (probe F9), forever in one
       // flush before this cap. So one runs at most metaMaxRuns() times per flush; past that the cycle is
       // logged once and the run skipped. A runtime `^{}` block keeps its own cap. The lap cap below
