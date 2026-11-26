@@ -283,6 +283,92 @@ describe("a condition-head assignment is a whole-value write (#2113 r1 PRE-2)", 
   }, 180000);
 });
 
+// s482 r2 (#2113 r1 review MED-A, LOW-2). The server side counts a kept condition-head assignment as the
+// write it is (print.scrml constReads): a server-run initializer that calls a function writing a file-scope
+// `let` this way makes the server artifact declare that binding. Red on b0b77bdbb: program.server.js held
+// `let z = rec(wr() + sx);` and `function wr() { if ((lit = "z") === "z") … }` but no `let lit`, so
+// importing it threw `ReferenceError: lit is not defined` at module initialization (q76 no secret, q78 with
+// one; q77 threw on 153bd0334 too). `serverModule` imports the server artifact — its module initialization
+// runs every initializer the server holds — and returns what it recorded (a load failure fails the test).
+async function serverModule(src) {
+  const main = writeApp(src);
+  const out = main.replace(/main\.scrml$/, "out");
+  const p = Bun.spawnSync(["bun", CLI, "compile", main, "--output-dir", out], { cwd: ROOT, env: { ...process.env, NO_COLOR: "1" }, stdout: "pipe", stderr: "pipe" });
+  if (p.exitCode !== 0) throw new Error("did not compile: " + p.stderr.toString() + p.stdout.toString());
+  const server = readFileSync(join(out, "program.server.js"), "utf8");
+  const client = readdirSync(out).filter((f) => !SERVER_FILES.includes(f)).map((f) => ({ f, text: readFileSync(join(out, f), "utf8") }));
+  const m = server.match(/^let (hits\w*) = /m);
+  writeFileSync(join(out, "probe.server.js"), server + (m ? `\nexport { ${m[1]} as __probe };\n` : ""));
+  const mod = await import(pathToFileURL(join(out, "probe.server.js")).href);
+  return { server, client, hits: mod.__probe };
+}
+const SRV_INIT = (decls, body) => PROG(`\${
+    const API_KEY: string = "zz-sk-live-123";
+    function tag(s: string) -> string { return "[" + s + "]"; }
+    let hits: string = "";
+    function rec(s: string) -> string { hits = hits + "<" + s + ">"; return "r"; }
+    function peek() -> string { return hits; }
+${decls}
+}`, `<button id="r" onclick={ @out = peek(); }>r</button>\n${body}`);
+const WR = `    function wr() -> string { if ((lit = "z") == "z") { return "q"; } return "n"; }`;
+
+describe("a condition-head write in a function a server-run initializer calls (#2113 r1 MED-A)", () => {
+  test("q76: no secret — the server artifact declares the written binding and loads; z's effect runs there", async () => {
+    const s = SRV_INIT(`    let lit: string = "plain";
+    let sx: string = "x";
+    server function sv() -> string { return sx; }
+${WR}
+    let z: string = rec(wr() + sx);`, `<button id="b" onclick={ lit = "w"; sx = "y"; }>b</button>`);
+    const m = await serverModule(s);
+    expect(m.server).toMatch(/^let lit\w* = "plain";$/m);
+    expect(m.server).toMatch(/^let z\w* = rec\w*\(wr\w*\(\) \+ sx\w*\);$/m);
+    expect(m.hits).toBe("<qx>");
+    // z is server-only (it reads sx, which only server code reads): the client does not see its effect
+    expect(await texts(s, ["c"], [{ click: "#b" }, { click: "#r" }])).toEqual(["[]"]);
+  }, 180000);
+
+  test("q77: z server-only, lit written only by a handler (threw at load on 153bd0334 too) — loads", async () => {
+    const s = SRV_INIT(`    let lit: string = "plain";
+    let sx: string = "x";
+    server function sv() -> string { return sx; }
+${WR}
+    let z: string = rec(wr() + sx);`, `<button id="b" onclick={ lit = "w"; }>b</button>`);
+    const m = await serverModule(s);
+    expect(m.server).toMatch(/^let lit\w* = "plain";$/m);
+    expect(m.hits).toBe("<qx>");
+  }, 180000);
+
+  test("q78: with a secret — no client file holds it; the server artifact declares the written binding and loads", async () => {
+    const s = SRV_INIT(`    let keyLet: string = tag(API_KEY);
+    let lit: string = "plain";
+${WR}
+    let z: string = rec(wr() + keyLet);`, `<button id="b" onclick={ keyLet = "w"; lit = "w"; }>b</button>`);
+    const m = await serverModule(s);
+    expect(leaked(m.client, SECRET)).toEqual([]);
+    expect(m.server).toMatch(/^let lit\w* = "plain";$/m);
+    expect(m.hits).toBe("<q[zz-sk-live-123]>");
+  }, 180000);
+});
+
+// s482 r2 (#2113 r1 review LOW-2) — the observable case with no secret (§7.6 rule (b) note): a binding
+// server code reads is server-only, so the acting initializer that reads it is too (the largest set);
+// its effect runs on the server and the client no longer sees it. q30: `<plain>` on 153bd0334, empty now
+// (q31, the same program with no client write, is empty on 153bd0334 too).
+describe("a client-written binding server code reads, read by an acting initializer (#2113 r1 LOW-2)", () => {
+  test("q30: lit and z are server-only — the client holds a shell and no z; the server runs z", async () => {
+    const s = SRV_INIT(`    let lit: string = "plain";
+    let z: string = rec(lit);
+    server function sv() -> string { return lit; }`, `<button id="b" onclick={ lit = "w"; }>b</button>`);
+    const b = await build(s);
+    expect(b.js).toMatch(/^let lit\w* = null;$/m);
+    expect(b.js).not.toMatch(/^let z\w* = /m);
+    const m = await serverModule(s);
+    expect(m.server).toMatch(/^let z\w* = rec\w*\(lit\w*\);$/m);
+    expect(m.hits).toBe("<plain>");
+    expect(await texts(s, ["c"], [{ click: "#b" }, { click: "#r" }])).toEqual(["[]"]);
+  }, 180000);
+});
+
 describe("not covered — ruling-gated (g-boot-body-unread-cell-server-only-s482)", () => {
   test("a cell declared in the program BODY, written but never read, still ships the secret (today's behaviour, pinned)", async () => {
     const b = await build(PROG(LIB, `let <keyCell:string=(tag(API_KEY))/>\n<button id="b" onclick={ @keyCell = "w"; }>b</button>`));
