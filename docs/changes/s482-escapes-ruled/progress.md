@@ -26,3 +26,20 @@ Ruling (user-voice-scrml.md, verbatim heading): "⭐ RULED — a backslash in a 
       grant error, so writeGrantsOf adds `write`. Probes (tools/l1.ts, base vs head): append/method/filter + position
       write fix-its now `[free, append|remove, write]` and compile applied; same error codes; a lone refused position
       write now also gets W-DISPLAY-UNTRACKED (`int[write]`). Tape slices 560/560; display-untracked 34/34.
+- [x] item 5: already closed by #2110 — verified, no change. F1: `xs = [...xs, 4]` → `[free, append]`,
+      `int[replace]` → `[replace, free, append]`, filter → `[free, remove]`, each applied compiles (tools/l1.ts).
+      INFO-1: strEscaped spells lone surrogates / U+2028 / U+2029 as `\uXXXX` (display-untracked-s482 test
+      "r2 INFO-1" passes). INFO-2: §6.15 and the §34 W-DISPLAY-UNTRACKED row carry "PA reading, prov=pa-ruled —
+      #2107 r2 review INFO-2" for the meta.subscribe exemption.
+
+## Gates (head = this branch, base = origin/main 7de593ce0; tools in ~/.cache/scrml/review/s482-escapes-ruled/)
+
+- #2110 12×20 escape matrix: 36 SAME (byte-identical), 204+12 both-error same codes, 0 value change, 0 newly
+  accepted, 0 warning diffs; 143 message diffs, all E-PARSE-001 (the intended text).
+- #2110 probes (emit e1–e9, recovery, each, if, typed attrs): verdicts and codes identical.
+- corpus (3441 files): 482 compile on both; 0 ok flips, 0 code diffs, 0 warning diffs, 0 byte diffs (whole result
+  minus `ms`); 1 message diff (prop-substitution-string-escapes, E-PARSE-001 text).
+- bootstrap-conformance --json: PASS 851 / FAIL 3 / NT 628 / UNS 491 / CRASH 0 on both; 0 verdict diffs.
+- s34-census --check-new --base 7de593ce0 PASS; gen-bootstrap-severity --check current; types-gate --check OK;
+  retired-forms-lint --base-ref OK; snippet-gate 120/0/9; spec-coverage-check 0 violations; delta-lint PASS.
+- Chromium (SCRML_BROWSER_TESTS=1): opener-escapes + display-untracked browser files 4/4, 29 expects.
