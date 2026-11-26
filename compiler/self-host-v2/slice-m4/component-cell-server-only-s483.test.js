@@ -197,6 +197,10 @@ describe("not covered here — a component ATTRIBUTE (a prop) is not a body cell
 });
 
 describe("the 'only server code reads it' sub-case is refused upstream (no accepted program reaches it)", () => {
+  // c30: an unread program cell seeded from `mk() + @card.k` compiled on c58d24b7c and shipped the secret (k's
+  // seed in the client made API_KEY client-read); with k judged, the cell's seed reaches server-only code and
+  // reads a cell, so it is the S483 INTERIM refusal (g-boot-outer-cell-server-seed-reads-cell-s482) — newly
+  // rejecting, as b11 / b12 were in #2121.
   test("a server function reading `@card.k` is E-REACTIVE-003; an unread body cell seeded from it is the INTERIM refusal", async () => {
     const a = await build(PROG(`\${ server function sr() -> string { return @card.k; } }\n` + CARD(KCELL, `<b>x</b>`) + `\n<card/>\n<button id="b" onclick={ @out = sr() !{ .Transport(t2) :> return }; }>b</button>`));
     expect(a.ok).toBe(false);
