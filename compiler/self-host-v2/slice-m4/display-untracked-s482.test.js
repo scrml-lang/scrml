@@ -151,7 +151,7 @@ describe("W-DISPLAY-UNTRACKED — a display of a `let` that a later writer write
     expect(w[0].message).toContain("replace `let m: int = …;` with `let <m:int=(…)/>` (the same initializer, in the parentheses)");
   }, 120000);
 
-  // r2 of #2107 (F-A): a string is always parenthesized — the opener's quoted value drops `\n` to `n` and
+  // r2 of #2107 (F-A): a string is always parenthesized — the opener's quoted value has only the §4.18.3 escapes (`\n` is E-PARSE-001, §5.2 RULED S482; it was dropped to `n` before #2110) and
   // reads `${…}` as a reactive template (g-boot-opener-string-escapes-s482), so only `=("…")` keeps the value
   // (the reviewer's q1 → q3, x2p; Chromium: display-untracked-chromium-s482.browser.test.js)
   test("the fix-it quotes a string literal re-escaped, parenthesized (r1 F4, r2 F-A)", async () => {

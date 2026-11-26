@@ -10985,20 +10985,23 @@ ${
         return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.slice(0, k).concat(ds), file: tp.file, ns: tp.ns, inFn: tp.inFn };
     }
 
-    // s482-opener-escapes — INTERIM (fail closed; gap
-    // g-boot-opener-string-escapes-s482): what a backslash means inside a
-    // quoted attribute value or a declaration's quoted own value
-    // (`title="…"`, `let <s:string="…"/>`) is NOT RULED (SPEC §5.2 / §66.2.4).
-    // `\"` and `\\` keep the one meaning every candidate reading gives them
-    // here (the §4.18.3 catalog's `"` and `\`); `\${` is read as the catalog's
-    // literal `${`, which the quoted-`${…}` refusal then refuses. A `\` + any
-    // other character used to drop the `\` and keep the character (`\n` became
-    // the letter `n` — a silent wrong value); it is now E-PARSE-001, against
-    // the backslash and the character after it, and on recovery both
-    // characters are kept as content so the value's extent never moves.
-    // After a live `${` the rest of the value is an interpolation's own
-    // grammar (the whole value is refused as a quoted template, §5.5.3), so
-    // no escape there is judged.
+    // s482-opener-escapes / s482-escapes-ruled — a backslash inside a quoted
+    // attribute value or a declaration's quoted own value (`title="…"`,
+    // `let <s:string="…"/>`) follows the §4.18.3 escape catalog (SPEC §5.2,
+    // §66.2.4; ruling:user-voice-scrml.md-S482-quoted-value-escapes-catalog,
+    // the owner's "B"): `\"` is a literal `"` (it does not close the value),
+    // `\\` a literal `\`, and `\${` the catalog's literal `${`, which the
+    // quoted-`${…}` refusal then refuses (§5.5.3). A `\` + any other character
+    // is a malformed escape, E-PARSE-001, against the backslash and the
+    // character after it; on recovery both characters are kept as content so
+    // the value's extent never moves. (Before #2110 the reader dropped the `\`
+    // and kept the character — `\n` became the letter `n`, a silent wrong
+    // value.) A single-quoted value — which §5.1 does not admit, gap
+    // g-boot-single-quoted-attr-accepted-s473 — is read by the same catalog,
+    // so `\'` is malformed there too (PA reading, prov=pa-ruled). After a live
+    // `${` the rest of the value is an interpolation's own grammar (the whole
+    // value is refused as a quoted template, §5.5.3), so no escape there is
+    // judged.
     fn parseQuoted(mp: MP, q: string) -> RValue {
         let m: MP = mAdv(mp, 1);
         let text: string = "";
@@ -11009,7 +11012,7 @@ ${
                 if (live || n == "\"" || n == "\\" || (n == "$" && chAt(m, 2) == "{")) {
                     text = text + n;
                 } else {
-                    m = mDiag(m, "E-PARSE-001", quotedEscMsg(n), m.pos, m.pos + 2);
+                    m = mDiag(m, "E-PARSE-001", quotedEscMsg(n, q, fragOn(m)), m.pos, m.pos + 2);
                     text = text + "\\" + n;
                 }
                 m = mAdv(m, 2);
@@ -11026,10 +11029,21 @@ ${
         return { v: AAttrValue.Quoted(text, q == "'"), mp: mAdv(m, 1) };
     }
 
-    fn quotedEscMsg(n: string) -> string {
+    // The E-PARSE-001 message for `\` + `n` in a value quoted with `q`. `emitted`:
+    // the text is `^{}` emit() output (FRAGMENT MODE, parseFragment), which
+    // emit() has already read its own escapes in (§22.4.1) and where the
+    // expression form is not available — the advice differs there.
+    fn quotedEscMsg(n: string, q: string, emitted: boolean) -> string {
         let shown: string = n;
-        if (n == "\n") shown = "⏎";
-        return "`\\" + shown + "` in a quoted value: what a backslash means in a quoted attribute or declaration value is not decided yet (SPEC §5.2, §66.2.4), so only `\\\"` and `\\\\` are read — write `\\\\` for a literal backslash, or write the value as an expression, `name=(\"…\")`, where a string has the ordinary escapes (`\\n` is a newline)";
+        if (n == "\n" || n == "\r") shown = "⏎";
+        let place: string = "a quoted value";
+        if (emitted) place = "a quoted value of the `^{}` block's emitted markup";
+        const head: string = "`\\" + shown + "` in " + place + " is not an escape: a quoted attribute or declaration value has only the §4.18.3 escapes `\\\"`, `\\\\` and `\\$" + "{` (SPEC §5.2)";
+        let fix: string = " — write `\\\\` for a literal backslash, or write the value as an expression, `name=(\"…\")`, where a string has the ordinary escapes (`\\n` is a newline)";
+        if (emitted) fix = " — emit() reads `\\\\`, `\\n`, `\\\"` and `\\t` in its text before the markup reader does (emit.raw() reads none, §22.4.1), so a literal backslash in an emitted quoted value is four backslashes in the string handed to emit() (two with emit.raw()), and a newline or tab is the character itself; the expression form `name=(\"…\")` is not available in emitted markup (§22.4.1: every value there is literal)";
+        if (n == "'" && q == "'") fix = " — to put a `'` in the value, write it double-quoted, `name=\"it's\"`: a `'` needs no escape there, and `\"` is the attribute-string delimiter (§5.1)";
+        if (n == "'" && q != "'") fix = " — a `'` needs no escape in a `\"`-quoted value: write it alone, `name=\"it's\"`";
+        return head + fix;
     }
 
     // ---- opener types (char level): Name, Name[g, …][…], Name | not -------------

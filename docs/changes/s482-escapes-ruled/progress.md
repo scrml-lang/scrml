@@ -19,3 +19,6 @@ Ruling (user-voice-scrml.md, verbatim heading): "⭐ RULED — a backslash in a 
 ## Log
 
 - [x] item 1 SPEC + gap markers (commit 1)
+- [x] items 2+3: parseQuoted comment rewritten to the ruled rule; quotedEscMsg(n, q, emitted) — no "not decided",
+      a `\'` hint per quote style, emit-specific advice in FRAGMENT MODE (fragOn). `\'` is NOT in the §4.18.3 catalog
+      ("exactly three escape sequences, and no others") — kept refused. opener-escapes-s482.test.js 20/20.
