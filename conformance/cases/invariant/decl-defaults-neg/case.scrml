@@ -1,0 +1,11 @@
+// §66.13.5 (S482 / S483) — the defaults break `start <= end`: E-WRITE-INVARIANT at compile time.
+<program>
+    <dateRange:struct>
+        let <start:int=5/>
+        let <end:int=1/>
+    </>
+    invariant (start <= end) [ordered]
+    <main>
+        <p id="s">${@dateRange.start}</p>
+    </main>
+</program>

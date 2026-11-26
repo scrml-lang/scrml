@@ -1,0 +1,8 @@
+// §66.13.5 / §14.2 (S483) — the type form; a literal into a cell of the type breaks `low <= mid`.
+<program>
+    type Band:struct = { low: int, mid: int, high: int } invariant (low <= mid) [lowMid] invariant (mid <= high)
+    let <b:Band=({ low: 5, mid: 1, high: 9 })/>
+    <main>
+        <p id="b">${@b.low}</p>
+    </main>
+</program>

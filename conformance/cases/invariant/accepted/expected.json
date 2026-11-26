@@ -1,0 +1,46 @@
+{
+  "id": "invariant-accepted",
+  "description": "Declaration invariants in both forms — after a declaration's closer (with `renders` between two clauses) and after a `type :struct` body — whose literals keep them, compile and run; a function named `invariant` is still an ordinary call elsewhere.",
+  "language-version": "1.0",
+  "spec": "§66.13.5, §14.2",
+  "provenance": "ruling:user-voice-scrml.md-S483-struct-invariant-syntax (\"yes, your recommendations on all three plus the follow-up\"); ruling:user-voice-scrml.md-S482-struct-invariant-contract (\"RULED yes (a)\")",
+  "rationale": "§66.13.5 rules 1-2: several clauses and `renders` follow the closer in either order; `invariant` is contextual only right after a closer / a `:struct` body and before `(` — \"Anywhere else it is an ordinary name\".",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-DECL-INVARIANT-"
+    ],
+    "notCodes": [
+      "E-WRITE-INVARIANT",
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#lo",
+        "text": "18"
+      },
+      {
+        "selector": "#r",
+        "text": "2"
+      },
+      {
+        "selector": "#call",
+        "text": "true"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-decl-invariant-unimplemented-s483",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=5",
+          "emitted:E-SCOPE-001=13",
+          "emitted:E-STATE-UNDECLARED=2",
+          "emitted:E-STMT-NO-EFFECT=1"
+        ],
+        "runtime": "sha256:932237c7486957bc"
+      }
+    }
+  }
+}

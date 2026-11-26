@@ -1,0 +1,7 @@
+// §66.13.5 rule 5 (S483) — a scalar cell has no fields for an invariant to relate.
+<program>
+    let <n:int=0/> invariant (n >= 0)
+    <main>
+        <p id="n">${@n}</p>
+    </main>
+</program>

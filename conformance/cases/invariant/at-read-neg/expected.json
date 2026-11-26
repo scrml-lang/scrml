@@ -1,0 +1,29 @@
+{
+  "id": "invariant-at-read-neg",
+  "description": "An invariant that reads a cell (`@limit`): E-CONTRACT-003 — a type's rule checks only its own value.",
+  "language-version": "1.0",
+  "spec": "§66.13.5, §53.11",
+  "provenance": "ruling:user-voice-scrml.md-S483-struct-invariant-syntax (\"yes, your recommendations on all three plus the follow-up\"); ruling:user-voice-scrml.md-S482-struct-invariant-contract (\"RULED yes (a)\")",
+  "rationale": "§66.13.5 rule 6: \"An `@` read … is E-CONTRACT-003 (§53.11)\"; ruling S483 item 1: \"an `@cell` read is E-CONTRACT-003\".",
+  "expect": {
+    "codes": [
+      "E-CONTRACT-003"
+    ],
+    "notCodes": [
+      "E-DECL-INVARIANT-IMPURE"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-decl-invariant-unimplemented-s483",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=3",
+          "emitted:E-SCOPE-001=5",
+          "emitted:E-STATE-UNDECLARED=2",
+          "missing:E-CONTRACT-003"
+        ]
+      }
+    }
+  }
+}

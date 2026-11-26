@@ -1,0 +1,12 @@
+// §66.13.5 rule 7 (S483) — `check` is a `function`, which carries no purity guarantee.
+<program>
+    function check() { return true; }
+    <dateRange:struct>
+        let <start:int=0/>
+        let <end:int=0/>
+    </>
+    invariant (check())
+    <main>
+        <p id="s">${@dateRange.start}</p>
+    </main>
+</program>

@@ -42387,6 +42387,10 @@ ${
                     ts = checkWrite(env, sw.w, exprType0(ts, pv.value.nid), pv.value, "`" + pv.name + "`", ts);
                 }
             }
+            // s483 (Q21 lane 1) — the grouped write (ruling S483 item 2): its literal overrides
+            // folded against the target's declaration invariants (§66.13.5 rule 9)
+            const tt: Type | not = knownOf(nameType(env, nameFact(env.t.names, target.nid)));
+            if (tt is given) ts = literalInvs(env, value, tt, placeLabel(target), ts);
             return record(ts, e.nid, VType.Unknown);
         }
         const r: RVT = typeExpr(env, value, ts0);
