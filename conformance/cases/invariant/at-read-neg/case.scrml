@@ -1,0 +1,12 @@
+// §66.13.5 rule 6 (S483) — an invariant reads only the value's own fields; `@limit` is another cell.
+<program>
+    let <limit:int=3/>
+    <dateRange:struct>
+        let <start:int=0/>
+        let <end:int=0/>
+    </>
+    invariant (start <= @limit)
+    <main>
+        <p id="s">${@dateRange.start}</p>
+    </main>
+</program>

@@ -1,0 +1,14 @@
+// §53.8.1 (S483, r1 F4) — the Booking example's invariant half: day-number fields, so `<` compares numbers (ruled S440).
+<program>
+    ${
+    type Booking:struct = {
+        checkIn:  int,
+        checkOut: int,
+        nights:   int
+    } invariant (checkIn < checkOut) [validDateRange]
+    }
+    let <booking:Booking=({ checkIn: 20240, checkOut: 20247, nights: 7 })/>
+    <main>
+        <p id="n">${@booking.nights}</p>
+    </main>
+</program>

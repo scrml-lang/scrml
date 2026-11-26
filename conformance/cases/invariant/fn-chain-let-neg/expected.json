@@ -1,0 +1,26 @@
+{
+  "id": "invariant-fn-chain-let-neg",
+  "description": "An invariant whose pure `fn` reads a file-scope `let` that a `function` writes: E-DECL-INVARIANT-IMPURE.",
+  "language-version": "1.0",
+  "spec": "§66.13.5",
+  "provenance": "ruling:user-voice-scrml.md-S483-struct-invariant-syntax (\"yes, your recommendations on all three plus the follow-up\"); ruling:user-voice-scrml.md-S482-struct-invariant-contract (\"RULED yes (a)\")",
+  "rationale": "§66.13.5 rule 7 (r1): the outer bindings an invariant may not read directly, it may not read through a `fn` either.",
+  "expect": {
+    "codes": [
+      "E-DECL-INVARIANT-IMPURE"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-decl-invariant-unimplemented-s483",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=2",
+          "emitted:E-SCOPE-001=5",
+          "emitted:E-STATE-UNDECLARED=1",
+          "missing:E-DECL-INVARIANT-IMPURE"
+        ]
+      }
+    }
+  }
+}

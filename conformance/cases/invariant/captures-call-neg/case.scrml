@@ -1,0 +1,12 @@
+// §66.13.5 rule 2 (S483 r1, prov=pa-ruled:S483-capture-never-silent) — `invariant(true);` after a closer is the clause, and a function `invariant` is in scope.
+<program>
+    function invariant(x: bool) { @hits = @hits + 1; }
+    let <hits:int=0/>
+    <r:struct>
+        let <a:int=0/>
+    </>
+    invariant(true);
+    <main>
+        <p id="h">${@hits}</p>
+    </main>
+</program>

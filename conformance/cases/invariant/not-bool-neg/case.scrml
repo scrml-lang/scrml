@@ -1,0 +1,11 @@
+// §66.13.5 rule 8 (S483) — `start + end` is an `int`, not a condition.
+<program>
+    <dateRange:struct>
+        let <start:int=0/>
+        let <end:int=0/>
+    </>
+    invariant (start + end)
+    <main>
+        <p id="s">${@dateRange.start}</p>
+    </main>
+</program>

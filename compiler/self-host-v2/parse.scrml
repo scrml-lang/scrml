@@ -48,7 +48,7 @@ ${
     import { Severity } from "./severity.scrml";
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, IfForm, AEffect, ARequest, AType, ATypeK, AFnFx,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport, ALink,
-             AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
+             AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AInvariant, AValArg, AValidator,
              AProgram, AItem, AItemK, AConst, FileAst, ADbFn, AHostBind, APage, AEndpoint, AEpArm, AChannel, AOnchange, Diag, ASql, ASqlMode,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, AForBound, ALift, ACss, AForeign, mkSpan, newDiag, stdlibPathPrefix,
              HView, HChain, HTargetParts, hostView, hostChainOf, hostRootGlobal, hostTargetParts, isHyphenWordExpr, metaCallee, metaOf, AMeta, patAlts } from "./ast.scrml";
@@ -7931,7 +7931,7 @@ ${
         if (r.code == "" && r.i < ts.length) r = refErr(r.i, "E-CONTRACT-002", "text is left over after the predicate, at `" + refAt(ts, r.i).v + "`");
         if (r.code == "E-CONTRACT-003" && r.msg.substring(0, 6) == "IDENT:") {
             const nm2: string = r.msg.substring(6);
-            return { code: r.code, p: r.p, msg: "the inline predicate `" + shown + "` references the name `" + nm2 + "` — an inline predicate is stateless: its only subject is the incoming value (§53.2.1: \"No external identifiers MAY appear — if they do, the compiler SHALL emit `E-CONTRACT-003`\"; §53.3.1: it SHALL NOT access \"Any function parameter or outer binding\"). Write the bound as a number literal (`" + base + "(<=100)`). A type's rule checks only its own value; to compare against another cell, write a derived check (e.g. `<over=(@cell > @limit)/>`, where `@cell` is the refined cell and `@limit` the cell it is compared against) and use it in markup or the handler that changes the value" };
+            return { code: r.code, p: r.p, msg: "the inline predicate `" + shown + "` references the name `" + nm2 + "` — an inline predicate is stateless: its only subject is the incoming value (§53.2.1: \"No external identifiers MAY appear — if they do, the compiler SHALL emit `E-CONTRACT-003`\"; §53.3.1: it SHALL NOT access \"Any function parameter or outer binding\"). Write the bound as a number literal (`" + base + "(<=100)`). A type's rule checks only its own value; to compare against another cell, write a derived check (e.g. `<over=(@cell > @limit)/>`, where `@cell` is the refined cell and `@limit` the cell it is compared against) and use it in markup or the handler that changes the value. To relate two fields of one struct (a sibling field), state a declaration invariant on the struct's declaration instead: `invariant (start < end)` (§66.13.5)" };
         }
         if (r.code == "E-CONTRACT-003") {
             const nm: string = r.msg.substring(4);
@@ -9433,15 +9433,19 @@ ${
             return mkItem(bumpId(t), start, AItemK.TypeItem(hd));
         }
         t = expectP(t, "=");
-        let body: ATypeBody = ATypeBody.StructBody([]);
+        let body: ATypeBody = ATypeBody.StructBody([], []);
         if (kind.v == "enum") {
             const r: RVariants = parseVariants(t);
             body = ATypeBody.EnumBody(r.vs);
             t = r.tp;
         } else if (kind.v == "struct") {
             const r2: RFields = parseTypeFields(expectP(t, "{"), "}");
-            body = ATypeBody.StructBody(r2.fs);
             t = expectP(r2.tp, "}");
+            // s483 (Q21 lane 1) — `type X:struct = { … } invariant (e) [label]` (§14.2,
+            // §66.13.5): the clauses after the body, each its own expression and label
+            const ri: RInvs = typeInvariants(t);
+            t = ri.tp;
+            body = ATypeBody.StructBody(r2.fs, ri.invs);
         } else if (kind.v == "error") {
             // s479 (§14.2, ruling S479 batch item 1): "There is no `:error` kind. Error types
             // are enum types (§19.1) … `type Name:error = { … }` is … `E-PARSE-TYPE` …, and the
@@ -9460,6 +9464,55 @@ ${
         }
         const td: ATypeDecl = { nid: t.nid, span: spanFrom(t, start), exported: exported, name: nameTok.v, body: body };
         return mkItem(bumpId(t), start, AItemK.TypeItem(td));
+    }
+
+    // =========================================================================
+    // s483 (Q21 lane 1) — a declaration invariant `invariant (e) [label]` (§66.13.5;
+    // ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1: "`invariant (expr)`
+    // after the closer, bare field names (the `renders` scope), optional `[label]`;
+    // several clauses allowed; `type X:struct = {…} invariant (expr)` on the type
+    // form"). `invariant` is a contextual keyword ONLY right after a declaration's
+    // closer / a `type :struct` body, and only when a `(` follows it; anywhere else
+    // it is an ordinary name (a call `invariant(x)` stays a call).
+    // =========================================================================
+    type RInv:struct = { inv: AInvariant, tp: TP }
+    type RInvs:struct = { invs: AInvariant[], tp: TP }
+
+    // At the `invariant` word: is it the clause (`invariant` then `(`)?
+    fn invariantAt(tp: TP) -> boolean {
+        const t: PTok = cur(tp);
+        return t.cls == TC.Ident && t.v == "invariant" && tk(peekAt(tp, 1), "(");
+    }
+
+    // At the `(` of a clause whose `invariant` word starts at `start`: the
+    // parenthesized expression, then an optional `[label]` — exactly one name in
+    // brackets (§53.2.3's `named-constraint` spelling). Anything else after the `)`
+    // is not the clause's.
+    fn invariantClause(tp: TP, start: int) -> RInv {
+        const from: TP = expectP(tp, "(");
+        const r: RExpr = parseAssign(from);
+        const text: string = tokText(r.tp, from.i, r.tp.i);
+        let t: TP = expectP(r.tp, ")");
+        let label: string = "";
+        if (isP(t, "[") && peekAt(t, 1).cls == TC.Ident && tk(peekAt(t, 2), "]")) {
+            label = peekAt(t, 1).v;
+            t = adv(adv(adv(t)));
+        }
+        const inv: AInvariant = { nid: t.nid, span: spanFrom(t, start), e: r.e, label: label, text: text };
+        return { inv: inv, tp: bumpId(t) };
+    }
+
+    // The clauses after a `type X:struct = { … }` body, in source order.
+    fn typeInvariants(tp: TP) -> RInvs {
+        let t: TP = tp;
+        let out: AInvariant[] = [];
+        for (;;) {
+            if (!invariantAt(t)) { break; }
+            const r: RInv = invariantClause(adv(t), cur(t).start);
+            out = out.concat([r.inv]);
+            t = r.tp;
+        }
+        return { invs: out, tp: t };
     }
 
     // s479 (r1 LOW-3) — the tokens after a type alias's missing `;` (`type N = number
@@ -11614,6 +11667,7 @@ ${
         let short: ANode[] | not = not;
         let vals: AValidator[] = [];
         let rend: ASpan[] = [];
+        let inv: ASpan[] = [];
         let nRead: int = 0;
         let going = true;
         for (; going; ) {
@@ -11649,6 +11703,7 @@ ${
                 attrs = attrs.concat(ra.attrs);
                 vals = vals.concat(ra.vals);
                 rend = rend.concat(ra.rend);
+                inv = inv.concat(ra.inv);
                 kws = kws.concat(ra.kws);
                 if (m.pos == before) {
                     m = mDiag(m, "E-PARSE-TAG", "unexpected `" + chAt(m, 0) + "` in the tag `<" + nm.w + "`", m.pos, m.pos + 1);
@@ -11670,6 +11725,13 @@ ${
                 m = mDiag(m, "E-DECL-RENDERS-IN-OPENER", "`renders` follows the closer (`/>` or `</>`) — close the opener, then write `renders <…>` after it (§66.5.1, S447)", sp.start, sp.end);
             } else {
                 m = mDiag(m, "E-PARSE-TAG", "a markup element cannot stand inside the opener of `<" + nm.w + ">` — `renders <…>` is a declaration's clause, written after its closer (§66.5.1)", sp.start, sp.end);
+            }
+        }
+        for (const sp of inv) {
+            if (isDeclOpener(o)) {
+                m = mDiag(m, "E-DECL-INVARIANT-IN-OPENER", "`invariant` follows the closer (`/>` or `</>`) — close the opener, then write `invariant (…)` after it, with the declaration's field names bare: `<range:struct> … </> invariant (start <= end)` (§66.13.5, §66.2.5)", sp.start, sp.end);
+            } else {
+                m = mDiag(m, "E-PARSE-ATTR", "`invariant (…)` cannot stand inside the opener of `<" + nm.w + ">` — an invariant is a declaration's clause, written after its closer (§66.13.5)", sp.start, sp.end);
             }
         }
         return { o: o, binds: binds, parens: parens, mp: m };
@@ -12410,7 +12472,7 @@ ${
         return src.length;
     }
 
-    type RAttrScan:struct = { typed: ADeclAttr[], attrs: AAttr[], vals: AValidator[], rend: ASpan[], kws: AAttr[], mp: MP }   // kws: a bare `let` / `export` on the opener itself, judged once the opener is classified   // rend: a `renders <…>` met inside the opener
+    type RAttrScan:struct = { typed: ADeclAttr[], attrs: AAttr[], vals: AValidator[], rend: ASpan[], inv: ASpan[], kws: AAttr[], mp: MP }   // kws: a bare `let` / `export` on the opener itself, judged once the opener is classified   // rend: a `renders <…>` met inside the opener
 
     // SPEC §66.2.2 (i): "an own value — `=` immediately after the name, or after
     // `name:Type`". A spaced `=` (`<let count:int = 0/>`) is reported, then read
@@ -12447,9 +12509,11 @@ ${
         if (fragOn(m)) {
             // FRAGMENT MODE: an attribute is a plain name with a quoted value or none
             const why: string = fragAttrWhy(nm);
-            if (why != "") return { typed: [], attrs: [], vals: [], rend: [], kws: [], mp: fragPlain(nm.mp, why) };
+            if (why != "") return { typed: [], attrs: [], vals: [], rend: [], inv: [], kws: [], mp: fragPlain(nm.mp, why) };
         }
         if (nm.w == "renders" && rendersClauseAt(nm.mp)) return rendersInOpener(mp, nm.mp);
+        // s483 (Q21 lane 1): `invariant (e)` inside an opener (judged once the opener is classified)
+        if (nm.w == "invariant" && chAt(skipSpace(nm.mp), 0) == "(") return invariantInOpener(mp, skipSpace(nm.mp));
         if (nm.w == "export" && isSpaceCh(chAt(nm.mp, 0))) {
             exported = true;
             nm = readName(skipSpace(nm.mp));
@@ -12461,9 +12525,9 @@ ${
         m = nm.mp;
         if (nm.w == "" && (exported || isLet)) {
             // a keyword with nothing after it (`<x:int=0 let />`): the keyword alone
-            return { typed: [], attrs: [], vals: [], rend: [], kws: [bareKw(m, exported, isLet, start)], mp: m };
+            return { typed: [], attrs: [], vals: [], rend: [], inv: [], kws: [bareKw(m, exported, isLet, start)], mp: m };
         }
-        if (nm.w == "") return { typed: [], attrs: [], vals: [], rend: [], kws: [], mp: mp };
+        if (nm.w == "") return { typed: [], attrs: [], vals: [], rend: [], inv: [], kws: [], mp: mp };
         // name:…
         if (chAt(m, 0) == ":" && !isNamespace(nm.w) && !isChannelHookNs(nm.w)) {
             const rt: RMType = parseOpenerType(mAdv(m, 1));
@@ -12487,7 +12551,7 @@ ${
             if (exported || isLet) m = grantInOpener(m, exported, isLet, nm.w, start);
             const da: ADeclAttr = { nid: m.nid, span: mkSpan(start, m.pos), exported: exported, isLet: isLet,
                                     name: nm.w, ty: rt.t, dflt: dflt };
-            return { typed: [da], attrs: [], vals: [], rend: [], kws: [], mp: mBump(m) };
+            return { typed: [da], attrs: [], vals: [], rend: [], inv: [], kws: [], mp: mBump(m) };
         }
         let name: string = nm.w;
         if (chAt(m, 0) == "(") {
@@ -12496,13 +12560,13 @@ ${
                 // a call that is not a validator (§55.1's vocabulary): skipped whole, reported
                 const vm: MP = backToMarkup(m, vt);
                 const d: MP = mDiag(vm, "E-PARSE-ATTR", "`" + nm.w + "(…)` in a tag — only a validator (§55.1: `req`, `length`, `pattern`, `min`, `max`, `gt`, `lt`, `gte`, `lte`, `eq`, `neq`, `oneOf`, `notIn`) takes arguments here", start, vm.pos);
-                return { typed: [], attrs: [], vals: [], rend: [], kws: [], mp: d };
+                return { typed: [], attrs: [], vals: [], rend: [], inv: [], kws: [], mp: d };
             }
             // s444 Phase B (dpa-058): a validator call in an opener (§55.1, §66.4 rule 3)
             const rv: RValArg = parseValArg(vt);
             const vm2: MP = backToMarkup(m, rv.tp);
             const va: AValidator = { nid: vm2.nid, span: mkSpan(start, vm2.pos), name: nm.w, arg: rv.arg };
-            return { typed: [], attrs: [], vals: [va], rend: [], kws: [], mp: mBump(vm2) };
+            return { typed: [], attrs: [], vals: [va], rend: [], inv: [], kws: [], mp: mBump(vm2) };
         }
         if (chAt(m, 0) == ":") {
             const sub: RWord = readName(mAdv(m, 1));
@@ -12541,10 +12605,10 @@ ${
             m = grantInOpener(m, exported, isLet, name, start);
         } else if (name == "let" || name == "export") {
             // a trailing flag `<x:int=0 let/>` / `<x:int=0 export/>` — the keyword written after the name
-            return { typed: [], attrs: [], vals: [], rend: [], kws: [bareKw(m, name == "export", name == "let", start)], mp: m };
+            return { typed: [], attrs: [], vals: [], rend: [], inv: [], kws: [bareKw(m, name == "export", name == "let", start)], mp: m };
         }
         const a: AAttr = { nid: m.nid, span: mkSpan(start, m.pos), name: name, value: v };
-        return { typed: [], attrs: [a], vals: [], rend: [], kws: [], mp: mBump(m) };
+        return { typed: [], attrs: [a], vals: [], rend: [], inv: [], kws: [], mp: mBump(m) };
     }
 
     // S447: `let` / `export` inside an opener. `let` (with or without `export`)
@@ -12786,11 +12850,20 @@ ${
         if (scriptStyleAt(at) != "") {
             // s462: refused whole (§4.17) — the misplaced-`renders` report still follows
             const rs: MP = refuseScriptStyle(at);
-            return { typed: [], attrs: [], vals: [], rend: [mkSpan(mp.pos, rs.pos)], kws: [], mp: rs };
+            return { typed: [], attrs: [], vals: [], rend: [mkSpan(mp.pos, rs.pos)], inv: [], kws: [], mp: rs };
         }
         const ro: ROpener = parseOpener(at);
         const re: RElem = finishElem(ro.o, ro.mp);
-        return { typed: [], attrs: [], vals: [], rend: [mkSpan(mp.pos, re.mp.pos)], kws: [], mp: re.mp };
+        return { typed: [], attrs: [], vals: [], rend: [mkSpan(mp.pos, re.mp.pos)], inv: [], kws: [], mp: re.mp };
+    }
+
+    // s483 (Q21 lane 1) — an `invariant (e) [label]` clause written inside an opener
+    // (mirrors rendersInOpener): the clause is consumed whole (so the opener's own
+    // `/>` / `>` still ends the tag) and its span returned; parseOpener reports it —
+    // E-DECL-INVARIANT-IN-OPENER on a DECLARATION opener (§66.13.5, §66.2.5 zone 3).
+    fn invariantInOpener(mp: MP, open: MP) -> RAttrScan {
+        const ri: RMInv = declInvariant(open, mp.pos);
+        return { typed: [], attrs: [], vals: [], rend: [], inv: [mkSpan(mp.pos, ri.mp.pos)], kws: [], mp: ri.mp };
     }
 
     // s444 Phase B — a validator's arguments, at its `(`: a comparison and its
@@ -13723,7 +13796,7 @@ ${
                             body: body, server: true, failable: false, err: not };
         k = mBump(k);
         const cell: ADecl = { nid: d.nid, span: d.span, exported: false, isLet: d.isLet, name: d.name, ty: d.ty, own: AAttrValue.NoValue,
-                              attrs: [], mods: [], body: [], renders: not, validators: [] };
+                              attrs: [], mods: [], body: [], renders: not, validators: [], invs: [] };
         const ci: AItem = { nid: k.nid, span: d.span, k: AItemK.DeclItem(cell) };
         k = mBump(k);
         const fi: AItem = { nid: k.nid, span: d.span, k: AItemK.FnItem(load) };
@@ -15283,30 +15356,111 @@ ${
             m = rb.mp;
         }
         const declEnd: int = m.pos;
-        // `renders` follows the closer (§66.5.1).
+        // `renders` follows the closer (§66.5.1); s483 (Q21 lane 1): so do the
+        // declaration's `invariant (e) [label]` clauses (§66.13.5) — several, in
+        // either order with the one `renders` (ruling S483 item 1, amending §66.2.5
+        // zone 3).
         let renders: AElem | not = not;
-        const after: MP = skipTrivia(m);
-        const rw: RWord = readName(after);
-        if (rw.w == "renders") {
-            const at: MP = skipTrivia(rw.mp);
-            if (scriptStyleAt(at) != "") {
-                // s462: a `<script>` / `<style>` is no element (§4.17) — refused whole
-                m = refuseScriptStyle(at);
-            } else if (chAt(at, 0) == "<" && !mLooking(at, "</")) {
-                const ro: ROpener = parseOpener(at);
-                const re: RElem = finishElem(ro.o, ro.mp);
-                renders = re.e;
-                m = re.mp;
+        let invs: AInvariant[] = [];
+        let tail = true;
+        for (; tail; ) {
+            const after: MP = skipTrivia(m);
+            const rw: RWord = readName(after);
+            if (rw.w == "renders" && renders is not) {
+                const at: MP = skipTrivia(rw.mp);
+                if (scriptStyleAt(at) != "") {
+                    // s462: a `<script>` / `<style>` is no element (§4.17) — refused whole
+                    m = refuseScriptStyle(at);
+                    tail = false;
+                } else if (chAt(at, 0) == "<" && !mLooking(at, "</")) {
+                    const ro: ROpener = parseOpener(at);
+                    const re: RElem = finishElem(ro.o, ro.mp);
+                    renders = re.e;
+                    m = re.mp;
+                } else {
+                    m = mDiag(at, "E-PARSE-RENDERS", "`renders` must be followed by one markup element (§66.5.1)", rw.mp.pos - 7, rw.mp.pos);
+                    tail = false;
+                }
+            } else if (rw.w == "invariant" && chAt(skipSpace(rw.mp), 0) == "(") {
+                const ri: RMInv = declInvariant(skipSpace(rw.mp), after.pos);
+                invs = invs.concat([ri.inv]);
+                m = ri.mp;
             } else {
-                m = mDiag(at, "E-PARSE-RENDERS", "`renders` must be followed by one markup element (§66.5.1)", rw.mp.pos - 7, rw.mp.pos);
+                tail = false;
             }
         }
+        const rk: RMInvs = invariantsKept(m, o, child, body, invs);
+        m = rk.mp;
         const d: ADecl = {
             nid: m.nid, span: mkSpan(o.start, declEnd), exported: exported, isLet: o.isLet,
             name: o.name, ty: dty, own: o.own, attrs: o.typed, mods: mods, body: body, renders: renders,
-            validators: bySource(bare.concat(o.vals)),
+            validators: bySource(bare.concat(o.vals)), invs: rk.invs,
         };
         return { d: d, mp: mBump(m) };
+    }
+
+    // s483 (Q21 lane 1) — which of a declaration's invariant clauses stand. An
+    // invariant relates the fields of the declaration that DEFINES them (§66.13.5):
+    // one on a declaration with no attribute and no child field — a scalar cell, or
+    // a cell of an existing type (which inherits that type's invariants) — is
+    // E-DECL-INVARIANT-NO-FIELDS. One on a CHILD field that has fields of its own
+    // (a nested struct-shaped field) is not judged by the bootstrap yet: refused by
+    // name (INTERIM, g-boot-invariant-nested-field-s483) rather than accepted
+    // unchecked. A refused clause is dropped (analyze never sees it).
+    type RMInvs:struct = { invs: AInvariant[], mp: MP }
+
+    fn invariantsKept(mp: MP, o: Opener, child: boolean, body: ADeclChild[], invs: AInvariant[]) -> RMInvs {
+        if (invs.length == 0) return { invs: invs, mp: mp };
+        let m: MP = mp;
+        let nKids: int = 0;
+        for (const c of body) {
+            const ck: ADeclChild = c;
+            const isKid: boolean = match ck {
+                .ChildField(d: x) :> true,
+                .StateChild(s: x) :> false,
+                .Idle(s: x) :> false
+            };
+            if (isKid) nKids = nKids + 1;
+        }
+        if (o.typed.length == 0 && nKids == 0) {
+            let tyShown: string = "no type";
+            const oty: AType | not = o.ty;
+            if (oty is given) tyShown = "`" + typeNameText(oty) + "`";
+            for (const iv of invs) {
+                m = mDiag(m, "E-DECL-INVARIANT-NO-FIELDS", "`invariant (" + iv.text + ")` on `<" + o.name + ">`, which declares no fields (no attribute, no child field; its type is " + tyShown + ") — an invariant relates the fields of the declaration that defines them (§66.13.5). A cell of an existing type inherits that type's invariants: write the invariant on the type's declaration (`<range:struct> … </> invariant (start <= end)`, or `type Range:struct = { … } invariant (start <= end)`). To bound one scalar value, use a refinement type: `int(>=0)` (§53)", iv.span.start, iv.span.end);
+            }
+            return { invs: [], mp: m };
+        }
+        if (child) {
+            for (const iv of invs) {
+                m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`invariant (" + iv.text + ")` on the child field `" + o.name + "`, which has fields of its own — an invariant on a nested struct-shaped field is not judged by the bootstrap yet (§66.13.5; INTERIM, g-boot-invariant-nested-field-s483). Declare the field's shape as a named type that carries the invariant (`type Shape:struct = { … } invariant (…)`) and type the field by it, or state the invariant on the enclosing declaration over the nested paths (`invariant (" + o.name + ".a <= " + o.name + ".b)`)", iv.span.start, iv.span.end);
+            }
+            return { invs: [], mp: m };
+        }
+        return { invs: invs, mp: m };
+    }
+
+    // s483 (Q21 lane 1) — a declaration's `invariant (e) [label]` clause after its
+    // closer (§66.13.5), at the `(`; `start` = the `invariant` word. The
+    // parenthesized expression is one logic region (as a `(…)` attribute value is);
+    // the `[label]` is one name in brackets, written right after the `)`.
+    type RMInv:struct = { inv: AInvariant, mp: MP }
+
+    fn declInvariant(mp: MP, start: int) -> RMInv {
+        const tp: TP = regionTP(mp, LexStop.Balanced);
+        const ri: RInv = invariantClause(tp, start);
+        const t2: TP = expectRegionEnd(ri.tp);
+        let m: MP = backToMarkup(mp, t2);
+        let inv: AInvariant = ri.inv;
+        const lb: MP = skipInlineSpace(m);
+        if (chAt(lb, 0) == "[") {
+            const nm: RWord = readName(mAdv(lb, 1));
+            if (nm.w != "" && isLabelText(nm.w) && chAt(nm.mp, 0) == "]") {
+                m = mAdv(nm.mp, 1);
+                inv = { nid: inv.nid, span: mkSpan(start, m.pos), e: inv.e, label: nm.w, text: inv.text };
+            }
+        }
+        return { inv: inv, mp: m };
     }
 
     // §66.2.4: an own value / attribute default is a literal or a plain `@ref`
@@ -15576,14 +15730,17 @@ ${
             // statement like an `import`: its region ends at the line, not after its `}`
             if (chAt(after, 0) == "{" || chAt(after, 0) == "*") return logicRegionItem(mp, LexStop.Line, fileTop);
             // s478: `export const NAME = …;` ends at its `;` (LexStop.Decl), not at a later `}`
-            if (!fileTop && (wl.w == "const" || wl.w == "let" || wl.w == "type")) return logicRegionItem(mp, LexStop.Decl, false);
+            if (!fileTop && wl.w == "type") return typeRegionItem(mp, LexStop.Decl);
+            if (!fileTop && (wl.w == "const" || wl.w == "let")) return logicRegionItem(mp, LexStop.Decl, false);
+            if (wl.w == "type") return typeRegionItem(mp, LexStop.Statement);
             return logicRegionItem(mp, LexStop.Statement, false);
         }
         // s479 — a `type` declaration at a body top is ONE declaration (LexStop.Decl):
         // a braceless alias `type N = number;` has no `}` for LexStop.Statement to
         // stop after, so its region ran on past its `;` (g-boot-body-top-type-alias-region-s478)
-        if (!fileTop && w.w == "type") return logicRegionItem(mp, LexStop.Decl, false);
-        if (w.w == "function" || w.w == "fn" || w.w == "type") return logicRegionItem(mp, LexStop.Statement, false);
+        if (!fileTop && w.w == "type") return typeRegionItem(mp, LexStop.Decl);
+        if (w.w == "type") return typeRegionItem(mp, LexStop.Statement);
+        if (w.w == "function" || w.w == "fn") return logicRegionItem(mp, LexStop.Statement, false);
         // s451 (U1a): `server function …` (the deprecated modifier, §52.10)
         if (w.w == "server") return logicRegionItem(mp, LexStop.Statement, false);
         // s449: the keyword `when … changes { … }` at the program body top (§40.8: code)
@@ -16022,6 +16179,67 @@ ${
         let t: TP = adv({ toks: tp.toks, i: tp.i, nid: nid, diags: m.diags, file: tp.file, ns: tp.ns, inFn: tp.inFn });
         if (isP(t, ";")) t = adv(t);
         return { items: items, tp: t };
+    }
+
+    // s483 (Q21 lane 1) — a `type` declaration at a file / body top: its region
+    // (LexStop.Statement / .Decl) ends at the body's `}` (or its `;`), so the
+    // `invariant (e) [label]` clauses written after a `:struct` body (§14.2,
+    // §66.13.5) are read here, on the markup side, and attached to that type.
+    fn typeRegionItem(mp: MP, stop: LexStop) -> RMItems {
+        const r: RMItems = logicRegionItem(mp, stop, false);
+        if (r.items.length == 0) return r;
+        const last: AItem = r.items[r.items.length - 1];
+        const lk: AItemK = last.k;
+        const td: ATypeDecl | not = match lk {
+            .TypeItem(t: x) :> x,
+            .ImportItem(i: x) :> not,
+            .FnItem(f: x) :> not,
+            .DeclItem(d: x) :> not,
+            .MarkupItem(n: x) :> not,
+            .ProgramItem(p: x) :> not,
+            .ConstItem(c: x) :> not
+        };
+        if (td is not) return r;
+        const tb: ATypeBody = td.body;
+        const fs: ATypeField[] | not = match tb {
+            .StructBody(fields: xs) :> xs,
+            .EnumBody(variants: vs) :> not,
+            .HostBody :> not,
+            .AliasBody(ty: x) :> not
+        };
+        if (fs is not) return r;
+        let invs: AInvariant[] = structInvs(tb);
+        let m: MP = r.mp;
+        for (;;) {
+            const after: MP = skipTrivia(m);
+            const rw: RWord = readName(after);
+            if (!(rw.w == "invariant" && chAt(skipSpace(rw.mp), 0) == "(")) { break; }
+            const ri: RMInv = declInvariant(skipSpace(rw.mp), after.pos);
+            invs = invs.concat([ri.inv]);
+            m = ri.mp;
+        }
+        if (m.pos == r.mp.pos) return r;
+        const nd: ATypeDecl = { nid: td.nid, span: mkSpan(td.span.start, m.pos), exported: td.exported, name: td.name, body: ATypeBody.StructBody(fs, invs) };
+        let items: AItem[] = [];
+        let i: int = 0;
+        for (const it of r.items) {
+            if (i == r.items.length - 1) {
+                items = items.concat([{ nid: it.nid, span: it.span, k: AItemK.TypeItem(nd) }]);
+            } else {
+                items = items.concat([it]);
+            }
+            i = i + 1;
+        }
+        return { items: items, mp: m };
+    }
+
+    fn structInvs(tb: ATypeBody) -> AInvariant[] {
+        return match tb {
+            .StructBody(invs: xs) :> xs,
+            .EnumBody(variants: vs) :> [],
+            .HostBody :> [],
+            .AliasBody(ty: x) :> []
+        };
     }
 
     fn logicRegionItem(mp: MP, stop: LexStop, top: boolean) -> RMItems {
@@ -17087,7 +17305,7 @@ ${
                     fields = fields.concat([{ nid: nid, span: oc.span, isLet: false, name: c.name, ty: ct.t, vals: [] }]);
                     nid = nid + 1;
                 }
-                add = add.concat([{ nid: nid, span: oc.span, k: AItemK.TypeItem({ nid: nid + 1, span: oc.span, exported: false, name: rowName, body: ATypeBody.StructBody(fields) }) }]);
+                add = add.concat([{ nid: nid, span: oc.span, k: AItemK.TypeItem({ nid: nid + 1, span: oc.span, exported: false, name: rowName, body: ATypeBody.StructBody(fields, []) }) }]);
                 nid = nid + 2;
                 // §38.13.2: "The primary key is derived by the `id`-field convention …; an explicit
                 // `key=<column>` attribute … overrides it"

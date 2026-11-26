@@ -1,0 +1,37 @@
+{
+  "id": "invariant-booking-accepted",
+  "description": "The §53.8.1 Booking example (its declaration invariant over two `int` day-number fields) compiles and runs; its field refinement `number(>0 && <365)` is left out here — a struct field's refinement is the bootstrap's run-time-refinement INTERIM (g-boot-refinement-runtime-checks-s478).",
+  "language-version": "1.0",
+  "spec": "§66.13.5",
+  "provenance": "ruling:user-voice-scrml.md-S483-struct-invariant-syntax (\"yes, your recommendations on all three plus the follow-up\"); ruling:user-voice-scrml.md-S482-struct-invariant-contract (\"RULED yes (a)\")",
+  "rationale": "§53.8.1 / §66.13.5: `invariant (checkIn < checkOut) [validDateRange]` on `type Booking:struct`; `<` takes numbers (ruled S440), so the fields are `int` day numbers.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-DECL-INVARIANT-"
+    ],
+    "notCodes": [
+      "E-WRITE-INVARIANT",
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#n",
+        "text": "7"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-decl-invariant-unimplemented-s483",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-SCOPE-001=4",
+          "emitted:E-STATE-UNDECLARED=1"
+        ],
+        "runtime": "sha256:6a7bd15b29286996"
+      }
+    }
+  }
+}

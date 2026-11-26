@@ -1,0 +1,10 @@
+// §66.13.5 rule 3 (S483) — the clause belongs after the closer, not in the opener.
+<program>
+    <r:struct invariant (a <= b)>
+        let <a:int=0/>
+        let <b:int=0/>
+    </>
+    <main>
+        <p id="a">${@r.a}</p>
+    </main>
+</program>

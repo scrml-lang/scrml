@@ -13117,6 +13117,17 @@ type name:kind = { ... }
 - `:kind` — the kind annotation. Defined kinds: `:struct`, `:enum`. Additional kinds TBD.
 - **There is no `:error` kind.** Error types are enum types (§19.1): an error type is declared `type Name:enum = { … }`, and a variant that carries data declares it as payload fields, `Failed(message: string)` (§14.4). `type Name:error = { … }` is not a type declaration — it is `E-PARSE-TYPE` (a type kind other than `:enum` / `:struct`), and the message gives the enum form. **Provenance:** ruling:user-voice-scrml.md S479 "⭐ RULED — S479 batch items 1 and 2, PA recs adopted" item 1 — *"error types are enums — strike `:error` from §14.1.2, retire E-ERROR-008"*. (impl#1 still accepts `:error` — a carried divergence, `g-impl1-error-kind-and-dg-001-s479`.)
 - `{ ... }` — the type body (kind-dependent syntax).
+- **Declaration invariants (`:struct` only, S483).** A `:struct` type declaration MAY be followed by one or more
+  `invariant (expr) [label]` clauses — `type Band:struct = { low: int, mid: int, high: int } invariant (low <= mid)
+  [lowMid] invariant (mid <= high)` — each a condition over the type's own fields that every value of the type
+  satisfies, checked on every write (§66.13.5). The `[label]` is optional.
+  > **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1 — *"`type X:struct = {…}
+  > invariant (expr)` on the type form."*
+
+```
+type-decl       ::= 'type' identifier ':' kind '=' '{' type-body '}' invariant-clause*
+invariant-clause ::= 'invariant' '(' expression ')' ( '[' identifier ']' )?      // `:struct` only — §66.13.5
+```
 
 ### 14.3 Struct Types
 
@@ -25191,7 +25202,7 @@ always rule out before the program runs, and that is **not a value of any `!` er
 | Code | Raised by | Section |
 |---|---|---|
 | `E-INDEX-OUT-OF-RANGE-RT` | an index read `xs[i]` with `i < 0` or `i >= xs.length`; `s[i]` out of range; a negative computed `slice` position, `repeat` count or `padStart` / `padEnd` width; a negative COMPUTED `xs.insert` position (a negative literal one is `E-WRITE-INVARIANT` at compile time, S477) or a negative index write (S469; the last three derived); an index write at or past the end — `xs[i] = v`, `xs[i].f = v` (S473, §66.12.6 rule 3); an `xs.insert(i, x)` position past the end (S477, O36 RULED — §66.11.7) (emitted by the bootstrap's runtime; Nominal on impl#1) | §66.12.8 (moved from §49.13), §66.12.6, Appendix D.1 |
-| `E-WRITE-INVARIANT-RT` | a write the compiler could not prove inside a sequence invariant breaks it when it runs: a value or an edit that would leave a tape's length outside its type's bound, a `length =` that lengthens (S477, O36 RULED; raised before the write — nothing is written; emitted by the bootstrap's runtime; Nominal on impl#1). The code and its split from `E-INDEX-OUT-OF-RANGE-RT` ratified (ruling:user-voice-scrml.md S477 "E-WRITE-INVARIANT-RT ratified", §66.11.7) | §66.11.7, §66.12.2, §66.12.6 |
+| `E-WRITE-INVARIANT-RT` | a write the compiler could not prove inside a sequence or declaration invariant breaks it when it runs: a value or an edit that would leave a tape's length outside its type's bound, a `length =` that lengthens, a write whose candidate value makes a declaration invariant (§66.13.5) `false` (S483: ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 2 — *"otherwise the E-WRITE-INVARIANT-RT trap before any write (S477)"*; the declaration-invariant run-time check is owed in the bootstrap, `g-boot-invariant-write-checks-s483`) (S477, O36 RULED; raised before the write — nothing is written; emitted by the bootstrap's runtime; Nominal on impl#1). The code and its split from `E-INDEX-OUT-OF-RANGE-RT` ratified (ruling:user-voice-scrml.md S477 "E-WRITE-INVARIANT-RT ratified", §66.11.7) | §66.11.7, §66.12.2, §66.12.6 |
 | `E-INT-CONVERSION-RT` | `floor` / `ceil` / `trunc` / `round` of NaN, ±∞, or a value that rounds outside ±(2^53−1) (S469; ~~Nominal / spec-ahead — not yet emitted~~ emitted since S472 by `scrml:math` on both implementations — stdlib/math/host.js, compiler/runtime/stdlib/math.js) | §41.18 |
 | `E-HOST-VALUE-MISMATCH-RT` | the value a host function returned does not fit its wrapper's declared return type (S472 — the return-point decode; emitted at `compiler/self-host-v2/slice-m1/runtime/runtime.js`, the bootstrap's runtimes; Nominal on impl#1) | §21.3.1.1 |
 | `E-HOST-THROW-RT` | a `<host>` binding not declared `! HostError` whose target throws, or returns a Promise that rejects (S473 DRAFT; Nominal / spec-ahead — not yet emitted) | §21.3.3 rule 18 |
@@ -31797,7 +31808,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-RANGE-OUTSIDE-LOOP-HEAD | §49.2.5, §49.9 | A range `a..b` / `a..=b` anywhere other than the whole iterable of a `for` iterate head or the bounded-length token of a tape type (§66.12.2) — a range is not a value. **Nominal / spec-ahead — not yet emitted.** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F3 *"`..` and `..=` (Recommended)"* (*"loop-head only"*). | Error |
 | E-RANGE-BOUND-NOT-INT | §49.2.5, §49.9 | A range bound whose type is not `int`. **Nominal / spec-ahead — not yet emitted.** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F3 *"`..` and `..=` (Recommended)"*. | Error |
 | E-INDEX-OUT-OF-RANGE-RT | §66.12.8 (was §49.13), §66.12.6, §19.17 | Runtime trap: an index read `xs[i]` on a tape with `i < 0` or `i >= xs.length`. **(S469)** Also `s[i]` out of range on a string, and a negative COMPUTED position or count in `s.slice(…)` / `s.repeat(n)` (Appendix D.1; ruling:user-voice-scrml.md S469 "⭐ RULED — no negative positions anywhere" — *"No negatives anywhere (Recommended)"*; Nominal). Stops the current unit of execution; not a `!` error (§19.17). `xs.at(i)` is the non-trapping form (`T \| not`). ~~**Nominal / spec-ahead — not yet emitted**~~ **Emitted by the bootstrap's runtime** (`compiler/self-host-v2/slice-m1/runtime/runtime.js` — an out-of-range `xs[i]` / `s[i]` and a negative computed `slice` position trap; s469-boot-ruled-backlog); **Nominal on impl#1** (impl#1 reads JavaScript's `undefined`, §49.8). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F4 *"Trap + `.at()` (Recommended)"*. **S473:** also a position write at or past the end of a tape (`xs[i] = v`, `xs[i].f = v`; §66.12.6 rule 3) — nothing is written; ruling:user-voice-scrml.md S473 "⭐ RULED — S473 PA recs, all" item 4. Emitted by the bootstrap's runtime (`compiler/self-host-v2/slice-m1/runtime/runtime.js` `setPosition`, `setAt`, `writePath`); Nominal on impl#1. **S477:** also an `xs.insert(i, x)` position past the end (O36 RULED, §66.11.7 — a provable one is `E-WRITE-INVARIANT` at compile time); nothing is written. Emitted by the bootstrap's runtime (`tapeInsert`); Nominal on impl#1. Provenance: ruling:user-voice-scrml.md S477 "⭐ RULED — O36". | Runtime |
-| E-WRITE-INVARIANT-RT | §66.11.7, §66.12.2, §66.12.6, §19.17 | Runtime trap: a write the compiler could not prove inside a sequence invariant breaks it when it runs — a value or an edit that would leave a tape's length outside its type's bound (`T[min..=max, …]`, §66.12.2: an append past `max`, a pop below `min`, a computed value of the wrong length written, passed or returned into a bounded type), or a `length =` write that lengthens (§66.12.6 rule 3). The check runs before the write: nothing is written (no partial apply). Stops the current unit of execution; not a `!` error (§19.17). A provable violation is the compile-time `E-WRITE-INVARIANT` (§66.20); a position outside the tape is `E-INDEX-OUT-OF-RANGE-RT`. Code and split ratified: ruling:user-voice-scrml.md S477 "E-WRITE-INVARIANT-RT ratified". **Emitted by the bootstrap's runtime** (`compiler/self-host-v2/slice-m1/runtime/runtime.js` `lengthCheck`, `lengthGuard`, reached from `compiler/self-host-v2/print.scrml` — Core `PrimOp.LengthCheck`, `Check.RuntimeLength`); **Nominal on impl#1** (impl#1 does not implement §66; §34.0). Provenance: ruling:user-voice-scrml.md S477 "⭐ RULED — O36" — *"036 yes"* (*"a write whose effect the compiler cannot prove is checked at RUN TIME and TRAPS on violation (the §19.17 trap kind)"*). Direction of change: semantics-defined (previously unspecified). | Runtime |
+| E-WRITE-INVARIANT-RT | §66.11.7, §66.12.2, §66.12.6, §66.13.5, §19.17 | Runtime trap: a write the compiler could not prove inside a sequence or declaration invariant breaks it when it runs — a value or an edit that would leave a tape's length outside its type's bound (`T[min..=max, …]`, §66.12.2: an append past `max`, a pop below `min`, a computed value of the wrong length written, passed or returned into a bounded type), or a `length =` write that lengthens (§66.12.6 rule 3), or a write whose candidate value makes a declaration invariant (`invariant (expr)`, §66.13.5) `false` (S483, ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 2; the message names the declaration, the invariant's `[label]` or expression, and the candidate field values; the declaration-invariant check is owed in the bootstrap, `g-boot-invariant-write-checks-s483`). The check runs before the write: nothing is written (no partial apply). Stops the current unit of execution; not a `!` error (§19.17). A provable violation is the compile-time `E-WRITE-INVARIANT` (§66.20); a position outside the tape is `E-INDEX-OUT-OF-RANGE-RT`. Code and split ratified: ruling:user-voice-scrml.md S477 "E-WRITE-INVARIANT-RT ratified". **Emitted by the bootstrap's runtime** (`compiler/self-host-v2/slice-m1/runtime/runtime.js` `lengthCheck`, `lengthGuard`, reached from `compiler/self-host-v2/print.scrml` — Core `PrimOp.LengthCheck`, `Check.RuntimeLength`); **Nominal on impl#1** (impl#1 does not implement §66; §34.0). Provenance: ruling:user-voice-scrml.md S477 "⭐ RULED — O36" — *"036 yes"* (*"a write whose effect the compiler cannot prove is checked at RUN TIME and TRAPS on violation (the §19.17 trap kind)"*). Direction of change: semantics-defined (previously unspecified). | Runtime |
 | E-TAPE-JS-METHOD | §66.12.6, §66.20 | (a) A JavaScript array method name called on a tape, in any position, whatever the tape grants — the mutating `push` / `unshift` / `splice` (S469 "tape methods are named after their grants") or the copy-returning `toSorted` / `toReversed` / `with` (S469, O65 (a)); the fix-it names the scrml form (`.append(x)`, `.prepend(x)`, `.remove(i)` / `.insert(i, x)`, `.sort(…)`, `.reverse()`, a position write `xs[i] = v`). (b) A call of `sort`, `reverse`, `fill` or `copyWithin` on a tape whose result is discarded (a statement) — these return a new tape, so the JavaScript in-place idiom would do nothing (derived, §66.12.6 rule 3). Code inside a `_{ }` slice is not checked. **Nominal on impl#1** (impl#1 does not implement §66; it carries the code, §34.0). Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`tapeJsFix`, `tapeMethodStmt`). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — tape methods are named after their grants" — *"Names match the grants (Recommended)"*; ruling:user-voice-scrml.md S469 "⭐ RULED — open items from the loops + tapes SPEC PRs" — *"Refuse, one name each (Recommended)"*, *"E-TAPE-JS-METHOD (Recommended)"*. Direction of change: newly-rejecting. | Error |
 | E-GRANT-UNKNOWN | §66.12.2, §66.12.4, §66.20 | A tape grant token that is not a permission axis value: `any` / `all` (there is no all-grant, §66.12.4), a repeated token (the list is a set), any unknown word; the retired single-token places `end` / `front` / `anywhere` (the fix-it names both halves, `append` / `pop`, `prepend` / `shift`, `insert` / `remove` — S442); and the retired spelling `writable` (the fix-it: *"`writable` is spelled `write`"* — O10 RULED S469, no deprecation window). **Nominal on impl#1** (impl#1 does not implement §66 grants; it carries the code, §34.0). Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`grantAxis`, `resolveSeqType`, `grantUnknownMessage`). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED (partial O10) — the position-write grant is spelled `write`, not `writable`" — *"I dont like writable, I think I prefer write"*; ruling:user-voice-scrml.md S469 "⭐ RULED — O10 complete: `free`, `write`, `replace`" — *"Keep free and replace (Rec)"*; ruling:user-voice-scrml.md S442 — *"spellings are fine"*. Direction of change: newly-rejecting (`writable`). | Error |
 | E-POSITION-NEGATIVE | Appendix D.1 | A negative LITERAL `slice` position — `s.slice(-1)`, `s.slice(0, -2)` — refused at compile time: no position counts from the end (as ruled). Also, *derived* (the ruling applied to a count or width): a negative literal `s.repeat(n)` count or `s.padStart` / `s.padEnd` width. ~~`xs[-1]`, `s[-1]`~~ *(struck S469 r4: an index read is NOT this code — `xs[-1]` / `s[-1]` trap with `E-INDEX-OUT-OF-RANGE-RT`, literal or computed, §66.12.8 rule 2.)* A negative COMPUTED `slice` position, count or width traps instead (`E-INDEX-OUT-OF-RANGE-RT`); `xs.at(-1)` is `not` and `s.charAt(-1)` is `""`, literal or computed. Fix-it: count from the end explicitly (`s.slice(s.length - 1)`). **Code name provisional (PA, S469).** ~~**Nominal / spec-ahead — not yet emitted** (the bootstrap's `slice` still counts a negative from the end).~~ Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (the string-method check; its `slice` no longer counts a negative from the end — s469-boot-ruled-backlog); **Nominal on impl#1** (impl#1 carries it, §34.0). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — no negative positions anywhere" — *"No negatives anywhere (Recommended)"* (*"`slice(-1)` is refused (a literal at compile time; a computed one traps at run time, the PA reading)"*). Direction of change: newly-rejecting. | Error |
@@ -31932,6 +31943,11 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-FIXED-RETIRED | §15.7, §66.15.1 | A `fixed` attribute on an element. `fixed` is retired (S473 D26): a §66 use cannot override anything inside a declaration's `renders` (§66.6.9), so there is nothing to mark; the attribute is refused, never written to the DOM. **Provenance:** ruling:user-voice-scrml.md S473 D26 "your recs on all" — *"`fixed` is retired and refused with a named message."* Code name: PA reading, confirmed S475 (ruling:user-voice-scrml.md S475 "⭐ RULED — S475 owner questions, PA recs adopted wholesale" item 15, *"The older S473 veto-window readings are confirmed."*). **Nominal / not yet emitted** (`g-boot-fixed-attr-leaks-to-dom-s473`; impl#1 carries §15.7 for the legacy form). | Error |
 | E-DECL-ELEMENT-NAME-COLLIDES | §66.6.6 | A program cell whose name is an HTML element name, declared in a scope that also uses that name as a tag (`let <filter:string=""/>` and `<filter/>`): reported at the DECLARATION, naming the element and the tag use. The cell is legal when no tag use collides. **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 review-surfaced decisions, all PA recs" ("your recs") item 3. Code name: PA reading, confirmed S475 (ruling:user-voice-scrml.md S475 "⭐ RULED — S475 owner questions, PA recs adopted wholesale" item 15, *"The older S473 veto-window readings are confirmed."*). (Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml`, PR #1678; Nominal on impl#1, which does not implement §66.) | Error |
 | E-DECL-SLOT-OUTSIDE-RENDERS | §66.15.2 | §66 dialect: a `<slot/>` outside a declaration's `renders` — it names no use, so it would render nothing. (Rules 1–2 of §66.15.2 reuse E-COMPONENT-021 / E-COMPONENT-020.) **Provenance:** ruling:user-voice-scrml.md S473 D11 "your recs on all". Code name: PA reading, confirmed S475 (ruling:user-voice-scrml.md S475 "⭐ RULED — S475 owner questions, PA recs adopted wholesale" item 15, *"The older S473 veto-window readings are confirmed."*). Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`resolveSlot`) (`g-boot-slot-count-unchecked-s473`, resolved by s473-boot-ruled-refusals); Nominal on impl#1, which does not implement §66. | Error |
+| E-DECL-INVARIANT-IN-OPENER | §66.13.5, §66.2.5, §66.20 | §66 dialect: an `invariant (expr)` clause written inside a declaration's opener (`<r:struct invariant (a <= b)>`). The message says the clause follows the closer (`/>` or `</>`), with the declaration's field names bare — the S447 rule that a word introducing what follows stands outside the opener (the `E-DECL-RENDERS-IN-OPENER` parallel). **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1 (*"`invariant (expr)` after the closer"*). Emitted by the bootstrap at `compiler/self-host-v2/parse.scrml` (`invariantInOpener`, `parseOpenerB`); Nominal on impl#1 (§34.0). Direction of change: newly-rejecting. | Error |
+| E-DECL-INVARIANT-IMPURE | §66.13.5, §66.20 | §66 dialect: a declaration invariant reads something other than the value's own fields, literals, enum variants, the deterministic built-in methods a pure `fn` body may use (`.trim()`, `.length`, a `x => expr` sequence callback) and calls of a pure `fn` that computes only from its arguments — an outer binding (a file-scope constant or `let`, a host binding, a function named as a value), a call of a `function`, a host call, a write, a function value held as a value, a query or a handled failable call; or calls a `fn` that, directly or through the `fn`s it calls, reads an outer binding (the message names the call chain). An `@` read, direct or reached through a `fn`, is `E-CONTRACT-003` instead. The message names the fix: a `fn` that takes the fields as parameters. **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1 (*"Reads only the value's own fields, literals and pure `fn` calls; an `@cell` read is E-CONTRACT-003."*); the call-chain rule and direct-equals-`fn` purity are PA readings (r1 of #2120, prov=pa-ruled:S483-fn-chain-purity, prov=pa-ruled:S483-direct-equals-fn-purity; open to owner veto). Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`invPurity`, `invReachPass`); Nominal on impl#1 (§34.0). Direction of change: newly-rejecting. | Error |
+| E-DECL-INVARIANT-CAPTURES-CALL | §66.13.5, §66.20 | §66 dialect: `invariant (…)` written right after a declaration's closer or a `:struct` type body is read as an invariant clause (§66.13.5 rule 2), and a binding named `invariant` (a function, a constant, a file-scope `let`, a host binding) is in scope there — so the line may be meant as a call. The clause is refused, not judged further (fail closed); a captured call is never silently dropped. The message: this is read as an invariant clause; to call the function, rename it or move the call; to state an invariant, rename the binding. **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1 (the clause grammar, candidate A — whose "Against" names the capture); that the capture is never silent is a PA reading (r1 of #2120, prov=pa-ruled:S483-capture-never-silent; open to owner veto). Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`invCaptureWhy`, `resolveDeclInvs`, `resolveTypeInvs`); Nominal on impl#1 (§34.0). Direction of change: newly-rejecting. | Error |
+| E-DECL-INVARIANT-NO-FIELDS | §66.13.5, §66.20 | §66 dialect: an `invariant (expr)` clause on a declaration that defines no fields — no typed attribute and no child field: a scalar cell (`let <n:int=0/> invariant (n >= 0)`) or a cell of an existing type. The message names the two fixes: a cell of a type inherits the type's invariants (state the invariant on the type's declaration), and a scalar is bounded by a refinement type (`int(>=0)`, §53). **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1 and ruling:user-voice-scrml.md-S482-struct-invariant-contract (*"an invariant on the declaration itself"*). Emitted by the bootstrap at `compiler/self-host-v2/parse.scrml` (`invariantsKept`); Nominal on impl#1 (§34.0). Direction of change: newly-rejecting. | Error |
+| E-DECL-INVARIANT-NOT-BOOL | §66.13.5, §66.20 | §66 dialect: a declaration invariant's expression is not of type `bool` (`invariant (start + end)`). **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax (S430 Q1 *"typed, obviously"*; the design's typed condition). Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`invTypeCheck`); Nominal on impl#1 (§34.0). Direction of change: newly-rejecting. | Error |
 | E-DECL-USE-ATTR | §66.6.9, §66.20 | §66 dialect: an attribute on a plain use `<x …/>` that is not a declared attribute or child field of `x`, `as=`, or `if=` / `else-if=` / `else` (`class`, `style`, `id`, `aria-*`, `data-*`, `on…`, `bind:…`, `show=`, `key=`, a misspelled field, …); an attribute on a `<*x>` reference that names no field of `x` (`as=` included; `if=` / `else-if=` / `else` excepted — the open residue O18-r, `E-BOOTSTRAP-UNSUPPORTED` on the bootstrap for now, §66.6.9 rule 3); a construction value written as a `{…}` block. Nothing a use writes reaches an element of its `renders`. The legacy `const X = <…>` form keeps `E-COMPONENT-011` (§15.10). **Provenance:** ruling:user-voice-scrml.md S462 "ratified path to X" (dpa-069 item 1). **Nominal on impl#1** (impl#1 does not implement §66); emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`resolveUse`, `resolveStar`, `resolveConstructValue`). | Error |
 | E-RESERVED-IDENTIFIER | §6.8 | Local identifier shadows a reserved language keyword. Specific case: `function reset() {...}` or `fn reset {...}` shadows the `reset` keyword. | Error |
 | E-SYNTHESIZED-WRITE | §6.11, §52.6.8 | Assignment to an auto-synthesized property (e.g., `@signup.isValid = false`). Synthesized validity surface properties are read-only. See §55 for full validity surface specification. **S451 limb:** an assignment to a `<x server>` cell's load-failure state `@x.error` (§52.6.8 rule 4; ruling:user-voice-scrml.md S451 "your recs on all five" item 2) — **Nominal / spec-ahead for this limb, not yet emitted**. The validity limb is emitted at `compiler/src/symbol-table.ts:5231`. | Error |
@@ -47278,9 +47294,9 @@ scrml distinguishes two categories of value constraint:
 or external reactive references. These are ~~governed by `<machine>` (§51)~~ not inline predicates; each kind has its
 own mechanism (the §53.3.2 table; `<machine>` was removed S305/S307). Examples:
 - Enum transition rules (depends on current variant) — the value's transition graph, `rule=` state-children (§66.13.2)
-- Cross-field struct invariants (depends on sibling field values) — an `<engine for=Struct>` guard (§53.8.1).
-  ⚑ OPEN: `<engine>` is soft-deprecated (§66.21); the non-deprecated way to state a cross-field struct invariant
-  is an open owner question (gap g-spec-struct-invariant-form-s482)
+- Cross-field struct invariants (depends on sibling field values) — a declaration invariant, `invariant (start <
+  end)` written after the declaration (§66.13.5; ruling:user-voice-scrml.md-S482-struct-invariant-contract,
+  ruling:user-voice-scrml.md-S483-struct-invariant-syntax)
 - Constraints referencing reactive variables (`<=@maxMana`) — a type's rule checks only its own value; to compare
   against another cell, write a derived check (e.g. `<overBudget=(@spent > @maxMana)/>`) and use it in markup or the
   handler that changes the value (ruling:user-voice-scrml.md-S482-contract-003-derived-check)
@@ -47412,7 +47428,7 @@ The canonical decision rule for when to use an inline predicate vs ~~a `<machine
 | `number(>0 && <10000)` | Stateless | Inline predicate |
 | `string(.length > 7 && .length < 255)` | Stateless | Inline predicate |
 | `string(email)` | Stateless | Inline predicate (named shape) |
-| `start < end` on a struct | Contextual (needs sibling) | ~~`<machine for Struct>`~~ an `<engine for=Struct>` guard, `* => * given (self.start < self.end)` (§53.8.1; the `<engine for=T>` element is §66.21 Stage-1 soft-deprecated, `W-ENGINE-ELEMENT-DEPRECATED` — it parses and is not removed). ⚑ OPEN: `<engine>` is soft-deprecated (§66.21); the non-deprecated way to state a cross-field struct invariant is an open owner question (gap g-spec-struct-invariant-form-s482) |
+| `start < end` on a struct | Contextual (needs sibling) | ~~`<machine for Struct>`~~ ~~an `<engine for=Struct>` guard~~ a declaration invariant, `invariant (start < end)` after the declaration or its `type X:struct = { … }` body (§66.13.5; ruling:user-voice-scrml.md-S482-struct-invariant-contract, ruling:user-voice-scrml.md-S483-struct-invariant-syntax) |
 | `.Pending => .Processing` | Contextual (needs prior state) | ~~`<machine>`~~ the value's transition graph: `rule=` state-children on the enum value (§66.13.2; ruling:S435 (PA proposal text answered "a", L488), as §66.13.1 cites it: *"Every field's permitted changes are declared on its type: fixed, a lifecycle, a transition graph, or `let`/`replace`."*) |
 | `number(>=0 && <=@maxMana)` | Contextual (references reactive var) | ~~`<machine>`~~ a derived check: `<overBudget=(@spent > @maxMana)/>`, used in markup or the handler that changes the value (ruling:user-voice-scrml.md-S482-contract-003-derived-check) |
 
@@ -47842,42 +47858,49 @@ aspects of the same variable:
 - Machine: "is this transition (or mutation) valid given the current state?"
 
 Both MAY apply to the same variable. The canonical case is a struct field that has an inline
-predicate AND the struct is governed by a machine:
+predicate AND the struct carries a declaration invariant (§66.13.5 — the S482 fifth contract kind, which
+replaces the `<engine for=Struct>` guard this example used; `<engine>` is §66.21 soft-deprecated):
 
 ```scrml
 type Booking:struct = {
-    start:  string,
-    end:    string,
-    nights: number(>0 && <365)     // inline predicate on the field
-}
+    checkIn:  int,                 // day numbers: `<` takes numbers (ruled S440)
+    checkOut: int,
+    nights:   number(>0 && <365)   // inline predicate on the field
+} invariant (checkIn < checkOut) [validDateRange]      // declaration invariant over two fields
 
-<engine name=ValidBooking for=Booking> {
-    * => * given (self.start < self.end)   // machine governing the struct
-}
-</>
-
-<booking>: ValidBooking = { start: "2026-06-01", end: "2026-06-08", nights: 7 };
+let <booking:Booking=({ checkIn: 20240, checkOut: 20247, nights: 7 })/>
 ```
+
+> **Amendment S483.** The example's `<engine name=ValidBooking for=Booking> { * => * given (self.start <
+> self.end) }` is re-expressed as the declaration invariant `invariant (start < end)` (§66.13.5; bare field
+> names, no `self.`). r1 of #2120 (review F4): the date fields are `int` day numbers (`checkIn`, `checkOut`) —
+> `<` takes numbers, not strings (ruled S440), so the earlier `start: string` / `end: string` form did not
+> compile. The invariant half is proven by the conformance case `invariant-booking-accepted` and the bootstrap
+> slice `invariant-decl-s483.test.js`; the field refinement `number(>0 && <365)` on a struct field is the
+> bootstrap's run-time-refinement INTERIM (`g-boot-refinement-runtime-checks-s478`), not this example's. **Provenance:** ruling:user-voice-scrml.md-S482-struct-invariant-contract,
+> ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1.
 
 ### §53.8.2 Execution Order
 
-When both an inline predicate and a machine guard govern the same mutation, the execution order
-SHALL be:
+When both an inline predicate and a declaration invariant govern the same mutation, the execution order
+SHALL be (the full order, with the field's own contract, is §66.13.5):
 
 1. **Field-level inline predicate evaluated** (stateless, fast — `E-CONTRACT-*`)
-2. If the field check passes, **struct machine guard evaluated** (contextual — `E-ENGINE-*`)
+2. If the field check passes, **the declaration invariants evaluated** on the candidate value (contextual —
+   `E-WRITE-INVARIANT` where provable at compile time, else the `E-WRITE-INVARIANT-RT` trap, §66.13.5)
 3. If both checks pass, **assignment applied**
 4. `<effect>`s listing the variable fire (§6.7.4; formerly `when @var changes {}`)
 
-This order ensures the cheap, local check runs first. The machine guard is not evaluated if the
-field-level check already rejects the value.
+This order ensures the cheap, local check runs first. The invariant is not evaluated if the
+field-level check already rejects the value. *(S483: "struct machine guard" re-read as "declaration
+invariant", §66.13.5 — ruling:user-voice-scrml.md-S483-struct-invariant-syntax.)*
 
 ### §53.8.3 Disambiguation Rule — The `@reactive` Reference Rejection
 
 If a predicate expression contains any reference to a reactive variable (`@name`), sibling field
 reference (`self.field`), or any identifier that resolves outside the incoming-value scope, the
 compiler SHALL emit `E-CONTRACT-003` at compile time. ~~with a message directing the developer to
-use `<machine>` instead.~~ with a message that says a type's rule checks only its own value and, to compare against another cell, directs the developer to a derived check (e.g. `<overBudget=(@spent > @maxMana)/>`) used in markup or the handler that changes the value (ruling:user-voice-scrml.md-S482-contract-003-derived-check).
+use `<machine>` instead.~~ with a message that says a type's rule checks only its own value and, to compare against another cell, directs the developer to a derived check (e.g. `<overBudget=(@spent > @maxMana)/>`) used in markup or the handler that changes the value (ruling:user-voice-scrml.md-S482-contract-003-derived-check). For a sibling-field reference, the message SHOULD also say that fields of one struct are related by a declaration invariant on its declaration, `invariant (start < end)` (§66.13.5; prov=pa-ruled:S483-sibling-advice — a PA reading carried by the lane-1 brief from the design's §5 table, not a ruled item; open to owner veto).
 
 ```scrml
 // INVALID — @maxMana is an external reactive reference
@@ -53210,7 +53233,14 @@ A declaration is read in three zones. **No word inside an opener modifies or int
    attributes (`attr:Type=default`), and flags that are true just by being present: validators (`req`,
    `length(…)`, …), `single`, `server`, `pinned`, `prepaint`, and the valued modifiers (`persist=`, `key=`,
    `debounced=`, …). (`<`/`*` in `<*x/>` is a sigil on a USE, §66.6.2, not a keyword.)
-3. **After the closer — the declaration's markup.** `renders <markup>` (§66.5.1, unchanged).
+3. **After the closer — the declaration's markup and its invariants.** `renders <markup>` (§66.5.1, unchanged) and
+   any number of `invariant (expr) [label]` clauses (§66.13.5), in either order.
+   > **Amendment S483 — `invariant` clauses follow the closer too.** **Provenance:**
+   > ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1 — *"Amends S447 §66.2.5 zone 3 ("after the
+   > closer, `renders`") — `invariant` clauses and `renders` follow the closer in either order."* · supersedes:
+   > this zone's prior text *"After the closer — the declaration's markup. `renders <markup>`"* (the closer's ONE
+   > word). The S447 principle is unchanged: a word that introduces what follows stands outside the opener, so
+   > `invariant (…)` inside an opener is its own error, `E-DECL-INVARIANT-IN-OPENER` (§66.20).
 
 ```scrml
 let <darkMode:bool=false/>                     // writable: `let` before the `<`
@@ -53578,6 +53608,11 @@ A declaration's markup is attached by a **`renders` clause** that follows the de
 <swatch label:string="Brand" hex:string="#338967"/>
 renders <span class="chip"><i style="background:${hex}"></i> ${label}</span>
 ```
+
+> **Amendment S483 — `renders` is no longer the only word after a closer.** A declaration's closer MAY also be
+> followed by `invariant (expr) [label]` clauses (§66.13.5), before or after the `renders` clause, several of
+> them; a declaration has at most one `renders`. **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax
+> item 1 — *"`invariant` clauses and `renders` follow the closer in either order."*
 
 `renders` is a **contextual keyword in exactly two positions**: after an enum variant inside a `type:enum` body
 (§19.2) and after a declaration's closer (this section). It is not reserved elsewhere. Rejected alternatives
@@ -54294,13 +54329,15 @@ Data is **immutable by default**. A write is legal only when the target's **type
 | a transition graph (`rule=` state-children, §66.13) | a write along the graph's edges |
 | sequence edit grants (§66.12) | the granted edits (grow and shrink, each granted separately at end / front / anywhere — S442, §66.12.2; positions; length) |
 | `replace` (on a scalar: `let`, §66.9) | replacing the whole value, bounded by the invariants |
+| a declaration invariant (`invariant (expr)`, §66.13.5) | nothing — it grants no write; it BOUNDS every write to the declaration's value (S482, S483) |
 
 #### 66.11.2 Permissions govern the transition, never the spelling
 
 A write is judged by **the old → new transition it performs**, not by how it is spelled. There are three kinds
 of check:
 
-1. **Invariants** — length bounds and per-position types (§66.12) — are checked on **EVERY** write, however it
+1. **Invariants** — length bounds and per-position types (§66.12), **and declaration invariants (§66.13.5,
+   ruling:user-voice-scrml.md-S482-struct-invariant-contract)** — are checked on **EVERY** write, however it
    is spelled. A length bound is a bounded length (`a..=b`, §66.12.2), which binds every write, `replace`
    included. A FIXED length (a tape with no `free` and no bound) is not an invariant of this kind: it is the
    absence of length-changing edit grants, so it binds the edits (item 2) and not a `replace` (item 3), which
@@ -54500,6 +54537,9 @@ operation is not a reactive-correctness question — it is `E-WRITE-NOT-GRANTED`
 > (`E-INDEX-OUT-OF-RANGE-RT`, §66.12.6 rule 3). The write still compiles (the capability is kept), and it fails
 > closed: the check runs before the write, so a refused write writes nothing (no partial apply; a trap is not a
 > `!` failure, §19.17).
+> **Supersedes (S483 side record):** S477 (this block — a refused write is a trap) supersedes S440's reading of a refused
+> write as a `!` failure — ruling:user-voice-scrml.md-S483-struct-invariant-syntax, side record: *"S477 (a refused
+> write is a trap) supersedes S440 (a `!` failure); the SPEC gets the supersedes line."*
 > The trap codes: a position outside the tape (an index write at or past the end, an `insert(i, x)` with `i`
 > greater than the length or negative) is `E-INDEX-OUT-OF-RANGE-RT`; any other invariant a write would break at
 > run time — a value or an edit that would leave a tape's length outside its type's bound (§66.12.2), a `length =`
@@ -55253,6 +55293,13 @@ The Q6 enumeration is those four — ruling:S435 (PA proposal text answered "a",
 changes are declared on its type: fixed, a lifecycle, a transition graph, or `let`/`replace`."* In addition, from dpa-052 (not the Q6 enumeration): a sequence field's **type-carried edit grants** (§66.12) govern
 its edits.
 
+In addition, ruled S482 (Q21 = (a)): a **declaration invariant** (§66.13.5) — a condition over several fields of
+one declaration, checked on every write from any writer. With it the contract kinds are five. It is
+declaration-level, not a field's: it grants no write (§66.11.1) and bounds every write to the value.
+> **Provenance:** ruling:user-voice-scrml.md-S482-struct-invariant-contract — *"(a) add a fifth contract kind — an
+> invariant on the declaration itself (e.g. `start < end`), checked on every write from any writer like the other
+> kinds, a violating write rejected … RULED yes (a)."*
+
 There are no message arms, no methods, and no dispatch-through-the-value (S430 P1 — *"I am against virtual
 functions"*): behaviour is a write the field's contract admits.
 
@@ -55383,6 +55430,167 @@ declaration is and goes before the `<` — ruling:user-voice-scrml.md S447, *"yo
 > exactly the adopted-leans table (#3, #9, #12, #15, #19, #21), and #20 appears in neither; a search of the S435
 > transcript finds no PA message bryan answered that presented #20 or the S178 reopen) or simply re-read as "a `single` declaration or a shared instance", and whether
 > the gated `<shared>`-cell pole (labelled "P3" inside the free-shaped-shared-cell debate — not the S430 P3 ruling) closes as subsumed, is not ruled.
+
+#### 66.13.5 Declaration invariants — `invariant (expr)` (S482, S483)
+
+> **Provenance:** ruling:user-voice-scrml.md-S482-struct-invariant-contract — *"(a) add a fifth contract kind — an
+> invariant on the declaration itself (e.g. `start < end`), checked on every write from any writer like the other
+> kinds, a violating write rejected … RULED yes (a). The syntax of the invariant was not ruled."* ·
+> ruling:user-voice-scrml.md-S483-struct-invariant-syntax — *"yes, your recommendations on all three plus the
+> follow-up"*: item 1 *"`invariant (expr)` after the closer, bare field names (the `renders` scope), optional
+> `[label]`; several clauses allowed; `type X:struct = {…} invariant (expr)` on the type form. Reads only the
+> value's own fields, literals and pure `fn` calls; an `@cell` read is E-CONTRACT-003."*; item 2 *"check every
+> write, as ruled. The grouped write is the existing spread `@r = { ...@r, start: a, end: b }`: one snapshot, all
+> or nothing, checked once. W-INVARIANT-SPLIT-WRITE offers the merge fix-it."* — *"Provable violation
+> E-WRITE-INVARIANT, otherwise the E-WRITE-INVARIANT-RT trap before any write (S477)"*; item 2 follow-up
+> *"flow-sensitive static discharge … is a ruled, owed follow-up lane … INTERIM until built"*; item 3 *"refused,
+> the field keeps its prior value (§53.7.2 parity), plus W-BIND-INVARIANT-FIELD naming the draft-cell + §55.11
+> validator pattern."* · design: the S482 Q21 build-out proposal (candidate A).
+
+A **declaration invariant** is a condition over the fields of one declaration's value that every value of it
+satisfies. It is the fifth contract kind (§66.13.1): declaration-level, it grants no write (§66.11.1) and bounds
+every write (§66.11.2 item 1).
+
+**Syntax.** An invariant is written AFTER the closer of the declaration that defines the fields — a declaration
+with a body of child fields, or with typed attributes — and after the body of a `type X:struct = { … }` (§14.2):
+
+```scrml
+<dateRange:struct>
+    let <start:int=0/>
+    let <end:int=0/>
+</>
+invariant (start <= end) [ordered]
+
+<band:struct>
+    let <low:int=18/>
+    let <mid:int=21/>
+    let <high:int=24/>
+</>
+invariant (low <= mid) [lowBelowMid]
+invariant (mid <= high) [midBelowHigh]
+renders <span>${low}–${high}</span>
+
+type Range:struct = { start: int, end: int } invariant (start <= end)
+```
+
+```
+decl-tail        ::= ( renders-clause | invariant-clause )*        // at most one renders-clause
+invariant-clause ::= 'invariant' '(' expression ')' ( '[' identifier ']' )?
+```
+
+1. Several clauses MAY follow one declaration; they and the one `renders` clause stand in either order
+   (§66.2.5 zone 3, §66.5.1).
+2. `invariant` is a **contextual keyword** only right after a declaration's closer or a `:struct` type body, and
+   only when a `(` follows it. Anywhere else it is an ordinary name: a function named `invariant` is called as
+   any other. The consequence, stated plainly: a call `invariant(x)` (with or without `;`) written directly
+   after a declaration's closer or a `:struct` type body is read as an invariant CLAUSE, not a call. That
+   reading is never silent: when a binding named `invariant` (a function, a constant, a file-scope `let`, a
+   host binding) is in scope at the clause, the clause is **`E-DECL-INVARIANT-CAPTURES-CALL`** (§66.20) and is
+   not judged further (fail closed). The message says the line is read as a clause and names the fixes: to
+   call the function, rename it or move the call (another statement between the declaration and the call); to
+   state an invariant there, rename the binding. *(r1 of #2120, prov=pa-ruled:S483-capture-never-silent — the
+   capture itself is the ruled grammar (S483 item 1, candidate A, whose "Against" names it); that it is never
+   silent is a PA reading, open to owner veto.)*
+3. `invariant (…)` written inside an opener is **`E-DECL-INVARIANT-IN-OPENER`** (§66.20): a word that introduces
+   what follows stands outside the opener (§66.2.5). The message says the clause follows the closer.
+4. The `[label]` (the §53.2.3 spelling) names the invariant in diagnostics; a violation's message names the
+   label, or the expression when no label is written.
+5. A declaration that defines no fields — no typed attribute and no child field (a scalar cell, or a cell of an
+   existing type) — cannot carry an invariant: **`E-DECL-INVARIANT-NO-FIELDS`** (§66.20). A cell of an existing
+   type INHERITS that type's invariants (`let <trip:Range=(…)/>` is bound by `Range`'s); a cell cannot add one
+   of its own (that would be an anonymous subtype — declare a named one). To bound one scalar value, use a
+   refinement type (`int(>=0)`, §53). The message names both.
+
+**Scope — what an invariant may read.** Inside the expression, the value's own attributes and child fields are
+bound as **bare, read-only names** — the §66.5.2 `renders` reading — and nested fields are reached by path
+(`range.end`). The expression may also hold literals, enum variants, calls of a pure `fn` (§48) that
+computes only from its arguments (rule 7), and the deterministic built-in methods and properties a pure `fn`
+body may use on its own values — a string's or a tape's methods (`first.trim()`, `name.toUpperCase()`,
+`tags.includes(t)`), `.length`, `.at(i)`, a sequence callback written `x => expr` (`[lo, hi].every(x => x >= 0)`),
+`E.toEnum(s)`, a payload-variant construction. The purity of a direct expression is the purity of a pure `fn`
+body: what a `fn` may compute from its own values, an invariant may compute from its fields; what a `fn` may not
+use, an invariant may not either (*r1 of #2120, prov=pa-ruled:S483-direct-equals-fn-purity*). It reads nothing
+else:
+
+6. An `@` read (`@limit`, `@.`) is **`E-CONTRACT-003`** (§53.11): a type's rule checks only its own value; the
+   message directs the author to a derived check (ruling:user-voice-scrml.md-S482-contract-003-derived-check).
+   An `@` read reached through a called `fn` (rule 7) is `E-CONTRACT-003` too, the message naming the call
+   chain.
+7. Any other outer binding (a file-scope constant or `let`, a host binding, a function named as a value), a
+   call of a function declared `function`, a host call (`Date.now()`, a method of a host global), a write, a
+   function value held as a value (other than a sequence callback, above), a query or a handled failable call
+   is **`E-DECL-INVARIANT-IMPURE`** (§66.20). The fix is a `fn` that takes the fields as parameters.
+   **A called `fn` reads what the invariant may read, at any depth of calls.** A `fn` called from an invariant
+   — directly, or transitively through the `fn`s it calls — that reads a cell (`@x`, `@.`: `E-CONTRACT-003`,
+   rule 6) or an outer binding (a file-scope `let` or constant, a `<request>`'s or a validity surface's state, a
+   lifecycle element: `E-DECL-INVARIANT-IMPURE`) is refused at the call, the message naming the call chain
+   (`ok` → `inner`) and the read. The set refused through a call is exactly the set refused directly. A §48
+   `fn` MAY read `@x` as a value (§48.5.3), so "pure `fn`" alone would not make the invariant a function of the
+   value's fields: a write to `@limit` could then break a stored value's invariant with nothing re-checking it
+   (the read set never names `@limit`), and the client and the server could disagree. A called function whose
+   body the compiler cannot see is refused (fail closed). *(r1 of #2120, prov=pa-ruled:S483-fn-chain-purity —
+   the ruling admits "pure `fn` calls" and makes "an `@cell` read … E-CONTRACT-003"; the design's rationale,
+   "It may not read cells …, impure `function`s, or outer bindings … Without these rules it could not be
+   evaluated identically on the client and the server, or proven statically", resolves the two toward refusal.
+   A PA reading, open to owner veto.)* (Rules 6 and 7, with this, make the expression a function of the value's
+   fields alone — so it evaluates identically on the client and the server, its read set holds every value it
+   depends on, and it is provable at compile time where its inputs are literals.)
+8. Its type SHALL be `bool`; any other type is **`E-DECL-INVARIANT-NOT-BOOL`** (§66.20).
+
+**The read set.** The compiler records, for each invariant, the field paths it reads (its READ SET). A write
+that touches no path in the read set — nor a prefix or an extension of one — cannot change the invariant's
+value and needs no check.
+
+**When it is checked.** Every write that changes a field in the read set is checked, on the **candidate new
+value of the whole declaration value**, before anything is written: a direct field write, a deep write, a
+spread, a genuine replace, `reset`, a use-site initializer, construction, a server reload, and a local value of
+the type (§66.11.2 item 1, §66.11.3 — O58: a genuine replace *"the invariants apply to it as to every write"*).
+A deep write (`@trip.range.end = x`) checks every enclosing invariant whose read set holds the path. The
+grouped write is the existing spread, `@r = { ...@r, start: a, end: b }`: one snapshot, all or nothing (§66.11.3),
+checked once. Two separate field writes are each checked; the second may never run if the first breaks the
+invariant.
+
+**Evaluation order** — extending §53.8.2, for one write:
+
+1. each written field's refinement (`E-CONTRACT-001` / `-RT`, §53);
+2. each written field's own contract (grant, lifecycle, transition graph, §66.13.1);
+3. the declaration's invariants, in source order, on the candidate value;
+4. the write is applied;
+5. subscribers are notified (§66.11.7).
+
+A refused write (at any step) writes nothing and notifies nothing. An invariant may assume step 1 held.
+
+**Failure.**
+
+9. A write that **provably** breaks an invariant is the compile error **`E-WRITE-INVARIANT`** (§66.20). Provable
+   cases include: the declaration's own defaults (its shared instance and `reset` target would be invalid — the
+   error is at the declaration); a use site whose attribute values are literals (`<slider min=60 max=10/>`); an
+   object literal written, constructed or passed as a value of the type (`@r = { start: 5, end: 1 }`,
+   `let <b:Band=({ low: 5, mid: 1, high: 9 })/>`); a spread whose overrides are literals and whose invariant
+   reads only overridden fields. A literal into a cell of an invariant-bearing TYPE is judged by that type's
+   invariants.
+10. Any other write is checked **at run time** and a violation is the **`E-WRITE-INVARIANT-RT`** trap (§19.17),
+    raised before the write — nothing is written (O36 RULED S477, §66.11.7). A compiler MAY omit the check where
+    it proves the write keeps the invariant; the behaviour is the same either way.
+11. **Flow-sensitive static discharge** — a write proven to keep the invariant by its surrounding guards
+    (`if (x <= @trip.end) { @trip.start = x }`) needing no run-time check — is the capable form owed by S430
+    *"if possible"*: a ruled, owed follow-up (S483 item 2 follow-up), **INTERIM** until built. Until then such
+    writes are checked at run time, which is correct and only slower.
+
+**Boundaries and bindings** (owed — the boundaries lane). A value that arrives from outside the program is input,
+not a program write: a server-function parameter of an invariant-bearing type is checked at entry (§53.9.4), a
+SQL row decoded into the type is checked, a channel frame adds the invariants to the §38 receiver check (3), and
+a frame that fails is not applied. A form input bound straight to a field an invariant reads is REFUSED and the
+field keeps its prior value (§53.7.2 parity), with `W-BIND-INVARIANT-FIELD` naming the draft-cell + §55.11
+validator pattern; consecutive field writes that an invariant reads together get `W-INVARIANT-SPLIT-WRITE` with
+the spread fix-it (ruling S483 items 2 and 3). The compiler-generated draft form for bound invariant fields is
+the filed owed capable form (not blocking).
+
+**Status.** Nominal on impl#1 (impl#1 does not implement §66, §34.0). The bootstrap
+(`compiler/self-host-v2/`) builds the syntax, the scope, purity and `bool` rules, the read set and the static
+`E-WRITE-INVARIANT` (s483-invariant-1); the run-time checks at write sites, the boundaries and the lints are
+owed (known-gaps `g-boot-invariant-write-checks-s483`, `g-boot-invariant-boundaries-lints-s483`,
+`g-boot-invariant-flow-discharge-s483`).
 
 ### 66.14 Encapsulation — E2
 
@@ -56082,6 +56290,16 @@ emitter). Every code below is Nominal on impl#1.
 > **Provenance:** ruling:user-voice-scrml.md S447 — *"your recs"* (item 2; sub-recs 2, 3, 4) · dd:
 > opener-keyword-vs-attribute-2026-10-01 (SF4).
 
+> **Amendment S483 — four rows added, two widened:** `E-DECL-INVARIANT-IN-OPENER`, `E-DECL-INVARIANT-IMPURE`,
+> `E-DECL-INVARIANT-NO-FIELDS`, `E-DECL-INVARIANT-NOT-BOOL` (the declaration invariant, §66.13.5) — each lands
+> with its bootstrap emitter and its §34 row; `E-WRITE-INVARIANT` / `E-WRITE-INVARIANT-RT` widened from "a sequence
+> invariant" to "a sequence or declaration invariant". `W-INVARIANT-SPLIT-WRITE` and `W-BIND-INVARIANT-FIELD`
+> (ruling S483 items 2 and 3) land with their emitters (owed, `g-boot-invariant-boundaries-lints-s483`).
+> r1 of #2120: a fifth row, `E-DECL-INVARIANT-CAPTURES-CALL` (§66.13.5 rule 2; prov=pa-ruled:S483-capture-never-silent),
+> and `E-DECL-INVARIANT-IMPURE` widened to a `fn` reached through calls (prov=pa-ruled:S483-fn-chain-purity).
+> **Provenance:** ruling:user-voice-scrml.md-S482-struct-invariant-contract;
+> ruling:user-voice-scrml.md-S483-struct-invariant-syntax.
+
 > **Amendment S462 — one row added:** `E-DECL-USE-ATTR` (O18, §66.6.9). The bootstrap emitted it before any SPEC
 > text named it (dpa-069 D-9 — the house rule broken the other way round); its §34 row lands with this row.
 > **Provenance:** ruling:user-voice-scrml.md S462 "ratified path to X" (dpa-069 item 1).
@@ -56115,14 +56333,19 @@ emitter). Every code below is Nominal on impl#1.
 | **`E-HANDLE-REDECLARE`** | Error | (i) Two `as=` handles of the same name in one scope; (ii) an `as=` handle named like a cell — including a row-scoped handle in an `<each>` row named like a program-level cell (§66.7.4); (iii) the same `as=` name on mutually exclusive `if=` instances — an error for now, logged as a candidate widening (§66.7.2); *(S471)* (iv) a row-scoped `ref=@name` in an `<each>` row template naming a cell declared outside the row (§6.7.1b (a); ruling:user-voice-scrml.md S471 "your recs on F0 and F1", dpa-075 F1 (a)). **Provenance:** ruling:user-voice-scrml.md S440 (#4 = (c); #2 and #5 = PA recs — item #5). **Named; impl pending — Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-DECL-SINGLE-INSTANTIATED`** | Error | A plain use `<x …/>` of a `single` declaration (§66.13.3); `<*x/>` is the only way to render it. O55 RULED S442 (formerly conditional on O55). **Provenance:** ruling:user-voice-scrml.md S442 — *"1 your rec, 2 deliberate, 3 your rec"* (item 1). **Nominal on impl#1 — not yet emitted for the §66 form by impl#1** (impl#1 does not implement §66); **emitted by the bootstrap** (`compiler/self-host-v2/`) *(record-lag corrected S473 D31)*. |
 | **`E-WRITE-NOT-GRANTED`** | Error | A write whose compile-time-classified old→new transition is not granted by the target's type: a write to a locked (constant) declaration, to a fixed field, a `replace` (incl. `reset(@x)` and unclassifiable reassignment) without a `replace` grant, an un-granted sequence edit (including an in-place tape method — `.append`, `.pop`, `.prepend`, `.shift`, `.insert`, `.remove`, an index or `length =` write — on a tape in ANY position: a local, a parameter, a return value, a struct field, a tuple position, or a host / `asIs` value given no granting tape type; §66.12.6, S469), or a write off a lifecycle path — including a transition off a lifecycle path or sequence edit grant on a SUB-FIELD, written via the spread-override shape `@x = { ...@x, f: v }` (§66.11.3, S437; a genuine replace is authoritative, O58 = (b)). *(S475, §66.11.6 "What a presence lifecycle `(not to T)` grants a write":)* `@m = not` on a `let` lifecycle cell; a `T → T′` write on a locked `(not to T)` cell that is not a pending cell; a value that admits `not` written into a `(not to T)` cell other than as a pending cell's own handled load (INTERIM) — RULED S475, bryan: "your recs on all of them", items 2, 3, 8; the compiler-written load writes of a pending cell are never this code (§13.9.1 rule 5). The message names the missing grant (for a locked scalar: `let`). A write off a `rule=` graph keeps its existing code, `E-ENGINE-INVALID-TRANSITION` (§66.11, §66.13.2). **Nominal on impl#1 — not yet emitted for the §66 form by impl#1** (impl#1 does not implement §66); **emitted by the bootstrap** (`compiler/self-host-v2/`) *(record-lag corrected S473 D31)*. |
-| **`E-WRITE-INVARIANT`** | Error | A write that provably violates a sequence invariant — a length bound or a per-position type (§66.11.2), or an `insert` at a negative literal position (S477, §66.12.8 rule 7; the unprovable case traps at run time — `E-WRITE-INVARIANT-RT` / `E-INDEX-OUT-OF-RANGE-RT`, O36 RULED S477, §66.11.7). **Nominal on impl#1 — not yet emitted for the §66 form by impl#1** (impl#1 does not implement §66); **emitted by the bootstrap** (`compiler/self-host-v2/`) *(record-lag corrected S473 D31)*. |
-| **`E-WRITE-INVARIANT-RT`** | Runtime (trap, §19.17) | A write the compiler could not prove inside a sequence invariant breaks it when it runs: a value or an edit that would leave a tape's length outside its type's bound (§66.12.2), a `length =` write that lengthens (§66.12.6 rule 3). Raised before the write; nothing is written. A position outside the tape keeps `E-INDEX-OUT-OF-RANGE-RT`. O36 RULED S477 (§66.11.7); this code and its split from `E-INDEX-OUT-OF-RANGE-RT` ratified (ruling:user-voice-scrml.md S477 "E-WRITE-INVARIANT-RT ratified"). **Emitted by the bootstrap's runtime** (`compiler/self-host-v2/slice-m1/runtime/runtime.js` `lengthCheck`, `lengthGuard`); Nominal on impl#1. |
+| **`E-WRITE-INVARIANT`** | Error | A write that provably violates a sequence or declaration invariant — a length bound or a per-position type (§66.11.2), or an `insert` at a negative literal position (S477, §66.12.8 rule 7; the unprovable case traps at run time — `E-WRITE-INVARIANT-RT` / `E-INDEX-OUT-OF-RANGE-RT`, O36 RULED S477, §66.11.7), or a declaration invariant (`invariant (expr)`, §66.13.5) that a literal value provably makes `false` — the declaration's defaults, a use site's literal attributes, an object literal written as a value of the type (S483, ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 2 — *"Provable violation E-WRITE-INVARIANT"*). The message names which kind of invariant (and for a declaration invariant its `[label]` or expression and the field values). **Nominal on impl#1 — not yet emitted for the §66 form by impl#1** (impl#1 does not implement §66); **emitted by the bootstrap** (`compiler/self-host-v2/`) *(record-lag corrected S473 D31)*. |
+| **`E-WRITE-INVARIANT-RT`** | Runtime (trap, §19.17) | A write the compiler could not prove inside a sequence or declaration invariant breaks it when it runs: a value or an edit that would leave a tape's length outside its type's bound (§66.12.2), a `length =` write that lengthens (§66.12.6 rule 3), a write whose candidate value makes a declaration invariant `false` (§66.13.5, S483; owed in the bootstrap, `g-boot-invariant-write-checks-s483`). Raised before the write; nothing is written. A position outside the tape keeps `E-INDEX-OUT-OF-RANGE-RT`. O36 RULED S477 (§66.11.7); this code and its split from `E-INDEX-OUT-OF-RANGE-RT` ratified (ruling:user-voice-scrml.md S477 "E-WRITE-INVARIANT-RT ratified"). **Emitted by the bootstrap's runtime** (`compiler/self-host-v2/slice-m1/runtime/runtime.js` `lengthCheck`, `lengthGuard`); Nominal on impl#1. |
 | **`W-GRANT-REDUNDANT`** | Warning | A type grants `replace` together with edit grants, which `replace` subsumes (§66.11.3). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; ~~the bootstrap does~~ the bootstrap does not emit it either — *record-lag corrected S473 D31*). |
 | **`E-GRANT-UNKNOWN`** | Error | A grant token that is not a permission axis value — including `any` / `all`, which do not exist (§66.12.4); the retired single-token places `end` / `front` / `anywhere` (fix-it naming both halves, S442); and the retired spelling `writable` (fix-it *"`writable` is spelled `write`"*, O10 RULED S469, §66.12.2). **Nominal on impl#1 — not yet emitted for the §66 form by impl#1** (impl#1 does not implement §66); **emitted by the bootstrap** (`compiler/self-host-v2/`) *(record-lag corrected S473 D31)*. |
 | **`E-TAPE-JS-METHOD`** | Error | (a) A JavaScript array method name — the mutating `push`, `unshift` or `splice`, or (S469, O65 (a)) the copy-returning `toSorted`, `toReversed` or `with` — called on a tape, in any position (§66.12.6 rule 1), whatever the tape grants; the fix-it names the scrml method (`push` → `.append(x)`, `unshift` → `.prepend(x)`, `splice` → `.remove(i)` / `.insert(i, x)`, `toSorted` → `.sort(…)`, `toReversed` → `.reverse()`, `with` → a position write `xs[i] = v`). (b) A call of `sort`, `reverse`, `fill` or `copyWithin` on a tape whose result is discarded (a statement): these return a new tape and do not mutate, so the JavaScript in-place idiom would do nothing; fix-it `xs = xs.sort();` (needs `write`) or a binding of the result. Trigger (b) is derived, not separately ruled (§66.12.6 rule 3). Code inside a `_{ }` slice is host code and is not checked. **Nominal on impl#1** (impl#1 does not implement §66); **the bootstrap emits it** (`compiler/self-host-v2/analyze.scrml` — `tapeJsFix`, `tapeMethodStmt`; S469 s469-boot-strings-1). Code name confirmed S469 (*"E-TAPE-JS-METHOD (Recommended)"*). Full row §34. |
 | **`E-FIELD-PRIVATE-WRITE`** | Error | A write from a file other than the defining file to a field that is not `export`ed (§66.14). **Nominal on impl#1 — not yet emitted for the §66 form by impl#1** (impl#1 does not implement §66); **emitted by the bootstrap** (`compiler/self-host-v2/`) *(record-lag corrected S473 D31)*. |
 | **`E-FOREIGN-REPLACE-PRIVATE`** | Error | A whole-value replace, from outside the defining file, of a value whose type has any private field (§66.14). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; ~~the bootstrap does~~ the bootstrap does not emit it either — *record-lag corrected S473 D31*). |
 | **`E-THEME-TOKEN-CELL-COLLISION`** | Error | A `<theme>` token and a cell are declared with the same name in one program — tokens and cells share ONE namespace (§66.17 item 4), so the pair cannot coexist silently. The message names both declarations. (No existing code fits: `E-NAME-COLLIDES-STATE` is a *local* reusing a cell name, §6.1.3; `E-SCOPE-REDECLARE` is function-body scope, §7.3.3.) **Nominal / spec-ahead — not yet emitted** (impl#1 does not implement §66; the bootstrap front end does not parse T3 yet, so it has no fire site). Provenance: ruling:user-voice-scrml.md S440 (all recs #2, item 5). |
+| **`E-DECL-INVARIANT-IN-OPENER`** | Error | `invariant (expr)` is written inside a declaration's opener (§66.13.5). The message says the clause follows the closer (`/>` or `</>`). **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1. **Nominal on impl#1; the bootstrap emits it** (`compiler/self-host-v2/parse.scrml`, s483-invariant-1). |
+| **`E-DECL-INVARIANT-IMPURE`** | Error | A declaration invariant reads an outer binding, calls a `function` or a host function, writes, or holds a function value (other than a `x => expr` sequence callback), a query or a handled failable call — or calls a `fn` that, directly or through the `fn`s it calls, reads an outer binding (§66.13.5 rule 7; an `@` read, direct or through a `fn`, is `E-CONTRACT-003`). The deterministic built-in methods a pure `fn` body may use are admitted. **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1; the call-chain and built-in readings prov=pa-ruled (r1 of #2120). **Nominal on impl#1; the bootstrap emits it** (`compiler/self-host-v2/analyze.scrml`). |
+| **`E-DECL-INVARIANT-CAPTURES-CALL`** | Error | `invariant (…)` right after a declaration's closer or a `:struct` type body is read as a clause (§66.13.5 rule 2) while a binding named `invariant` is in scope there; refused, never a silently dropped call. **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1; never-silent prov=pa-ruled:S483-capture-never-silent (r1 of #2120). **Nominal on impl#1; the bootstrap emits it** (`compiler/self-host-v2/analyze.scrml`). |
+| **`E-DECL-INVARIANT-NO-FIELDS`** | Error | An invariant on a declaration with no typed attribute and no child field — a scalar cell or a cell of an existing type (§66.13.5 rule 5). **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1. **Nominal on impl#1; the bootstrap emits it** (`compiler/self-host-v2/parse.scrml`). |
+| **`E-DECL-INVARIANT-NOT-BOOL`** | Error | A declaration invariant whose expression is not a `bool` (§66.13.5 rule 8). **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax. **Nominal on impl#1; the bootstrap emits it** (`compiler/self-host-v2/analyze.scrml`). |
 | **`E-DECL-RENDERS-IN-OPENER`** | Error | `renders` is written inside a declaration's opener (§66.5.1). Message: *"`renders` follows the closer (`/>` or `</>`)"* — replacing the generic parse error on the `<` that follows it. **Provenance:** ruling:user-voice-scrml.md S447 (*"your recs"*, item 2, sub-rec 2). **Nominal on impl#1; the bootstrap emits it** (`compiler/self-host-v2/parse.scrml`, S449). |
 | **`E-DECL-KEYWORD-NOT-ITEM`** | Error | `let` or `export` (or `export let`) followed by a tag in a CODE-DEFAULT body that is not an item position — an engine state-child body, a match arm, a `:`-shorthand body (§4.18.1, §66.2.5). In a FREE-TEXT body (a plain-markup element body, a `renders` element's body) the words are text and nothing fires (narrowed S449) — except before a tag that is a declaration by its opener (§66.2.2), where it fires and names the `${"let"}` escape (PA reading S449, for veto — §66.2.5). (Whether a `<page>` / `<theme>` body is an item position: ⚑ O61 — the bootstrap refuses both elements whole with E-BOOTSTRAP-UNSUPPORTED and reports no keyword in their bodies.) **Provenance:** ruling:user-voice-scrml.md S447 (*"your recs"*, item 2, sub-rec 3) · narrowed by ruling:user-voice-scrml.md S449 "RULED — \"your recs.\" — the `on` field contradiction, the opener-keyword prose cost, the corpus-dialect lean", item 2. **Nominal on impl#1; the bootstrap emits it** (`compiler/self-host-v2/parse.scrml` — state-child bodies, and free-text bodies before a declaration opener; S449). |
 | **`E-DECL-LET-IN-OPENER`** | Error | `let` (or `export let`) written INSIDE a declaration opener: the S435 in-opener prefix `<let x:T=v/>`, a trailing `<x:T=v let/>`, or a grant on an attribute (`<x let a:T/>`, `<x export let a:T/>`) (§66.2.5, §66.4 rule 6). The message names the fix: `let <x:T=v/>` for the declaration's own value; a child declaration `let <a:T=v/>` (or `export let <a:T=v/>`) in the body for an attribute. **Provenance:** ruling:user-voice-scrml.md S447 (*"your recs"*, item 2; sub-rec 4) · supersedes: ruling:S435 "writable cells spelled `let`" (position). **Nominal on impl#1; the bootstrap emits it** (`compiler/self-host-v2/parse.scrml`; the bootstrap's parser and tests migrated S449 — `docs/changes/s449-opener-keywords-land/`). |

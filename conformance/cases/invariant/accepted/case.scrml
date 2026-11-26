@@ -1,0 +1,20 @@
+// §66.13.5 (S482 / S483) — the accepted forms; deterministic built-ins and a pure `fn` chain (r1).
+<program>
+    type Range:struct = { lo: int, hi: int } invariant (lo <= hi) [ordered]
+    fn width(a: int, b: int) -> int { return b - a; }
+    fn spread(a: int, b: int) -> bool { return width(a, b) >= 0; }
+    <band:struct>
+        let <low:int=18/>
+        let <mid:int=21/>
+        let <high:int=24/>
+    </>
+    invariant (low <= mid) [lowBelowMid]
+    renders <span class="band">${low}-${high}</span>
+    invariant (mid <= high)
+    invariant (spread(low, high) && [low, mid, high].every(x => x > 0))
+    let <r:Range=({ lo: 1, hi: 2 })/>
+    <main>
+        <p id="lo">${@band.low}</p>
+        <p id="r">${@r.hi}</p>
+    </main>
+</program>

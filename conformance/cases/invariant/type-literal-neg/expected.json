@@ -1,0 +1,28 @@
+{
+  "id": "invariant-type-literal-neg",
+  "description": "An object literal into a cell typed by a `type X:struct` with an invariant (low 5 > mid 1): E-WRITE-INVARIANT — a cell of the type inherits its invariants.",
+  "language-version": "1.0",
+  "spec": "§66.13.5, §14.2",
+  "provenance": "ruling:user-voice-scrml.md-S483-struct-invariant-syntax (\"yes, your recommendations on all three plus the follow-up\"); ruling:user-voice-scrml.md-S482-struct-invariant-contract (\"RULED yes (a)\")",
+  "rationale": "§66.13.5 rule 5 (a cell of an existing type INHERITS that type's invariants) and rule 9 (an object literal constructed as a value of the type is a provable case).",
+  "expect": {
+    "codes": [
+      "E-WRITE-INVARIANT"
+    ],
+    "notCodes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-decl-invariant-unimplemented-s483",
+      "fails": {
+        "codes": [
+          "emitted:E-STATE-UNDECLARED=1",
+          "emitted:E-UNQUOTED-DISPLAY-TEXT=1",
+          "missing:E-WRITE-INVARIANT"
+        ]
+      }
+    }
+  }
+}
