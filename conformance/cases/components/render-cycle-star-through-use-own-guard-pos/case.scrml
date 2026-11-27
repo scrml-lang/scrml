@@ -1,0 +1,17 @@
+// §66.6.2 rule 1 (S483 r2) — a `<*f/>` cycle through a use, guarded by that NEW instance's own state:
+// arm B of the program field `ph` mounts `<card/>`, whose render shows `<*ph/>` only in the `<B>` arm of
+// card's own graph field `cs`. Each new `<card>` starts in `<A>`, so the render ends — legal.
+<program>
+${ type Ph:enum = { A, B } }
+<ph:Ph=.B single>
+  <A rule=.B><b>x</b></>
+  <B rule=.A><div><card/></div></>
+</>
+<card t:string="c">
+    <cs:Ph=.A>
+      <A rule=.B><b>closed</b></>
+      <B rule=.A><i>[<*ph/>]</i></>
+    </>
+</> renders <span><*cs/></span>
+<main id="o"><*ph/></main>
+</program>

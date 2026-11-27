@@ -1,0 +1,37 @@
+{
+  "id": "components-render-cycle-star-through-use-own-guard-pos",
+  "description": "A `<*f/>` cycle through a use guarded by the new instance's own graph field is legal and renders: each new `<card>` starts in the arm without `<*ph/>` (#2139 r1 re-review HIGH-1).",
+  "language-version": "1.0",
+  "spec": "§66.6.2",
+  "provenance": "ruling:user-voice-scrml.md-S483-star-self-render-error (\"it is the same field of the same instance at every level, so any guard gives the same answer at every level\"); PA reading pa-ruled:S483-star-cycle-same-instance (a cycle that crosses a use and is guarded by that new instance's own state is not that shape)",
+  "rationale": "§66.6.2 rule 1 (S483 r2): a guard on a new instance's own writable state ends the walk — each instance's state is its own and starts again from its initial value.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-DECL-RENDER-CYCLE-"
+    ],
+    "notCodes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#o",
+        "text": "closed"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-render-cycle-unimplemented-s483",
+      "fails": {
+        "codes": [
+          "emitted:E-ATTR-001=6",
+          "emitted:E-COMPONENT-035=2",
+          "emitted:E-MARKUP-001=4",
+          "emitted:E-STMT-NO-EFFECT=1"
+        ],
+        "runtime": "sha256:bb6884e28be42509"
+      }
+    }
+  }
+}

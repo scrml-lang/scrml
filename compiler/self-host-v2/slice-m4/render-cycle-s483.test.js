@@ -339,3 +339,129 @@ renders <div><*v/></div>
 <main id="o"><card/></main>`), ["o"])).toEqual(["none"]);
   }, 240000);
 });
+
+// s483 r2 (#2139 r1 re-review HIGH-1; PA reading pa-ruled:S483-star-cycle-same-instance) — a rule-1
+// cycle through a use, guarded by that NEW instance's own state (a `let` child, a graph field): each
+// instance's state is its own and starts again from its initial value, so the guard can end it (a click
+// opens one level). Not rule 1's shape; it compiles and renders as on base (merge-base e25c84674).
+// Guards on attributes, program state and shared instances stay walked through (s08, s09, n08 above),
+// and a guard on the new instance's own state every branch of which leads back stays refused.
+const PHB = (cardBody, renders, more = "") => P(`${PH}
+<ph:Ph=.B single>
+  <A rule=.B><b>x</b></>
+  <B rule=.A><div><card/></div></>
+</>
+<card t:string="c">
+${cardBody}
+</> renders ${renders}
+${more}<main id="o"><*ph/></main>`);
+
+describe("item 1 (r2, #2139 r1 re-review HIGH-1): a guard on the new instance's own state ends the walk", () => {
+  test("q01 / q02e: `<*cs/>` of card's own graph field, `<*ph/>` in one arm — compiles and renders (base: the same)", async () => {
+    const cs = (b) => `    <cs:Ph=.A>
+      <A rule=.B>${b}</>
+      <B rule=.A><i>[<*ph/>]</i></>
+    </>`;
+    expect(await texts(PHB(cs(`<b>closed</b>`), `<span><*cs/></span>`), ["o"])).toEqual(["closed"]);
+    expect(await texts(PHB(cs(`<button class="open" onclick=(@card.cs = .B)>open</button>`), `<span><*cs/></span>`), ["o"])).toEqual(["open"]);
+  }, 240000);
+
+  test("q02d / q23: `if=` on card's own `let` cell, and a `<match>` on it — compiles and renders (base: the same)", async () => {
+    expect(await texts(PHB(`  let <open:boolean=false/>`, `<span><button class="open" onclick=(@card.open = true)>open</button><i if=(open)>[<*ph/>]</i></span>`), ["o"])).toEqual(["open"]);
+    expect(await texts(PHB(`  let <open:boolean=false/>`, `<span><match for=Ph on=(open ? Ph.B : Ph.A)><A><button class="open" onclick=(@card.open = true)>open</button></A><B><i>[<*ph/>]</i></B></match></span>`), ["o"])).toEqual(["open"]);
+  }, 240000);
+
+  test("still refused: every branch of the own-state guard leads back (state arms, `if=` / `else`, `<match>`)", async () => {
+    const a = await errors(PHB(`    <cs:Ph=.A>
+      <A rule=.B><b><*ph/></b></>
+      <B rule=.A><i><*ph/></i></>
+    </>`, `<span><*cs/></span>`));
+    // one report at each `<*ph/>` on a cycle (each closes its own)
+    expect(a.es.map((d) => d.code)).toEqual(["E-DECL-RENDER-CYCLE-STAR", "E-DECL-RENDER-CYCLE-STAR"]);
+    const b = await errors(PHB(`  let <open:boolean=false/>`, `<span><i if=(open)><*ph/></i><b else><*ph/></b></span>`));
+    expect(b.es.map((d) => d.code)).toEqual(["E-DECL-RENDER-CYCLE-STAR", "E-DECL-RENDER-CYCLE-STAR"]);
+    expect(b.es[0].message).toContain("`if=` chain (on the new instance's own state, and every branch of it leads back");
+    const c = await errors(PHB(`  let <open:boolean=false/>`, `<span><match for=Ph on=(open ? Ph.B : Ph.A)><A><*ph/></A><B><i><*ph/></i></B></match></span>`));
+    expect(c.es.map((d) => d.code)).toEqual(["E-DECL-RENDER-CYCLE-STAR", "E-DECL-RENDER-CYCLE-STAR"]);
+  }, 240000);
+
+  test("the message for a cycle through a use never says \"same instance\" of the hop that crosses it", async () => {
+    const { es, name } = await errors(PHB(``, `<i><*ph/></i>`));
+    expect(es.map((d) => d.code)).toEqual(["E-DECL-RENDER-CYCLE-STAR"]);
+    expect(es[0].message).not.toContain("same field of the same instance");
+    expect(es[0].message).toContain(`the cycle comes back to \`<*ph/>\` (${name}:9:16), one field of one instance (the program's, or a shared instance's), at every level`);
+    expect(es[0].message).toContain("Each use on the way (`<card>`) mounts a new instance, but from the same values at every level");
+    expect(es[0].message).toContain("show the nested `<*ph/>` only under that instance's own state");
+  }, 120000);
+
+  test("an attribute guard after the use stays walked through (n08); an own-state guard on the `<slot/>` of a new `<wrap>` ends it", async () => {
+    const n08 = await errors(PHB(``, `<i><span if=(t == "q")><*ph/></span></i>`));
+    expect(n08.es.map((d) => d.code)).toEqual(["E-DECL-RENDER-CYCLE-STAR"]);
+    const wrapOwn = `<wrap t:string="w">
+  let <open:boolean=false/>
+</> renders <span>w<i if=(open)>[<slot/>]</i></span>
+`;
+    expect(await texts(PHB(``, `<i><wrap><*ph/></wrap></i>`, wrapOwn), ["o"])).toEqual(["w"]);
+    const wrapAll = `<wrap t:string="w">
+</> renders <span>[<slot/>]</span>
+`;
+    const r = await errors(PHB(``, `<i><wrap><*ph/></wrap></i>`, wrapAll));
+    expect(r.es.map((d) => d.code)).toEqual(["E-DECL-RENDER-CYCLE-STAR"]);
+  }, 240000);
+
+  test("q22 (pinned, owner question g-boot-star-own-arm-new-instance-guard-s483): `<*ph/>` in ph's own arm inside a new `<wrap>`'s guarded slot — still refused (base: E-BOOTSTRAP-UNSUPPORTED; r1 and r2: E-DECL-RENDER-CYCLE-STAR)", async () => {
+    const { es } = await errors(P(`${PH}
+<ph:Ph=.B single>
+  <A rule=.B><b>x</b></>
+  <B rule=.A><div><wrap><*ph/></wrap></div></>
+</>
+<wrap t:string="w">
+  let <open:boolean=false/>
+</> renders <span><button class="open" onclick=(@wrap.open = true)>open</button><i if=(open)>[<slot/>]</i></span>
+<main><*ph/></main>`));
+    expect(es.map((d) => d.code)).toEqual(["E-DECL-RENDER-CYCLE-STAR"]);
+  }, 120000);
+});
+
+// s483 r2 (#2139 r1 re-review MED-1) — every branch mounts the declaration through another
+// declaration's render, not only by a use written in it (base and r1: compiled, Chromium overflowed).
+describe("item 2 (r2, #2139 r1 re-review MED-1): every branch mounts it through other renders", () => {
+  const decls = `<pa t:string="a">
+</> renders <b><card/></b>
+<pb t:string="b">
+</> renders <i><card/></i>`;
+  test("q04 / q24: `<pa>` / `<pb>` each render `<card/>` — the `if=` chain and the `<match>` refused, one hop per branch named", async () => {
+    const a = await errors(P(`${decls}
+<card d:int=3>
+</> renders <span><pa if=(d > 0)/><pb else/></span>
+<main><card/></main>`));
+    expect(a.es.map((d) => d.code)).toEqual(["E-DECL-RENDER-CYCLE-USE"]);
+    expect(a.es[0].message).toContain(`\`<card>\` in every branch of the \`if=\` chain at ${a.name}:7:19 (\`<pa>\` (${a.name}:7:19), whose render mounts \`<card>\` (${a.name}:3:16) in the \`if=\` branch; \`<pb>\` (${a.name}:7:35), whose render mounts \`<card>\` (${a.name}:5:16) in the \`else\` branch)`);
+    const b = await errors(P(`${PH}
+${decls}
+<card d:int=3>
+</> renders <span><match for=Ph on=(d > 0 ? Ph.A : Ph.B)><A><pa/></A><B><pb/></B></match></span>
+<main><card/></main>`));
+    expect(b.es.map((d) => d.code)).toEqual(["E-DECL-RENDER-CYCLE-USE"]);
+    expect(b.es[0].message).toContain("in every arm of the `<match>`");
+  }, 240000);
+
+  test("q21: one branch through `<pa>`'s render, the other a direct use — refused", async () => {
+    const { es } = await errors(P(`<pa t:string="a">
+</> renders <b><card/></b>
+<card d:int=3>
+</> renders <span><pa if=(d > 0)/><card else/></span>
+<main><card/></main>`));
+    expect(es.map((d) => d.code)).toEqual(["E-DECL-RENDER-CYCLE-USE"]);
+  }, 120000);
+
+  test("legal: a branch that mounts it only through a GUARDED render does not count", async () => {
+    expect(await texts(P(`<pa t:string="a">
+</> renders <b>a<card if=(t == "zz")/></b>
+<pb t:string="b">
+</> renders <i>b</i>
+<card d:int=3>
+</> renders <span><pa if=(d > 0)/><pb else/></span>
+<main id="o"><card/></main>`), ["o"])).toEqual(["a"]);
+  }, 120000);
+});

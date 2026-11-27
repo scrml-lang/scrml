@@ -145,3 +145,78 @@ describe("guarded recursion renders a finite tree (Chromium)", () => {
     expect(await load(out, ["o", "z"])).toEqual({ errors: [], texts: ["y", "end"] });
   }, 120000);
 });
+
+// s483 r2 (#2139 r1 re-review HIGH-1 / MED-1). A rule-1 cycle through a use, guarded by that new
+// instance's OWN state (PA reading pa-ruled:S483-star-cycle-same-instance), compiles and renders as on
+// base (merge-base e25c84674): each click on the last `button.open` opens exactly one level, whose new
+// `<card>` starts closed again — no error. Every branch mounting the declaration through other
+// declarations' renders is refused (base and r1: compiled, then "Maximum call stack size exceeded").
+const CARD_PROGRAM = (cardBody, renders) => `<program>\n${PH}<ph:Ph=.B single>\n  <A rule=.B><b>x</b></>\n  <B rule=.A><div><card/></div></>\n</>\n<card t:string="c">\n${cardBody}\n</> renders ${renders}\n<main id="o"><*ph/></main>\n<p id="z">end</p>\n</program>\n`;
+
+// load `out`, then click the last `button.open` `clicks` times: the text of `#o` after each step
+async function clicks(out, clicks) {
+  const srv = Bun.serve({ port: 0, fetch(req) {
+    const p = new URL(req.url).pathname;
+    return new Response(Bun.file(join(out, p === "/" ? "index.html" : p)), { headers: { "content-type": p.endsWith(".js") ? "text/javascript" : "text/html" } });
+  } });
+  const page = await browser.newPage();
+  page.setDefaultTimeout(5000);
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  try {
+    await page.goto(`http://localhost:${srv.port}/`);
+    await page.waitForFunction(() => document.getElementById("z") !== null, null, { timeout: 5000 }).catch(() => {});
+    const text = () => page.evaluate(() => (document.getElementById("o")?.textContent ?? "<none>").replace(/\s+/g, "").trim());
+    const seen = [await text()];
+    for (let i = 0; i < clicks; i++) {
+      const b = page.locator("button.open");
+      await b.nth((await b.count()) - 1).click();
+      await page.waitForTimeout(300);
+      seen.push(await text());
+    }
+    return { errors, seen };
+  } finally {
+    await page.close();
+    srv.stop();
+  }
+}
+
+describe("r2: a guard on the new instance's own state ends a `<*f/>` cycle through a use (Chromium)", () => {
+  test("q02d / q02e / q23: `if=` on a `let` cell, a graph field's arm, a `<match>` — one level per click, no error", async () => {
+    if (skip()) return;
+    const shapes = [
+      ["q02d", `  let <open:boolean=false/>`, `<span><button class="open" onclick=(@card.open = true)>open</button><i if=(open)>[<*ph/>]</i></span>`],
+      ["q02e", `    <cs:Ph=.A>\n      <A rule=.B><button class="open" onclick=(@card.cs = .B)>open</button></>\n      <B rule=.A><i>[<*ph/>]</i></>\n    </>`, `<span><*cs/></span>`],
+      ["q23", `  let <open:boolean=false/>`, `<span><match for=Ph on=(open ? Ph.B : Ph.A)><A><button class="open" onclick=(@card.open = true)>open</button></A><B><i>[<*ph/>]</i></B></match></span>`],
+    ];
+    const want = {
+      q02d: ["open", "open[open]", "open[open[open]]"],
+      q02e: ["open", "[open]", "[[open]]"],
+      q23: ["open", "[open]", "[[open]]"],
+    };
+    for (const [id, body, renders] of shapes) {
+      const out = build(CARD_PROGRAM(body, renders));
+      expect([id, await clicks(out, 2)]).toEqual([id, { errors: [], seen: want[id] }]);
+    }
+  }, 240000);
+
+  test("q01: card's own graph field starts in an arm without `<*ph/>` — renders \"closed\"", async () => {
+    if (skip()) return;
+    const out = build(CARD_PROGRAM(`    <cs:Ph=.A>\n      <A rule=.B><b>closed</b></>\n      <B rule=.A><i><*ph/></i></>\n    </>`, `<span><*cs/></span>`));
+    expect(await load(out, ["o", "z"])).toEqual({ errors: [], texts: ["closed", "end"] });
+  }, 120000);
+
+  test("q04 / q21 / q24: every branch mounts `<card>` through `<pa>` / `<pb>`'s renders — E-DECL-RENDER-CYCLE-USE, exit 1", () => {
+    const pa = `<pa t:string="a">\n</> renders <b><card/></b>\n`;
+    const pb = `<pb t:string="b">\n</> renders <i><card/></i>\n`;
+    const shapes = [
+      ["q04", pa + pb, `<pa if=(d > 0)/><pb else/>`],
+      ["q21", pa, `<pa if=(d > 0)/><card else/>`],
+      ["q24", pa + pb, `<match for=Ph on=(d > 0 ? Ph.A : Ph.B)><A><pa/></A><B><pb/></B></match>`],
+    ];
+    for (const [id, decls, body] of shapes) {
+      const r = compile(`<program>\n${PH}${decls}<card d:int=3>\n</> renders <span>${body}</span>\n<main><card/></main>\n<p id="z">end</p>\n</program>\n`);
+      expect([id, r.exitCode, r.text.includes("E-DECL-RENDER-CYCLE-USE")]).toEqual([id, 1, true]);
+    }
+  }, 120000);
+});
