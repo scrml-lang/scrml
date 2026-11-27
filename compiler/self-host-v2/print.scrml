@@ -160,10 +160,26 @@ ${
         if (p.consts.length == 0) return [];
         let want: int[] = [];
         for (const r of roots) { want = constReads(p, r, want); }
-        let i: int = p.consts.length - 1;
-        for (; i >= 0; ) {
-            if (hasInt(want, p.consts[i].sym.id)) want = constReads(p, Node.NExpr(p.consts[i].init), want);
-            i = i - 1;
+        // s483 (lane s483-component-attr-server-only): Core order makes one pass a fixed point — an
+        // initializer names only earlier bindings. The classification's COMPONENT bindings
+        // (bodyAsConsts, `fin` false) need not keep it: an attribute's binding stands for its use-site
+        // values too, which may read a cell of a declaration put after it, and a program cell's seed
+        // may read a component field. So the pass repeats while a binding it found was passed before
+        // it was found (wanted, not walked) — once, as before, when Core order holds.
+        let walked: int[] = [];
+        let more = true;
+        for (; more; ) {
+            let i: int = p.consts.length - 1;
+            for (; i >= 0; ) {
+                const id: int = p.consts[i].sym.id;
+                if (hasInt(want, id) && !hasInt(walked, id)) {
+                    want = constReads(p, Node.NExpr(p.consts[i].init), want);
+                    walked = walked.concat([id]);
+                }
+                i = i - 1;
+            }
+            more = false;
+            for (const w of want) { if (!hasInt(walked, w) && isConstSym(p, w)) more = true; }
         }
         let out: CoreConst[] = [];
         for (const k of p.consts) { if (hasInt(want, k.sym.id)) out = out.concat([k]); }
@@ -238,20 +254,31 @@ ${
         let u: ConstUse = { reads: [], writes: [] };
         if (p.consts.length == 0) return u;
         for (const r of roots) { u = constUseIn(p, r, u); }
-        let i: int = p.consts.length - 1;
-        for (; i >= 0; ) {
-            const id: int = p.consts[i].sym.id;
-            // s482 r1 (#2113 review HIGH-1 / PRE-1): a binding OUTSIDE `noInit` has its initializer run by
-            // this artifact whether or not its code uses the binding (clientConsts: one that acts, that
-            // server code does not read and that is not server-only runs in the client alone) — so
-            // that initializer is this artifact's code, a root like the others, and what it reads is
-            // READ (`let z = rec(lit)`, nothing reads z: `lit` is client-read, held with its
-            // initializer — never a shell, never left out). (A binding only overwritten, in `noInit`,
-            // names nothing through its initializer — the shell.) Core order makes this one pass a fixed
-            // point: an initializer names only earlier bindings, and whether a binding is in `noInit`
-            // does not depend on what this walk finds.
-            if (hasInt(u.reads, id) || !hasInt(noInit, id)) u = constUseIn(p, Node.NExpr(p.consts[i].init), u);
-            i = i - 1;
+        // s483 (lane s483-component-attr-server-only): repeated while a binding read was passed before it
+        // was found — the classification's component bindings need not keep Core order (constsReadIn)
+        let walked: int[] = [];
+        let more = true;
+        for (; more; ) {
+            let i: int = p.consts.length - 1;
+            for (; i >= 0; ) {
+                const id: int = p.consts[i].sym.id;
+                // s482 r1 (#2113 review HIGH-1 / PRE-1): a binding OUTSIDE `noInit` has its initializer run by
+                // this artifact whether or not its code uses the binding (clientConsts: one that acts, that
+                // server code does not read and that is not server-only runs in the client alone) — so
+                // that initializer is this artifact's code, a root like the others, and what it reads is
+                // READ (`let z = rec(lit)`, nothing reads z: `lit` is client-read, held with its
+                // initializer — never a shell, never left out). (A binding only overwritten, in `noInit`,
+                // names nothing through its initializer — the shell.) Core order makes this one pass a fixed
+                // point: an initializer names only earlier bindings, and whether a binding is in `noInit`
+                // does not depend on what this walk finds.
+                if ((hasInt(u.reads, id) || !hasInt(noInit, id)) && !hasInt(walked, id)) {
+                    u = constUseIn(p, Node.NExpr(p.consts[i].init), u);
+                    walked = walked.concat([id]);
+                }
+                i = i - 1;
+            }
+            more = false;
+            for (const r2 of u.reads) { if (!hasInt(walked, r2) && isConstSym(p, r2)) more = true; }
         }
         return u;
     }
@@ -8380,7 +8407,12 @@ ${
             .ResetOn(triggers: ds) :> bodyDepIds(bc, ds),
             .Errors(of: x) :> bodyValidityIds(bc, x),
             .Reach(fields: fs) :> bodyValiditiesIds(bc, fs),
-            .Star(decl: d) :> bodyOf(bc, d.id),
+            // s483 (lane s483-component-attr-server-only; #2125 review MED-1 (i)): a `<*x/>` renders x's
+            // renders for an existing instance — it reads exactly the fields those renders read, and they
+            // are client code already (every declaration is a client root), so the `<*x/>` itself reads
+            // nothing (was: every field of x — no cell of a `single` declaration, which only a `<*x/>`
+            // renders, could become a shell; d22 / d31)
+            .Star(decl: d) :> [],
             // no-default-arm: one question of a view — does it name a body cell other than by a place
             _ :> []
         };
@@ -8414,24 +8446,132 @@ ${
             if (init is given && !hasInt(skip, f.sym.id) && !idleWatched(f) && seedLive(init)) out = out.concat([f.sym.id]);
         }
         // s483 (lane s483-component-cell-server-only; ruling:user-voice-scrml.md-S483-component-cell-server-only):
-        // and each cell of a COMPONENT declaration's body — a field declared in its body (FieldRole.Child,
-        // never an attribute: an attribute's value is given at the use site, in the user's markup) with a
-        // live seed, the same exceptions, and none that a use site gives a value (constructsField — fail
-        // closed: that instance's value is the use site's, client code)
-        let usegiven: string[] = [];
-        for (const n of allNodes(Node.NProgram(p))) { usegiven = usegiven.concat(nodeConstructs(n)); }
+        // and each field of a COMPONENT declaration — s483 (lane s483-component-attr-server-only;
+        // ruling:user-voice-scrml.md-S483-component-attr-server-only — "an attribute no client code reads
+        // gets an empty client stand-in; its default never runs and its use-site value is never evaluated
+        // in the client"): an ATTRIBUTE as well as a cell of its body, and a field a use site gives a value
+        // as well as one it does not (#2125 review MED-1 (ii): excluding the latter left every OTHER
+        // instance running the secret seed, i05). Its values are its seed (an attribute's default) and
+        // every use site's value for it (compUseVals); it is a candidate when one of them is live, with
+        // the same exceptions.
+        const uv: UseVal[] = compUseVals(p);
         for (const d of p.decls) {
             if (d.kind == DeclKind.User) {
                 let i: int = 0;
                 for (const cf of d.fields) {
-                    const ci: Expr | not = cf.init;
-                    const free: boolean = !isAttribute(cf) && usegiven.indexOf(fieldKey(d.sym, i)) < 0;
-                    if (ci is given && free && !hasInt(skip, cf.sym.id) && !idleWatched(cf) && seedLive(ci)) out = out.concat([cf.sym.id]);
+                    let live: boolean = false;
+                    for (const v of fieldVals(d, i, uv)) { if (seedLive(v)) live = true; }
+                    if (live && !hasInt(skip, cf.sym.id) && !idleWatched(cf)) out = out.concat([cf.sym.id]);
                     i = i + 1;
                 }
             }
         }
         return out;
+    }
+
+    // s483 (lane s483-component-attr-server-only) — one use site's value for field `field` of
+    // declaration `decl` (a View.Instance's ConstructAttr), with the key fieldKey gives the field.
+    type UseVal:struct = { key: string, value: Expr }
+
+    // every use site's value, in every declaration's renders, at any depth (allNodes: an element's
+    // children, an `if=` arm, an `<each>` row, a slot, a gather row)
+    fn compUseVals(p: CoreProgram) -> UseVal[] {
+        let out: UseVal[] = [];
+        for (const n of allNodes(Node.NProgram(p))) {
+            const g: GivenAt | not = givenAtOf(n);
+            if (g is given) {
+                for (const a of g.attrs) { out = out.concat([{ key: fieldKey(g.decl, a.field), value: a.value }]); }
+            }
+        }
+        return out;
+    }
+
+    fn givenAtOf(n: Node) -> GivenAt | not {
+        return match n {
+            .NView(v: v) :> viewGivenAt(v),
+            // no-default-arm: one question of a node — is it a use site
+            _ :> not
+        };
+    }
+
+    fn viewGivenAt(v: View) -> GivenAt | not {
+        return match v {
+            .Instance(decl: d, attrs: attrs) :> { decl: d, attrs: attrs },
+            // no-default-arm: only a use site gives values
+            _ :> not
+        };
+    }
+
+    // field `i` of `d`'s values: its seed (a default), then each use site's value for it
+    fn fieldVals(d: Decl, i: int, uv: UseVal[]) -> Expr[] {
+        let out: Expr[] = [];
+        const init: Expr | not = d.fields[i].init;
+        if (init is given) out = [init];
+        const key: string = fieldKey(d.sym, i);
+        for (const u of uv) { if (u.key == key) out = out.concat([u.value]); }
+        return out;
+    }
+
+    // the binding the classification judges for a component field: its one value, or all of them as
+    // one tape — the reach of a tape is the union of its elements' (the binding is never printed:
+    // bodyAsConsts `fin` gives a component field none)
+    fn joinVals(vs: Expr[]) -> Expr {
+        if (vs.length == 1) return vs[0];
+        return Expr.ArrayOf(vs);
+    }
+
+    // `vs` with every use site's value for a field in `keys` dropped, at any depth (an element's
+    // children, an `if=` arm, an `<each>` row, a slot, a gather row)
+    fn dropGivenViews(vs: View[], keys: string[]) -> View[] {
+        let out: View[] = [];
+        for (const v of vs) { out = out.concat([dropGivenView(v, keys)]); }
+        return out;
+    }
+
+    fn dropGivenView(v: View, keys: string[]) -> View {
+        return match v {
+            .El(tag: t, attrs: a, kids: ks) :> View.El(t, a, dropGivenViews(ks, keys)),
+            .Cond(arms: arms) :> View.Cond(dropGivenArms(arms, keys)),
+            .Each(src: s, bind: b, key: k, handles: hs, row: r) :> View.Each(s, b, k, hs, dropGivenViews(r, keys)),
+            .Instance(decl: d, attrs: attrs, slot: sl, alias: al) :> View.Instance(d, dropGivenAttrs(d, attrs, keys), dropGivenViews(sl, keys), al),
+            .Gather(g: g, rows: rows, key: k) :> View.Gather(g, dropGivenRows(rows, keys), k),
+            .Text :> v,
+            .RawText :> v,
+            .Dyn :> v,
+            .Slot :> v,
+            .Star :> v,
+            .Effect :> v,
+            .Run :> v,
+            .Init :> v,
+            .Request :> v,
+            .ResetOn :> v,
+            .Errors :> v,
+            .Reach :> v
+        };
+    }
+
+    fn dropGivenArms(arms: CondArm[], keys: string[]) -> CondArm[] {
+        let out: CondArm[] = [];
+        for (const a of arms) { out = out.concat([{ test: a.test, body: dropGivenViews(a.body, keys) }]); }
+        return out;
+    }
+
+    fn dropGivenRows(rows: GatherRow[], keys: string[]) -> GatherRow[] {
+        let out: GatherRow[] = [];
+        for (const r of rows) { out = out.concat([{ views: dropGivenViews(r.views, keys) }]); }
+        return out;
+    }
+
+    fn dropGivenAttrs(d: Sym, attrs: ConstructAttr[], keys: string[]) -> ConstructAttr[] {
+        let out: ConstructAttr[] = [];
+        for (const a of attrs) { if (keys.indexOf(fieldKey(d, a.field)) < 0) out = out.concat([a]); }
+        return out;
+    }
+
+    fn dropGivenDecl(d: Decl, keys: string[]) -> Decl {
+        const rs: View[] | not = d.renders;
+        if (rs is not || keys.length == 0) return d;
+        return { sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: d.fields, renders: dropGivenViews(rs, keys), wiring: d.wiring, handles: d.handles };
     }
 
     fn idleWatched(f: Field) -> boolean {
@@ -8502,24 +8642,45 @@ ${
         // shell field in its declaration — every instance's — and a binding only in the classification
         // (`fin` false: what its seed reaches is judged), put last (it has no place; a seed names only
         // file-scope bindings, which precede it). In the program both printers print it has none.
+        // s483 (lane s483-component-attr-server-only; ruling:user-voice-scrml.md-S483-component-attr-server-only
+        // — "its default never runs and its use-site value is never evaluated in the client"): so is an
+        // ATTRIBUTE of `cells`, and a cell a use site gives a value. The binding's initializer stands for
+        // all of the field's values — its seed and every use site's (fieldVals, joinVals) — so what any of
+        // them reaches is judged, and a read of the field reads all of them. Every use site's value for
+        // such a field is dropped from the renders (dropGivenDecl), in the classification too: there it
+        // is the binding's initializer, not client code. In the program both printers print, the use site
+        // passes nothing, so the instance holds the shell.
+        const uv: UseVal[] = compUseVals(p);
+        let dropKeys: string[] = [];
+        for (const d0 of p.decls) {
+            if (d0.kind == DeclKind.User) {
+                let j: int = 0;
+                for (const f0 of d0.fields) {
+                    if (hasInt(cells, f0.sym.id)) dropKeys = dropKeys.concat([fieldKey(d0.sym, j)]);
+                    j = j + 1;
+                }
+            }
+        }
         let ds: Decl[] = [];
         for (const d of p.decls) {
             if (d.sym.id == pd.sym.id) {
-                ds = ds.concat([{ sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: fs, renders: d.renders, wiring: d.wiring, handles: d.handles }]);
+                ds = ds.concat([dropGivenDecl({ sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: fs, renders: d.renders, wiring: d.wiring, handles: d.handles }, dropKeys)]);
             } else if (d.kind == DeclKind.User) {
                 let cfs: Field[] = [];
+                let ci: int = 0;
                 for (const cf of d.fields) {
-                    const ci: Expr | not = cf.init;
-                    if (hasInt(cells, cf.sym.id) && ci is given) {
+                    if (hasInt(cells, cf.sym.id)) {
                         cfs = cfs.concat([shellField(cf)]);
-                        if (!fin) ks = ks.concat([{ sym: cf.sym, init: ci, mutable: cf.wcap is given }]);
+                        const vs: Expr[] = fieldVals(d, ci, uv);
+                        if (!fin && vs.length > 0) ks = ks.concat([{ sym: cf.sym, init: joinVals(vs), mutable: cf.wcap is given }]);
                     } else {
                         cfs = cfs.concat([cf]);
                     }
+                    ci = ci + 1;
                 }
-                ds = ds.concat([{ sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: cfs, renders: d.renders, wiring: d.wiring, handles: d.handles }]);
+                ds = ds.concat([dropGivenDecl({ sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: cfs, renders: d.renders, wiring: d.wiring, handles: d.handles }, dropKeys)]);
             } else {
-                ds = ds.concat([d]);
+                ds = ds.concat([dropGivenDecl(d, dropKeys)]);
             }
         }
         return { program: p.program, decls: ds, types: p.types, fns: p.fns, server: p.server, dbs: p.dbs, reset: p.reset, sqlError: p.sqlError,
