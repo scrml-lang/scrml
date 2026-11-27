@@ -123,7 +123,7 @@ describe("refused: an initializer inside a construct that can trap (E-FILE-SCOPE
   test("modulo by a binding not proven non-zero (n - 2)", async () => {
     const d = await errors(inIf("const c: int = 7 % (n - 2);"));
     expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
-    expect(d[0].message).toContain("(`%`), which is not proven a non-zero value nor a `number`");
+    expect(d[0].message).toContain("(`%`), with a result that may be an `int` (neither operand is proven a `number`) and a divisor not proven non-zero");
     expect(d[0].message).toContain("ruling:user-voice-scrml.md-S483-q8-division");
   }, 120000);
 
@@ -405,10 +405,97 @@ describe("q8-fu LOW-1: `%` by a number divisor is not a trap site", () => {
       expect([ini, d.map((x) => x.code)]).toEqual([ini, []]);
     }
   }, 120000);
-  test("refused: a `number` dividend by an `int` divisor (the ruling's \"by a possibly-zero int\")", async () => {
-    const d = await errors(inIf("const c: number = 7.0 % (n - 2);"));
+  // q8-fu2 (#2133 review item 3; prov=pa-ruled:S483-mixed-mod-no-trap, the same governing clause): `%` lowers
+  // to the bare JS `%` and numJoin(number, int) is `number`, so `7.0 % n0` is NaN, a `number` — the s469 trap is
+  // owed on an `int` result only. Before q8-fu2 it was refused by the ruling's literal words ("by a possibly-zero
+  // int"); now `%` is a site only when neither operand is proven a `number`.
+  test("q8-fu2: accepted — a `number` dividend by an `int` divisor (`7.0 % (n - 2)`, `y % n`); it runs to NaN", async () => {
+    for (const ini of ["const c: number = 7.0 % (n - 2);", "const c: number = y % n;", "const c: number = x % items.length;"]) {
+      const d = await errors(inIf(ini));
+      expect([ini, d.map((x) => x.code)]).toEqual([ini, []]);
+    }
+    const bodyTop = `<program>\n${HEAD}\${ const c: number = 7.0 % (n - 2); }\n<p id="z">\${c}</p>\n</program>\n`;
+    expect(await texts(bodyTop, ["z"])).toEqual(["NaN"]);
+  }, 120000);
+  test("still refused: `int % int` by a divisor not proven non-zero; the message names the `int` result", async () => {
+    const d = await errors(inIf("const c: int = n % (n - 2);"));
     expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
-    expect(d[0].message).toContain("by an `int` has no `int` value");
+    expect(d[0].message).toContain("with a result that may be an `int`");
+    expect(d[0].message).toContain("an `int` `n % 0` has no `int` value");
     expect(d[0].message).toContain("refuse only what can actually trap");
+  }, 120000);
+});
+
+// q8-fu2 (#2133 review LOW-1): numberOnly read a `Partial`'s proven members as the whole value, so a divisor with a
+// branch the typer could not type (`v(2)`, a recursive function: `Partial([number])`) passed as a `number`. A
+// Partial is never proven a `number` now — fail closed, either operand.
+describe("q8-fu2 LOW-1: a `Partial` operand is not proven a `number`", () => {
+  const PRE = `<program>\n${HEAD}\${ const n0: int = 0; }\n\${ function v(q: int) { if (q <= 1) return 0.0; return q * v(q - 1); } }\n`;
+  const inIfP = (ini) => `${PRE}<p id="a" if=(n > 5)>\${ ${ini} }\${c}</p>\n<p id="z">end</p>\n</program>\n`;
+  for (const ini of [
+    "const c: number = n % v(2);",                 // probe g01
+    "const c: number = n % (n > 1 ? y : v(2));",   // probe g02
+    "const c: number = v(2) % n0;",                // probe g03
+  ]) {
+    test(`refused: ${ini}`, async () => {
+      const d = await errors(inIfP(ini));
+      expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+      expect(d[0].message).toContain("(`%`), with a result that may be an `int`");
+    }, 120000);
+  }
+  test("accepted: a proven `number` on the other side still decides (`y % v(2)`)", async () => {
+    const d = await errors(inIfP("const c: number = y % v(2);"));
+    expect(d.map((x) => x.code)).toEqual([]);
+  }, 120000);
+});
+
+// q8-fu2 (#2133 review MED-1): `replaceAll` checks its result against the longest string too (runtime.js
+// strReplaceAll → requireFits: E-INDEX-OUT-OF-RANGE-RT). Before, neither half counted it: `big.replaceAll("a", big)`
+// in an untaken `if=` blanked the page, and unread at the body top the printer dropped it. It is trap-free only
+// when the receiver and the replacement are literals (or never-written consts holding one) with
+// (2·L + 1)·2·W + 2·L ≤ MAX — the most the result can be for any `find`, "" included.
+describe("q8-fu2 MED-1: replaceAll is a trap site unless its result provably fits", () => {
+  const PRE = `<program>\n${HEAD}\${ const s: string = "ab"; }\n\${ let w: string = "xy"; }\n\${ const big: string = "b".repeat(3) + "a"; }\n`;
+  const inIfS = (ini) => `${PRE}<p id="a" if=(n > 5)>\${ ${ini} }\${c}</p>\n<p id="z">end</p>\n</program>\n`;
+  for (const ini of [
+    "const c: string = big.replaceAll(\"a\", big);",   // #2133 review probe r01's shape
+    "const c: string = w.replaceAll(\"x\", \"y\");",     // receiver not a literal
+    "const c: string = \"ab\".replaceAll(\"a\", w);",    // replacement not a literal
+  ]) {
+    test(`refused: ${ini}`, async () => {
+      const d = await errors(inIfS(ini));
+      expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+      expect(d[0].message).toContain(".replaceAll(…)`, whose result is not proven to fit the longest string (536870888 UTF-16 units");
+      expect(d[0].message).toContain("E-INDEX-OUT-OF-RANGE-RT");
+    }, 120000);
+  }
+  test("accepted: a literal receiver and replacement that fit, a never-written const included, any find", async () => {
+    for (const ini of [
+      "const c: string = \"abc\".replaceAll(\"b\", \"xyz\");",
+      "const c: string = s.replaceAll(\"\", \"--\");",
+      "const c: string = s.replaceAll(w, \"q\");",          // the searched-for text does not matter
+    ]) {
+      const d = await errors(inIfS(ini));
+      expect([ini, d.map((x) => x.code)]).toEqual([ini, []]);
+    }
+  }, 120000);
+  test("message: a literal receiver is shown, cut at 16 units (#2133 review item 4 cosmetic)", async () => {
+    const d = await errors(inIfS("const c: string = \"a long receiver literal here\".replaceAll(\"a\", w);"));
+    expect(d[0].message).toContain("calls `\"a long receiver …\".replaceAll(…)`");
+    const r = await errors(inIfS("const c: string = \"ab\".repeat(300000000);"));
+    expect(r[0].message).toContain("calls `\"ab\".repeat(…)` with the count `300000000`");
+  }, 120000);
+
+  // the printer half (print.scrml primTraps / replaceAllFitsCore): kept unread, and it runs at its place
+  const UNREAD = (ini) => `${PRE}\${ ${ini} }\n<p id="z">end</p>\n</program>\n`;
+  test("kept, unread: a replaceAll on a non-literal receiver", async () => {
+    const res = await result(UNREAD("const t: string = w.replaceAll(\"x\", \"yy\");"));
+    expect(res.ok).toBe(true);
+    expect(res.client.js).toContain("strReplaceAll");
+  }, 120000);
+  test("left out, unread: a literal replaceAll that fits", async () => {
+    const res = await result(UNREAD("const t: string = \"abc\".replaceAll(\"b\", \"q\");"));
+    expect(res.ok).toBe(true);
+    expect(res.client.js).not.toContain("strReplaceAll");
   }, 120000);
 });
