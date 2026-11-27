@@ -31825,6 +31825,170 @@ ${
         return addDiag(st, env.file, e.span, "E-DECL-RENDER-CYCLE-STAR", path + ". Rendering it never ends: each `<*f/>` on the cycle shows the same field of the same instance at every level, so any guard on the way (an `if=`, the state arm holding it) gives the same answer at every level, and every level renders the next (§66.6.2). Show a different field there, or make the nested part a component with a depth attribute — a plain use is a new instance, so its guard can end it: `<tree depth=(depth - 1) if=(depth > 0)/>`");
     }
 
+    // ---- s483 (lane s483-self-render) — a declaration whose render mounts itself ---------------
+    // ruling:user-voice-scrml.md-S483-component-self-mount-error (§66.6.2 S483 rule 2): a use of a
+    // declaration inside its own render — directly, or through other declarations' renders — that is
+    // unconditional on every path is E-DECL-RENDER-CYCLE-USE, at the use. A plain use is a NEW
+    // instance (§66.6.1) whose render runs at its mount (§66.7.6), so such a render mounts another of
+    // itself, without end (before S483 it compiled, and the page overflowed the stack at load —
+    // g-boot-component-mounts-self-s483). Unconditional: the use stands in the render's markup with no
+    // `if=` / `else-if=` / `else` on it or on any element around it, outside every `<each>` row, block
+    // `<match>` arm, state-child body shown by `<*f/>` (#2116 review y04) and Tier-0 gather row; markup
+    // that always renders is walked through — a child field's own `renders` shown by `<*f/>`
+    // (MInline), a `<db>` block's children, and the slot content given to a use whose declaration's
+    // render shows its `<slot/>` unconditionally. Guarded recursion stays legal: each level is a new
+    // instance, and its guard can read something that changes per level (a depth attribute). Each
+    // declaration's walk is reported at its own uses on a cycle through it (a mutual pair: one report
+    // at each of the two uses). Not judged in a file holding a parse error (Rule C).
+    type MountHop:struct = { use: AElem, decl: int, file: string }
+    type MountWalk:struct = { hops: MountHop[], slot: boolean }
+    type MountPath:struct = { hops: MountHop[] }
+    type DeclMounts:struct = { decl: int, name: string, hops: MountHop[] }
+
+    fn selfMountPass(g: Globals, t: Tables) -> Diag[] {
+        let tab: DeclMounts[] = [];
+        for (const ds of g.decls) {
+            const d: ADecl | not = ds.d;
+            if (!ds.isProgram && d is given && fileErrs(g.files, ds.file).length == 0) {
+                tab = tab.concat([{ decl: ds.info.sym.id, name: d.name, hops: mountWalk(g, t, ds.file, rendersOf(d), []).hops }]);
+            }
+        }
+        let out: Diag[] = [];
+        for (const dm of tab) {
+            for (const h of dm.hops) {
+                const cyc: MountHop[] = mountCycle(tab, h, dm.decl);
+                if (cyc.length > 0) out = out.concat([selfMountDiag(g, dm.name, cyc)]);
+            }
+        }
+        return out;
+    }
+
+    // The uses `nodes` mount unconditionally (in the declaration's file `file`), and whether they
+    // show the render's `<slot/>` unconditionally. `seen`: the declarations whose slot is being asked
+    // about (declShowsSlot) — each at most once on the way.
+    fn mountWalk(g: Globals, t: Tables, file: string, nodes: ANode[], seen: int[]) -> MountWalk {
+        let hops: MountHop[] = [];
+        let slot = false;
+        for (const n of nodes) {
+            const e: AElem | not = nodeElem(n);
+            if (e is given && !chainGuarded(e)) {
+                const f: ElemFact | not = elemFact(t.elems, e.nid);
+                const u: Sym | not = useDecl(f);
+                let walk: ANode[] = [];
+                if (u is given) {
+                    hops = hops.concat([{ use: e, decl: u.id, file: file }]);
+                    // slot content is rendered where the used declaration's `<slot/>` stands
+                    if (e.kids.length > 0 && declShowsSlot(g, t, u.id, seen)) walk = e.kids;
+                } else {
+                    walk = alwaysRenders(f, e);
+                    if (slotFact(f)) slot = true;
+                }
+                const w: MountWalk = mountWalk(g, t, file, walk, seen);
+                hops = hops.concat(w.hops);
+                if (w.slot) slot = true;
+            }
+        }
+        return { hops: hops, slot: slot };
+    }
+
+    // An element carrying `if=` / `else-if=` / `else` renders only on its branch.
+    fn chainGuarded(e: AElem) -> boolean {
+        for (const a of e.attrs) {
+            if (isChainAttr(a.name)) return true;
+        }
+        return false;
+    }
+
+    // The markup an element (not a use) renders every time it renders: an HTML element's or a `<db>`
+    // block's children, a child field's own `renders` shown by `<*f/>`. An `<each>` row, a block
+    // `<match>` arm and a state-child body render only on their condition; a shared instance's
+    // `<*x/>` constructs nothing (InlineView, MStar); `<slot/>`, `<errors>`, `<schema>` hold no use.
+    fn alwaysRenders(f: ElemFact | not, e: AElem) -> ANode[] {
+        return match f {
+            .MHtml :> e.kids,
+            .MUse(decl: d) :> [],
+            .MEach(bind: b) :> [],
+            .MSlot :> [],
+            .MStateView(v: sv) :> [],
+            .MInline(v: iv) :> inlineOwnNodes(iv),
+            .MStar(decl: d) :> [],
+            .MErrors(of: x) :> [],
+            .MDb :> e.kids,
+            .MMatch(m: mb) :> [],
+            .MSchema :> [],
+            not :> e.kids
+        };
+    }
+
+    fn slotFact(f: ElemFact | not) -> boolean {
+        return match f {
+            .MSlot :> true,
+            .MHtml :> false,
+            .MUse(decl: d) :> false,
+            .MEach(bind: b) :> false,
+            .MStateView(v: sv) :> false,
+            .MInline(v: iv) :> false,
+            .MStar(decl: d) :> false,
+            .MErrors(of: x) :> false,
+            .MDb :> false,
+            .MMatch(m: mb) :> false,
+            .MSchema :> false,
+            not :> false
+        };
+    }
+
+    // Does the declaration `id`'s render show its `<slot/>` unconditionally (so a use's children render
+    // whenever the use does)?
+    fn declShowsSlot(g: Globals, t: Tables, id: int, seen: int[]) -> boolean {
+        if (seen.indexOf(id) >= 0) return false;
+        for (const ds of g.decls) {
+            const d: ADecl | not = ds.d;
+            if (ds.info.sym.id == id && !ds.isProgram && d is given) return mountWalk(g, t, ds.file, rendersOf(d), seen.concat([id])).slot;
+        }
+        return false;
+    }
+
+    // The shortest cycle of unconditional uses from the use `h0` back to the declaration `target`
+    // (`tab`: each declaration's unconditional uses): the uses in order, the last one a use of
+    // `target`; [] none.
+    fn mountCycle(tab: DeclMounts[], h0: MountHop, target: int) -> MountHop[] {
+        let seen: int[] = [];
+        let todo: MountPath[] = [{ hops: [h0] }];
+        for (; todo.length > 0; ) {
+            let next: MountPath[] = [];
+            for (const p of todo) {
+                const last: MountHop = p.hops[p.hops.length - 1];
+                if (last.decl == target) return p.hops;
+                if (seen.indexOf(last.decl) < 0) {
+                    seen = seen.concat([last.decl]);
+                    for (const dm of tab) {
+                        if (dm.decl == last.decl) {
+                            for (const h of dm.hops) { next = next.concat([{ hops: p.hops.concat([h]) }]); }
+                        }
+                    }
+                }
+            }
+            todo = next;
+        }
+        return [];
+    }
+
+    // E-DECL-RENDER-CYCLE-USE — at the first use on the cycle (the one written in `dname`'s render),
+    // naming every use on it with its place.
+    fn selfMountDiag(g: Globals, dname: string, cyc: MountHop[]) -> Diag {
+        const h0: MountHop = cyc[0];
+        let path: string = "`<" + dname + ">`'s render mounts `<" + h0.use.tag + ">` (" + placeIn(g.files, h0.file, h0.use.span.start) + ")";
+        let i: int = 1;
+        for (; i < cyc.length; ) {
+            const h: MountHop = cyc[i];
+            path = path + ", whose render mounts `<" + h.use.tag + ">` (" + placeIn(g.files, h.file, h.use.span.start) + ")";
+            i = i + 1;
+        }
+        let head: string = "`<" + dname + ">` is used inside its own render";
+        if (cyc.length > 1) head = "this `<" + h0.use.tag + ">` mounts `<" + dname + ">` again inside `<" + dname + ">`'s own render";
+        return newDiag("E-DECL-RENDER-CYCLE-USE", head + ": " + path + ". Every use on the way is unconditional — no `if=` / `else-if=` / `else` on it or around it, and not in an `<each>` row, a `<match>` arm or a state-child body — and a plain use is a new instance whose render runs at its mount (§66.6.1, §66.7.6), so mounting one `<" + dname + ">` mounts another, without end (§66.6.2). Guard the nested use with something that changes per level, so the recursion ends: `<" + dname + " depth=(depth - 1) if=(depth > 0)/>`, or a `<match>` arm on a value that reaches a leaf", h0.file, h0.use.span);
+    }
+
     // The state-children of the field declared by the ADecl `fieldNid` inside
     // the declaration `ds` (a program cell, or a user declaration's child).
     fn fieldStateChildren(ds: DeclSrc, fieldNid: int) -> AStateChild[] {
@@ -58882,7 +59046,7 @@ ${
         // s444 Phase B: dead validators (RULED S442 (5)) and the forms that take `novalidate` (RULED S442 (3))
         const vp: ValPass = validatorPass(ra.g, bound);
         // s468: static executable attribute values (§5.2 S464) and impure `fn` bodies (§48.3.3)
-        const sinkDiags: Diag[] = staticExecPass(ra.g, bound).concat(fnWritePass(ra.g, sum)).concat(fileScopePass(ra.g, bound, sum)).concat(fallOffPass(ra.g, bound)).concat(invReachPass(ra.g, bound, st.diags)).concat(txRulesPass(ra.g)).concat(css.diags).concat(styleOverlaps(ra.g));
+        const sinkDiags: Diag[] = staticExecPass(ra.g, bound).concat(fnWritePass(ra.g, sum)).concat(fileScopePass(ra.g, bound, sum)).concat(fallOffPass(ra.g, bound)).concat(invReachPass(ra.g, bound, st.diags)).concat(txRulesPass(ra.g)).concat(selfMountPass(ra.g, bound)).concat(css.diags).concat(styleOverlaps(ra.g));
         const typed: RTyping = typeProgram(files, withWaits(bound, waitingFns(sum)), st.diags.concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags), ra.g.te.link);
         // s483 r1 (#2129 review HIGH-1) — a trapping initializer inside a construct, judged over the
         // TYPED tables: boundCheckAt reads Typing.bounds, which typeProgram fills
