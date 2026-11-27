@@ -16,7 +16,9 @@ Source: #2133 review (~/.cache/scrml/review/s483-2133/review.md). Branch s483-q8
 - [x] corpus differential (3001 files): 0 crash, 0 newly rejected/accepted, 0 diag/msg diffs, 0 byte diffs over 331 both-ok
 - [x] Chromium s482/s483 (15 files): 105 pass / 0 fail (3 new q8-fu2 tests)
 - [x] commit 1 hook: 58800 pass / 0 fail
-- [ ] host-global-scan both shards; slice-m4 set
+- [x] commit 2 hook: 58800 pass / 0 fail
+- [x] host-global-scan --check mode-shard 1/2 and 2/2: exit 0, 0 violations; throws all pinned (none from the new cases)
+- [x] slice-m4 set (28 s482/s483 files: every E-FILE-SCOPE-INIT-IN-CONSTRUCT / runBootstrapArtifact test): 735 pass / 12 skip / 0 fail
 - [ ] PR
 
 Finding: w01 is NOT a Partial divisor — the typer joins `y : u()` (number / int) to Known(number), so under item 3's rule (`int % number` is a `number`, no trap) it is accepted on head as on base; true Partial divisors (g01 / g02, `v(2)` a recursive fn) are refused on head, accepted on base.
