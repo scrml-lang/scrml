@@ -33561,7 +33561,7 @@ ${
             // file-scope const whose initializer is a compile-time constant (literals, enum
             // variants, other such consts) and that is not server-only, directly and through a fn
             // chain. A `let`, a host-derived const, or a server-only const stays refused"): the
-            // server-only half is judged after placement (invServerConstPass)
+            // server-only half is judged after placement (the printer — print.scrml invLeakRefusal)
             const kc: ConstInfo | not = constNamed(env.g, env.file, n);
             if (kc is given) {
                 const kwhy: string = invConstWhy(env.g, kc, 0);
@@ -33920,218 +33920,13 @@ ${
     }
 
     // s483 (Q21 lane 2) — ruling:user-voice-scrml.md-S483-invariant-const-read: "A `let`, a
-    // host-derived const, or a server-only const stays refused." A compile-time constant an
-    // invariant reads — directly or through the `fn`s it calls — that SERVER code reads is
-    // refused: §7.6 (b) keeps a binding only server code reads out of the client artifact
-    // ("A binding is server-only when only server code reads it"), and an invariant is
-    // checked wherever its value is written, the client included — reading the constant
-    // there would print it into the client. Judged after placement, fail closed: server code
-    // is the body of a function placed on the server (§12.2 — a server function, or one only
-    // server code reaches), the seed of a program cell that server code reads, and the
-    // initializer of a constant server code reads (the largest set). A constant the
-    // client also reads is refused too (it may be read there only through the invariant);
-    // the message says why. r1 (#2128 review M1): that is narrower than the ruling (a
-    // constant the client also reads is not server-only, §7.6 (b)) — INTERIM,
-    // g-boot-invariant-const-client-read-s483: the capable form classifies with the
-    // printer's §7.6 (b) reach (print.scrml clientConsts / serverInits) with the invariant's
-    // own reach left out, which is not available before lowering; a second reach walk here
-    // that disagreed with the printer's would admit a constant the printer keeps server-only.
-    type InvConstAt:struct = { id: int, by: string }
-
-    fn invServerConstPass(g: Globals, t: Tables) -> Diag[] {
-        // r1 (#2128 review H2 HIGH): the server reader set is CLOSED over the call graph —
-        // every expression server code runs, followed into what it reaches, each once: a server
-        // function's body, the body of every function it calls (whatever that callee's own
-        // placement — a shared helper a server function calls runs on the server too, §12.2,
-        // through its server copy), the seed of a program cell such code reads, and the
-        // initializer of a constant such code reads (the largest set, §7.6 (b)). Before r1 only
-        // the DIRECT reads of server-placed bodies counted, so `function srv() { return key() }`
-        // with `fn key() { return K }` left `K` out, and an invariant reading `K` through its own
-        // `fn` chain was admitted and printed the constant into the client (probe g03). Now the
-        // set refused through a call is exactly the set refused directly (§66.13.5 rule 7).
-        let srv: InvConstAt[] = [];
-        let fnSeen: int[] = [];
-        let fq: FnSrc[] = [];
-        let fby: string[] = [];
-        for (const fs of g.fns) {
-            const id: int = fs.info.sym.id;
-            if ((t.server.servers.indexOf(id) >= 0 || t.server.inherited.indexOf(id) >= 0) && fnSeen.indexOf(id) < 0) {
-                fnSeen = fnSeen.concat([id]);
-                fq = fq.concat([fs]);
-                fby = fby.concat(["the server function `" + fs.info.name + "`"]);
-            }
-        }
-        let fieldSeen: int[] = [];
-        let xq: AExpr[] = [];
-        let xby: string[] = [];
-        let fi: int = 0;
-        let xi: int = 0;
-        let more: boolean = true;
-        for (; more; ) {
-            more = false;
-            // the queued function bodies: each expression is server code
-            for (; fi < fq.length; ) {
-                for (const x of invBodyExprs(fq[fi].f.body)) {
-                    xq = xq.concat([x]);
-                    xby = xby.concat([fby[fi]]);
-                }
-                fi = fi + 1;
-                more = true;
-            }
-            // the queued server expressions: a constant read, a called function, a program cell read
-            for (; xi < xq.length; ) {
-                const x: AExpr = xq[xi];
-                const by: string = xby[xi];
-                const n0: int = srv.length;
-                srv = invAddConstRead(srv, t, x, by);
-                if (srv.length > n0) {
-                    for (const k of t.consts) {
-                        if (k.sym.id == srv[n0].id) {
-                            for (const y of invExprsDeep(k.init)) {
-                                xq = xq.concat([y]);
-                                xby = xby.concat(["the initializer of `" + k.name + "`, which server code reads"]);
-                            }
-                        }
-                    }
-                }
-                const sym: int = invFnSymOf(nameFact(t.names, x.nid));
-                if (sym >= 0 && fnSeen.indexOf(sym) < 0) {
-                    fnSeen = fnSeen.concat([sym]);
-                    const nx: FnSrc | not = fnSrcOfSym(g, sym);
-                    if (nx is given) {
-                        fq = fq.concat([nx]);
-                        fby = fby.concat([invThrough(by, nx.info.name)]);
-                    }
-                }
-                const pf: int = invProgFieldRead(t, x);
-                if (pf >= 0 && fieldSeen.indexOf(pf) < 0) {
-                    fieldSeen = fieldSeen.concat([pf]);
-                    for (const d of t.decls) {
-                        if (d.sym.id == t.program.id && pf < d.fields.length) {
-                            for (const y of invAttrExprs(d.fields[pf].init)) {
-                                xq = xq.concat([y]);
-                                xby = xby.concat(["the seed of `@" + d.fields[pf].sym.hint + "`, which server code reads"]);
-                            }
-                        }
-                    }
-                }
-                xi = xi + 1;
-                more = true;
-            }
-        }
-        if (srv.length == 0) return [];
-        let out: Diag[] = [];
-        for (const ds of g.decls) {
-            const d: ADecl | not = ds.d;
-            if (d is given && !ds.isProgram) {
-                for (const iv of ds.info.invs) { out = out.concat(invServerConstDiags(g, t, ds.file, iv, "`<" + d.name + ">`", srv)); }
-            }
-        }
-        for (const ti of g.types) {
-            for (const iv of ti.invs) { out = out.concat(invServerConstDiags(g, t, ti.file, iv, "`type " + ti.name + "`", srv)); }
-        }
-        return out;
-    }
-
-    // `by` (who reads) extended by the call into `name`: "the server function `srv`, through `key`".
-    fn invThrough(by: string, name: string) -> string {
-        if (by.indexOf(", through `") >= 0) return by + " → `" + name + "`";
-        return by + ", through `" + name + "`";
-    }
-
-    fn invAttrExprs(v: AAttrValue) -> AExpr[] {
-        return match v {
-            .Bare(e: e) :> invExprsDeep(e),
-            .Paren(e: e) :> invExprsDeep(e),
-            .Quoted(v: x) :> [],
-            .Dur(text: x) :> [],
-            .NoValue :> [],
-            .Braced(b: x) :> []
-        };
-    }
-
-    fn invAddConstRead(acc: InvConstAt[], t: Tables, x: AExpr, by: string) -> InvConstAt[] {
-        const id: int = invConstIdOf(nameFact(t.names, x.nid));
-        if (id < 0) return acc;
-        for (const a of acc) {
-            if (a.id == id) return acc;
-        }
-        return acc.concat([{ id: id, by: by }]);
-    }
-
-    fn invConstIdOf(f: NameFact | not) -> int {
-        return match f {
-            .NConst(sym: s) :> s.id,
-            .NLocal(sym: x) :> -1,
-            .NField(decl: x) :> -1,
-            .NInst(decl: x) :> -1,
-            .NStruct(owner: x) :> -1,
-            .NFn(sym: x) :> -1,
-            .NLength :> -1,
-            .NSurface(of: x) :> -1,
-            .NReq(id: x) :> -1,
-            not :> -1
-        };
-    }
-
-    fn invProgFieldRead(t: Tables, x: AExpr) -> int {
-        const f: NameFact | not = nameFact(t.names, x.nid);
-        return match f {
-            .NField(decl: d, idx: i) :> (d.id == t.program.id ? i : -1),
-            .NConst(sym: x) :> -1,
-            .NLocal(sym: x) :> -1,
-            .NInst(decl: x) :> -1,
-            .NStruct(owner: x) :> -1,
-            .NFn(sym: x) :> -1,
-            .NLength :> -1,
-            .NSurface(of: x) :> -1,
-            .NReq(id: x) :> -1,
-            not :> -1
-        };
-    }
-
-    // One clause: the constants it reads directly and through its `fn` chain (each `fn` once).
-    fn invServerConstDiags(g: Globals, t: Tables, file: string, iv: InvInfo, what: string, srv: InvConstAt[]) -> Diag[] {
-        let xs: AExpr[] = invExprsDeep(iv.e);
-        let seen: int[] = [];
-        let queue: FnSrc[] = [];
-        for (const x of xs) {
-            const sym: int = invFnSymOf(nameFact(t.names, x.nid));
-            if (sym >= 0 && seen.indexOf(sym) < 0) {
-                seen = seen.concat([sym]);
-                const fs: FnSrc | not = fnSrcOfSym(g, sym);
-                if (fs is given) queue = queue.concat([fs]);
-            }
-        }
-        let i: int = 0;
-        for (; i < queue.length; ) {
-            for (const x of invBodyExprs(queue[i].f.body)) {
-                xs = xs.concat([x]);
-                const sym: int = invFnSymOf(nameFact(t.names, x.nid));
-                if (sym >= 0 && seen.indexOf(sym) < 0) {
-                    seen = seen.concat([sym]);
-                    const nx: FnSrc | not = fnSrcOfSym(g, sym);
-                    if (nx is given) queue = queue.concat([nx]);
-                }
-            }
-            i = i + 1;
-        }
-        let out: Diag[] = [];
-        let done: int[] = [];
-        for (const x of xs) {
-            const id: int = invConstIdOf(nameFact(t.names, x.nid));
-            if (id >= 0 && done.indexOf(id) < 0) {
-                for (const a of srv) {
-                    if (a.id == id) {
-                        done = done.concat([id]);
-                        let kn: string = nameOfExpr(x);
-                        out = out.concat([newDiag("E-DECL-INVARIANT-IMPURE", "`invariant (" + iv.text + ")` on " + what + " reads the file-scope constant `" + kn + "`, which server code reads (" + a.by + ") — a binding only server code reads is server-only and stays out of the client artifact (§7.6 (b)), and an invariant is checked wherever the value is written, the client included, so reading it there would put it in the client (ruling:user-voice-scrml.md-S483-invariant-const-read: \"a server-only const stays refused\"). Read a constant no server code reads, or compute the bound in a `fn` from the fields. (A constant the client ALSO reads is not server-only under §7.6 (b) and the ruling admits it; it is refused here too until the classification can leave the invariant's own reach out — INTERIM, g-boot-invariant-const-client-read-s483)", file, iv.span)]);
-                    }
-                }
-            }
-        }
-        return out;
-    }
+    // host-derived const, or a server-only const stays refused." The server-only half is judged by the
+    // PRINTER (print.scrml invLeakRefusal; r2 — #2128 r1 re-review H2a–H2d): its own §7.6 (b)
+    // classification, run without the invariant checks and with them — a binding, function or field
+    // server-only in the first run and client-held in the second is refused. (r0 / r1 judged it here by
+    // a second reach walk over the AST, invServerConstPass, which missed a constant's initializer, a
+    // server-only initializer, a derived field and a component attribute, and refused a constant the
+    // client also reads — g-boot-invariant-const-client-read-s483, closed by the printer's two runs.)
 
     fn invErrIn(prior: Diag[], file: string, span: ASpan) -> boolean {
         for (const d of prior) {
@@ -34236,7 +34031,7 @@ ${
     // may read (ruling:user-voice-scrml.md-S483-invariant-const-read: "a file-scope const
     // whose initializer is a compile-time constant (literals, enum variants, other such
     // consts)"), else why not (the message's tail). Whether server code reads it is judged
-    // after placement (invServerConstPass).
+    // after placement (the printer — print.scrml invLeakRefusal).
     fn invConstWhy(g: Globals, kc: ConstInfo, depth: int) -> string {
         if (kc.mutable) return " — a mutable binding: a write can change it, so the invariant would not be a function of the value's fields (an invariant may read a file-scope `const` initialized by a compile-time constant; ruling:user-voice-scrml.md-S483-invariant-const-read)";
         if (!invConstInit(g, kc.file, kc.init, depth)) return ", whose initializer is not a compile-time constant — an invariant may read a file-scope `const` only when it is initialized by a literal, an enum variant, another such constant, or arithmetic the compiler folds over them (`+ - *`, comparisons, `&&` / `||`, `? :`), so its value is the same wherever the value is written and known at compile time (ruling:user-voice-scrml.md-S483-invariant-const-read; ruling:user-voice-scrml.md-S483-invariant-const-fold)";
@@ -59439,7 +59234,7 @@ ${
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
                             novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, timings: bound.timings, server: sf, css: css.facts, consts: bound.consts, requests: bound.requests, taliases: bound.taliases, tscope: bound.tscope, waits: waitingFns(sum), rows: bound.rows, lines: bound.lines };
-        const base0: Diag[] = chScopeQuiet(domScopeDropped(cps.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags).concat(hostPlacedDiags(fns, pp.facts.servers)).concat(hostServerDiags(ra.g, pp.facts.servers)).concat(nestedFnPass(ra.g, t)).concat(eps.diags), chs.quiet, chs.calls).concat(chs.diags).concat(invServerConstPass(ra.g, t));
+        const base0: Diag[] = chScopeQuiet(domScopeDropped(cps.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags).concat(hostPlacedDiags(fns, pp.facts.servers)).concat(hostServerDiags(ra.g, pp.facts.servers)).concat(nestedFnPass(ra.g, t)).concat(eps.diags), chs.quiet, chs.calls).concat(chs.diags);
         // s471: the linear pass (§35) — after the typer (§35.5: "after type resolution and
         // route inference"; a non-exhaustive `match`'s E-TYPE-020 is in `base0`, §35.4.3)
         const base: Diag[] = base0.concat(linPass(ra.g, t, base0));

@@ -78,7 +78,10 @@ describe("H2 — a server function's calls are followed: the constant it reaches
     test(`${v.name}: refused; without the invariant the constant is in no client file`, async () => {
       const r = await result(srvProg(v.fns, v.inv, "srv(1)"));
       expect(codes(r)).toEqual(["E-DECL-INVARIANT-IMPURE"]);
-      expect(errs(r)[0].message).toContain("which server code reads (");
+      // r2 (#2128 r1 re-review H2): the printer's classification run without and with the invariant (print.scrml
+      // invLeakRefusal) — one refusal per invariant, naming what it reaches
+      expect(errs(r)[0].message).toContain("reaches what §7.6 (b) keeps out of the client artifact");
+      expect(errs(r)[0].message).toContain("`K`");
       const r2 = await result(srvProg(v.fns, "", "srv(1)"));
       expect(codes(r2)).toEqual([]);
       expect(clientText(r2)).not.toContain(SECRET);
@@ -104,14 +107,15 @@ let <out:string=""/>
 `;
     const r = await result(src);
     expect(codes(r)).toEqual(["E-DECL-INVARIANT-IMPURE"]);
-    expect(errs(r)[0].message).toContain("through `key`");
+    expect(errs(r)[0].message).toContain("`ok()` → `key()`");
   }, 120000);
 
-  test("the message names the call chain the server code reaches the constant through", async () => {
+  test("the message names the chain the invariant reaches the server-only code through", async () => {
     const r0 = await result(srvProg(variants[0].fns, variants[0].inv, "srv(1)"));
-    expect(errs(r0)[0].message).toContain("which server code reads (the server function `srv`, through `key`)");
+    expect(errs(r0)[0].message).toContain("`key()` through `ok()` → `key()` (only server code reaches it");
+    expect(errs(r0)[0].message).toContain("`K` through `ok()` → `key()` → `K`");
     const r = await result(srvProg(variants[1].fns, variants[1].inv, "srv(1)"));
-    expect(errs(r)[0].message).toContain("the server function `srv`, through `wrap` → `key`");
+    expect(errs(r)[0].message).toContain("`ok()` → `wrap()` → `key()` → `K`");
   }, 120000);
 });
 

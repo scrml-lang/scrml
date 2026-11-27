@@ -200,11 +200,12 @@ ${
     fn constReads(p: CoreProgram, root: Node, acc: int[]) -> int[] {
         let out: int[] = acc;
         const bc: BodyCells = bodyCellsOf(p);
-        for (const n of allNodes(root)) {
-            if (bodyAny(bc)) {
-                const bu: ConstUse = bodyUseOf(bc, n);
-                for (const b of bu.reads.concat(bu.writes)) { if (!hasInt(out, b)) out = out.concat([b]); }
-            }
+        const ns: Node[] = allNodes(root);
+        if (bodyAny(bc)) {
+            const bu: ConstUse = bodyUseAll(p, bc, ns);
+            for (const b of bu.reads.concat(bu.writes)) { if (!hasInt(out, b)) out = out.concat([b]); }
+        }
+        for (const n of ns) {
             let id: int = localReadOf(n);
             if (id < 0) id = assignedLocalOf(n);
             if (id < 0) id = assignedExprLocalOf(n);
@@ -292,14 +293,15 @@ ${
         let over: int[] = [];
         // s483 (lane s483-body-cell-server-only): a cell of the program body bodyPlaced classifies as a
         // binding — a whole-value, statically checked write of it (`@c = v`) is a write; every other
-        // reference reads it (bodyUseOf)
+        // reference reads it (bodyUseOf; an invariant guard reads what bodyUseAll says)
         const bc: BodyCells = bodyCellsOf(p);
-        for (const n of allNodes(root)) {
-            if (bodyAny(bc)) {
-                const bu: ConstUse = bodyUseOf(bc, n);
-                for (const br of bu.reads) { if (!hasInt(reads, br)) reads = reads.concat([br]); }
-                for (const bw of bu.writes) { if (!hasInt(writes, bw)) writes = writes.concat([bw]); }
-            }
+        const ns: Node[] = allNodes(root);
+        if (bodyAny(bc)) {
+            const bu: ConstUse = bodyUseAll(p, bc, ns);
+            for (const br of bu.reads) { if (!hasInt(reads, br)) reads = reads.concat([br]); }
+            for (const bw of bu.writes) { if (!hasInt(writes, bw)) writes = writes.concat([bw]); }
+        }
+        for (const n of ns) {
             const id: int = localReadOf(n);
             if (id >= 0 && isConstSym(p, id) && !hasInt(reads, id)) reads = reads.concat([id]);
             let wl: int = assignedLocalOf(n);
@@ -7304,8 +7306,14 @@ ${
         const ps: CoreProgram = shakeProgram(p1, keep);
         const orf: string[] = outerRefusal(ps);
         if (orf.length > 0) return { js: "", html: "", refused: orf, routes: [] };
-        const si: int[] = serverInitsExposing(ps, keep);
-        const plan: InitPlan = bodyInits(ps, si, keep);
+        // s483 r2 (#2128 r1 re-review H2a–H2d): an invariant never moves a server-only binding,
+        // function or field into the client (invLeakRefusal — this classification, run without the
+        // invariant checks and with them)
+        const ilr: string[] = invLeakRefusal(p1, keep);
+        if (ilr.length > 0) return { js: "", html: "", refused: ilr, routes: [] };
+        const cp: ClientPlan = clientPlanOf(ps, keep);
+        const si: int[] = cp.si;
+        const plan: InitPlan = cp.plan;
         const p: CoreProgram = plan.p;
         // S478 ruling item 26 (1): a LIBRARY entry (no `<program>`, §21.5) is analyzed as a
         // library, but §21.5's output — "no HTML output … a JS module with the exported bindings
@@ -7333,14 +7341,10 @@ ${
         let templates: Template[] = [];
         // s472: the constants the CLIENT's code reads — its declarations and its functions
         // (computed below, before any is printed: a module-level `const` precedes its readers)
-        const serverOnly0: int[] = serverOnlyFns(p).concat(reachedOnlyByServer(p));
-        let clientRoots: Node[] = [];
-        for (const d0 of p.decls) { clientRoots = clientRoots.concat([Node.NDecl(d0)]); }
-        // s482 (g-boot-dead-client-fn-ships-server-const-s481): the functions the client can run
-        // (clientLiveFns) — an unreached one is not printed, so nothing it reads is held here
-        const liveFns: int[] = clientLiveFns(p, keep, si);
-        for (const f0 of p.fns) { if (!hasInt(serverOnly0, f0.sym.id) && hasInt(liveFns, f0.sym.id)) clientRoots = clientRoots.concat([Node.NFn(f0)]); }
-        const cconsts: CoreConst[] = clientConsts(p, clientRoots, serverOnly0, si);
+        // s483 r2: clientPlanOf — the steps invLeakRefusal runs too
+        const clientRoots: Node[] = cp.roots;
+        const liveFns: int[] = cp.liveFns;
+        const cconsts: CoreConst[] = cp.consts;
         // s482 (s482-registry-client): the runtime `reflect` registries print only the types this
         // client code uses (clientRegistryIds, §22.4.2 strategy 2)
         let regRoots: Node[] = clientRoots;
@@ -8127,14 +8131,29 @@ ${
     // reading an outer cell) is one fixed point. A body cell it makes server-only is a SHELL field in
     // the program declaration and a binding the server artifact runs (bodyAsConsts `fin`).
     fn outerPlaced(p: CoreProgram, keep: int[]) -> CoreProgram {
+        return outerPlacedBy(p, outerMoves(p, keep));
+    }
+
+    // s483 r2 (#2128 r1 re-review H2d): the classification alone — the Sym ids of the cells declared
+    // outside the body and of the body / component fields it makes server-only (outerPlaced moves them;
+    // invLeakRefusal compares two runs of it)
+    fn outerMoves(p: CoreProgram, keep: int[]) -> int[] {
         const outs: OuterCell[] = outerLive(p);
         const bcs: int[] = bodyCands(p);
-        if (outs.length == 0 && bcs.length == 0) return p;
+        if (outs.length == 0 && bcs.length == 0) return [];
         const si: int[] = serverInitsExposing(bodyAsConsts(outerAsConsts(p, outs, false), p, bcs, false), keep);
+        let out: int[] = [];
+        for (const oc of outs) { if (hasInt(si, oc.decl.id)) out = out.concat([oc.decl.id]); }
+        for (const b of bcs) { if (hasInt(si, b)) out = out.concat([b]); }
+        return out;
+    }
+
+    fn outerPlacedBy(p: CoreProgram, mv: int[]) -> CoreProgram {
+        if (mv.length == 0) return p;
         let moved: OuterCell[] = [];
-        for (const oc of outs) { if (hasInt(si, oc.decl.id)) moved = moved.concat([oc]); }
+        for (const oc of outerLive(p)) { if (hasInt(mv, oc.decl.id)) moved = moved.concat([oc]); }
         let bmoved: int[] = [];
-        for (const b of bcs) { if (hasInt(si, b)) bmoved = bmoved.concat([b]); }
+        for (const b of bodyCands(p)) { if (hasInt(mv, b)) bmoved = bmoved.concat([b]); }
         if (moved.length == 0 && bmoved.length == 0) return p;
         let q: CoreProgram = p;
         if (moved.length > 0) q = outerAsConsts(p, moved, true);
@@ -8347,6 +8366,208 @@ ${
 
     fn readUse(ids: int[]) -> ConstUse {
         return { reads: ids, writes: [] };
+    }
+
+    // s483 r2 (#2128 r1 re-review H2d) — bodyUseOf over the nodes `ns` (one walk, preorder), with an
+    // INVARIANT GUARD read as the runtime reads it: an InvariantGuard over a declaration's instance
+    // builds its candidate from the fields it writes and the fields its checks name (and the
+    // dependencies of the derived fields they recompute) — runtime invariantGuard `need` — and reads
+    // no other field, so it reads exactly those (invGuardReads), never every field its instance handle
+    // names (a Lexical handle names every body cell). The guard's own handle — its first argument, the
+    // next node in preorder — is judged with it. A guard whose declaration is not known here (a handle
+    // through an alias, a Lexical handle of a guard that writes — fail closed) is judged by
+    // bodyUseOf as before. `cur`: the declaration whose subtree the walk is in (its construction
+    // check's Lexical(0) handle is that declaration's fresh instance).
+    fn bodyUseAll(p: CoreProgram, bc: BodyCells, ns: Node[]) -> ConstUse {
+        let reads: int[] = [];
+        let writes: int[] = [];
+        let cur: int = -1;
+        let skip: boolean = false;
+        for (const n of ns) {
+            const dn: int = nodeDeclId(n);
+            if (dn >= 0) cur = dn;
+            const own: boolean = skip && invHandleNode(n);
+            skip = false;
+            if (!own) {
+                let u: ConstUse = { reads: [], writes: [] };
+                const g: int[] | not = invGuardReads(p, bc, n, cur);
+                if (g is given) {
+                    u = readUse(g);
+                    skip = true;
+                } else {
+                    u = bodyUseOf(bc, n);
+                }
+                for (const r of u.reads) { if (!hasInt(reads, r)) reads = reads.concat([r]); }
+                for (const w of u.writes) { if (!hasInt(writes, w)) writes = writes.concat([w]); }
+            }
+        }
+        return { reads: reads, writes: writes };
+    }
+
+    fn nodeDeclId(n: Node) -> int {
+        return match n {
+            .NDecl(d: d) :> d.sym.id,
+            // no-default-arm: one question of a node — is it a declaration
+            _ :> -1
+        };
+    }
+
+    fn invHandleNode(n: Node) -> boolean {
+        return match n {
+            .NExpr(e: e) :> invHandleExpr(e),
+            // no-default-arm: one question of a node — is it an instance handle
+            _ :> false
+        };
+    }
+
+    fn invHandleExpr(e: Expr) -> boolean {
+        return match e {
+            .Handle :> true,
+            // no-default-arm: one question of an expression — is it an instance handle
+            _ :> false
+        };
+    }
+
+    // The body cells an InvariantGuard node reads (see bodyUseAll), or `not` when `n` is not one whose
+    // declaration and fields are known here.
+    fn invGuardReads(p: CoreProgram, bc: BodyCells, n: Node, cur: int) -> int[] | not {
+        const e: Expr | not = nodeExprOf(n);
+        if (e is not) return not;
+        const g: InvGF | not = invGuardFields(p, e, cur);
+        if (g is not) return not;
+        let out: int[] = [];
+        for (const ix of g.idxs) {
+            for (const id of bodyAt(bc, g.decl, ix)) { if (!hasInt(out, id)) out = out.concat([id]); }
+        }
+        return out;
+    }
+
+    // An InvariantGuard's declaration (Sym id) and the indices of the fields it reads — those it
+    // writes, and those its checks name (a check below a field: that field; else the names and the
+    // derived fields' dependencies) — or `not` when `e` is not a guard whose declaration and fields
+    // are all known here (fail closed).
+    type InvGF:struct = { decl: int, idxs: int[] }
+
+    fn invGuardFields(p: CoreProgram, e: Expr, cur: int) -> InvGF | not {
+        const a: Expr[] | not = invGuardArgs(e);
+        if (a is not || a.length != 4) return not;
+        const ws: Expr[] = invElems(a[1]);
+        const d: int = invGuardDecl(a[0], ws.length == 0, cur);
+        if (d < 0) return not;
+        let dd: Decl | not = not;
+        for (const x of p.decls) { if (x.sym.id == d) dd = x; }
+        if (dd is not) return not;
+        let names: string[] = [];
+        for (const f of dd.fields) { names = names.concat([f.sym.hint]); }
+        let idxs: int[] = [];
+        for (const w of ws) {
+            const parts: Expr[] = invElems(w);
+            if (parts.length == 0) return not;
+            const i: int = invLitInt(parts[0]);
+            const nm: string | not = invLitStr(parts[0]);
+            if (i >= 0) idxs = idxs.concat([i]);
+            else if (nm is given) idxs = idxs.concat([names.indexOf(nm)]);
+            else return not;
+        }
+        for (const c of invElems(a[2])) {
+            const parts: Expr[] = invElems(c);
+            if (parts.length < 5) return not;
+            const at: Expr[] = invElems(parts[0]);
+            let want: Expr[] = [];
+            if (at.length > 0) {
+                want = [at[0]];
+            } else {
+                want = invElems(parts[2]);
+                if (parts.length > 5) {
+                    for (const dv of invElems(parts[5])) {
+                        const dp: Expr[] = invElems(dv);
+                        if (dp.length < 3) return not;
+                        want = want.concat(invElems(dp[2]));
+                    }
+                }
+            }
+            for (const x of want) {
+                const nm: string | not = invLitStr(x);
+                if (nm is not) return not;
+                idxs = idxs.concat([names.indexOf(nm)]);
+            }
+        }
+        let out: int[] = [];
+        for (const ix of idxs) {
+            if (ix < 0) return not;
+            if (!hasInt(out, ix)) out = out.concat([ix]);
+        }
+        return { decl: d, idxs: out };
+    }
+
+    // the declaration a guard's instance handle names: a shared instance or a child instance's
+    // declaration, or — for a guard that writes nothing (a construction check) — the declaration the
+    // walk is in, for its own fresh instance (Lexical(0)); else -1
+    fn invGuardDecl(h: Expr, noWrites: boolean, cur: int) -> int {
+        return match h {
+            .Handle(inst: i) :> invInstDecl(i, noWrites, cur),
+            // no-default-arm: one question of a guard's first argument — whose instance is it
+            _ :> -1
+        };
+    }
+
+    fn invInstDecl(i: InstRef, noWrites: boolean, cur: int) -> int {
+        return match i {
+            .Shared(decl: d) :> d.id,
+            .Kid(decl: d) :> d.id,
+            .Lexical(depth: k) :> (k == 0 && noWrites ? cur : -1),
+            .Alias(sym: x) :> -1,
+            .Narrowed(sym: x) :> -1,
+            .HandleOf(sym: x) :> -1
+        };
+    }
+
+    fn nodeExprOf(n: Node) -> Expr | not {
+        return match n {
+            .NExpr(e: e) :> e,
+            // no-default-arm: one question of a node — is it an expression
+            _ :> not
+        };
+    }
+
+    fn invElems(e: Expr) -> Expr[] {
+        return match e {
+            .ArrayOf(elems: xs) :> xs,
+            // no-default-arm: one question of an expression — is it a tape literal
+            _ :> []
+        };
+    }
+
+    fn invLitInt(e: Expr) -> int {
+        return match e {
+            .Lit(lit: l) :> invLitIntV(l),
+            // no-default-arm: one question of an expression — is it an int literal
+            _ :> -1
+        };
+    }
+
+    fn invLitIntV(l: Literal) -> int {
+        return match l {
+            .Int(v: v) :> v,
+            // no-default-arm: one question of a literal — is it an int
+            _ :> -1
+        };
+    }
+
+    fn invLitStr(e: Expr) -> string | not {
+        return match e {
+            .Lit(lit: l) :> invLitStrV(l),
+            // no-default-arm: one question of an expression — is it a string literal
+            _ :> not
+        };
+    }
+
+    fn invLitStrV(l: Literal) -> string | not {
+        return match l {
+            .Str(v: v) :> v,
+            // no-default-arm: one question of a literal — is it a string
+            _ :> not
+        };
     }
 
     // field `idx` of declaration `d`, when it is a binding here
@@ -9057,5 +9278,716 @@ ${
             .FParse(json: x) :> not,
             .FCallV(f: x) :> not
         };
+    }
+
+    // =========================================================================
+    // s483 r2 (#2128 r1 re-review H2a–H2d; ruling:user-voice-scrml.md-S483-invariant-const-read — "a
+    // server-only const stays refused"; prov=pa-ruled:S483-invariant-attr-server-only) — THE INVARIANT
+    // LEAK CHECK. An invariant is checked wherever its value is written, the client included, so its
+    // predicates are client code: what they reach is read by the client. §7.6 (b) keeps a binding only
+    // server code reads — and an unread one whose initializer reaches server-only code — out of the
+    // client artifact; an invariant must never move such a binding into it. Several analyze-side
+    // approximations of that reach each missed a root (a constant's initializer, a server-only
+    // initializer, a derived field's formula, a component attribute's value), so the judgement is the
+    // printer's OWN classification, run twice: once on the program with every invariant check left out
+    // (invStripProgram — the checks' predicates gone, every write and value kept), once on the program
+    // as printed. A binding, a function or a component / body field that is server-only in the first
+    // run and client-held in the second is refused by name (E-DECL-INVARIANT-IMPURE) — there is no
+    // second classifier that can disagree with the printer: both runs ARE the printer's (clientPlanOf —
+    // the steps printProgramExposing takes). A binding the client holds anyway (it reads it itself) is
+    // in both runs, so it is admitted — the capable form of g-boot-invariant-const-client-read-s483.
+    // A program with no invariant check is not judged (nothing differs).
+    // =========================================================================
+
+    // The client half's classification of a shaken, placed program `ps` — what printProgramExposing
+    // prints from: the server-only initializers (`si`), the body places (`plan`), the server-only
+    // functions, the functions the client can run, the client roots and the client's bindings.
+    type ClientPlan:struct = { si: int[], plan: InitPlan, serverOnly: int[], liveFns: int[], roots: Node[], consts: CoreConst[] }
+
+    fn clientPlanOf(ps: CoreProgram, keep: int[]) -> ClientPlan {
+        const si: int[] = serverInitsExposing(ps, keep);
+        const plan: InitPlan = bodyInits(ps, si, keep);
+        const p: CoreProgram = plan.p;
+        const serverOnly0: int[] = serverOnlyFns(p).concat(reachedOnlyByServer(p));
+        let clientRoots: Node[] = [];
+        for (const d0 of p.decls) { clientRoots = clientRoots.concat([Node.NDecl(d0)]); }
+        // s482 (g-boot-dead-client-fn-ships-server-const-s481): the functions the client can run
+        // (clientLiveFns) — an unreached one is not printed, so nothing it reads is held here
+        const liveFns: int[] = clientLiveFns(p, keep, si);
+        for (const f0 of p.fns) { if (!hasInt(serverOnly0, f0.sym.id) && hasInt(liveFns, f0.sym.id)) clientRoots = clientRoots.concat([Node.NFn(f0)]); }
+        const cconsts: CoreConst[] = clientConsts(p, clientRoots, serverOnly0, si);
+        return { si: si, plan: plan, serverOnly: serverOnly0, liveFns: liveFns, roots: clientRoots, consts: cconsts };
+    }
+
+    // One run of the classification: what the client holds — the bindings it holds WITH their
+    // initializer (`consts`; a shell, clientConsts' `not` stand-in, holds nothing), the functions it
+    // prints (`fns`) — and what is server-only: the functions (`serverFns`) and the cells / fields
+    // outerPlaced makes server-only (`moved`), and the bindings server code reads or that are server-only
+    // (`srv`). `p`: the program the client is printed from.
+    type ClientView:struct = { consts: int[], fns: int[], serverFns: int[], moved: int[], srv: int[], p: CoreProgram }
+
+    fn clientViewOf(p1: CoreProgram, keep: int[]) -> ClientView {
+        const q: CoreProgram = shakeDecls(p1, keep);
+        const mv: int[] = outerMoves(q, keep);
+        const ps: CoreProgram = outerPlacedBy(q, mv);
+        const cp: ClientPlan = clientPlanOf(ps, keep);
+        const p: CoreProgram = cp.plan.p;
+        let ks: int[] = [];
+        for (const k of cp.consts) {
+            const k0: CoreConst | not = findConst(p, k.sym.id);
+            let shell: boolean = false;
+            if (k0 is given) shell = invAbsent(k.init) && !invAbsent(k0.init);
+            if (!shell) ks = ks.concat([k.sym.id]);
+        }
+        let fs: int[] = [];
+        for (const f of p.fns) { if (!hasInt(cp.serverOnly, f.sym.id) && hasInt(cp.liveFns, f.sym.id)) fs = fs.concat([f.sym.id]); }
+        // the bindings server code reads, and the server-only ones (§7.6 (b) — what keeps a binding out of the client)
+        const srv: int[] = unionInts(constsReached(p, serverRoots(p, cp.serverOnly, cp.si)), cp.si);
+        return { consts: ks, fns: fs, serverFns: cp.serverOnly, moved: mv, srv: srv, p: p };
+    }
+
+    fn invAbsent(e: Expr) -> boolean {
+        return match e {
+            .Lit(lit: l) :> invAbsentLit(l),
+            // no-default-arm: one question of an expression — is it the absence literal
+            _ :> false
+        };
+    }
+
+    fn invAbsentLit(l: Literal) -> boolean {
+        return match l {
+            .Absent :> true,
+            // no-default-arm: one question of a literal — is it `not`
+            _ :> false
+        };
+    }
+
+    // The refusals: what is server-only without the invariant checks (`b`, invStripProgram) and
+    // client-held with them (`a`) — a binding server code reads or that is server-only, a function only
+    // server code reaches, a cell / field outerPlaced makes server-only — one refusal per invariant that
+    // reaches any of it, naming each with the chain it is reached by (invLeakChains). A binding reached
+    // only through such a field's value is named with that field.
+    fn invLeakRefusal(p1: CoreProgram, keep: int[]) -> string[] {
+        if (p1.tool is given || p1.program.id < 0 || !hasInvariantChecks(p1)) return [];
+        const a: ClientView = clientViewOf(p1, keep);
+        const b: ClientView = clientViewOf(invStripProgram(p1), keep);
+        let tk: int[] = [];
+        for (const k of a.consts) { if (!hasInt(b.consts, k) && hasInt(b.srv, k)) tk = tk.concat([k]); }
+        let tf: int[] = [];
+        for (const f of a.fns) { if (!hasInt(b.fns, f) && hasInt(b.serverFns, f)) tf = tf.concat([f]); }
+        let tm: int[] = [];
+        for (const m of b.moved) { if (!hasInt(a.moved, m)) tm = tm.concat([m]); }
+        if (tk.length == 0 && tf.length == 0 && tm.length == 0) return [];
+        const ch: InvChains = invLeakChains(a.p, tk.concat(tf), tm);
+        // one refusal per invariant, in the order the walk met them
+        let labels: string[] = [];
+        for (const l of ch.flabels.concat(ch.labels)) { if (labels.indexOf(l) < 0) labels = labels.concat([l]); }
+        let out: string[] = [];
+        for (const lbl of labels) {
+            let parts: string[] = [];
+            let anyField: boolean = false;
+            let j: int = 0;
+            for (const fid of ch.fids) {
+                if (ch.flabels[j] == lbl) {
+                    anyField = true;
+                    let secrets: string[] = [];
+                    let jj: int = 0;
+                    for (const t of ch.ids) {
+                        if (hasInt(ch.via[jj], fid)) secrets = secrets.concat(["`" + invSymHint(a.p, t) + "`"]);
+                        jj = jj + 1;
+                    }
+                    let tail: string = "";
+                    if (secrets.length > 0) tail = " — " + secrets.join(", ");
+                    parts = parts.concat([invFieldName(p1, fid) + " (no client code reads it, and its value reaches server-only code" + tail + ", so the client holds an empty stand-in and never evaluates that value)"]);
+                }
+                j = j + 1;
+            }
+            let i: int = 0;
+            for (const t2 of ch.ids) {
+                if (ch.labels[i] == lbl && ch.via[i].length == 0) {
+                    const nm: string = invSymHint(a.p, t2);
+                    let thru: string = "";
+                    if (ch.paths[i] != "") thru = " through " + ch.paths[i];
+                    if (hasInt(tf, t2)) parts = parts.concat(["`" + nm + "()`" + thru + " (only server code reaches it — §12.2 Trigger 5)"]);
+                    else parts = parts.concat(["`" + nm + "`" + thru + " (only server code reads it, or no code reads it and its initializer reaches server-only code)"]);
+                }
+                i = i + 1;
+            }
+            let rule: string = "ruling:user-voice-scrml.md-S483-invariant-const-read: \"a server-only const stays refused\" — the set refused through a call, a constant or a derived field is the set refused directly";
+            let fix: string = "Read a constant the client already holds, or compute the bound in a `fn` from the fields";
+            if (anyField) {
+                rule = rule + "; prov=pa-ruled:S483-invariant-attr-server-only with ruling:user-voice-scrml.md-S483-component-attr-server-only";
+                fix = "Keep the secret off the field: give it a value the client may hold (e.g. a server-computed non-secret value), or leave the field out of the invariant";
+            }
+            if (parts.length > 0) {
+                out = out.concat(["E-DECL-INVARIANT-IMPURE: " + lbl + " reaches what §7.6 (b) keeps out of the client artifact: " + parts.join("; ") + ". An invariant is checked wherever the value is written, the client included, so what it reaches is client code, and checking it there would print each of these into the client (" + rule + "). " + fix]);
+            }
+        }
+        // (a difference no chain was found for — not expected: every difference is the checks' reach)
+        for (const t3 of tk.concat(tf)) {
+            if (!hasInt(ch.ids, t3)) out = out.concat(["E-DECL-INVARIANT-IMPURE: an invariant check puts `" + invSymHint(a.p, t3) + "`, which is server-only without it (§7.6 (b)), in the client artifact (ruling:user-voice-scrml.md-S483-invariant-const-read: \"a server-only const stays refused\"). Read a constant the client already holds, or compute the bound in a `fn` from the fields"]);
+        }
+        for (const t4 of tm) {
+            if (!hasInt(ch.fids, t4)) out = out.concat(["E-DECL-INVARIANT-IMPURE: an invariant check reads " + invFieldName(p1, t4) + ", which is server-only without it (§7.6 (b); ruling:user-voice-scrml.md-S483-component-attr-server-only), so it would print the field's value into the client. Keep the secret off the field: give it a value the client may hold (e.g. a server-computed non-secret value), or leave the field out of the invariant"]);
+        }
+        return out;
+    }
+
+    fn invSymHint(p: CoreProgram, id: int) -> string {
+        for (const k of p.consts) { if (k.sym.id == id) return k.sym.hint; }
+        for (const f of p.fns) { if (f.sym.id == id) return f.sym.hint; }
+        for (const d of p.decls) { if (d.sym.id == id) return d.sym.hint; }
+        return "#" + id;
+    }
+
+    // "the attribute `t` of `<card>`" / "the cell `@c`" / "the cell `c` of `<card>`"
+    fn invFieldName(p: CoreProgram, id: int) -> string {
+        for (const d of p.decls) {
+            for (const f of d.fields) {
+                if (f.sym.id == id) {
+                    if (d.sym.id == p.program.id) return "the cell `@" + f.sym.hint + "`";
+                    if (invIsAttr(f.role)) return "the attribute `" + f.sym.hint + "` of `<" + d.sym.hint + ">`";
+                    return "the cell `" + f.sym.hint + "` of `<" + d.sym.hint + ">`";
+                }
+            }
+            if (d.sym.id == id) return "the cell `@" + d.sym.hint + "`";
+        }
+        return "the field #" + id;
+    }
+
+    fn invIsAttr(r: FieldRole) -> boolean {
+        return match r {
+            .Attribute :> true,
+            .Child :> false
+        };
+    }
+
+    // The chains an invariant check reaches each target by — a breadth-first walk from every check
+    // (an InvariantGuard's / InvariantValue's checks, a persisted cell's restore checks) through the
+    // bindings it reads (into their initializers), the functions it calls (into their bodies), and —
+    // for a guard over a known declaration — the fields its checks name (into their values: the seed
+    // and every use site's value). `ids` / `labels` / `paths` / `via`: each binding or function target
+    // found, the invariant that reaches it, the chain after the invariant (`` `L` → `K` ``), and the
+    // field targets the chain passes through; `fids` / `flabels`: each field target found and the
+    // invariant that reads it.
+    type InvChains:struct = { ids: int[], labels: string[], paths: string[], via: int[][], fids: int[], flabels: string[] }
+
+    fn invLeakChains(p: CoreProgram, targets: int[], fields: int[]) -> InvChains {
+        let qn: Node[] = [];
+        let ql: string[] = [];
+        let qc: string[] = [];
+        let qv: int[][] = [];
+        const noVia: int[] = [];
+        const uv: UseVal[] = compUseVals(p);
+        let fids: int[] = [];
+        let flabels: string[] = [];
+        let cur: int = -1;
+        for (const n of allNodes(Node.NProgram(p))) {
+            const dn: int = nodeDeclId(n);
+            if (dn >= 0) cur = dn;
+            const e: Expr | not = nodeExprOf(n);
+            if (e is given) {
+                const pa: InvPrimAt | not = invPrimAt(e);
+                if (pa is given) {
+                    for (const c of invElems(pa.checks)) {
+                        const lbl: string = invCheckLabel(c, pa.loc);
+                        qn = qn.concat([Node.NExpr(c)]);
+                        ql = ql.concat([lbl]);
+                        qc = qc.concat([""]);
+                        qv = qv.concat([noVia]);
+                        const gf: InvGF | not = invGuardFields(p, e, cur);
+                        if (gf is given) {
+                            for (const d of p.decls) {
+                                if (d.sym.id == gf.decl) {
+                                    for (const ix of invCheckFieldIdxs(d, c)) {
+                                        const f: Field = d.fields[ix];
+                                        if (hasInt(fields, f.sym.id) && !hasInt(fids, f.sym.id)) {
+                                            fids = fids.concat([f.sym.id]);
+                                            flabels = flabels.concat([lbl]);
+                                        }
+                                        for (const v of fieldVals(d, ix, uv)) {
+                                            qn = qn.concat([Node.NExpr(v)]);
+                                            ql = ql.concat([lbl]);
+                                            qc = qc.concat(["`" + f.sym.hint + "` (its value)"]);
+                                            qv = qv.concat([[f.sym.id]]);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for (const d2 of p.decls) {
+            for (const f2 of d2.fields) {
+                const ps: Persist | not = f2.persist;
+                if (ps is given) {
+                    const iv: Expr | not = ps.invs;
+                    if (iv is given) {
+                        for (const c2 of invElems(iv)) {
+                            qn = qn.concat([Node.NExpr(c2)]);
+                            ql = ql.concat([invCheckLabel(c2, ps.loc) + " (the restore check of `@" + f2.sym.hint + "`)"]);
+                            qc = qc.concat([""]);
+                            qv = qv.concat([noVia]);
+                        }
+                    }
+                }
+            }
+        }
+        let ids: int[] = [];
+        let labels: string[] = [];
+        let paths: string[] = [];
+        let via: int[][] = [];
+        let seen: int[] = [];
+        let i: int = 0;
+        for (; i < qn.length; ) {
+            const n2: Node = qn[i];
+            for (const k of constReads(p, n2, [])) {
+                if (!hasInt(seen, k)) {
+                    seen = seen.concat([k]);
+                    const kc: CoreConst | not = findConst(p, k);
+                    const c3: string = invStep(qc[i], "`" + invSymHint(p, k) + "`");
+                    if (hasInt(targets, k)) {
+                        ids = ids.concat([k]);
+                        labels = labels.concat([ql[i]]);
+                        paths = paths.concat([c3]);
+                        via = via.concat([qv[i]]);
+                    }
+                    if (kc is given) {
+                        qn = qn.concat([Node.NExpr(kc.init)]);
+                        ql = ql.concat([ql[i]]);
+                        qc = qc.concat([c3]);
+                        qv = qv.concat([qv[i]]);
+                    }
+                }
+            }
+            for (const fid of fnCalleesIn(p, n2)) {
+                if (!hasInt(seen, fid)) {
+                    seen = seen.concat([fid]);
+                    const c4: string = invStep(qc[i], "`" + invSymHint(p, fid) + "()`");
+                    if (hasInt(targets, fid)) {
+                        ids = ids.concat([fid]);
+                        labels = labels.concat([ql[i]]);
+                        paths = paths.concat([c4]);
+                        via = via.concat([qv[i]]);
+                    }
+                    for (const fn0 of p.fns) {
+                        if (fn0.sym.id == fid) {
+                            qn = qn.concat([Node.NFn(fn0)]);
+                            ql = ql.concat([ql[i]]);
+                            qc = qc.concat([c4]);
+                            qv = qv.concat([qv[i]]);
+                        }
+                    }
+                }
+            }
+            i = i + 1;
+        }
+        // a chain of one step is the target itself: no "through"
+        let ps2: string[] = [];
+        for (const pth of paths) {
+            if (pth.indexOf(" → ") < 0) ps2 = ps2.concat([""]);
+            else ps2 = ps2.concat([pth]);
+        }
+        return { ids: ids, labels: labels, paths: ps2, via: via, fids: fids, flabels: flabels };
+    }
+
+    fn invStep(path: string, step: string) -> string {
+        if (path == "") return step;
+        return path + " → " + step;
+    }
+
+    // an invariant primitive's checks and its location
+    type InvPrimAt:struct = { checks: Expr, loc: string }
+
+    fn invPrimAt(e: Expr) -> InvPrimAt | not {
+        return match e {
+            .Prim(op: o, args: a) :> invPrimAtOf(o, a),
+            // no-default-arm: one question of an expression — is it an invariant primitive
+            _ :> not
+        };
+    }
+
+    fn invPrimAtOf(o: PrimOp, a: Expr[]) -> InvPrimAt | not {
+        const ci: int = invChecksArg(o);
+        if (ci < 0 || a.length < ci + 2) return not;
+        let loc: string = "";
+        const l: string | not = invLitStr(a[a.length - 1]);
+        if (l is given) loc = l;
+        return { checks: a[ci], loc: loc };
+    }
+
+    // "`invariant [label]` on <owner> (file:line)"
+    fn invCheckLabel(c: Expr, loc: string) -> string {
+        const parts: Expr[] = invElems(c);
+        let owner: string = "";
+        let what: string = "";
+        if (parts.length >= 5) {
+            const o: string | not = invLitStr(parts[3]);
+            if (o is given) owner = o;
+            const w: string | not = invLitStr(parts[4]);
+            if (w is given) what = w;
+        }
+        let at: string = "";
+        if (loc != "") at = " (" + loc + ")";
+        return "the invariant " + what + " on " + owner + at;
+    }
+
+    // the field indices of declaration `d` a check names (its root field for a check below a field,
+    // else its names and its derived fields' dependencies)
+    fn invCheckFieldIdxs(d: Decl, c: Expr) -> int[] {
+        let names: string[] = [];
+        for (const f of d.fields) { names = names.concat([f.sym.hint]); }
+        const parts: Expr[] = invElems(c);
+        if (parts.length < 5) return [];
+        const at: Expr[] = invElems(parts[0]);
+        let want: Expr[] = [];
+        if (at.length > 0) {
+            want = [at[0]];
+        } else {
+            want = invElems(parts[2]);
+            if (parts.length > 5) {
+                for (const dv of invElems(parts[5])) {
+                    const dp: Expr[] = invElems(dv);
+                    if (dp.length >= 3) want = want.concat(invElems(dp[2]));
+                }
+            }
+        }
+        let out: int[] = [];
+        for (const x of want) {
+            const nm: string | not = invLitStr(x);
+            if (nm is given) {
+                const ix: int = names.indexOf(nm);
+                if (ix >= 0 && !hasInt(out, ix)) out = out.concat([ix]);
+            }
+        }
+        return out;
+    }
+
+    // the index of the checks argument of an invariant primitive, else -1
+    fn invChecksArg(o: PrimOp) -> int {
+        if (o == PrimOp.InvariantGuard) return 2;
+        if (o == PrimOp.InvariantValue) return 4;
+        return -1;
+    }
+
+    fn hasInvariantChecks(p: CoreProgram) -> boolean {
+        for (const d of p.decls) {
+            if (d.invs is given) return true;
+            for (const f of d.fields) {
+                const ps: Persist | not = f.persist;
+                if (ps is given) { if (ps.invs is given) return true; }
+            }
+        }
+        for (const n of allNodes(Node.NProgram(p))) {
+            if (invPrimNode(n)) return true;
+        }
+        return false;
+    }
+
+    fn invPrimNode(n: Node) -> boolean {
+        return match n {
+            .NExpr(e: e) :> invPrimExpr(e),
+            // no-default-arm: one question of a node — is it an invariant primitive
+            _ :> false
+        };
+    }
+
+    fn invPrimExpr(e: Expr) -> boolean {
+        return match e {
+            .Prim(op: o) :> invChecksArg(o) >= 0,
+            // no-default-arm: one question of an expression — is it an invariant primitive
+            _ :> false
+        };
+    }
+
+    // `p` with every invariant check left out: a declaration's construction check and a persisted
+    // cell's decode check gone (`not`), and the checks of every InvariantGuard / InvariantValue empty —
+    // the primitive itself, its instance, its writes and its value kept, so the program differs from
+    // `p` only by what the predicates (and their derived-field recomputations) read and call.
+    fn invStripProgram(p: CoreProgram) -> CoreProgram {
+        let ds: Decl[] = [];
+        for (const d of p.decls) { ds = ds.concat([sivDecl(d)]); }
+        let fs: Fn[] = [];
+        for (const f of p.fns) { fs = fs.concat([sivFn(f)]); }
+        let ss: ServerFn[] = [];
+        for (const sf of p.server) {
+            ss = ss.concat([{ sym: sf.sym, params: sf.params, ret: sf.ret, body: sivBlock(sf.body), err: sf.err, waits: sf.waits }]);
+        }
+        let ks: CoreConst[] = [];
+        for (const k of p.consts) { ks = ks.concat([{ sym: k.sym, init: sivExpr(k.init), mutable: k.mutable }]); }
+        let css: CoreCss | not = p.css;
+        const c0: CoreCss | not = p.css;
+        if (c0 is given) {
+            let vs: CssVar[] = [];
+            for (const cv of c0.vars) { vs = vs.concat([{ cell: cv.cell, read: sivExpr(cv.read) }]); }
+            css = { sheet: c0.sheet, vars: vs };
+        }
+        return { program: p.program, decls: ds, types: p.types, fns: fs, server: ss, dbs: p.dbs, reset: p.reset, sqlError: p.sqlError,
+                 serverCallError: p.serverCallError, css: css, consts: ks, loads: p.loads, envelopes: p.envelopes, head: p.head,
+                 tool: p.tool, endpoints: p.endpoints, channels: p.channels, typed: p.typed, outer: p.outer };
+    }
+
+    fn sivDecl(d: Decl) -> Decl {
+        let fs: Field[] = [];
+        for (const f of d.fields) { fs = fs.concat([sivField(f)]); }
+        const rs: View[] | not = d.renders;
+        let rs2: View[] | not = not;
+        if (rs is given) rs2 = sivViews(rs);
+        return { sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: fs, renders: rs2, wiring: d.wiring, handles: d.handles, invs: not };
+    }
+
+    fn sivField(f: Field) -> Field {
+        const init: Expr | not = f.init;
+        let init2: Expr | not = not;
+        if (init is given) init2 = sivExpr(init);
+        const ps: Persist | not = f.persist;
+        let ps2: Persist | not = not;
+        if (ps is given) ps2 = { store: ps.store, key: ps.key, invs: not, loc: ps.loc };
+        return { sym: f.sym, ty: f.ty, init: init2, mode: f.mode, role: f.role, grants: f.grants, graph: f.graph,
+                 exported: f.exported, wcap: f.wcap, vals: f.vals, persist: ps2, timing: f.timing };
+    }
+
+    fn sivFn(f: Fn) -> Fn {
+        return { sym: f.sym, params: f.params, body: sivBlock(f.body), pure: f.pure, err: f.err, waits: f.waits, host: f.host };
+    }
+
+    fn sivBlock(b: Block) -> Block {
+        return { stmts: sivStmts(b.stmts) };
+    }
+
+    fn sivMaybeBlock(b: Block | not) -> Block | not {
+        if (b is not) return not;
+        return sivBlock(b);
+    }
+
+    fn sivMaybeExpr(e: Expr | not) -> Expr | not {
+        if (e is not) return not;
+        return sivExpr(e);
+    }
+
+    fn sivExprs(es: Expr[]) -> Expr[] {
+        let out: Expr[] = [];
+        for (const e of es) { out = out.concat([sivExpr(e)]); }
+        return out;
+    }
+
+    fn sivExpr(e: Expr) -> Expr {
+        return match e {
+            .Lit :> e,
+            .Local :> e,
+            .Read :> e,
+            .Call(callee: c, args: a) :> Expr.Call(c, sivExprs(a)),
+            .Prim(op: o, args: a) :> Expr.Prim(o, sivPrimArgs(o, a)),
+            .Match(scrut: s, arms: arms) :> Expr.Match(sivExpr(s), sivMatchArms(arms)),
+            .ArrayOf(elems: xs) :> Expr.ArrayOf(sivExprs(xs)),
+            .StructOf(ty: t, fields: xs) :> Expr.StructOf(t, sivExprs(xs)),
+            .VariantOf(enumSym: es, idx: i, args: a) :> Expr.VariantOf(es, i, sivExprs(a)),
+            .Handle :> e,
+            .InitOf :> e,
+            .Host :> e,
+            .Lambda(params: ps, body: b) :> Expr.Lambda(ps, sivExpr(b)),
+            .BlockLambda(params: ps, body: b) :> Expr.BlockLambda(ps, sivBlock(b)),
+            .SeqCall(op: o, seq: sq, f: f) :> Expr.SeqCall(o, sivExpr(sq), sivExpr(f)),
+            .Validity :> e,
+            .Refetch :> e,
+            .ServerCall(fn: f, args: a) :> Expr.ServerCall(f, sivExprs(a)),
+            .Query(q: q) :> Expr.Query(sivQuery(q)),
+            .Assigned(local: l, value: v) :> Expr.Assigned(l, sivExpr(v)),
+            .Foreign(slice: sl, args: a) :> Expr.Foreign(sl, sivExprs(a)),
+            .FnRef :> e,
+            .CallV(f: f, args: a) :> Expr.CallV(sivExpr(f), sivExprs(a))
+        };
+    }
+
+    // an invariant primitive's checks argument emptied; every other argument kept (and stripped)
+    fn sivPrimArgs(o: PrimOp, a: Expr[]) -> Expr[] {
+        const ci: int = invChecksArg(o);
+        let out: Expr[] = [];
+        let i: int = 0;
+        for (const x of a) {
+            if (i == ci) out = out.concat([Expr.ArrayOf([])]);
+            else out = out.concat([sivExpr(x)]);
+            i = i + 1;
+        }
+        return out;
+    }
+
+    fn sivQuery(q: SqlQuery) -> SqlQuery {
+        return { db: q.db, chunks: q.chunks, params: sivExprs(q.params), slots: q.slots, mode: q.mode, kind: q.kind, reads: q.reads,
+                 writes: q.writes, columns: q.columns, nobatch: q.nobatch, handled: q.handled, site: q.site, row: q.row };
+    }
+
+    fn sivMatchArms(arms: MatchArm[]) -> MatchArm[] {
+        let out: MatchArm[] = [];
+        for (const a of arms) { out = out.concat([{ pat: a.pat, body: sivExpr(a.body) }]); }
+        return out;
+    }
+
+    fn sivStmts(ss: Stmt[]) -> Stmt[] {
+        let out: Stmt[] = [];
+        for (const s of ss) { out = out.concat([sivStmt(s)]); }
+        return out;
+    }
+
+    fn sivStmt(s: Stmt) -> Stmt {
+        return match s {
+            .Let(sym: x, init: i) :> Stmt.Let(x, sivExpr(i)),
+            .Assign(local: l, value: v, path: ps) :> Stmt.Assign(l, sivExpr(v), sivPath(ps)),
+            .Write(cap: c, inst: i, edit: k, value: v, check: ck) :> Stmt.Write(c, i, sivEdit(k), sivExpr(v), ck),
+            .Commit(writes: ws) :> Stmt.Commit(sivStmts(ws)),
+            .If(cond: c, thenB: t, elseB: el, tx: tx) :> Stmt.If(sivExpr(c), sivBlock(t), sivMaybeBlock(el), tx),
+            .Return(e: x) :> Stmt.Return(sivExpr(x)),
+            .Eval(e: x) :> Stmt.Eval(sivExpr(x)),
+            .Suspend(bind: b, on: on, then: t) :> Stmt.Suspend(b, sivExpr(on), sivBlock(t)),
+            .ResetSurface :> s,
+            .Defer(body: b) :> Stmt.Defer(sivBlock(b)),
+            .Unpersist :> s,
+            .Attempt(result: r, call: c, err: er, ok: ok, arms: arms) :> Stmt.Attempt(r, sivFailable(c), er, sivOk(ok), sivErrArms(arms)),
+            .Fail(err: er, idx: i, args: a) :> Stmt.Fail(er, i, sivExprs(a)),
+            .Join(k: k, body: b) :> Stmt.Join(k, sivBlock(b)),
+            .Jump :> s,
+            .Loop(label: l, head: h, body: b) :> Stmt.Loop(l, sivLoopHead(h), sivBlock(b)),
+            .Break :> s,
+            .Continue :> s,
+            .Gather(g: g) :> Stmt.Gather(sivGather(g)),
+            .Lift(into: i, what: w) :> Stmt.Lift(i, sivLifted(w)),
+            .LocalFn(f: f) :> Stmt.LocalFn(sivFn(f))
+        };
+    }
+
+    fn sivPath(ps: PathStep[]) -> PathStep[] {
+        let out: PathStep[] = [];
+        for (const st of ps) { out = out.concat([sivPathStep(st)]); }
+        return out;
+    }
+
+    fn sivPathStep(st: PathStep) -> PathStep {
+        return match st {
+            .StepField :> st,
+            .StepIndex(index: i, loc: l) :> PathStep.StepIndex(sivExpr(i), l)
+        };
+    }
+
+    fn sivEdit(k: EditKind) -> EditKind {
+        return match k {
+            .ElemAt(index: i, path: p, loc: l) :> EditKind.ElemAt(sivExpr(i), p, l),
+            .PositionAt(index: i, loc: l) :> EditKind.PositionAt(sivExpr(i), l),
+            .Replace :> k,
+            .Append :> k,
+            .Prepend :> k,
+            .Anywhere :> k,
+            .PositionWrite :> k,
+            .FieldAt :> k,
+            .Transition :> k,
+            .RemoveEnd :> k,
+            .RemoveFront :> k,
+            .RemoveAnywhere :> k
+        };
+    }
+
+    fn sivFailable(c: Failable) -> Failable {
+        return match c {
+            .FCall(fn: f, args: a) :> Failable.FCall(f, sivExprs(a)),
+            .FSettled :> c,
+            .FParse(json: j, en: en, err: er) :> Failable.FParse(sivExpr(j), en, er),
+            .FCallV(f: f, args: a) :> Failable.FCallV(sivExpr(f), sivExprs(a))
+        };
+    }
+
+    fn sivOk(ok: OkArm) -> OkArm {
+        return { bind: ok.bind, body: sivBlock(ok.body), value: sivMaybeExpr(ok.value) };
+    }
+
+    fn sivErrArms(arms: ErrArm[]) -> ErrArm[] {
+        let out: ErrArm[] = [];
+        for (const a of arms) { out = out.concat([{ pat: a.pat, body: sivBlock(a.body), value: sivMaybeExpr(a.value), whole: a.whole }]); }
+        return out;
+    }
+
+    fn sivLoopHead(h: LoopHead) -> LoopHead {
+        return match h {
+            .Forever :> h,
+            .While(cond: c) :> LoopHead.While(sivExpr(c)),
+            .Counted(init: i, cond: c, step: sp) :> LoopHead.Counted(sivStmts(i), sivMaybeExpr(c), sivStmts(sp)),
+            .Each(h: eh) :> LoopHead.Each({ bind: eh.bind, src: sivExpr(eh.src) }),
+            .Range(h: rh) :> LoopHead.Range({ bind: rh.bind, counter: rh.counter, end: rh.end, lo: sivExpr(rh.lo), hi: sivExpr(rh.hi), inclusive: rh.inclusive })
+        };
+    }
+
+    fn sivGather(g: Gather) -> Gather {
+        return { label: g.label, bind: g.bind, head: sivLoopHead(g.head), body: sivBlock(g.body) };
+    }
+
+    fn sivLifted(w: Lifted) -> Lifted {
+        return match w {
+            .LValue(e: e) :> Lifted.LValue(sivExpr(e)),
+            .LRow :> w
+        };
+    }
+
+    fn sivViews(vs: View[]) -> View[] {
+        let out: View[] = [];
+        for (const v of vs) { out = out.concat([sivView(v)]); }
+        return out;
+    }
+
+    fn sivView(v: View) -> View {
+        return match v {
+            .El(tag: t, attrs: a, kids: ks) :> View.El(t, sivAttrs(a), sivViews(ks)),
+            .Text :> v,
+            .RawText :> v,
+            .Dyn(e: e) :> View.Dyn(sivExpr(e)),
+            .Cond(arms: arms) :> View.Cond(sivCondArms(arms)),
+            .Each(src: s, bind: b, key: k, handles: hs, row: r) :> View.Each(sivExpr(s), b, sivMaybeExpr(k), hs, sivViews(r)),
+            .Instance(decl: d, attrs: attrs, slot: sl, alias: al) :> View.Instance(d, sivConstructAttrs(attrs), sivViews(sl), al),
+            .Slot :> v,
+            .Star :> v,
+            .Effect(deps: ds, body: b) :> View.Effect(ds, sivBlock(b)),
+            .Request(target: t, deps: ds, body: b, mount: m, state: st, handle: h, cls: c) :> View.Request(t, ds, sivBlock(b), m, st, h, c),
+            .ResetOn(triggers: ds, reset: b, rank: r) :> View.ResetOn(ds, sivBlock(b), r),
+            .Errors :> v,
+            .Gather(g: g, rows: rows, key: k) :> View.Gather(sivGather(g), sivGatherRows(rows), k),
+            .Run(body: b, hoist: h, meta: m) :> View.Run(sivBlock(b), h, m),
+            .Init :> v,
+            .Reach :> v
+        };
+    }
+
+    fn sivAttrs(xs: Attr[]) -> Attr[] {
+        let out: Attr[] = [];
+        for (const a of xs) { out = out.concat([sivAttr(a)]); }
+        return out;
+    }
+
+    fn sivAttr(a: Attr) -> Attr {
+        return match a {
+            .Static :> a,
+            .Bound(name: n, e: e) :> Attr.Bound(n, sivExpr(e)),
+            .Show(test: t) :> Attr.Show(sivExpr(t)),
+            .ClassOn(name: n, test: t) :> Attr.ClassOn(n, sivExpr(t)),
+            .On(event: ev, body: b) :> Attr.On(ev, sivBlock(b)),
+            .Bind(kind: k, read: r, sink: sk, write: w) :> Attr.Bind(k, sivExpr(r), sk, sivBlock(w)),
+            .Gate :> a
+        };
+    }
+
+    fn sivCondArms(arms: CondArm[]) -> CondArm[] {
+        let out: CondArm[] = [];
+        for (const a of arms) { out = out.concat([{ test: sivExpr(a.test), body: sivViews(a.body) }]); }
+        return out;
+    }
+
+    fn sivConstructAttrs(attrs: ConstructAttr[]) -> ConstructAttr[] {
+        let out: ConstructAttr[] = [];
+        for (const a of attrs) { out = out.concat([{ field: a.field, value: sivExpr(a.value) }]); }
+        return out;
+    }
+
+    fn sivGatherRows(rows: GatherRow[]) -> GatherRow[] {
+        let out: GatherRow[] = [];
+        for (const r of rows) { out = out.concat([{ views: sivViews(r.views) }]); }
+        return out;
     }
 }
