@@ -1,0 +1,21 @@
+// §66.13.5 rule 7b (r1 of #2128, review H3) — ruling S483-invariant-derived-split: a field derived only from its
+// sibling fields is checked at the source write. `span` is `b - a`; the write `@w.b = 20` would make span 20, so
+// the check (span recomputed on the candidate) traps before `b` is written, and the rest of the handler does not run.
+<program>
+    <w:struct>
+        let <a:int=0/>
+        let <b:int=5/>
+        <span:int=(b - a)/>
+    </>
+    invariant (span <= 10) [ab]
+    let <n:int=0/>
+    function setB(v: int) {
+        @w.b = v;
+        @n = 1;
+    }
+    <main>
+        <button id="go" onclick=setB(20)>go</button>
+        <p id="s">${@w.span}</p>
+        <p id="n">${@n}</p>
+    </main>
+</program>

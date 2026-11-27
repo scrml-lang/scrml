@@ -952,8 +952,7 @@ class Request {
       } catch (e) {
         // F4 (A5): a Let initializer threw — a host error (r1 L3: or a trap, reported as one); the run is over
         task.cancel();
-        if (isTrap(e)) reportLater(e);
-        else reportHostError(e);
+        reportHostError(e);
         this.idle();
         return;
       } finally {
@@ -1135,11 +1134,10 @@ export function suspend(task, value, k, onLiveReject) {
         batch(() => untrack(() => withStamp(stamp, frame, lift, k, v)));
       } catch (e) {
         // r1 (#2128 review L3): a TRAP raised in a continuation (a reload's invariant check, an
-        // index past the end …) is a trap, not a host error — §19.17: it ends this unit (the
-        // continuation) and is reported once with its code and location, as a hole's trap is
-        // (reportLater: the page's error event); it is not a `!` error, so no `.error` is set.
-        if (isTrap(e)) reportLater(e);
-        else reportHostError(e);
+        // index past the end …) ends this unit (the continuation) and is reported once — the one
+        // reporter classifies it as a trap, with its code (§19.17), not as a host error; it is not
+        // a `!` error, so no `.error` is set
+        reportHostError(e);
         abandonWaiting(task);
       } finally {
         task.owner.settled(task);
@@ -1148,10 +1146,7 @@ export function suspend(task, value, k, onLiveReject) {
     (e) => {
       task.pending--;
       if (!task.cancelled) {
-        if (e !== REPORTED) {
-          if (isTrap(e)) reportLater(e);
-          else reportHostError(e);
-        }
+        if (e !== REPORTED) reportHostError(e);
         // s475 r1 (F4): the owner's own end-of-run on a live host rejection (a request's signals)
         if (onLiveReject) {
           try { onLiveReject(e); } catch (e2) { reportHostError(e2); }
@@ -1228,8 +1223,14 @@ function abandonWaiting(task) {
 // s454 (U1b) — THE ONE REPORTER of host errors that surface asynchronously (a
 // throw in a continuation, a rejected suspension value). Default: the console.
 // `setHostErrorReporter` (tests, devtools) replaces it and returns the old one.
+// r1 (#2128 review L3): a trap (§19.17 — `E-WRITE-INVARIANT-RT` from a reload's check, …) is
+// reported as a trap with its code, not as a host error (it is the program's defined runtime
+// error, not a defect of the host).
 let hostErrorReporter = (e) => {
-  try { console.error("scrml: a host error in a continuation —", e); } catch { /* nothing to do */ }
+  try {
+    if (isTrap(e)) console.error("scrml: trap " + e.code + " in a continuation (§19.17) —", e);
+    else console.error("scrml: a host error in a continuation —", e);
+  } catch { /* nothing to do */ }
 };
 export function setHostErrorReporter(fn) {
   const prev = hostErrorReporter;

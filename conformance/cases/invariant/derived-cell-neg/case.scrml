@@ -1,0 +1,13 @@
+// §66.13.5 rule 7b (r1 of #2128, review H3) — ruling S483-invariant-derived-split: a computed field that TRACKS a
+// cell (`b` is `@k`) is read by the invariant as `@k` by another route: E-CONTRACT-003, PERMANENT.
+<program>
+    let <k:int=0/>
+    <w:struct>
+        let <a:int=0/>
+        <b:int=(@k)/>
+    </>
+    invariant (a <= b) [ab]
+    <main>
+        <p id="a">${@w.a}</p>
+    </main>
+</program>

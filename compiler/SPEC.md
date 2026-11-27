@@ -31869,7 +31869,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-CONTRACT-001 | §53.11 | Inline predicate violation at compile time (statically provable) | Error |
 | E-CONTRACT-001-RT | §53.11 | Inline predicate violation at runtime | Runtime |
 | E-CONTRACT-002 | §53.11 | Named shape not found in registry, or the inline predicate is malformed, or a union with a refined member has a member with no runtime test (S459) (reported where the refinement is declared, every zone; emitted at `compiler/src/type-system.ts` `checkRefinementJudgeable`.) | Error |
-| E-CONTRACT-003 | §53.11 | Predicate references external state. ~~— use `<machine>` instead~~ — a type's rule checks only its own value; to compare against another cell, write a derived check (e.g. `<overBudget=(@spent > @maxMana)/>`) and use it in markup or the handler that changes the value. Provenance: ruling:user-voice-scrml.md-S482-contract-003-derived-check (`<machine>` was removed S305/S307; the message names the derived check). (Emitted by the bootstrap at `compiler/self-host-v2/parse.scrml` `refSimple`, and by impl#1 at `compiler/src/type-system.ts` `checkRefinementJudgeable`.) | Error |
+| E-CONTRACT-003 | §53.11 | Predicate references external state. ~~— use `<machine>` instead~~ — a type's rule checks only its own value; to compare against another cell, write a derived check (e.g. `<overBudget=(@spent > @maxMana)/>`) and use it in markup or the handler that changes the value. Provenance: ruling:user-voice-scrml.md-S482-contract-003-derived-check (`<machine>` was removed S305/S307; the message names the derived check). (Emitted by the bootstrap at `compiler/self-host-v2/parse.scrml` `refSimple`, and by impl#1 at `compiler/src/type-system.ts` `checkRefinementJudgeable`.) Also a declaration invariant's `@` read (§66.13.5 rule 6) and, PERMANENT, an invariant over a computed field or a locked field's use-site value that TRACKS a live value (§66.13.5 rule 7b; ruling:user-voice-scrml.md-S483-invariant-derived-split — emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` `invDerivedDiags`, `useInvs`; Nominal on impl#1, §34.0). | Error |
 | E-CONTRACT-004-WARN | §53.11 | `bind:value` HTML attribute conflicts with predicate-generated attribute | Warning |
 | E-BPP-001 | §3.5 | Body pre-parser encountered unparseable logic block | Error |
 | E-BS-000 | §4 | Block splitter encountered malformed block structure | Error |
@@ -31946,7 +31946,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-DECL-ELEMENT-NAME-COLLIDES | §66.6.6 | A program cell whose name is an HTML element name, declared in a scope that also uses that name as a tag (`let <filter:string=""/>` and `<filter/>`): reported at the DECLARATION, naming the element and the tag use. The cell is legal when no tag use collides. **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 review-surfaced decisions, all PA recs" ("your recs") item 3. Code name: PA reading, confirmed S475 (ruling:user-voice-scrml.md S475 "⭐ RULED — S475 owner questions, PA recs adopted wholesale" item 15, *"The older S473 veto-window readings are confirmed."*). (Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml`, PR #1678; Nominal on impl#1, which does not implement §66.) | Error |
 | E-DECL-SLOT-OUTSIDE-RENDERS | §66.15.2 | §66 dialect: a `<slot/>` outside a declaration's `renders` — it names no use, so it would render nothing. (Rules 1–2 of §66.15.2 reuse E-COMPONENT-021 / E-COMPONENT-020.) **Provenance:** ruling:user-voice-scrml.md S473 D11 "your recs on all". Code name: PA reading, confirmed S475 (ruling:user-voice-scrml.md S475 "⭐ RULED — S475 owner questions, PA recs adopted wholesale" item 15, *"The older S473 veto-window readings are confirmed."*). Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`resolveSlot`) (`g-boot-slot-count-unchecked-s473`, resolved by s473-boot-ruled-refusals); Nominal on impl#1, which does not implement §66. | Error |
 | E-DECL-INVARIANT-IN-OPENER | §66.13.5, §66.2.5, §66.20 | §66 dialect: an `invariant (expr)` clause written inside a declaration's opener (`<r:struct invariant (a <= b)>`). The message says the clause follows the closer (`/>` or `</>`), with the declaration's field names bare — the S447 rule that a word introducing what follows stands outside the opener (the `E-DECL-RENDERS-IN-OPENER` parallel). **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1 (*"`invariant (expr)` after the closer"*). Emitted by the bootstrap at `compiler/self-host-v2/parse.scrml` (`invariantInOpener`, `parseOpenerB`); Nominal on impl#1 (§34.0). Direction of change: newly-rejecting. | Error |
-| E-DECL-INVARIANT-IMPURE | §66.13.5, §66.20 | §66 dialect: a declaration invariant reads something other than the value's own fields, literals, enum variants, the deterministic built-in methods a pure `fn` body may use (`.trim()`, `.length`, a `x => expr` sequence callback) and calls of a pure `fn` that computes only from its arguments — an outer binding (a file-scope `let`; a file-scope constant whose initializer is not a compile-time constant (a literal, an enum variant or another such constant), or that server code reads — §66.13.5 rule 7a, ruling:user-voice-scrml.md-S483-invariant-const-read; a host binding; a function named as a value), a call of a `function`, a host call, a write, a function value held as a value, a query or a handled failable call; or calls a `fn` that, directly or through the `fn`s it calls, reads an outer binding (the message names the call chain). An `@` read, direct or reached through a `fn`, is `E-CONTRACT-003` instead. The message names the fix: a `fn` that takes the fields as parameters. **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1 (*"Reads only the value's own fields, literals and pure `fn` calls; an `@cell` read is E-CONTRACT-003."*); the call-chain rule and direct-equals-`fn` purity are PA readings (r1 of #2120, prov=pa-ruled:S483-fn-chain-purity, prov=pa-ruled:S483-direct-equals-fn-purity; open to owner veto). Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`invPurity`, `invReachPass`); Nominal on impl#1 (§34.0). Direction of change: newly-rejecting. | Error |
+| E-DECL-INVARIANT-IMPURE | §66.13.5, §66.20 | §66 dialect: a declaration invariant reads something other than the value's own fields, literals, enum variants, the deterministic built-in methods a pure `fn` body may use (`.trim()`, `.length`, a `x => expr` sequence callback) and calls of a pure `fn` that computes only from its arguments — an outer binding (a file-scope `let`; a file-scope constant whose initializer is not a compile-time constant (a literal, an enum variant, another such constant, or arithmetic folded over them — ruling:user-voice-scrml.md-S483-invariant-const-fold), or that server code reads, at any depth of its calls — §66.13.5 rule 7a, ruling:user-voice-scrml.md-S483-invariant-const-read; a computed field whose initializer reads what rule 7 refuses, §66.13.5 rule 7b; a host binding; a function named as a value), a call of a `function`, a host call, a write, a function value held as a value, a query or a handled failable call; or calls a `fn` that, directly or through the `fn`s it calls, reads an outer binding (the message names the call chain). An `@` read, direct or reached through a `fn`, is `E-CONTRACT-003` instead. The message names the fix: a `fn` that takes the fields as parameters. **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1 (*"Reads only the value's own fields, literals and pure `fn` calls; an `@cell` read is E-CONTRACT-003."*); the call-chain rule and direct-equals-`fn` purity are PA readings (r1 of #2120, prov=pa-ruled:S483-fn-chain-purity, prov=pa-ruled:S483-direct-equals-fn-purity; open to owner veto). Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`invPurity`, `invReachPass`); Nominal on impl#1 (§34.0). Direction of change: newly-rejecting. | Error |
 | E-DECL-INVARIANT-CAPTURES-CALL | §66.13.5, §66.20 | §66 dialect: `invariant (…)` written right after a declaration's closer or a `:struct` type body is read as an invariant clause (§66.13.5 rule 2), and a binding named `invariant` that can be called (a function, a constant or a file-scope `let` holding a function, a host binding — s483-invariant-2, prov=pa-ruled:S483-capture-callable-only: `const invariant = 3` cannot be a call, so it does not capture) is in scope there — so the line may be meant as a call. The clause is refused, not judged further (fail closed); a captured call is never silently dropped. The message: this is read as an invariant clause; to call the function, rename it or move the call; to state an invariant, rename the binding. **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1 (the clause grammar, candidate A — whose "Against" names the capture); that the capture is never silent is a PA reading (r1 of #2120, prov=pa-ruled:S483-capture-never-silent; open to owner veto). Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`invCaptureWhy`, `resolveDeclInvs`, `resolveTypeInvs`); Nominal on impl#1 (§34.0). Direction of change: newly-rejecting. | Error |
 | E-DECL-INVARIANT-NO-FIELDS | §66.13.5, §66.20 | §66 dialect: an `invariant (expr)` clause on a declaration that defines no fields — no typed attribute and no child field: a scalar cell (`let <n:int=0/> invariant (n >= 0)`) or a cell of an existing type. The message names the two fixes: a cell of a type inherits the type's invariants (state the invariant on the type's declaration), and a scalar is bounded by a refinement type (`int(>=0)`, §53). **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1 and ruling:user-voice-scrml.md-S482-struct-invariant-contract (*"an invariant on the declaration itself"*). Emitted by the bootstrap at `compiler/self-host-v2/parse.scrml` (`invariantsKept`); Nominal on impl#1 (§34.0). Direction of change: newly-rejecting. | Error |
 | E-DECL-INVARIANT-NOT-BOOL | §66.13.5, §66.20 | §66 dialect: a declaration invariant's expression is not of type `bool` (`invariant (start + end)`). **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax (S430 Q1 *"typed, obviously"*; the design's typed condition). Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`invTypeCheck`); Nominal on impl#1 (§34.0). Direction of change: newly-rejecting. | Error |
@@ -55543,23 +55543,62 @@ else:
    fields alone — so it evaluates identically on the client and the server, its read set holds every value it
    depends on, and it is provable at compile time where its inputs are literals.)
 7a. **Compile-time constants (S483).** A file-scope `const` whose initializer is a COMPILE-TIME CONSTANT — a
-   literal (a negated number included), an enum variant, or another such constant — MAY be read, directly and
-   through a called `fn` (rule 7). (ruling:user-voice-scrml.md-S483-invariant-const-read — owner: *"Allow
+   literal (a negated number included), an enum variant, another such constant, or arithmetic the compiler folds
+   over them (`+ - *`, comparisons, `&&` / `||` / `!`, `? :` — `const LIM = BASE * 2 - 1`) — MAY be read, directly
+   and through a called `fn` (rule 7). *(The folded arithmetic: ruling:user-voice-scrml.md-S483-invariant-const-fold
+   — owner: "Admit foldable arithmetic (Recommended)" — "any initializer the compiler folds to a value at compile
+   time (+ - * … over literals and other such consts) is a compile-time constant; the parenthetical in
+   S483-invariant-const-read is examples, not a closed list". It retires the PA reading
+   prov=pa-ruled:S483-const-initializer-list, which had kept `const LIM = 1 + 2` refused.)* (ruling:user-voice-scrml.md-S483-invariant-const-read — owner: *"Allow
    compile-time consts (Recommended)"* — *"admit a file-scope const whose initializer is a compile-time constant
    (literals, enum variants, other such consts) and that is not server-only, directly and through a fn chain. A
    `let`, a host-derived const, or a server-only const stays refused."*) Its value is the same wherever the value
    is written and is known at compile time, so the static zone folds it (rule 9). A constant whose initializer is
-   anything else (`const LIM = limit()`, a host value — and an arithmetic of constants, `const LIM = 1 + 2`: the
-   ruling's list is read as the whole list, prov=pa-ruled:S483-const-initializer-list, open to owner veto) stays
+   anything else (`const LIM = limit()`, `const LIM = limit() + 1`, a host value) stays
    **`E-DECL-INVARIANT-IMPURE`**, the message saying it is not a compile-time constant; a `let` stays refused (a
    write can change it). A
    constant SERVER CODE READS is refused, **`E-DECL-INVARIANT-IMPURE`**: a binding only server code reads is
    server-only and stays out of the client artifact (§7.6 (b)), and an invariant is checked wherever its value
    is written, the client included — reading it there would put it in the client. The bootstrap judges "server
-   code reads it" fail closed, after route placement: a read in the body of a function placed on the server
-   (§12.2 — a server function, or one only server code reaches), in the seed of a program cell server code
-   reads, or in the initializer of a constant server code reads (the largest set, §7.6 (b)) refuses it, even
-   when the client reads it too; the message names the reader.
+   code reads it" fail closed, after route placement, over the CALL GRAPH: what a server-placed function (§12.2
+   — a server function, or one only server code reaches) runs is server code, and so is the body of every
+   function it calls, at any depth and whatever that callee's own placement (a shared helper a server function
+   calls runs on the server too), the seed of a program cell such code reads, and the initializer of a constant
+   such code reads (the largest set, §7.6 (b)). A read anywhere in it refuses the constant; the message names
+   the reader and the call chain (`the server function srv, through key`). So the set refused through a call is
+   exactly the set refused directly (rule 7) on the server side too *(r1 of #2128, review H2 — before it, only a
+   server-placed body's DIRECT reads counted, and a constant a server function reached through a shared `fn`
+   was admitted and printed into the client)*. It is refused even when the client reads it too — narrower than
+   the ruling, which admits a constant that is not server-only (one the client also reads is not, §7.6 (b)):
+   **INTERIM** (`g-boot-invariant-const-client-read-s483`); the capable form classifies with §7.6 (b)'s reach
+   with the invariant's own reach left out, and admits a constant the client reads independently.
+7b. **Computed fields (S483).** A field with no write capability whose initializer is an expression (a derived
+   field, `<span:int=(end - start)/>`) is read by an invariant as its initializer: the invariant is judged as if
+   it read that expression directly, at any depth of such fields.
+   (ruling:user-voice-scrml.md-S483-invariant-derived-field — owner: *"Check at the source (Recommended)"* —
+   *"a write to anything the derived field depends on is treated as a write to the value: the invariant runs on
+   the candidate recomputed value before that write lands; a refused write writes nothing"*; refined by
+   ruling:user-voice-scrml.md-S483-invariant-derived-split — owner: *"Split (Recommended)"* — *"check-at-source
+   is built for a field derived only from the value's own sibling fields (a sibling write re-checks the
+   candidate); a field that tracks a cell or a live use-site value stays refused, PERMANENT, E-CONTRACT-003 (an @
+   read by another route)"*.)
+   - A field computed only from the value's own sibling fields, literals, compile-time constants (rule 7a) and
+     pure `fn` calls (rule 7) is CHECKED AT THE SOURCE: the siblings it is computed from join the invariant's read
+     set, and a write to one of them re-judges the invariant on the candidate with the field RECOMPUTED from the
+     candidate's siblings (`@w.b = 20` under `invariant (span <= 10)`, `span = b - a`, traps before `b` is
+     written).
+   - A computed field that reads a cell (`@x`, `@.`), or a declared value's, a `<request>`'s or a validity
+     surface's state — directly or through a called `fn` — TRACKS a live value: **`E-CONTRACT-003`** (rule 6),
+     **PERMANENT**. Any other read rule 7 refuses (a host call, a non-constant binding) is
+     **`E-DECL-INVARIANT-IMPURE`**.
+   - A locked field a use site gives a value that is not a compile-time constant (a cell, a row binder, a local, a
+     call) TRACKS that value (§66.9 rule 8): when an invariant reads the field, directly or through a computed
+     field, the use site is **`E-CONTRACT-003`**, **PERMANENT**. A constant use-site value is checked at
+     construction.
+   The fix the messages name: a `let` field (seeded once, then checked on every write), a constant, or a derived
+   check (§53.11). *(Bootstrap, INTERIM: a `{ … }` block initializer, and a use-site value given to a field the
+   check recomputes, are refused by name — `g-boot-invariant-derived-field-s483`; a use-site call of constants is
+   refused with the tracking values.)*
 8. Its type SHALL be `bool`; any other type is **`E-DECL-INVARIANT-NOT-BOOL`** (§66.20).
 
 **The read set.** The compiler records, for each invariant, the field paths it reads (its READ SET). A write
@@ -55570,6 +55609,11 @@ value and needs no check.
 value of the whole declaration value**, before anything is written: a direct field write, a deep write, a
 spread, a genuine replace, `reset`, a use-site initializer, construction, a server reload, and a local value of
 the type (§66.11.2 item 1, §66.11.3 — O58: a genuine replace *"the invariants apply to it as to every write"*).
+A value DECODED into the program is checked too: a `persist=` restore and a cross-tab value (§6.14.2 rule 1
+*"Restore is construction"*, rule 3 *"decoded against the cell's current declared type and its full declared
+contract"*, rule 5) are judged against every invariant of the cell's type at the value's whole depth — its own
+type's, and those of every struct, tape element and payload it holds — and a value that breaks one takes the
+default; it never reaches the cell *(r1 of #2128, review H1)*.
 A deep write (`@trip.range.end = x`) checks every enclosing invariant whose read set holds the path. The
 grouped write is the existing spread, `@r = { ...@r, start: a, end: b }`: one snapshot, all or nothing (§66.11.3),
 checked once. Two separate field writes are each checked; the second may never run if the first breaks the
@@ -55620,14 +55664,17 @@ the filed owed capable form (not blocking).
 constants (s483-invariant-2): a direct field write, a deep write, a spread (one check after every overridden
 field's own contract, before any write), a genuine replace, `reset` and `reset-on=`, a declaration's
 construction (its seeded fields — a use-site initializer, a non-literal default), a construction `{ … }` of an
-invariant-bearing type, a `<request>` reload (the loaded value), a local's part write, and the tape edits of a
-field an invariant reads (append, prepend, removals, filter, map) — each on the candidate value, the
-`E-WRITE-INVARIANT-RT` trap before the write. Refused by name (`E-BOOTSTRAP-UNSUPPORTED`, fail closed — never
-written unchecked; INTERIM): a write at a tape POSITION inside a value an invariant constrains and a part tape
-edit there (`g-boot-invariant-position-writes-s483`); an invariant that reads a field with no write capability
-whose value tracks — a derived field, or a locked attribute a use site gives a live value (§66.9 rule 8) — whose
-value moves with no write to check (`g-boot-invariant-derived-field-s483`); and a `bind:` to a field an
-invariant reads, until the boundaries lane builds its refusal-with-keep (`g-boot-invariant-boundaries-lints-s483`).
+invariant-bearing type, a `<request>` reload (the loaded value), a local's part write, the tape edits of a
+field an invariant reads (append, prepend, removals, filter, map), a write to a sibling a computed field is
+derived from (rule 7b, the field recomputed on the candidate), and a `persist=` restore and cross-tab value (the
+default on failure) — each on the candidate value, the `E-WRITE-INVARIANT-RT` trap before the write (r1 of
+#2128: the derived fields, the restore, the server reader set over the call graph, foldable constants). Refused by
+name (`E-BOOTSTRAP-UNSUPPORTED`, fail closed — never written unchecked; INTERIM): a write at a tape POSITION inside
+a value an invariant constrains and a part tape edit there (`g-boot-invariant-position-writes-s483`); a computed
+field with a `{ … }` initializer, and a use-site value given to a field the check recomputes
+(`g-boot-invariant-derived-field-s483`); and a `bind:` to a field an invariant reads, until the boundaries lane
+builds its refusal-with-keep (`g-boot-invariant-boundaries-lints-s483`). A computed field or a use-site value
+that TRACKS a live value is `E-CONTRACT-003`, PERMANENT (rule 7b).
 The boundaries, the lints and flow-sensitive discharge are owed (`g-boot-invariant-boundaries-lints-s483`,
 `g-boot-invariant-flow-discharge-s483`).
 

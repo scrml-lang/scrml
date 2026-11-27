@@ -1,0 +1,16 @@
+// §66.13.5 rule 7a (r1 of #2128, review L1) — ruling S483-invariant-const-fold: an initializer the compiler folds
+// over literals and other compile-time constants is a compile-time constant (`LIM = BASE * 2 - 1` is 19).
+<program>
+    ${
+        const BASE = 10;
+        const LIM = BASE * 2 - 1;
+    }
+    <dateRange:struct>
+        let <start:int=0/>
+        let <end:int=10/>
+    </>
+    invariant (end - start <= LIM) [maxLen]
+    <main>
+        <p id="s">${@dateRange.start}</p>
+    </main>
+</program>

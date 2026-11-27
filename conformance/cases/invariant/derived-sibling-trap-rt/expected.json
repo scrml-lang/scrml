@@ -1,0 +1,44 @@
+{
+  "id": "invariant-derived-sibling-trap-rt",
+  "description": "A field derived from its siblings (`span = b - a`) under `invariant (span <= 10)`: the sibling write `@w.b = 20` is checked with span recomputed on the candidate and traps (E-WRITE-INVARIANT-RT) before the write — span stays 5 and the handler's next statement never runs.",
+  "language-version": "1.0",
+  "spec": "§66.13.5",
+  "provenance": "ruling:user-voice-scrml.md-S483-invariant-derived-split (\"Split (Recommended)\")",
+  "rationale": "Ruling S483-invariant-derived-split: \"check-at-source is built for a field derived only from the value's own sibling fields (a sibling write re-checks the candidate)\".",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-WRITE-INVARIANT",
+      "E-BOOTSTRAP-UNSUPPORTED",
+      "E-CONTRACT-003"
+    ],
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#s",
+        "text": "5"
+      },
+      {
+        "selector": "#n",
+        "text": "0"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-decl-invariant-unimplemented-s483",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-SCOPE-001=8",
+          "emitted:E-STATE-UNDECLARED=2"
+        ],
+        "runtime": "sha256:6a7bd15b29286996"
+      }
+    }
+  }
+}

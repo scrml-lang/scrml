@@ -33930,7 +33930,12 @@ ${
     // server code reaches), the seed of a program cell that server code reads, and the
     // initializer of a constant server code reads (the largest set). A constant the
     // client also reads is refused too (it may be read there only through the invariant);
-    // the message says why.
+    // the message says why. r1 (#2128 review M1): that is narrower than the ruling (a
+    // constant the client also reads is not server-only, §7.6 (b)) — INTERIM,
+    // g-boot-invariant-const-client-read-s483: the capable form classifies with the
+    // printer's §7.6 (b) reach (print.scrml clientConsts / serverInits) with the invariant's
+    // own reach left out, which is not available before lowering; a second reach walk here
+    // that disagreed with the printer's would admit a constant the printer keeps server-only.
     type InvConstAt:struct = { id: int, by: string }
 
     fn invServerConstPass(g: Globals, t: Tables) -> Diag[] {
@@ -34120,7 +34125,7 @@ ${
                     if (a.id == id) {
                         done = done.concat([id]);
                         let kn: string = nameOfExpr(x);
-                        out = out.concat([newDiag("E-DECL-INVARIANT-IMPURE", "`invariant (" + iv.text + ")` on " + what + " reads the file-scope constant `" + kn + "`, which server code reads (" + a.by + ") — a binding only server code reads is server-only and stays out of the client artifact (§7.6 (b)), and an invariant is checked wherever the value is written, the client included, so reading it there would put it in the client (ruling:user-voice-scrml.md-S483-invariant-const-read: \"a server-only const stays refused\"). Read a constant no server code reads (fail closed: one server code reads may be server-only), or compute the bound in a `fn` from the fields", file, iv.span)]);
+                        out = out.concat([newDiag("E-DECL-INVARIANT-IMPURE", "`invariant (" + iv.text + ")` on " + what + " reads the file-scope constant `" + kn + "`, which server code reads (" + a.by + ") — a binding only server code reads is server-only and stays out of the client artifact (§7.6 (b)), and an invariant is checked wherever the value is written, the client included, so reading it there would put it in the client (ruling:user-voice-scrml.md-S483-invariant-const-read: \"a server-only const stays refused\"). Read a constant no server code reads, or compute the bound in a `fn` from the fields. (A constant the client ALSO reads is not server-only under §7.6 (b) and the ruling admits it; it is refused here too until the classification can leave the invariant's own reach out — INTERIM, g-boot-invariant-const-client-read-s483)", file, iv.span)]);
                     }
                 }
             }

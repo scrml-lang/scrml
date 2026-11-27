@@ -116,3 +116,14 @@ impl#1 frozen (§66 Nominal there, §34.0).
   `<#rq>.error` is NOT set: §19.17 "A trap SHALL NOT be a `!` error" and §6.7.7 `.error: Error | not` — surfaced.
 - nit: the E-WRITE-INVARIANT lone-write message no longer doubles the label's backticks.
 - persist.test.js pin: Field.persist carries `invs: null, loc: ""` (H1).
+- L3 corrected (after bd8bbaae7): routing a continuation's trap to reportLater crashed the bootstrap-conformance
+  harness under Bun (its global reportError is an uncaught exception there). The trap now goes through the one
+  reporter, whose default classifies it — "scrml: trap E-… in a continuation (§19.17)" — instead of "a host error".
+- M1: INTERIM + g-boot-invariant-const-client-read-s483 (message + SPEC 7a); M2: NOT built — owner question,
+  g-boot-invariant-each-row-construct-s483 (a pre-write check changes S479's ruled hole-trap behaviour).
+- SPEC §66.13.5: 7a (foldable constants, call-graph server reader set, M1 INTERIM), new 7b (computed fields),
+  decoded values (persist), Status; §34 E-CONTRACT-003 / E-DECL-INVARIANT-IMPURE rows.
+- conformance: 5 new invariant cases (server-const-via-call-neg, derived-sibling-trap-rt, derived-cell-neg,
+  use-site-live-neg, const-fold-accepted); impl#1 xfail signatures captured (const-fold-accepted passes on impl#1).
+- bootstrap-conformance --json: PASS 877 / FAIL 3 / NOT-TWINNED 628 / UNSUPPORTED 491 / CRASH 0; 0 record diffs
+  on the 1994 shared cases vs r0; the 5 new PASS.

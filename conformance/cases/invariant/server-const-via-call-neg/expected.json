@@ -1,0 +1,26 @@
+{
+  "id": "invariant-server-const-via-call-neg",
+  "description": "An invariant reaching a constant through a `fn` chain, where a server function reaches the same constant through a call (`srv` → `key` → K): E-DECL-INVARIANT-IMPURE (the constant is server-read; reading it in a check the client runs would ship it). The set refused through a call is the set refused directly.",
+  "language-version": "1.0",
+  "spec": "§66.13.5, §7.6, §12.2",
+  "provenance": "ruling:user-voice-scrml.md-S483-invariant-const-read (\"Allow compile-time consts (Recommended)\")",
+  "rationale": "Ruling S483-invariant-const-read: \"A `let`, a host-derived const, or a server-only const stays refused.\" §66.13.5 rule 7: \"The set refused through a call is exactly the set refused directly.\"",
+  "expect": {
+    "codes": [
+      "E-DECL-INVARIANT-IMPURE"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-decl-invariant-unimplemented-s483",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=3",
+          "emitted:E-SCOPE-001=3",
+          "emitted:E-STATE-UNDECLARED=3",
+          "missing:E-DECL-INVARIANT-IMPURE"
+        ]
+      }
+    }
+  }
+}
