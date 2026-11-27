@@ -1,6 +1,6 @@
 # migrations.map.md
 # project: scrml
-# updated: 2026-11-08T16:47:39Z  commit: f92d1a8fb
+# updated: 2026-11-26T22:24:19Z  commit: fa24c93bb
 # The repo has no database of its own. This map covers the schema-migration machinery the compiler provides to user programs (SPEC §39, :33429).
 # No migration code changed fa0e875b4..f92d1a8fb.
 

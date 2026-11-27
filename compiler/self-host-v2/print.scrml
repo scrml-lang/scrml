@@ -185,7 +185,7 @@ ${
         let out: int[] = acc;
         const bc: BodyCells = bodyCellsOf(p);
         for (const n of allNodes(root)) {
-            if (bc.prog >= 0) {
+            if (bodyAny(bc)) {
                 const bu: ConstUse = bodyUseOf(bc, n);
                 for (const b of bu.reads.concat(bu.writes)) { if (!hasInt(out, b)) out = out.concat([b]); }
             }
@@ -268,7 +268,7 @@ ${
         // reference reads it (bodyUseOf)
         const bc: BodyCells = bodyCellsOf(p);
         for (const n of allNodes(root)) {
-            if (bc.prog >= 0) {
+            if (bodyAny(bc)) {
                 const bu: ConstUse = bodyUseOf(bc, n);
                 for (const br of bu.reads) { if (!hasInt(reads, br)) reads = reads.concat([br]); }
                 for (const bw of bu.writes) { if (!hasInt(writes, bw)) writes = writes.concat([bw]); }
@@ -876,7 +876,7 @@ ${
             .VariantOf(enumSym: es, idx: vi, args: va) :> variantValueJs(ctx, es, vi, va),   // s472: THE ENUM VALUE SHAPE, as a `fail` builds it
             .Handle(inst: i) :> instJs(ctx, i),
             .Assigned(local: l, value: v) :> JsExpr.JAssignE(symName(ctx, l), exprJs(ctx, v)),   // s474 (§50, D10): the kept condition-head assignment
-            .InitOf(decl: d, inst: i, idx: x) :> rtCall(ctx, "initial", [instJs(ctx, i), JsExpr.JAnnot(jnum(x), memberName(ctx, d, x))]),
+            .InitOf(decl: d, inst: i, idx: x) :> initOfJs(ctx, d, i, x),
             .Host(call: c) :> hostJs(c),
             .Lambda(params: ps, body: b) :> JsExpr.JArrowE(symNames(ctx, ps), exprJs(ctx, b)),
             .BlockLambda(params: ps, body: b) :> JsExpr.JArrow(symNames(ctx, ps), blockJs(lambdaCtx(ctx, b), b)),   // s478
@@ -886,6 +886,66 @@ ${
             .ServerCall(fn: f, args: args) :> rtCall(ctx, "call", [jid(routeName(ctx.p, f)), JsExpr.JArray(exprsJs(ctx, args)), jid("task$")]),
             .Query(q: q) :> queryJs(ctx, q),
             .Foreign(slice: fsl0, args: args) :> foreignJs(ctx, fsl0, args)      // s477: a sealed foreign slice (§23.2.4a)
+        };
+    }
+
+    // D15: a reset's value — the field's own initializer, re-run (`rt.initial`: the thunk the
+    // instance was constructed with, kept on its record — reinitUsed).
+    // s483 (lane s483-component-cell-server-only; #2121 review MED-1): a reset of a PROGRAM cell is
+    // InitOf too (lower.scrml resetStmt / resetWrite). The program has no use site, so its
+    // initializer is the declared one: through the enclosing program instance (`Lexical(0)`) it is
+    // printed where it stands — the declared initializer, as the copied expression was before — and
+    // a cell §7.6 rule (b) made server-only has the shell's `not` as its declared initializer
+    // (bodyAsConsts), so its reset writes `null`, never the seed. Through any other reference the
+    // program instance's kept thunk is re-run (rt.initial).
+    fn initOfJs(ctx: Ctx, d: Sym, i: InstRef, x: int) -> JsExpr {
+        const init: Expr | not = programInitInline(ctx.p, d, i, x);
+        if (init is given) return exprJs(ctx, init);
+        return rtCall(ctx, "initial", [instJs(ctx, i), JsExpr.JAnnot(jnum(x), memberName(ctx, d, x))]);
+    }
+
+    // the declared initializer of program field `x`, when an InitOf of it through `i` prints it
+    // where it stands (initOfJs), else `not`
+    fn programInitInline(p: CoreProgram, d: Sym, i: InstRef, x: int) -> Expr | not {
+        if (d.id != p.program.id) return not;
+        const pd: Decl | not = programDeclOf(p);
+        if (pd is not || x < 0 || x >= pd.fields.length) return not;
+        const init: Expr | not = pd.fields[x].init;
+        if (init is not) return not;
+        // through another reference (a function's `Shared`), the declared initializer prints the same
+        // only when it names no instance lexically (lower substituted the reset's target for Lexical(0))
+        if (!isLexical0(i) && namesLexical(init)) return not;
+        return init;
+    }
+
+    fn namesLexical(e: Expr) -> boolean {
+        for (const n of allNodes(Node.NExpr(e))) {
+            if (nodeLexical(n)) return true;
+        }
+        return false;
+    }
+
+    fn nodeLexical(n: Node) -> boolean {
+        return match n {
+            .NInst(i: i) :> instLexical(i),
+            // no-default-arm: one question of a node — is it a lexical instance reference
+            _ :> false
+        };
+    }
+
+    fn instLexical(i: InstRef) -> boolean {
+        return match i {
+            .Lexical(depth: k) :> true,
+            // no-default-arm: one question of an instance reference — is it lexical
+            _ :> false
+        };
+    }
+
+    fn isLexical0(i: InstRef) -> boolean {
+        return match i {
+            .Lexical(depth: k) :> k == 0,
+            // no-default-arm: one question of an instance reference — is it the nearest enclosing instance
+            _ :> false
         };
     }
 
@@ -4332,7 +4392,8 @@ ${
         let gseeds: string[] = [];
         for (const n of allNodes(Node.NProgram(p))) {
             constructed = constructed.concat(nodeConstructs(n));
-            reinits = reinits.concat(nodeInitOfs(n));
+            // s483: a program-cell reset printed where it stands (initOfJs) keeps no thunk
+            if (!inlineInitOf(p, n)) reinits = reinits.concat(nodeInitOfs(n));
             gseeds = gseeds.concat(nodeGivenSeeds(p, n));
         }
         return { constructed: constructed, reinits: reinits, reg: [], gseeds: gseeds };
@@ -4440,6 +4501,22 @@ ${
             .NEdit(k: k) :> [],
             .NView(v: v) :> [],
             .NAttr(a: a) :> []
+        };
+    }
+
+    fn inlineInitOf(p: CoreProgram, n: Node) -> boolean {
+        return match n {
+            .NExpr(e: e) :> exprInlineInitOf(p, e),
+            // no-default-arm: one question of a node — is it an InitOf initOfJs prints where it stands
+            _ :> false
+        };
+    }
+
+    fn exprInlineInitOf(p: CoreProgram, e: Expr) -> boolean {
+        return match e {
+            .InitOf(decl: d, inst: i, idx: x) :> programInitInline(p, d, i, x) is given,
+            // no-default-arm: one question of an expression — is it such an InitOf
+            _ :> false
         };
     }
 
@@ -6431,7 +6508,7 @@ ${
         const noInit: int[] = clientNoInit(p, sread, si);
         const u: ConstUse = constUse(p, clientRoots, noInit);
         const rid: int[] = clientHeld(u, noInit);
-        if (rid.length == p.consts.length && bodyCellsOf(p).prog < 0) return p.consts;
+        if (rid.length == p.consts.length && !bodyAny(bodyCellsOf(p))) return p.consts;
         let out: CoreConst[] = [];
         for (const k2 of p.consts) {
             const id: int = k2.sym.id;
@@ -8087,48 +8164,77 @@ ${
     // place: its formula runs only when it is read, so an unread one runs nowhere — it is a shell and
     // no binding. One whose seed reads a cell is refused by name (outerRefusal — the server artifact
     // holds no cell).
+    //
+    // s483 (lane s483-component-cell-server-only; ruling:user-voice-scrml.md-S483-component-cell-server-only
+    // — RULED (a): "an unread component cell whose seed reaches server-only code becomes an empty client
+    // stand-in and nothing runs its seed"): and the cells of a COMPONENT declaration's body (bodyCands),
+    // judged in the same fixed point — no second classifier. A component cell is a field of every
+    // instance of its declaration; the classification is the DECLARATION's: a read through any
+    // instance (the declaration's own renders and handlers — Lexical, an `as=` handle, the shared
+    // instance, a `<*x/>`) keeps the field client-read for every instance. One it makes server-only is
+    // a SHELL field in every instance (seed `not`) and no binding anywhere: the server artifact holds no
+    // instance, and nothing reads the field, so running its seed is unobservable (§6.15 A1: a seed is a
+    // value position) — the same reason an unread derived program cell runs nowhere.
     // =========================================================================
-    type BodyCells:struct = { prog: int, ids: int[], caps: int[] }
+    // One entry per declaration field that is a binding here (`isConstSym`): its declaration
+    // (`decls`), its index there (`idxs`), its Sym (`ids`) and its write capability (`caps`, or -1).
+    // `prog`: the program declaration's Sym id. No entry: the classification judges no body cell.
+    type BodyCells:struct = { prog: int, decls: int[], idxs: int[], ids: int[], caps: int[] }
 
-    // The program declaration's fields that are bindings here (`ids[i]`: field i's Sym id, or -1) and
-    // their write capabilities (`caps[i]`, or -1); `prog` -1 when no field is one.
     fn bodyCellsOf(p: CoreProgram) -> BodyCells {
-        const none: BodyCells = { prog: -1, ids: [], caps: [] };
+        const none: BodyCells = { prog: p.program.id, decls: [], idxs: [], ids: [], caps: [] };
         if (p.consts.length == 0) return none;
-        const pd: Decl | not = programDeclOf(p);
-        if (pd is not) return none;
+        let ds: int[] = [];
+        let xs: int[] = [];
         let ids: int[] = [];
         let caps: int[] = [];
-        let any: boolean = false;
-        for (const f of pd.fields) {
-            let id: int = -1;
-            if (isConstSym(p, f.sym.id)) {
-                id = f.sym.id;
-                any = true;
+        for (const d of p.decls) {
+            if (d.sym.id == p.program.id || d.kind == DeclKind.User) {
+                let i: int = 0;
+                for (const f of d.fields) {
+                    if (isConstSym(p, f.sym.id)) {
+                        ds = ds.concat([d.sym.id]);
+                        xs = xs.concat([i]);
+                        ids = ids.concat([f.sym.id]);
+                        let cap: int = -1;
+                        const w: Sym | not = f.wcap;
+                        if (w is given) cap = w.id;
+                        caps = caps.concat([cap]);
+                    }
+                    i = i + 1;
+                }
             }
-            ids = ids.concat([id]);
-            let cap: int = -1;
-            const w: Sym | not = f.wcap;
-            if (w is given) cap = w.id;
-            caps = caps.concat([cap]);
         }
-        if (!any) return none;
-        return { prog: pd.sym.id, ids: ids, caps: caps };
+        return { prog: p.program.id, decls: ds, idxs: xs, ids: ids, caps: caps };
     }
 
+    fn bodyAny(bc: BodyCells) -> boolean {
+        return bc.ids.length > 0;
+    }
+
+    // a field of the program declaration or of a component declaration (a candidate of bodyCands —
+    // the program's, or a user declaration's)
     fn isBodyCell(p: CoreProgram, id: int) -> boolean {
-        const pd: Decl | not = programDeclOf(p);
-        if (pd is not) return false;
-        for (const f of pd.fields) { if (f.sym.id == id) return true; }
+        for (const d of p.decls) {
+            if (d.sym.id == p.program.id || d.kind == DeclKind.User) {
+                for (const f of d.fields) { if (f.sym.id == id) return true; }
+            }
+        }
         return false;
     }
 
     // One node's uses of the body cells that are bindings. FAIL CLOSED: every reference to such a
     // field other than a whole-value, statically checked Write is a READ — a place read (a whole
-    // program snapshot reads them all), a part / compound / checked write, a re-run initializer, a
-    // validity surface or its reset, a storage removal, an effect's, a request's or a reset's
-    // dependency (a request's target too), an error list, a gate, a handle of the program instance
-    // (any Lexical handle counts), a `<*x/>` of the program.
+    // instance snapshot reads all of its declaration's), a part / compound / checked write, a
+    // validity surface or its reset, a storage removal, an effect's, a request's or a reset rule's
+    // dependency (a request's target too), an error list, a gate, a handle of an instance (a Lexical
+    // handle names every body cell; an `as=` / narrowed handle every component cell), a `<*x/>`.
+    // s483 (lane s483-component-cell-server-only; #2121 review MED-1, prov=pa-ruled:S483-reset-is-write):
+    // a RESET — `reset(@c)`, or a `reset-on=` rule's write — is a Write whose value is the field's
+    // own initializer re-run (InitOf, lower.scrml resetStmt / resetWrite): a statically checked
+    // whole-value write (a Replace, or the Static transition of a `rule=` cell), not a read. The
+    // InitOf itself observes nothing of the field; what it runs is the seed, which a server-only
+    // cell's shell does not hold (its reset writes `not`).
     fn bodyUseOf(bc: BodyCells, n: Node) -> ConstUse {
         return match n {
             .NPlace(pl: pl) :> readUse(bodyPlaceIds(bc, pl)),
@@ -8145,22 +8251,41 @@ ${
         return { reads: ids, writes: [] };
     }
 
-    fn bodyAt(bc: BodyCells, idx: int) -> int[] {
-        if (idx < 0 || idx >= bc.ids.length) return [];
-        if (bc.ids[idx] < 0) return [];
-        return [bc.ids[idx]];
+    // field `idx` of declaration `d`, when it is a binding here
+    fn bodyAt(bc: BodyCells, d: int, idx: int) -> int[] {
+        let j: int = 0;
+        for (const x of bc.decls) {
+            if (x == d && bc.idxs[j] == idx) return [bc.ids[j]];
+            j = j + 1;
+        }
+        return [];
     }
 
-    fn bodyAll(bc: BodyCells) -> int[] {
+    // every field of declaration `d` that is a binding here
+    fn bodyOf(bc: BodyCells, d: int) -> int[] {
         let out: int[] = [];
-        for (const id of bc.ids) { if (id >= 0) out = out.concat([id]); }
+        let j: int = 0;
+        for (const x of bc.decls) {
+            if (x == d) out = out.concat([bc.ids[j]]);
+            j = j + 1;
+        }
+        return out;
+    }
+
+    // every component (non-program) field that is a binding here
+    fn bodyComp(bc: BodyCells) -> int[] {
+        let out: int[] = [];
+        let j: int = 0;
+        for (const x of bc.decls) {
+            if (x != bc.prog) out = out.concat([bc.ids[j]]);
+            j = j + 1;
+        }
         return out;
     }
 
     fn bodyCellIds(bc: BodyCells, d: Sym, path: FieldRef[]) -> int[] {
-        if (d.id != bc.prog) return [];
-        if (path.length == 0) return bodyAll(bc);
-        return bodyAt(bc, path[0].idx);
+        if (path.length == 0) return bodyOf(bc, d.id);
+        return bodyAt(bc, d.id, path[0].idx);
     }
 
     fn bodyPlaceIds(bc: BodyCells, pl: Place) -> int[] {
@@ -8171,25 +8296,28 @@ ${
     }
 
     fn bodyFieldIds(bc: BodyCells, d: Sym, idx: int) -> int[] {
-        if (d.id != bc.prog) return [];
-        return bodyAt(bc, idx);
+        return bodyAt(bc, d.id, idx);
     }
 
     fn bodyStmtUse(bc: BodyCells, s: Stmt) -> ConstUse {
         return match s {
-            .Write(cap: c, edit: e, check: k) :> bodyWriteUse(bc, c, e, k),
-            .ResetSurface(of: v) :> readUse(bodyValidityIds(bc, v)),
-            .Unpersist(decl: d, idx: i) :> readUse(bodyFieldIds(bc, d, i)),
+            .Write(cap: c, edit: e, value: v, check: k) :> bodyWriteUse(bc, c, e, v, k),
+            // s483 (#2121 review MED-1, prov=pa-ruled:S483-reset-is-write): the surface and storage
+            // halves of a reset (lower.scrml resetStmt — each follows the reset's Write of the same
+            // field and writes no cell; core.scrml) observe nothing of its value: they are the reset,
+            // which bodyWriteUse judges
+            .ResetSurface(of: v) :> readUse([]),
+            .Unpersist(decl: d, idx: i) :> readUse([]),
             // no-default-arm: one question of a statement — does it write or reset a body cell
             _ :> readUse([])
         };
     }
 
-    fn bodyWriteUse(bc: BodyCells, cap: Sym, e: EditKind, c: Check) -> ConstUse {
+    fn bodyWriteUse(bc: BodyCells, cap: Sym, e: EditKind, v: Expr, c: Check) -> ConstUse {
         let i: int = 0;
         for (const w of bc.caps) {
-            if (w == cap.id && bc.ids[i] >= 0) {
-                if (isReplaceEdit(e) && isStaticCheck(c)) return { reads: [], writes: [bc.ids[i]] };
+            if (w == cap.id) {
+                if (isStaticCheck(c) && (isReplaceEdit(e) || isInitOfExpr(v))) return { reads: [], writes: [bc.ids[i]] };
                 return readUse([bc.ids[i]]);
             }
             i = i + 1;
@@ -8197,11 +8325,19 @@ ${
         return readUse([]);
     }
 
+    fn isInitOfExpr(e: Expr) -> boolean {
+        return match e {
+            .InitOf(decl: x) :> true,
+            // no-default-arm: one question of an expression — is it a reset's re-run initializer
+            _ :> false
+        };
+    }
+
     fn bodyExprIds(bc: BodyCells, e: Expr) -> int[] {
         return match e {
-            .InitOf(decl: d, idx: i) :> bodyFieldIds(bc, d, i),
             .Validity(of: v) :> bodyValidityIds(bc, v),
             .Handle(inst: i) :> bodyInstIds(bc, i),
+            // InitOf (a reset's value) reads nothing of the field — bodyWriteUse judges the reset
             // no-default-arm: one question of an expression — does it read a body cell other than by a place
             _ :> []
         };
@@ -8209,17 +8345,19 @@ ${
 
     fn bodyInstIds(bc: BodyCells, i: InstRef) -> int[] {
         return match i {
-            .Shared(decl: d) :> (d.id == bc.prog ? bodyAll(bc) : []),
-            .Lexical(depth: x) :> bodyAll(bc),
-            // no-default-arm: one question of an instance reference — may it name the program instance
-            _ :> []
+            .Shared(decl: d) :> bodyOf(bc, d.id),
+            .Lexical(depth: x) :> bc.ids,
+            .Kid(decl: d) :> bodyOf(bc, d.id),
+            .Alias(sym: x) :> bodyComp(bc),
+            .Narrowed(sym: x) :> bodyComp(bc),
+            .HandleOf(sym: x) :> bodyComp(bc)
         };
     }
 
     fn bodyValidityIds(bc: BodyCells, v: ValidityOf) -> int[] {
         return match v {
             .OfField(decl: d, idx: i) :> bodyFieldIds(bc, d, i),
-            .OfDecl(decl: d) :> (d.id == bc.prog ? bodyAll(bc) : [])
+            .OfDecl(decl: d) :> bodyOf(bc, d.id)
         };
     }
 
@@ -8242,7 +8380,7 @@ ${
             .ResetOn(triggers: ds) :> bodyDepIds(bc, ds),
             .Errors(of: x) :> bodyValidityIds(bc, x),
             .Reach(fields: fs) :> bodyValiditiesIds(bc, fs),
-            .Star(decl: d) :> (d.id == bc.prog ? bodyAll(bc) : []),
+            .Star(decl: d) :> bodyOf(bc, d.id),
             // no-default-arm: one question of a view — does it name a body cell other than by a place
             _ :> []
         };
@@ -8274,6 +8412,24 @@ ${
         for (const f of pd.fields) {
             const init: Expr | not = f.init;
             if (init is given && !hasInt(skip, f.sym.id) && !idleWatched(f) && seedLive(init)) out = out.concat([f.sym.id]);
+        }
+        // s483 (lane s483-component-cell-server-only; ruling:user-voice-scrml.md-S483-component-cell-server-only):
+        // and each cell of a COMPONENT declaration's body — a field declared in its body (FieldRole.Child,
+        // never an attribute: an attribute's value is given at the use site, in the user's markup) with a
+        // live seed, the same exceptions, and none that a use site gives a value (constructsField — fail
+        // closed: that instance's value is the use site's, client code)
+        let usegiven: string[] = [];
+        for (const n of allNodes(Node.NProgram(p))) { usegiven = usegiven.concat(nodeConstructs(n)); }
+        for (const d of p.decls) {
+            if (d.kind == DeclKind.User) {
+                let i: int = 0;
+                for (const cf of d.fields) {
+                    const ci: Expr | not = cf.init;
+                    const free: boolean = !isAttribute(cf) && usegiven.indexOf(fieldKey(d.sym, i)) < 0;
+                    if (ci is given && free && !hasInt(skip, cf.sym.id) && !idleWatched(cf) && seedLive(ci)) out = out.concat([cf.sym.id]);
+                    i = i + 1;
+                }
+            }
         }
         return out;
     }
@@ -8341,10 +8497,27 @@ ${
             if (o.at < newAt.length) at = newAt[o.at];
             os = os.concat([{ decl: o.decl, at: at }]);
         }
+        // s483 (lane s483-component-cell-server-only; ruling:user-voice-scrml.md-S483-component-cell-server-only
+        // — "becomes an empty client stand-in and nothing runs its seed"): a COMPONENT cell of `cells` is a
+        // shell field in its declaration — every instance's — and a binding only in the classification
+        // (`fin` false: what its seed reaches is judged), put last (it has no place; a seed names only
+        // file-scope bindings, which precede it). In the program both printers print it has none.
         let ds: Decl[] = [];
         for (const d of p.decls) {
             if (d.sym.id == pd.sym.id) {
                 ds = ds.concat([{ sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: fs, renders: d.renders, wiring: d.wiring, handles: d.handles }]);
+            } else if (d.kind == DeclKind.User) {
+                let cfs: Field[] = [];
+                for (const cf of d.fields) {
+                    const ci: Expr | not = cf.init;
+                    if (hasInt(cells, cf.sym.id) && ci is given) {
+                        cfs = cfs.concat([shellField(cf)]);
+                        if (!fin) ks = ks.concat([{ sym: cf.sym, init: ci, mutable: cf.wcap is given }]);
+                    } else {
+                        cfs = cfs.concat([cf]);
+                    }
+                }
+                ds = ds.concat([{ sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: cfs, renders: d.renders, wiring: d.wiring, handles: d.handles }]);
             } else {
                 ds = ds.concat([d]);
             }

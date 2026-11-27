@@ -1,27 +1,33 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-11-08T16:47:39Z  commit: f92d1a8fb
-# scan mode: FULL_COLD_START
-# This report replaces the stacked S396–S471 passes (prior text: `git show 9cf2bef88:.claude/maps/non-compliance.report.md`). The carried findings were re-checked against f92d1a8fb; closures are listed at the end.
+# generated: 2026-11-26T22:24:19Z  commit: fa24c93bb
+# scan mode: NON_COMPLIANCE_ONLY (S483 delta refresh of the f92d1a8fb FULL_COLD_START scan)
+# S483 delta: every `SPEC.md :N` citation was re-located by matching its 9-line context against the current SPEC.md; each SPEC-facing finding below was re-read against fa24c93bb (still true unless listed under "Closed"). No bun/test/compiler was run, so the executed-check figures in the Summary are the f92d1a8fb ones.
+# This report replaces the stacked S396–S471 passes (prior text: `git show 9cf2bef88:.claude/maps/non-compliance.report.md`). The carried findings were re-checked against f92d1a8fb (SPEC-facing ones again at fa24c93bb); closures are listed at the end.
 
 ## Summary
 
 Total docs scanned: 259 in-scope `.md` (125 repo docs + 134 spa-lists by name only). Not enumerated: 2,136 `.md` under docs/changes/ (per-dispatch BRIEF / progress records), handOffs/, archive/, .claude/.
 Executed checks: `bootstrap-conformance.ts --json` (matches docs/bootstrap-conformance.md), `state.ts --check` (PASS; 155 heading/marker drifts, WARN), `facts.ts --check` (PASS), `spec-coverage-check.ts` (1,115 rows, 49 SILENT, 0 violations). A backticked-identifier grep cross-check of the 14 docs changed since 546e2f4aa found no doc over the 20% threshold (worst: kickstarter-v2 13/306, tutorial 5/88; all unfound names are user-example identifiers).
 Compliant: 220 (no name, location or content heuristic fired. Only the 14 docs changed since 546e2f4aa got the identifier cross-check; the rest passed name/location heuristics and the carried-finding re-checks)
-Non-compliant: 30 docs from this pass (SPEC.md [2 findings], known-gaps.md, gaunt.md, the roadmap, and the 26-doc location group) + 1 non-doc reference (package.json); plus 9 carried findings re-verified live (SPEC ×4, FACTS, PA-SCRML-REFERENCE, pinned-discussions, known-gaps, a census script) and 5 in-source items
+Non-compliant: 31 docs (30 from the f92d1a8fb pass + SPEC-INDEX.md, new at fa24c93bb) (SPEC.md [2 findings], known-gaps.md, gaunt.md, the roadmap, and the 26-doc location group) + 1 non-doc reference (package.json); plus 9 carried findings re-verified live (SPEC ×4, FACTS, PA-SCRML-REFERENCE, pinned-discussions, known-gaps, a census script) and 5 in-source items
 Uncertain: 9 docs (4 native-parser notes, 4 dated articles, kickstarter-v2), plus 3 uncertain sections inside SPEC.md / known-gaps.md
 
 ## Non-compliant docs
 
-### compiler/SPEC.md §39.8 (:33746) — `scrml migrate` CLI and `.migration.sql/.json` artifacts
+### compiler/SPEC-INDEX.md — stale line anchors vs HEAD (NEW at fa24c93bb)
+**Reason:** grep-mismatch (generated file lags its source)
+**Detail:** the generated totals block says 57,341 lines and its §22/§34/§49/§66/§67/§68 ranges start at 28018 / 31349 / 39968 / 52909 / 56342 / 56805, but `compiler/SPEC.md` headings at fa24c93bb are at 28029 / 31360 / 39984 (`# §49`) / 52932 / 56565 / 57028 (`wc -l` 57,564; SPEC.md was edited by #2120 after the last bot regen). Hand-written note at SPEC-INDEX.md :13 still says §49 is "at line 19410"; the heading is at :39984.
+**Suggested disposition:** update to match current (the bot regenerates the ranges after the next merge; fix the :13 note by hand, or delete the line number from it)
+
+### compiler/SPEC.md §39.8 (:35167) — `scrml migrate` CLI and `.migration.sql/.json` artifacts
 **Reason:** grep-mismatch (spec vs code)
 **Detail:** §39.8 says the compiler SHALL write `<db-path>.migration.sql` / `.migration.json` on every compile, and that `scrml migrate [--dry|--check|--force]` applies them. No code in compiler/src writes those files. `scrml migrate` (compiler/src/commands/migrate.js) is a source codemod (`--dry-run`, `--check`, `--program-shape`). Schema apply is `scrml db-migrate --db <url>`. The subsections are also misnumbered `38.8.1` / `38.8.2`. Tracked as open gap `g-spec-39-8-describes-a-migrate-cli-and-artifacts-that-do-not-exist` (docs/known-gaps.md :25765, S441). Still open at f92d1a8fb.
 **Suggested disposition:** update to match current (rewrite §39.8 around db-migrate / introspect, or mark it Nominal)
 
-### compiler/SPEC.md :23189 — E-ERROR-016 "no compiler emits it yet"
+### compiler/SPEC.md :23957 — E-ERROR-016 "no compiler emits it yet"
 **Reason:** grep-mismatch (carried from S454; re-verified)
-**Detail:** The status line says E-ERROR-016 is Nominal and no compiler emits it. The bootstrap emits it: compiler/self-host-v2/analyze.scrml :32237 `addDiag(…, "E-ERROR-016", …)` (10 occurrences in analyze.scrml; listed in severity.scrml).
+**Detail:** The status line says E-ERROR-016 is Nominal and no compiler emits it. The bootstrap emits it: compiler/self-host-v2/analyze.scrml :48918 `addDiag(…, "E-ERROR-016", …)` (10 occurrences in analyze.scrml; listed in severity.scrml).
 **Suggested disposition:** update to match current (state that impl#2 emits it; impl#1 Nominal)
 
 ### docs/known-gaps.md — 155 heading/marker status drifts
@@ -51,7 +57,7 @@ Uncertain: 9 docs (4 native-parser notes, 4 dated articles, kickstarter-v2), plu
 
 ## Uncertain docs (needs human review)
 
-### compiler/SPEC.md §14.12.6.1 (:15838–15841) — `given u :>` taught as caller form 1 for `(not to T)`
+### compiler/SPEC.md §14.12.6.1 (:16411–16414) — `given u :>` taught as caller form 1 for `(not to T)`
 **Reason:** carried (S465). §42.2.3 soft-deprecates `given` in favour of `if (u is given)`. S475's lifecycle-reads work (#1783, read rule E-TYPE-001) landed on the bootstrap only.
 **What to check:** whether §14.12.6.1 should lead with `is given`, and whether either implementation credits that form for a `(not to T)` value.
 
@@ -77,7 +83,7 @@ Uncertain: 9 docs (4 native-parser notes, 4 dated articles, kickstarter-v2), plu
 
 ## Carried non-compliant findings — re-verified at f92d1a8fb (from the pre-f92d1a8fb report)
 
-### compiler/SPEC.md §32 (:29765) — in-arm `~` "orphans to `null`, silently" (old N15)
+### compiler/SPEC.md §32 (:31054) — in-arm `~` "orphans to `null`, silently" (old N15)
 **Reason:** doc-vs-code (carried; text re-grepped, behaviour not re-executed this pass)
 **Detail:** The §32 status table still says an in-arm `~` with no outer `~` "orphans to `null`, silently — `E-TILDE-001` has zero fire sites". The old N15 measured that impl#1 makes this fatal (`E-CG-TILDE-UNRESOLVED`, sink at codegen/emit-expr.ts :220). Also SPEC-INDEX §32 row.
 **Suggested disposition:** update to match current (re-execute the §32.2.1 example on impl#1, then correct the table)
@@ -87,7 +93,7 @@ Uncertain: 9 docs (4 native-parser notes, 4 dated articles, kickstarter-v2), plu
 **Detail:** Both are emitted in compiler/src/codegen/emit-library.ts; `grep -c` in SPEC.md = 0 for each at f92d1a8fb.
 **Suggested disposition:** update to match current (add §34 rows with emitter provenance)
 
-### compiler/SPEC.md :28030 — `E-MANIFEST-001` documented only in prose (old N-S437-6)
+### compiler/SPEC.md :29305 — `E-MANIFEST-001` documented only in prose (old N-S437-6)
 **Reason:** grep-mismatch. **Detail:** No §34 row and no manifest error catalog anywhere in SPEC.
 **Suggested disposition:** update to match current (add the row, or the catalog the prose promises)
 
@@ -123,8 +129,8 @@ Uncertain: 9 docs (4 native-parser notes, 4 dated articles, kickstarter-v2), plu
 - One test comment still cites "the bunfig default 10s per-test timeout" (old N11; never in force).
 
 ## Carried uncertain items — re-checked at f92d1a8fb
-- **compiler/SPEC.md §34 `W-PREPAINT-UNCOVERED-READ` (:30739)** — a `W-` code with severity Info (old U-S445-1). Check: rename to `I-` or change severity.
-- **compiler/SPEC.md §34 `E-PROTECT-006` (:30333)** still says "PA ratification pending" (old U-S444-1). Check: ratify and drop the note.
+- **compiler/SPEC.md §34 `W-PREPAINT-UNCOVERED-READ` (:32049)** — a `W-` code with severity Info (old U-S445-1). Check: rename to `I-` or change severity.
+- **compiler/SPEC.md §34 `E-PROTECT-006` (:31623)** still says "PA ratification pending" (old U-S444-1). Check: ratify and drop the note.
 - **compiler/src/api.js :1850** cites the RETIRED `E-WRITE-NOT-IN-LOGIC-CONTEXT` row as authority (old U-S445-2). Check: cite the live rule.
 - **scripts/conflict-marker-gate.ts :5** says "117 duplicated Sections rows"; the old measurement was 114 non-identical rows (old U-S422-1).
 - **`E-MU-001`** has one SPEC mention while emitted from two files (old U-S422-2).
@@ -134,9 +140,10 @@ Uncertain: 9 docs (4 native-parser notes, 4 dated articles, kickstarter-v2), plu
 - **Bootstrap SPEC silences flagged by #1202** — sequence index type, E-FN-003 vs E-FN-004 (old U-S445-3; not re-checked).
 
 ## Closed since the last report (re-verified at f92d1a8fb)
+- (S483 delta) none of the SPEC-facing findings closed between f92d1a8fb and fa24c93bb: §39.8 migration artifacts still have no writer in compiler/src; E-ERROR-016 still "Nominal" at SPEC :23957 while analyze.scrml emits it (:48918); §32 in-arm `~` text still at :31054; E-MANIFEST-001 prose-only still at :29305; the E-PROTECT-006 row (:31623) still says "PA ratification pending". Not re-checked at S483: the `api.js :1850`, `conflict-marker-gate.ts :5`, `E-MU-001`, `parseRawCreateTableColumns` and known-gaps drift (155) items.
 - N-S458-1 (SPEC §21.4 silent on re-exports): SPEC now has 30 `export *` mentions.
 - N-S455-2 (`scrml fix --help` advertising `.run() !{ _ :> {} }`): no such help text; only superseded-ruling comments remain.
-- N-S454-1 (`E-NAME-COLLIDES-RESERVED-PREFIX` without a §34 row): row present (SPEC :30763).
+- N-S454-1 (`E-NAME-COLLIDES-RESERVED-PREFIX` without a §34 row): row present (SPEC :32074).
 - N-S453-7 (PRIMER lists an `Agent` tool): the PRIMER now says "NO `Agent`".
 - N-S405-3 (`g-tenant-floor-does-not-harvest-raw-DDL` stale-open): marker is `status=resolved`.
 - U1 / U4 (articles outside every compile gate / untracked): `docs/articles` is on the claim-gate surface (scripts/claim-gate-surface.js :28) and tracked.

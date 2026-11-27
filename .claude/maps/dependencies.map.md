@@ -1,6 +1,6 @@
 # dependencies.map.md
 # project: scrml
-# updated: 2026-11-08T16:47:39Z  commit: f92d1a8fb
+# updated: 2026-11-26T22:24:19Z  commit: fa24c93bb
 # Versions: package.json range, then the installed node_modules version in parentheses. Runtime: bun >=1.3.13 (engines); CI pins bun 1.4.3.
 
 ## Runtime Dependencies
