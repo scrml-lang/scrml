@@ -101,82 +101,72 @@ let batchDepth = 0;
 let constructing = 0;
 let owed = [];
 const SEEDING = Symbol("seeding");
-
-// s483 r1 (s483-host-render-request fix round, review HIGH-1; RULED S483,
-// ruling:user-voice-scrml.md-S483-host-calls-render-request, Q15 (a): "a run cap on the render
-// queue now, matching the S482 effect cap, so no shape can hang") — THE RUN'S CAUSE.
-// The per-flush caps (drainQueues) count the runs of one flush, and a loop that laps through an
-// awaited value never meets them: a render effect reaches host glue that clicks a button, the
-// handler writes a request's dependency, the request runs, and its settle — a microtask, a new
-// flush — writes the cell the render reads (probe R10). Every lap starts a flush at zero, and the
-// microtask chain never yields to the event loop, so the page hung. So each queued run carries
-// its CAUSE: the run (a `LapNode`) that was executing when it was queued, or null (an event
-// from outside, a timer, the program body). A run's lap count is one more than the count of the
-// nearest run of the SAME effect among its causes — the number of times it has run in one chain
-// of cause and effect. `suspend` carries the cause across its await, so a settle's writes are
-// caused by the run that started the wait. A chain ends when the page yields to the event loop
-// (a macrotask, `lapTick`): a wait that settles after that starts a fresh chain, so a request
-// whose server answer re-triggers it is not a hang and is not capped. A chain of DIFFERENT runs
-// (120 requests each depending on the last, one interpolation reading them all) counts 1 for
-// each run, however long it is: only a run repeated in its own causes counts up.
-let runCause = null;                    // the LapNode of the run executing now, or null
-let lapEpoch = 0;                       // advanced once the page yields to the event loop
-let lapTickPending = false;
-const lapTimer = globalThis.setTimeout; // the host's, as the runtime loaded (a test's fake clock is its own)
-
-/** The run of `e` whose cause is `cause`: its lap count is one more than the nearest same-effect cause's. */
-function lapNode(cause, e) {
-  let c = cause;
-  while (c !== null && c.e !== e) c = c.parent;
-  return { e, n: c === null ? 1 : c.n + 1, parent: cause };
-}
-
-/** A wait started under a cause: the chain it belongs to ends when the page next yields. */
-function lapTick() {
-  if (lapTickPending || typeof lapTimer !== "function") return;
-  lapTickPending = true;
-  lapTimer(() => { lapTickPending = false; lapEpoch++; lapTripped.clear(); }, 0);
-}
-
-// The effects a cap stopped since the page last yielded. A loop that one flush's cap stopped and
-// whose request carried it into the next flush is stopped there by the lap cap — the same cycle,
-// logged once (by the cap that met it first).
-const lapTripped = new Set();
-function noteTripped(e) {
-  lapTripped.add(e);
-  lapTick();
-}
-
-/**
- * A run queue: a Set that remembers the cause of each entry (`runCause`) — the LATEST run that
- * queued it (a run queued again by a later run reflects that run's write too; an outside write,
- * whose cause is null, does not replace a run's). So a loop's request, queued by every lap of a
- * one-flush loop, carries the last lap's count into the next flush, not the first's.
- */
-class RunQueue extends Set {
-  constructor() {
-    super();
-    this.causes = new Map();
-  }
-  add(e) {
-    if (runCause !== null || !super.has(e)) this.causes.set(e, runCause);
-    return super.add(e);
-  }
-  delete(e) {
-    this.causes.delete(e);
-    return super.delete(e);
-  }
-  clear() {
-    this.causes.clear();
-    super.clear();
-  }
-}
-
-const queue = new RunQueue();
+const queue = new Set();
 // `<effect>` bodies (§6.7.4) wait until the render / structure effects of the
 // same flush have settled: an `if=` region or `<each>` row the same batch
 // unmounts unregisters its effects (teardown step 1) BEFORE they could run.
-const effectQueue = new RunQueue();
+const effectQueue = new Set();
+
+// s483 r2 (s483-host-render-request fix round 2; RULED S483, ruling:user-voice-scrml.md-S483-render-bound-time:
+// "Time without yielding" — "stop re-running render effects once the page has gone ~1 s without yielding to
+// the browser") — THE RENDER STALL BOUND. The per-flush cap (drainQueues) counts the runs of one flush. A loop
+// that laps through an awaited value starts a new flush each lap and never meets it: a render effect reaches
+// host glue that clicks a button, the handler writes a request's dependency, and the request's settle — a
+// microtask — writes the cell the render reads (probe R10). That microtask chain never lets the page yield, so
+// it hung. So the runtime watches for the page yielding to the event loop: when a flush starts and no yield
+// is being watched for, it starts a watch: a new `stallId`, the time (`stallSince`), and a tick posted to
+// itself through a MessageChannel (a setTimeout captured at load where there is none). The tick runs only in a
+// later task, so when it runs the page has yielded and the watch ends. A render effect (an `Effect`: an
+// interpolation, an attribute, an `if=` / `<each>`) that is about to RE-RUN — it already ran during this watch
+// — when RENDER_STALL_MS (`globalThis.__scrml_render_stall_ms` overrides, for tests) or more have passed since
+// the watch began is skipped, and the stall is logged once. After the page next yields, render effects run
+// again. Only render effects: an `<effect>` / `<request>` keeps the per-flush cap (s482), a runtime `^{}` block
+// its own. A finite chain of updates, however many laps, completes if it finishes within the bound; the trip
+// point depends on the machine's speed (accepted in the ruling). A single run that never returns is not bounded.
+// A yield the runtime cannot observe (a task that ran before its own tick did) still counts toward the bound.
+const RENDER_STALL_MS = 1000;
+let stallId = 0;                        // the current watch (advanced as each watch begins)
+let stallSince = 0;                     // when the current watch (a stretch without a yield) began
+let yieldWatched = false;               // a tick is posted and has not run yet
+// a render loop has been logged since the page last yielded — by the per-flush cap or the stall bound,
+// whichever met it first: one report per stall (a loop lapping through a request meets the per-flush cap in
+// every lap's flush, and each effect in it meets it; reported once, not once a lap or once an effect)
+let loopReported = false;
+const stallClock = (() => {
+  const p = globalThis.performance;
+  return p !== undefined && p !== null && typeof p.now === "function" ? p.now.bind(p) : Date.now;
+})();
+const yieldTimer = globalThis.setTimeout;   // the host's, as the runtime loaded (fallback only)
+const yieldPort = (() => {
+  if (typeof MessageChannel !== "function") return null;
+  const ch = new MessageChannel();
+  ch.port1.onmessage = sawYield;
+  // a server-side or test process must not stay alive for this port
+  if (typeof ch.port1.unref === "function") ch.port1.unref();
+  return ch.port2;
+})();
+
+/** A task ran: the page yielded to the event loop since the watch began. */
+function sawYield() {
+  if (!yieldWatched) return;
+  yieldWatched = false;
+  loopReported = false;
+}
+
+/** A flush is starting: if no yield is being watched for, start a new watch (a new `stallId`) from now. */
+function watchYield() {
+  if (yieldWatched) return;
+  yieldWatched = true;
+  stallId++;
+  stallSince = stallClock();
+  if (yieldPort !== null) yieldPort.postMessage(0);
+  else if (typeof yieldTimer === "function") yieldTimer(sawYield, 0);
+}
+
+function renderStallMs() {
+  const n = globalThis.__scrml_render_stall_ms;
+  return typeof n === "number" && n >= 0 ? n : RENDER_STALL_MS;
+}
 
 function track(source) {
   if (tracking) {
@@ -217,7 +207,7 @@ export function batch(fn) {
 // logs the cycle once (console.error) and skips the run. The next flush counts afresh.
 // s483 (s483-host-render-request; RULED S483, ruling:user-voice-scrml.md-S483-host-calls-render-request,
 // Q15 (a)) — a render / structure effect taken from `queue` has the same cap (drainQueues); and
-// (s483 fix r1) both queues have a second bound ACROSS flushes, the lap cap (`runCause`).
+// (s483 r2) a second bound across flushes, the stall bound (RENDER_STALL_MS) — render effects only.
 //
 // One flush at a time (s449 fix round, MEDIUM-1): a render effect that writes
 // while it runs — `<each>`'s reconcile sets a surviving row's item cell before
@@ -301,13 +291,11 @@ function drainQueues() {
   const effectRuns = new Map();        // s482 (s482-effect-host): runs of each queued effect, this flush
   let maxEffectRuns = 0;
   const renderRuns = new Map();        // s483 (s483-host-render-request): runs of each render effect, this flush
+  watchYield();                        // s483 r2: the stall bound's watch for the page yielding
   for (;;) {
     let e = null;
-    let cause = null;                  // s483 r1: the run that queued it (`runCause`)
-    let capped = false;                // s483 r1: a render effect or a queued effect (the lap cap applies)
     if (queue.size > 0) {
       [e] = queue;
-      cause = queue.causes.get(e) ?? null;
       queue.delete(e);
       // s483 — the render queue's backstop (RULED S483, ruling:user-voice-scrml.md-S483-host-calls-render-request,
       // Q15 (a): "a run cap on the render queue now, matching the S482 effect cap, so no shape can hang").
@@ -316,17 +304,27 @@ function drainQueues() {
       // is NOT built: ruled (Q15 b), queued: lane s483-q15b-pure-marker. Today host glue that fires a DOM event whose
       // handler writes the cell an interpolation reads re-queues that render (probe F9), forever in one
       // flush before this cap. So one runs at most metaMaxRuns() times per flush; past that the cycle is
-      // logged once and the run skipped. A runtime `^{}` block keeps its own cap. The lap cap below
-      // bounds the same loop when it laps through an awaited value (a new flush each lap, probe R10).
+      // logged (once until the page next yields, `loopReported`) and the run skipped. A runtime
+      // `^{}` block keeps its own cap. The stall bound below (s483 r2, RENDER_STALL_MS) bounds the same
+      // loop when it laps through an awaited value (a new flush each lap, probe R10).
       if (e instanceof Effect && !e.disposed) {
-        capped = true;
         if (maxEffectRuns === 0) maxEffectRuns = metaMaxRuns();
         const n = (renderRuns.get(e) ?? 0) + 1;
         renderRuns.set(e, n);
         if (n > maxEffectRuns) {
-          if (n === maxEffectRuns + 1) {
+          if (n === maxEffectRuns + 1 && !loopReported) {
+            loopReported = true;
             console.error("[scrml] render effect exceeded " + maxEffectRuns + " runs in one update — possible infinite loop (a value it reads is written while it renders); the run is skipped");
-            noteTripped(e);
+          }
+          continue;
+        }
+        // s483 r2 — the stall bound (RENDER_STALL_MS, above): a re-run once the page has gone the bound
+        // without yielding is skipped; logged once per stall (`loopReported`)
+        if (e.stall !== stallId) e.stall = stallId;
+        else if (stallClock() - stallSince >= renderStallMs()) {
+          if (!loopReported) {
+            loopReported = true;
+            console.error("[scrml] render effects stopped: the page has gone " + renderStallMs() + " ms without yielding to the browser — possible infinite loop (a value a render reads keeps being written, through an awaited result or host code); render effects run again once the page yields");
           }
           continue;
         }
@@ -338,17 +336,14 @@ function drainQueues() {
       continue;
     } else if (effectQueue.size > 0 && bodyHold === 0) {   // s482: held while the body runs (runBody)
       [e] = effectQueue;
-      cause = effectQueue.causes.get(e) ?? null;
       effectQueue.delete(e);
       if (!e.disposed) {
-        capped = true;
         if (maxEffectRuns === 0) maxEffectRuns = metaMaxRuns();
         const n = (effectRuns.get(e) ?? 0) + 1;
         effectRuns.set(e, n);
         if (n > maxEffectRuns) {
           if (n === maxEffectRuns + 1) {
             console.error("[scrml] effect exceeded " + maxEffectRuns + " runs in one update — possible infinite loop (a dependency is written while the effect runs); the run is skipped");
-            noteTripped(e);
           }
           continue;
         }
@@ -357,29 +352,10 @@ function drainQueues() {
       break;
     }
     if (e.disposed) continue;
-    // s483 r1 — THE LAP CAP (see `runCause`): a render effect or a queued `<effect>` / `<request>`
-    // repeated more than metaMaxRuns() times in its own chain of causes — a chain that never let the
-    // page yield — is a loop: logged once (not again when a per-flush cap already logged it since the page last
-    // yielded, `lapTripped`) and the run skipped, which ends the chain. A loop inside one
-    // flush meets the per-flush cap above first (its lap count is never larger), so one run is never
-    // counted against both. Any other queued run (a `^{}` block, which keeps its own cap) only carries
-    // its cause on.
-    const node = lapNode(cause, e);
-    if (capped && node.n > maxEffectRuns) {
-      if (node.n === maxEffectRuns + 1 && !lapTripped.has(e)) {
-        console.error("[scrml] " + (e instanceof Effect ? "render effect" : e instanceof Request ? "<request>" : "effect") + " exceeded " + maxEffectRuns + " runs in one chain of updates that never yielded to the event loop — possible infinite loop (a value it reads is written, through an awaited result, after it runs); the run is skipped");
-      }
-      noteTripped(e);
-      continue;
-    }
-    const savedCause = runCause;
-    runCause = node;
     try {
       e.run();
     } catch (err) {
       if (!failed) { failed = true; first = err; } else reportLater(err);
-    } finally {
-      runCause = savedCause;
     }
   }
   if (failed) throw first;
@@ -633,6 +609,7 @@ class Effect {
     this.blank = blank;
     this.disposed = false;
     this.sources = new Set();
+    this.stall = stallId;   // s483 r2: the stall it last ran in (drainQueues, the stall bound)
     stats.effects++;
     scope.own(() => {
       this.disposed = true;
@@ -1247,18 +1224,10 @@ export function suspend(task, value, k, onLiveReject) {
   // frame of the waiting call being awaited, if `value` is one — its restarts lift the continuation
   const frame = curFrame;
   const callee = waitFrames.get(value);
-  // s483 r1 (see `runCause`): the run that started this wait causes what its continuation writes —
-  // unless the page yielded to the event loop before it settled (a fresh chain then)
-  const cause = runCause;
-  const epoch = lapEpoch;
-  if (cause !== null) lapTick();
-  const resumeCause = () => (epoch === lapEpoch ? cause : null);
   Promise.resolve(value).then(
     (v) => {
       task.pending--;
       if (task.cancelled) return;
-      const savedCause = runCause;
-      runCause = resumeCause();
       try {
         const lift = callee !== undefined ? callee.restarts : null;
         batch(() => untrack(() => withStamp(stamp, frame, lift, k, v)));
@@ -1266,24 +1235,17 @@ export function suspend(task, value, k, onLiveReject) {
         reportHostError(e);
         abandonWaiting(task);
       } finally {
-        runCause = savedCause;
         task.owner.settled(task);
       }
     },
     (e) => {
       task.pending--;
-      const savedCause = runCause;
-      runCause = resumeCause();
-      try {
-        if (!task.cancelled) {
-          if (e !== REPORTED) reportHostError(e);
-          // s475 r1 (F4): the owner's own end-of-run on a live host rejection (a request's signals)
-          if (onLiveReject) {
-            try { onLiveReject(e); } catch (e2) { reportHostError(e2); }
-          }
+      if (!task.cancelled) {
+        if (e !== REPORTED) reportHostError(e);
+        // s475 r1 (F4): the owner's own end-of-run on a live host rejection (a request's signals)
+        if (onLiveReject) {
+          try { onLiveReject(e); } catch (e2) { reportHostError(e2); }
         }
-      } finally {
-        runCause = savedCause;
       }
       task.owner.settled(task);
     },
