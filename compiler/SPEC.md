@@ -5552,9 +5552,10 @@ rather than trusting a declaration. Then, for an effect body:
    *(S483 — the same unproven-host judgement, by ruling, beyond effect bodies:* a `<request>` body,
    E-REQUEST-WRITE-UNPROVEN (§6.7.7 Normative Statements); a derived formula or render expression,
    E-VALUE-WRITE-UNPROVEN (§6.15 — ⚑ ruled, NOT built in the bootstrap: g-boot-render-host-call-hang-s482, queued as
-   lane s483-q15b-pure-marker); and the run bound covers render effects too, within an update and across the
-   updates one chain of causes makes without yielding (§6.15, "The render self-write hang").
-   ruling:user-voice-scrml.md-S483-host-calls-render-request.)*
+   lane s483-q15b-pure-marker); and the per-update run bound above covers render effects too (§6.15, "The render
+   self-write hang"). ruling:user-voice-scrml.md-S483-host-calls-render-request. A render effect has a second bound
+   across updates, by time without yielding (§6.15, ruling:user-voice-scrml.md-S483-render-bound-time); an effect
+   body has only the per-update bound of this rule.)*
 6. **Outside the analysis, stated:** a network echo — the body sends to a `<channel>` or calls the server, and a
    server push later writes a synced cell the effect lists — is a later write by a different writer (the push),
    not a write by the effect. It is possible, it is not a compile-time cascade, and no compile-time rule can see
@@ -8455,21 +8456,34 @@ case reads the same in all three rules.
   posture: a runtime bound would mean the compile-time rule had a hole). *(S483, amended:)* host code is outside the
   compile-time rule — a render expression reaching host glue that writes the cell it reads re-queued its render
   forever in one update and hung the page — so, as defence in depth, an implementation's runtime SHALL bound the runs
-  of one render effect and report the cycle rather than hang, as §6.7.4 rule 5 requires for an effect: within one
-  update, and across the updates that one chain of cause and effect makes before the page yields to the event loop
-  (a render whose run leads back to itself through an awaited result — a `<request>`'s settle — runs each lap in a
-  new update, so a bound per update alone never meets it). A chain of different runs, however long, is not a cycle;
-  host code that schedules its own re-entry (its own microtask) is outside what a runtime can attribute to a run,
-  and is closed by the compile-time rule above. *(Provenance: ruling:user-voice-scrml.md-S483-host-calls-render-request — Q15, rec *"(a) a run cap on the
+  of one render effect and report the cycle rather than hang, in two ways. **Within one update**, as §6.7.4 rule 5
+  requires for an effect: a render effect runs at most a fixed number of times (the same bound as an effect's) in one
+  update. **Across updates, by time:** once the page has gone about one second without yielding to the event loop, a
+  render effect that has already run since the page last yielded SHALL NOT run again until the page yields, and the
+  stall SHALL be reported once. A render whose run leads back to itself through an awaited result (a `<request>`'s
+  settle) runs each lap in a new update, so a bound per update alone never meets it; the time bound does. The time
+  bound does not ask what caused a write: a loop whose writes come through a request's settle and a loop whose writes
+  come from host code's own microtask are bounded the same way. A chain of updates that ends inside the bound
+  completes, however many laps it takes; a chain that does not end before the bound is stopped, whether or not it
+  would have ended later, so where it stops depends on the machine's speed. The time bound covers render effects
+  only: an `<effect>` body keeps rule 5's per-update bound, and a single run that never returns is not bounded by
+  either. *(Provenance: ruling:user-voice-scrml.md-S483-host-calls-render-request — Q15, rec *"(a) a run cap on the
   render queue now, matching the S482 effect cap, so no shape can hang"*. RULED: *"yes, your recommendations on
-  both"* · supersedes: "no runtime re-run counter is needed", as an absolute · **Direction of change:** runtime-only,
-  nothing newly rejected; a cycle that hung now stops, logged once, after 100 runs of the render effect in one update
-  (probe F9), or after 100 laps of its own chain of causes across updates that never yielded (probes R10 / R11, a
-  `<request>` settle in the loop — S483 fix round r1, #2123 review HIGH-1). Still hangs, measured: host glue that
-  clicks from its own `queueMicrotask` (probe X2, g-boot-render-host-call-hang-s482) — closed by the Q15 (b) refusal
-  once built. Built in the bootstrap runtime (`compiler/self-host-v2/slice-m1/runtime/runtime.js` `drainQueues` and
-  `suspend`, the run's cause; the same bound as the effect queue, `globalThis.__scrml_max_meta_runs`); impl#1 is
-  frozen.)*
+  both"* · ruling:user-voice-scrml.md-S483-render-bound-time — owner chose *"Time without yielding (Recommended)"*:
+  stop re-running render effects once the page has gone ~1 s without yielding to the browser; drop the cause tracking;
+  bounds the host-glue microtask loop (X2) too; cost accepted: the trip point depends on timing · supersedes: "no
+  runtime re-run counter is needed", as an absolute; and the S483 r1 text "across the updates that one chain of cause
+  and effect makes … A chain of different runs, however long, is not a cycle" (a lap cap of 100 per chain of causes,
+  which stopped a finite 299-step chain, probe P5) · **Direction of change:** runtime-only, nothing newly rejected;
+  measured (S483 fix round r2, #2123, Chromium and happy-dom): a cycle that hung now stops — after 100 runs of the
+  render effect in one update (probe F9), or once the page has gone 1000 ms without yielding (probes R10 / R11, a
+  `<request>` settle in the loop; probe X2, host glue clicking from its own `queueMicrotask`; probe P6, a request
+  ring through `if=` arm remounts with no host code) — each logged once per stall, the page responsive after it.
+  Finite chains that the r1 lap cap stopped at 100 complete with base's values and no log (probe P5, 299 steps;
+  150-lap request and row-mount chains with answers immediate, by MessageChannel, setImmediate or a fake clock).
+  Built in the bootstrap runtime (`compiler/self-host-v2/slice-m1/runtime/runtime.js` `drainQueues`,
+  `RENDER_STALL_MS` = 1000, `globalThis.__scrml_render_stall_ms` overrides for tests; the per-update bound is the
+  effect queue's, `globalThis.__scrml_max_meta_runs`); impl#1 is frozen.)*
 
 **Outside the analysis, stated.** As for effects (§6.7.4 rule 6): a value position that calls the server, whose
 server-side code later causes a push into a synced cell, is a later write by a different writer, not a write by the
