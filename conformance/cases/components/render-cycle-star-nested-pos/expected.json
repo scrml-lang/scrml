@@ -1,0 +1,36 @@
+{
+  "id": "components-render-cycle-star-nested-pos",
+  "description": "A nested `<*qh/>` that does not lead back (c02) compiles and renders.",
+  "language-version": "1.0",
+  "spec": "§66.6.2",
+  "provenance": "ruling:user-voice-scrml.md-S483-star-self-render-error (\"Named error, always (Recommended)\" ... \"Guards do not make it legal.\")",
+  "rationale": "§66.6.2 rule 1: a nested `<*g/>` that does not lead back is unaffected.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-DECL-RENDER-CYCLE-"
+    ],
+    "notCodes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#o",
+        "text": "y"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-render-cycle-unimplemented-s483",
+      "fails": {
+        "codes": [
+          "emitted:E-ATTR-001=6",
+          "emitted:E-COMPONENT-035=2",
+          "emitted:E-MARKUP-001=2"
+        ],
+        "runtime": "sha256:b18ad73741195bfa"
+      }
+    }
+  }
+}

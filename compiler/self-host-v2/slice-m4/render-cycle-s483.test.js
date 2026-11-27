@@ -58,7 +58,7 @@ describe("item 1: E-DECL-RENDER-CYCLE-STAR — a `<*f/>` inside the markup it re
 
   test("c03: guarded by `if=` — still refused (guards do not make it legal)", async () => {
     const { es } = await errors(P(`${PH}
-let <show:boolean=false/>
+let <show:bool=false/>
 <ph:Ph=.A single>
   <A rule=.B><b id="o">x</b></>
   <B rule=.A><div if=(@show)><*ph/></div></>

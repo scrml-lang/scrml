@@ -1,0 +1,10 @@
+// §66.6.2 rule 1 (S483) — guarded by `if=`, still refused.
+<program>
+${ type Ph:enum = { A, B } }
+let <show:bool=false/>
+<ph:Ph=.A single>
+  <A rule=.B><b id="o">x</b></>
+  <B rule=.A><div if=(@show)><*ph/></div></>
+</>
+<main><*ph/></main>
+</program>

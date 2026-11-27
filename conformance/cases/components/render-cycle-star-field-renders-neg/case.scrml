@@ -1,0 +1,9 @@
+// §66.6.2 rule 1 (S483) — a field's `renders` holding its own `<*v/>`.
+<program>
+<card t:string="x">
+    let <v:int=1/>
+    renders <b id="o"><*v/></b>
+</>
+renders <span><*v/></span>
+<card/>
+</program>

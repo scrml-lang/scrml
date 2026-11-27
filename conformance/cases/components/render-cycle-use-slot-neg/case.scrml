@@ -1,0 +1,8 @@
+// §66.6.2 rule 2 (S483) — through slot content.
+<program>
+<wrap t:string="w">
+</> renders <div><slot/></div>
+<card t:string="x">
+</> renders <wrap><card/></wrap>
+<main id="o"><card/></main>
+</program>
