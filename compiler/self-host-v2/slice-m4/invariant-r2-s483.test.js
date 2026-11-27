@@ -293,3 +293,30 @@ invariant (span <= 5) [ab]
     expect(errs(r)[0].message).toContain("span = 9");
   }, 120000);
 });
+
+// ---------------------------------------------------------------------------------------------------------------
+// item 8 (cross-lane with #2129, ruling:user-voice-scrml.md-S482-trapping-construct-init — INTERIM refusal of an
+// initializer inside a construct that can trap): a construction of an invariant-bearing value the compiler does not
+// decide can trap (E-WRITE-INVARIANT-RT), so such an initializer inside a construct is E-FILE-SCOPE-INIT-IN-CONSTRUCT;
+// a decided one (an all-literal value its invariant folds to true) is accepted.
+// ---------------------------------------------------------------------------------------------------------------
+describe("item 8 — a construction that can trap, in an initializer inside a construct", () => {
+  const T = (init) => `<program>
+\${
+    type Range:struct = { lo: int, hi: int } invariant (lo <= hi) [rng]
+    const items: int[] = [];
+}
+<p id="a" if=(items.length > 0)>\${ ${init} }\${r.lo}</p>
+<p id="z">end</p>
+</program>
+`;
+  test("an undecided construction is refused (E-FILE-SCOPE-INIT-IN-CONSTRUCT, naming the invariant trap)", async () => {
+    const r = await result(T("const r: Range = { lo: items.length, hi: 0 };"));
+    expect(codes(r)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(errs(r)[0].message).toContain("constructs a value of `Range`");
+  }, 120000);
+  test("a decided construction (all literals, the invariant folds to true) is accepted", async () => {
+    const r = await result(T("const r: Range = { lo: 1, hi: 2 };"));
+    expect(codes(r)).toEqual([]);
+  }, 120000);
+});

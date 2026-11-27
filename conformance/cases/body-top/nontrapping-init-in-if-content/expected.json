@@ -1,0 +1,27 @@
+{
+  "id": "body-top-nontrapping-init-in-if-content",
+  "description": "§7.6 rule (b) (S483) — initializers inside `if=` content that cannot trap (a literal and arithmetic, a division by a non-zero literal, `items.at(0)`) stay legal and run; a function the content calls runs only when its branch shows.",
+  "language-version": "1.0",
+  "spec": "§7.6 rule (b) (S483), §7.6 R3, §19.17, §34",
+  "source-test": "compiler/self-host-v2/slice-m4/trapping-construct-init-s483.test.js",
+  "rationale": "§7.6 rule (b) (S483): \"An initializer there that can trap SHALL be E-FILE-SCOPE-INIT-IN-CONSTRUCT\" — it runs once, just before the construct, whether or not the construct shows (§7.6 R3), so the construct's test does not guard it. ruling:user-voice-scrml.md-S482-trapping-construct-init — INTERIM: \"extend E-FILE-SCOPE-INIT-IN-CONSTRUCT to an initializer inside a construct that can fail at run time (indexing, `.value` on a maybe value, checked conversions, division by a possibly-zero value)\"; PERMANENT: branch-scoped declarations (owner: \"yes, interim refusal now and the feature later\").",
+  "expect": {
+    "notCodes": [
+      "E-FILE-SCOPE-INIT-IN-CONSTRUCT"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#a",
+        "text": "5 1.5 true"
+      },
+      {
+        "selector": "#z",
+        "text": "end"
+      },
+      {
+        "selector": "#b",
+        "count": 0
+      }
+    ]
+  }
+}

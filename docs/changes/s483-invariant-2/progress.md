@@ -171,3 +171,9 @@ impl#1 frozen (§66 Nominal there, §34.0).
 - tests: slice-m4/invariant-r2-s483.test.js (16: leak negatives n01 n02 n02b n51 n60 m01 m02 + controls, M1,
   precision, H4 / H5 compile side, M3, L4, L5); Chromium invariant-write-chromium-s483 "Chromium r2" (+3: n21,
   n29 incl. a valid-tape control, n27 with the server artifact) — 14 / 14.
+- committed e4f65d307 (hook PASS).
+- item 8: #2129 (s483-trapping-construct-init) landed on origin/main (22a6a42a9) during this round — merged.
+  Conflict: analyze Tables literal (kept `lines`, added `trapDiags`); withTyping carries `lines`. Wired:
+  analyze trapSiteWhat → invConstructTrapWhat (an object literal of an invariant-bearing type not invProven);
+  print primTraps → an InvariantGuard / InvariantValue with a check acts (an unread initializer holding one is
+  kept). Tests: invariant-r2 +2 (refused undecided, decided accepted).

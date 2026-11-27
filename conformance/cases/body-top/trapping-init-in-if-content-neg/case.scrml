@@ -1,0 +1,6 @@
+// §7.6 rule (b) (S483) — a file-scope initializer that can trap (an index read), written inside `if=` content: it runs once, just before the construct, whether or not the branch shows, so `if=(items.length > 0)` does not guard it — E-FILE-SCOPE-INIT-IN-CONSTRUCT (INTERIM, g-boot-trapping-construct-init-s482).
+<program>
+${ const items: int[] = []; }
+<p id="a" if=(items.length > 0)>${ const first: int = items[0]; }${first}</p>
+<p id="z">end</p>
+</program>

@@ -1,0 +1,10 @@
+// §7.6 rule (b) (S483) — initializers inside `if=` content that cannot trap stay legal: a literal, arithmetic, a division by a non-zero literal, and `items.at(0)` (`T | not`, never a trap). The capable form for a value that could trap — a function the content calls — runs only when the branch shows.
+<program>
+${ const items: int[] = []; }
+${ const n: int = 2; }
+${ const y: number = 3.0; }
+${ function firstOf(xs: int[]) -> int { return xs[0]; } }
+<p id="a" if=(items.length == 0)>${ const k: int = n * 2 + 1; }${ const h: number = y / 2.0; }${ const f: int | not = items.at(0); }${k} ${h} ${f is not}</p>
+<p id="b" if=(items.length > 0)>${firstOf(items)}</p>
+<p id="z">end</p>
+</program>
