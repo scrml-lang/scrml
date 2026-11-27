@@ -1839,9 +1839,18 @@ ${
         }
         const surf: Stmt[] = surfaceReset(di, target, idx).concat(unpersistReset(c.t, di, target, idx));
         if (!isProgramKind(di.kind)) return [Stmt.Write(w.cap, target, w.edit, Expr.InitOf(d, target, idx), w.check)].concat(surf);
+        // s483 (lane s483-component-cell-server-only; #2121 review MED-1, prov=pa-ruled:S483-reset-is-write):
+        // a program cell's reset is `InitOf` too — the cell's own initializer re-run, never its
+        // expression copied into the handler — so the printer can tell a reset from an ordinary
+        // write (§7.6 rule (b): a reset is a whole-value write, not a read). The printer prints it
+        // as the declared initializer where it stands (print.scrml initOfJs: the same JS as
+        // before), or the shell's `not` when §7.6 rule (b) made the cell server-only. A `<db>` cell
+        // keeps the copied initializer (its Core seed is its load's answer, not its declared one), and
+        // so does a LITERAL initializer (it reaches nothing, so §7.6 rule (b) never judges its cell).
         const ic: LC = { t: c.t, file: c.file, subst: target, snap: not, rows: c.rows };
         const init: Expr | not = lowerValue(ic, di.fields[idx].init);
         if (init is not) return [];
+        if (resetByInitOf(c.t, di, idx, init)) return [Stmt.Write(w.cap, target, w.edit, Expr.InitOf(d, target, idx), w.check)].concat(surf);
         return [Stmt.Write(w.cap, target, w.edit, init, w.check)].concat(surf);
     }
 
@@ -1878,11 +1887,27 @@ ${
         const cap: Sym | not = f.wcap;
         if (cap is not) return [];
         const ic: LC = { t: c.t, file: c.file, subst: InstRef.Lexical(0), snap: not, rows: c.rows };
-        const init: Expr | not = lowerValue(ic, f.init);
-        if (init is not) return [];
+        const init0: Expr | not = lowerValue(ic, f.init);
+        if (init0 is not) return [];
+        // s483 (lane s483-component-cell-server-only; #2121 review MED-1): the reset is `InitOf`, as
+        // resetStmt's (a `<db>` cell or a literal initializer keeps the copied initializer)
+        let init: Expr = init0;
+        if (resetByInitOf(c.t, d, idx, init0)) init = Expr.InitOf(d.sym, InstRef.Lexical(0), idx);
         let edit: EditKind = EditKind.Replace;
         if (f.graph is given) edit = EditKind.Transition;
         return [Stmt.Write(cap, InstRef.Lexical(0), edit, init, Check.Static)].concat(surfaceReset(d, InstRef.Lexical(0), idx)).concat(unpersistReset(c.t, d, InstRef.Lexical(0), idx));
+    }
+
+    // s483 — a program cell's reset is InitOf (resetStmt / resetWrite) unless field `idx` of `di` is a
+    // `<db>` cell (its Core seed is a load's answer, lowerField) or its initializer is a literal
+    fn resetByInitOf(t: Tables, di: DeclInfo, idx: int, init: Expr) -> boolean {
+        if (idx < 0 || idx >= di.fields.length) return false;
+        for (const ld of t.server.loads) { if (ld.cell.id == di.fields[idx].sym.id) return false; }
+        return match init {
+            .Lit(lit: x) :> false,
+            // no-default-arm: one question of an expression — is it a literal
+            _ :> true
+        };
     }
 
     fn isProgramKind(k: DeclKind) -> boolean {

@@ -13,7 +13,8 @@
 // of it — bodyUseOf). A server-only body cell keeps its field as a SHELL (seed `not`) and its seed runs in
 // the server artifact; a derived one (its formula runs only when read) runs nowhere. A read — a display, a
 // compound write, `bind:`, an effect dependency, a request body, a client function, an argument to a server
-// call, a reset (it re-runs the seed in the client) — keeps the cell client-read, unchanged.
+// call — keeps the cell client-read, unchanged. A reset is a whole-value write, not a read (S483, lane
+// s483-component-cell-server-only, prov=pa-ruled:S483-reset-is-write — component-cell-server-only-s483.test.js).
 //
 // Shipping path: the scrml-boot CLI (every client file read) and scripts/bootstrap-conformance.ts
 // `runBootstrapArtifact` (happy-dom). Chromium: compiler/tests/browser/body-cell-server-only-chromium-s483.browser.test.js.
@@ -171,7 +172,7 @@ describe("a program-body cell nothing on the client reads, whose seed reaches a 
 });
 
 describe("a READ keeps the body cell client-read (unchanged)", () => {
-  test("a display, a locked display, a compound write, `bind:value`, an effect dependency, a request body, a client function, a server-call argument, a reset, a later read", async () => {
+  test("a display, a locked display, a compound write, `bind:value`, an effect dependency, a request body, a client function, a server-call argument, a later read", async () => {
     for (const extra of [
       `let <keyCell:string=(tag(API_KEY))/>\n<p id="d">\${@keyCell}</p>`,
       `<keyCell:string=(tag(API_KEY))/>\n<p id="d">\${@keyCell}</p>`,
@@ -181,7 +182,6 @@ describe("a READ keeps the body cell client-read (unchanged)", () => {
       `let <keyCell:string=(tag(API_KEY))/>\nlet <m:string=""/>\n<request id="rq">\${ @m = @keyCell; }</request>`,
       `\${ function show() -> string { return @keyCell; } }\nlet <keyCell:string=(tag(API_KEY))/>\n<button id="b" onclick={ @out = show(); }>b</button>`,
       `\${ function sk(s: string) -> string { const r: Row = ?{\`SELECT name FROM users WHERE id = 1\`}.get() !{ _ :> { return s; } }; return r.name + s; } }\nlet <keyCell:string=(tag(API_KEY))/>\n<button id="b" onclick={ @out = sk(@keyCell) !{ .Transport(t) :> return }; }>b</button>`,
-      `let <keyCell:string=(tag(API_KEY))/>\n<button id="b" onclick={ @keyCell = "w"; }>b</button>\n<button id="r" onclick={ reset(@keyCell); }>r</button>`,
       `let <keyCell:string=(tag(API_KEY))/>\n<button id="b" onclick={ @keyCell = "w"; }>b</button>\n<button id="r" onclick={ @out = @keyCell; }>r</button>`,
     ]) {
       const b = await build(PROG(LIB, extra));

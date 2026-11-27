@@ -1,6 +1,6 @@
 # test.map.md
 # project: scrml
-# updated: 2026-11-08T16:47:39Z  commit: f92d1a8fb
+# updated: 2026-11-26T22:24:19Z  commit: fa24c93bb
 # File counts are `git ls-files … | grep .test.` at f92d1a8fb. Suites were NOT re-run for this map, except the bootstrap conformance probe (figures in bootstrap.map.md).
 
 ## Test Framework
@@ -23,12 +23,12 @@ Types baseline: compiler/tests/TYPES-BASELINE.json (scripts/types-gate.ts)
 S475 additions: unit/ci-postgres-live-pipefail-s475, unit/ci-pr-base-s475, unit/scrml-boot-write-outputs-s475; helpers/actions-shell.js
 
 ## Bootstrap suites (compiler/self-host-v2)
-slice-m1: 11 · slice-m2: 12 · slice-m3: 5 · slice-m4: 164 · slice-codec: 2 test files; acceptance/: 285 cases in 27 categories (graded by slice-m4/acceptance.test.js `STATUS`).
+slice-m1: 12 · slice-m2: 14 · slice-m3: 5 · slice-m4: 290 · slice-codec: 2 test files (323); acceptance/: 286 cases in 27 categories (graded by slice-m4/acceptance.test.js `STATUS`).
 S475 added slice-m1/request.{core,runtime}.test.js and 35 slice-m4 `*-s475.test.js` (request-*, pending-cells, lifecycle-*, pg-envelope, sql-error-pg, statement-savepoint{,-pg}, pg-key-columns, namespace-import{,-chromium}, local-tape-edits, literal-carriers, transport-every-client-bang, caller-transport, nonbang-callee-envelope, value-if-object-arm, struct-context-valueif-followups{,-r1}, partial-followups{,-r1}, handled-landing-check{,-r1}, optgroup-narrow, parser-residue, failable-arm-qualifier, tx-connection-guards, unmatched-failure-tag, w-match-001-failing, boot-small-gaps2, boot-file-scope-own-value, request-id-unreferenceable, scrml-boot-output-hardening).
 Live Postgres: pg-*-s475 tests need SCRML_TEST_PG_URL (CI `postgres-live` sets it + SCRML_TEST_PG_REAL=1); `SCRML_PGTEST=0` skips.
 
 ## Conformance corpus
-conformance/cases/<category>/<case-id>/{case.scrml, expected.json[, aux *.scrml]} — 65 categories, 1,827 cases. expected.json: id, description, language-version, spec, source-test, rationale, expect {codes, notCodes, severity, runtime…}.
+conformance/cases/<category>/<case-id>/{case.scrml, expected.json[, aux *.scrml]} — 67 categories, 1,986 cases. expected.json: id, description, language-version, spec, source-test, rationale, expect {codes, notCodes, severity, runtime…}.
 Adapters: conformance/adapters/impl1-ts.ts, hybrid.ts. driver.ts = the 8-verb input vocabulary; fake-clock.ts; normalize.ts (DOM normalization).
 
 ## E2E

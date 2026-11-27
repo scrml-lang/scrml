@@ -1,6 +1,6 @@
 # infra.map.md
 # project: scrml
-# updated: 2026-11-08T16:47:39Z  commit: f92d1a8fb
+# updated: 2026-11-26T22:24:19Z  commit: fa24c93bb
 # No cloud/IaC in the repo: no Dockerfile, docker-compose, Terraform, k8s, fly/vercel/netlify/wrangler config at f92d1a8fb.
 
 ## Deployment
