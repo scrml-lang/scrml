@@ -167,3 +167,31 @@ describe("r1: the review's blank-page shapes are refused; the newly-accepted for
     }
   }, 120000);
 });
+
+// q8-fu (#2129 r1 review MED-1 / LOW-1) — in Chromium.
+describe("q8-fu: a literal repeat / pad that can pass the longest string; `%` by a number", () => {
+  const PRE = `<program>\n\${ const n: int = 2; }\n\${ const s: string = "ab"; }\n\${ const y: number = 0.0; }\n`;
+  test("MED-1: s.repeat(600000000) / s.padStart(600000000) in an untaken if= — refused, exit 1 (base: compiled, page blank)", () => {
+    for (const call of ["s.repeat(600000000)", "s.padStart(600000000)"]) {
+      const r = compile(`${PRE}<p id="a" if=(n > 5)>\${ const c: string = ${call}; }\${c}</p>\n<p id="z">end</p>\n</program>\n`);
+      expect([call, r.exitCode]).toEqual([call, 1]);
+      expect(r.text).toContain("E-FILE-SCOPE-INIT-IN-CONSTRUCT");
+      expect(r.text).toContain("not proven to fit the longest string");
+    }
+  }, 120000);
+
+  test("MED-1 (ruling S483-unread-trapping-init-runs): the unread body-top s.repeat(600000000) runs at its place and traps (base: dropped, the page mounted)", async () => {
+    if (skip()) return;
+    for (const call of ["s.repeat(600000000)", "s.padEnd(600000000)"]) {
+      const out = build(`${PRE}\${ const c: string = ${call}; }\n<p id="z">end</p>\n</program>\n`);
+      const r = await load(out, ["z"]);
+      expect([call, r.errors.some((e) => e.includes("E-INDEX-OUT-OF-RANGE-RT"))]).toEqual([call, true]);
+    }
+  }, 120000);
+
+  test("LOW-1: `%` by a number binding (NaN by 0) and a repeat that provably fits — compile and run in an untaken if=", async () => {
+    if (skip()) return;
+    const out = build(`${PRE}<p id="a" if=(n > 5)>\${ const m: number = 7.0 % y; }\${ const r: string = s.repeat(3); }\${m} \${r}</p>\n<p id="b">\${ const r2: string = s.repeat(3); }\${r2}</p>\n<p id="z">end</p>\n</program>\n`);
+    expect(await load(out, ["a", "b", "z"])).toEqual({ errors: [], texts: ["<none>", "ababab", "end"] });
+  }, 120000);
+});
