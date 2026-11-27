@@ -183,15 +183,18 @@ describe("a READ through any instance keeps the component cell client-read (unch
   }, 180000);
 });
 
-describe("not covered here — a component ATTRIBUTE (a prop) is not a body cell (gap g-boot-component-attr-server-only-s483)", () => {
-  test("a prop default or a use-site value reaching the secret still ships it (pinned, open)", async () => {
+// A component ATTRIBUTE (a prop), and a cell a use site gives a value, are judged the same way since lane
+// s483-component-attr-server-only (ruling:user-voice-scrml.md-S483-component-attr-server-only; gap
+// g-boot-component-attr-server-only-s483 resolved): slice-m4/component-attr-server-only-s483.test.js.
+describe("a component ATTRIBUTE nothing reads (c16 / c17) — now an empty stand-in too", () => {
+  test("a prop default or a use-site value reaching the secret is not in the client", async () => {
     for (const extra of [
       `<card t:string=(API_KEY)>\n  let <k:string=(tag(t))/>\n</> renders <b>x</b>\n<card/>`,
       CARD(`let <k:string=(tag(t))/>`, `<b>x</b>`) + `\n<card t=(API_KEY)/>`,
     ]) {
       const b = await build(PROG(extra));
       expect(b.ok).toBe(true);
-      expect(leaked(b.client, ["zz-sk-live-123"]).length).toBeGreaterThan(0);
+      expect(leaked(b.client, SECRET)).toEqual([]);
     }
   }, 300000);
 });
