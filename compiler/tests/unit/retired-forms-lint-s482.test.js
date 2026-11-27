@@ -391,16 +391,18 @@ describe("each fence's line is commonmark.js's own sourcepos (#2101 r4 F1; S483 
       expect(r.stderr).not.toContain("the two CommonMark readers disagree");
     } finally { rmSync(d, { recursive: true, force: true }); }
   });
-  // S483: marked splices a blockquote's `text` with a nested blockquote's text length when it re-reads that nested
-  // blockquote after a lazy line, so `text` no longer starts with segment 1 — segment 1 is placed at the
-  // blockquote's line by construction, not by that text match (r4 classify fuzz: 129 / 132 exit 2 before, 0 after)
+  // marked splices a blockquote's `text` with a nested blockquote's text length when it re-reads that nested
+  // blockquote after a lazy line; marked-internals placement exited 2 on these (the second: #2140 r0 review MED-1,
+  // "container could not be placed"). commonmark.js's sourcepos places them (S483 r1).
   test("S483: a fence in a nested blockquote's list, then a top-level line, is placed (was exit 2)", () => {
     expect(readFences("> > - ```scrml\n> >   " + W + "\n> >   ```\na\n").map((f) => [f.startLine, f.text])).toEqual([[2, W]]);
     expect(readFences("> > - ```scrml\n> >   " + W + "\n> >   ```\na\n\n```scrml\n" + W + "\n```\n").map((f) => f.startLine)).toEqual([2, 7]);
+    expect(readFences("- c\n> > \n> > d\na\n>   b\n> ```scrml\n> " + W + "\n> ```\n").map((f) => [f.startLine, f.text])).toEqual([[7, W]]);
   });
-  // the cross-check stays as a regression guard — and marked 18 still reads one shape differently from CommonMark:
-  // a fence opened in a list item in a blockquote, then an indented line with no `>` (CommonMark ends the
-  // blockquote and the fence; marked runs the fence on lazily)
+  // marked 18.2.0, now only the cross-check, still reads some valid CommonMark differently (both directions; the
+  // S483 r1 fuzz measures the rate — g-tool-retired-lint-marked18-residual-s483), e.g. a fence opened in a list
+  // item in a blockquote, then an indented line with no `>` (CommonMark ends the blockquote and the fence; marked
+  // runs the fence on lazily): exit 2, fail closed
   test("S483: a fence marked 18 reads and commonmark.js does not still exits 2 (the cross-check guards)", () => {
     expect(() => readFences("> - ~~~scrml\n    " + W)).toThrow(/the two CommonMark readers disagree/);
     const d = mkdtempSync(join(tmpdir(), "rfl-"));
