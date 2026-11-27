@@ -9,3 +9,4 @@ Probes copy + drivers: ~/.cache/scrml/review/s483-2123-r2/probes (myrun.sh, myrt
 2. Runtime: r1 lap cap removed (runtime.js back to r0's 6bbc1565d), stall bound added (RENDER_STALL_MS,
    MessageChannel tick, re-run-only, one report per stall). Slice tests rewritten for the stall bound;
    Chromium: F9, R10, X2, P5, P6 compiled probes. 21/21 with SCRML_BROWSER_TESTS=1 (x3).
+3. Stall check samples the clock (first re-run, then every 64th): perf_rows2 / PERF_each1000 within noise of base and r0; dbgchain N=1000..5000 within noise of base.

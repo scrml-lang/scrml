@@ -159,6 +159,8 @@ function watchYield() {
   yieldWatched = true;
   stallId++;
   stallSince = stallClock();
+  stallReRuns = 0;
+  stallOver = false;
   if (yieldPort !== null) yieldPort.postMessage(0);
   else if (typeof yieldTimer === "function") yieldTimer(sawYield, 0);
 }
@@ -166,6 +168,16 @@ function watchYield() {
 function renderStallMs() {
   const n = globalThis.__scrml_render_stall_ms;
   return typeof n === "number" && n >= 0 ? n : RENDER_STALL_MS;
+}
+
+// The re-runs of this watch, and whether it has passed the bound. The clock is read on the first re-run
+// and every 64th after it, not on every one: a page re-rendering thousands of rows in one task pays for
+// a few clock reads, and a loop is stopped at most 63 re-runs after the bound.
+let stallReRuns = 0;
+let stallOver = false;
+function pastStallBound() {
+  if (!stallOver && (stallReRuns++ & 63) === 0) stallOver = stallClock() - stallSince >= renderStallMs();
+  return stallOver;
 }
 
 function track(source) {
@@ -321,7 +333,7 @@ function drainQueues() {
         // s483 r2 — the stall bound (RENDER_STALL_MS, above): a re-run once the page has gone the bound
         // without yielding is skipped; logged once per stall (`loopReported`)
         if (e.stall !== stallId) e.stall = stallId;
-        else if (stallClock() - stallSince >= renderStallMs()) {
+        else if (pastStallBound()) {
           if (!loopReported) {
             loopReported = true;
             console.error("[scrml] render effects stopped: the page has gone " + renderStallMs() + " ms without yielding to the browser — possible infinite loop (a value a render reads keeps being written, through an awaited result or host code); render effects run again once the page yields");
