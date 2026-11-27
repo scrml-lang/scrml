@@ -19,3 +19,12 @@ Gap: g-boot-trapping-construct-init-s482 (INTERIM; PERMANENT = branch-scoped dec
 - Conformance: body-top/{trapping-init-in-if-content-neg, trapping-init-in-match-arm-neg, trapping-init-in-slot-neg,
   nontrapping-init-in-if-content}; impl#1 XFAIL signatures recorded under carried gap g-impl1-init-in-construct-s482.
 - Corpus differential: examples+benchmarks 78 files, 0 with the new diagnostic; samples / conformance — below.
+- Corpus differential (bootstrap compileSource, in place): examples 71, benchmarks 7, samples 881, conformance/cases
+  2035 (2031 pre-existing + 4 new) — the new diagnostic reaches only the 3 new negative cases; 0 non-test files
+  newly rejected or gaining a report; 0 compile crashes.
+- SPEC: §7.6 rule (b) "A non-acting initializer that can trap (S483)", §7.6 R3 sentence, S483 provenance block,
+  §34 E-FILE-SCOPE-INIT-IN-CONSTRUCT row, §40-area summary sentence. Gap entry filed (docs/known-gaps.md).
+- Gates: pre-commit hook PASS (58710 pass / 0 fail / 255 skip); slice-m4 4 shards 9137 pass / 0 fail;
+  bootstrap-conformance --json base vs head: CRASH 0, the only verdict / emitted-code diffs are the 3 new cases
+  (FAIL → PASS); host-global-scan --check both mode shards exit 0 (no unpinned thrower; new cases do not throw);
+  types-gate --check OK; s34-census --check-new PASS; retired-forms-lint ✓; Chromium test 5 pass.
