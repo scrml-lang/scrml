@@ -7235,7 +7235,7 @@ ${
         // printed from (shakeProgram; print-server.scrml shakes the same way, so both artifacts
         // judge one program)
         const ps: CoreProgram = shakeProgram(p1, keep);
-        const orf: string[] = outerRefusal(ps);
+        const orf: string[] = outerRefusal(ps, p1);
         if (orf.length > 0) return { js: "", html: "", refused: orf, routes: [] };
         const si: int[] = serverInitsExposing(ps, keep);
         const plan: InitPlan = bodyInits(ps, si, keep);
@@ -8218,7 +8218,13 @@ ${
     // artifact holds no cell, and the client must not run it (its seed reaches server-only code).
     // ⚑ INTERIM (g-boot-outer-cell-server-seed-reads-cell-s482): refused by name, never printed
     // into either artifact.
-    export fn outerRefusal(p: CoreProgram) -> string[] {
+    // s483 (lane s483-attr-trap; #2130 review LOW-1): `orig` — the program before shakeProgram. When the
+    // cell's only reader in the source is a use site's value for a component field nothing on the
+    // client reads (a52: `<card t=(@pk)/>`, t unread), that value was dropped (§7.6 rule (b),
+    // ruling:user-voice-scrml.md-S483-component-attr-server-only — "its use-site value is never
+    // evaluated in the client"); the message names it (droppedReaders) rather than saying that nothing
+    // reads the cell, which the author can see is not what the source says.
+    export fn outerRefusal(p: CoreProgram, orig: CoreProgram) -> string[] {
         let out: string[] = [];
         for (const oc of p.outer) {
             // s482 (lane s482-write-only-secret): a moved cell is the binding of its Sym (findConst) —
@@ -8226,7 +8232,7 @@ ${
             if (findConst(p, oc.decl.id) is given) {
                 const k: CoreConst | not = findConst(p, oc.decl.id);
                 if (k is given && readsCellReach(p, k.init)) {
-                    out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: the seed of `@" + oc.decl.hint + "`, a cell declared outside the program body that nothing on the client reads, reaches server-only code, so it runs in the server artifact (§7.6 rule (b), S481/S482) — but it also reads a cell (or calls through what the bootstrap cannot follow), which the server artifact does not hold. The bootstrap does not run such a seed yet (⚑ INTERIM, g-boot-outer-cell-server-seed-reads-cell-s482). Read the cell in the page, or seed it from bindings and functions only"]);
+                    out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: the seed of `@" + oc.decl.hint + "`, a cell declared outside the program body " + unreadWhy(droppedReaders(p, orig, oc.decl, not)) + ", reaches server-only code, so it runs in the server artifact (§7.6 rule (b), S481/S482) — but it also reads a cell (or calls through what the bootstrap cannot follow), which the server artifact does not hold. The bootstrap does not run such a seed yet (⚑ INTERIM, g-boot-outer-cell-server-seed-reads-cell-s482). Read the cell in the page, or seed it from bindings and functions only"]);
                 }
             }
         }
@@ -8234,14 +8240,66 @@ ${
         // bodyPlaced made server-only (a derived one has no binding: nothing runs its formula)
         const pd: Decl | not = programDeclOf(p);
         if (pd is given) {
+            let fi: int = 0;
             for (const f of pd.fields) {
                 const bk: CoreConst | not = findConst(p, f.sym.id);
                 if (bk is given && readsCellReach(p, bk.init)) {
-                    out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: the seed of `@" + f.sym.hint + "`, a cell of the program body that nothing on the client reads, reaches server-only code, so it runs in the server artifact (§7.6 rule (b), S481/S482; ruling:user-voice-scrml.md-S482-body-cell-server-only — a body cell is judged as a file-scope binding is) — but it also reads a cell (or calls through what the bootstrap cannot follow), which the server artifact does not hold. The bootstrap does not run such a seed yet (⚑ INTERIM, g-boot-outer-cell-server-seed-reads-cell-s482). Read the cell in the page, or seed it from bindings and functions only"]);
+                    out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: the seed of `@" + f.sym.hint + "`, a cell of the program body " + unreadWhy(droppedReaders(p, orig, pd.sym, { prog: p.program.id, decls: [pd.sym.id], idxs: [fi], ids: [f.sym.id], caps: [-1] })) + ", reaches server-only code, so it runs in the server artifact (§7.6 rule (b), S481/S482; ruling:user-voice-scrml.md-S482-body-cell-server-only — a body cell is judged as a file-scope binding is) — but it also reads a cell (or calls through what the bootstrap cannot follow), which the server artifact does not hold. The bootstrap does not run such a seed yet (⚑ INTERIM, g-boot-outer-cell-server-seed-reads-cell-s482). Read the cell in the page, or seed it from bindings and functions only"]);
+                }
+                fi = fi + 1;
+            }
+        }
+        return out;
+    }
+
+    // why a refused cell counts as unread: no client code reads it, or its only readers in the source are
+    // use-site values that were dropped (`names`, droppedReaders)
+    fn unreadWhy(names: string[]) -> string {
+        if (names.length == 0) return "that nothing on the client reads";
+        let who: string = names[0];
+        let i: int = 1;
+        for (; i < names.length; ) {
+            who = who + ", " + names[i];
+            i = i + 1;
+        }
+        return "whose only reader is the value a use site gives " + who + " — a component field nothing on the client reads, so that value is not evaluated (§7.6 rule (b); ruling:user-voice-scrml.md-S483-component-attr-server-only)";
+    }
+
+    // The component fields, as `<decl>.field`, that a use site of `orig` gives a value reading a cell —
+    // the body cell `bc` names (read as the classification reads it, bodyUseOf), or (`bc` not) the cell
+    // declared outside the body whose declaration is `d` (a reference to its shared instance) — where `p`
+    // no longer gives that value: it was dropped (bodyAsConsts).
+    fn droppedReaders(p: CoreProgram, orig: CoreProgram, d: Sym, bc: BodyCells | not) -> string[] {
+        const now: UseVal[] = compUseVals(p);
+        let out: string[] = [];
+        for (const n of allNodes(Node.NProgram(orig))) {
+            const g: GivenAt | not = givenAtOf(n);
+            if (g is given) {
+                for (const a of g.attrs) {
+                    const key: string = fieldKey(g.decl, a.field);
+                    if (!hasVal(now, key, a.value) && valueReadsCell(a.value, d, bc)) {
+                        let fh: string = "" + a.field;
+                        const gd: Decl | not = findDecl(orig, g.decl);
+                        if (gd is given && a.field < gd.fields.length) fh = gd.fields[a.field].sym.hint;
+                        const nm: string = "`<" + g.decl.hint + ">." + fh + "`";
+                        if (out.indexOf(nm) < 0) out = out.concat([nm]);
+                    }
                 }
             }
         }
         return out;
+    }
+
+    fn valueReadsCell(e: Expr, d: Sym, bc: BodyCells | not) -> boolean {
+        for (const n of allNodes(Node.NExpr(e))) {
+            if (bc is given) {
+                if (bodyUseOf(bc, n).reads.length > 0) return true;
+            } else {
+                const s: Sym | not = sharedRefOf(n);
+                if (s is given && s.id == d.id) return true;
+            }
+        }
+        return false;
     }
 
     // =========================================================================

@@ -130,6 +130,18 @@ describe("a dropped value that reaches nothing server-only still runs for its tr
   }, 600000);
 });
 
+describe("#2130 review LOW-1 — a refused cell whose only reader is a dropped use-site value says so", () => {
+  test("a52 `<card t=(@pk)/>`, t unread: the message names `<card>.t` (not \"nothing on the client reads\"); a cell nothing reads keeps the old text", async () => {
+    const a52 = await build(PROG(`let <pk:string=(mk() + @out)/>\n<card t:string="x"/> renders <b>x</b>\n<card t=(@pk)/>`));
+    expect(a52.ok).toBe(false);
+    expect(a52.err).toContain("the seed of `@pk`, a cell of the program body whose only reader is the value a use site gives `<card>.t` — a component field nothing on the client reads, so that value is not evaluated");
+    expect(a52.err).not.toContain("nothing on the client reads, reaches");
+    const a54 = await build(PROG(`<card t:string=(API_KEY)/> renders <b>x</b>\nlet <z:string=(tag(@card.t))/>`));
+    expect(a54.ok).toBe(false);
+    expect(a54.err).toContain("the seed of `@z`, a cell of the program body that nothing on the client reads, reaches");
+  }, 300000);
+});
+
 describe("a dropped value that reaches a secret cannot run in the client — its trap is lost (gap g-boot-dropped-value-trap-s483, pinned)", () => {
   test("r12c a use-site value, r12d a default, r12h a component cell's seed: no secret in the client, the page loads", async () => {
     for (const extra of [
