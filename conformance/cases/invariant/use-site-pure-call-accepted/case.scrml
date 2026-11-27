@@ -1,7 +1,8 @@
-// §66.13.5 rule 7b (r2 of #2128, re-review M3) — a locked field a use site gives a call of a pure `fn` of
-// compile-time constants: the value is the same at every evaluation (a `fn` is pure, §48), so it tracks nothing and
-// the construction check holds it. Admitted (only a value that tracks a cell or a live use-site value is the
-// PERMANENT E-CONTRACT-003 — ruling S483-invariant-derived-split).
+// §66.13.5 rule 7b (r2 of #2128, re-review M3; r3, re-review H7) — a locked field a use site gives a call of a
+// `fn` of compile-time constants whose body reads only its argument: nothing it calls reads anything live, so the
+// value is the same at every evaluation, it tracks nothing, and the construction check holds it. Admitted (only a
+// value that tracks a cell or a live use-site value is the PERMANENT E-CONTRACT-003 — ruling
+// S483-invariant-derived-split; a `fn` that READS a cell tracks it: use-site-live-call-neg).
 <program>
     ${
         fn dbl(x: int) -> int { return x * 2; }

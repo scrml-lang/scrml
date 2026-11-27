@@ -35436,7 +35436,12 @@ ${
     // omits the clause (lower constructCheck): it would judge the same constant values at every
     // instance, so it runs nowhere and reads no field's value in the client. Any doubt — a default that
     // does not fold, a use-site value, a `{ … }` block — is undecided, and the check stays.
+    // A clause that reads a file-scope constant — directly, or through a field computed from its siblings —
+    // is NOT decided here, so its check runs and the printer judges what the constant reaches as before
+    // (ruling:user-voice-scrml.md-S483-invariant-const-read: "a server-only const stays refused" — the
+    // refusal is never decided away).
     export fn invConstructDecided(t: Tables, d: DeclInfo, iv: InvInfo) -> boolean {
+        if (invConstEnts(t, iv.e).length > 0) return false;
         const heads: int[] = invUseHeads(d, iv);
         for (const k of t.attrs.facts) {
             const gi: int = invGivenField(k, d.sym.id);
@@ -35459,6 +35464,7 @@ ${
         for (const dv of invDerivedOf(d, names)) {
             const ie: AExpr | not = valueExpr(d.fields[dv.idx].init);
             if (ie is given) {
+                if (heads.indexOf(dv.idx) >= 0 && invConstEnts(t, ie).length > 0) return false;
                 const dvv: FV = invFold(ie, ents.concat(invConstEnts(t, ie)), names);
                 ents = fvDrop(ents, dv.name);
                 if (fvKind(dvv) != 0) ents = ents.concat([{ path: dv.name, v: dvv }]);

@@ -1,0 +1,11 @@
+{
+  "id": "invariant-use-site-function-call-accepted",
+  "description": "A locked field an invariant reads, given a call of a `function` of compile-time constants that reads nothing live (`<w b=(seed(2))/>`): accepted (it tracks nothing; the construction check holds it).",
+  "language-version": "1.0",
+  "spec": "§66.13.5, §48",
+  "provenance": "ruling:user-voice-scrml.md-S483-invariant-derived-split (\"Split (Recommended)\")",
+  "rationale": "Ruling S483-invariant-derived-split: only \"a field that tracks a cell or a live use-site value stays refused\" — a call that reads nothing live, at any depth, tracks nothing.",
+  "expect": {
+    "codes": []
+  }
+}

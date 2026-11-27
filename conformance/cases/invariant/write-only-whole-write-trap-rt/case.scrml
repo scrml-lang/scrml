@@ -1,0 +1,27 @@
+// §66.13.5 7a (r3 of #2128, re-review H6) — a cell client code only ever writes WHOLE, seeded from a server-only
+// constant, stays out of the client (S482 write-only secret: a whole write is not a read) — and its invariant is
+// still checked on every write: the whole write of `{ v: "" }` traps before it lands (the handler stops, `n` stays
+// 0); after `fill`, `{ v: "ok" }` lands and the handler runs on.
+${
+    const API_KEY: string = "zz-conf-secret";
+}
+<program db="./app.db">
+    ${
+        type Row:struct = { name: string }
+        type Tok:struct = { v: string } invariant (v != "") [nonEmpty]
+        function label(id: int) -> string {
+            const r: Row = ?{`SELECT name FROM users WHERE id = ${id}`}.get() !{ _ :> { return "none"; } };
+            return r.name + API_KEY;
+        }
+    }
+    let <out:string=""/>
+    let <s:string=""/>
+    let <n:int=0/>
+    let <tk:Tok=({ v: API_KEY })/>
+    <main>
+        <button id="go" onclick={ @out = label(1) !{ .Transport(t) :> return }; }>go</button>
+        <p id="c">${@out}</p><p id="n">${@n}</p>
+        <button id="fill" onclick={ @s = "ok"; }>fill</button>
+        <button id="w" onclick={ @tk = { v: @s }; @n = @n + 1; }>w</button>
+    </main>
+</program>

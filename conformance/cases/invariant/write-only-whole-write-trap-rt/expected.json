@@ -1,0 +1,45 @@
+{
+  "id": "invariant-write-only-whole-write-trap-rt",
+  "description": "A write-only cell seeded from a server-only constant (`let <tk:Tok=({ v: API_KEY })/>`, client code only writes it whole): accepted, and each whole write is checked — `@tk = { v: \"\" }` traps before it lands (n stays 0), then `{ v: \"ok\" }` lands (n = 1).",
+  "language-version": "1.0",
+  "spec": "§66.13.5, §7.6",
+  "provenance": "ruling:user-voice-scrml.md-S483-struct-invariant-syntax (\"yes, your recommendations on all three plus the follow-up\")",
+  "rationale": "§66.13.5: every write that touches the read set is checked on the candidate before it lands; 7a: a whole-value write judges the written value and does not read the field it overwrites.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-DECL-INVARIANT-IMPURE",
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "input": [
+      {
+        "click": "#w"
+      },
+      {
+        "click": "#fill"
+      },
+      {
+        "click": "#w"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#n",
+        "text": "1"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-decl-invariant-unimplemented-s483",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=3",
+          "emitted:E-SCOPE-001=4",
+          "emitted:E-STATE-UNDECLARED=8"
+        ],
+        "runtime": "sha256:6a7bd15b29286996"
+      }
+    }
+  }
+}

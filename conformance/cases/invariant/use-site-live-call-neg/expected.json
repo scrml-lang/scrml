@@ -1,0 +1,27 @@
+{
+  "id": "invariant-use-site-live-call-neg",
+  "description": "A locked field an invariant reads, given a call of a `fn` that reads a cell (`fn dbl(x) -> int { return x * @k; }`, `<w b=(dbl(2))/>`): E-CONTRACT-003 (the value tracks `@k`; PERMANENT).",
+  "language-version": "1.0",
+  "spec": "§66.13.5, §48",
+  "provenance": "ruling:user-voice-scrml.md-S483-invariant-derived-split (\"Split (Recommended)\")",
+  "rationale": "Ruling S483-invariant-derived-split: \"a field that tracks a cell or a live use-site value stays refused, PERMANENT, E-CONTRACT-003 (an @ read by another route)\" — a `fn` may read outer bindings (§48.5.3), so a call of one tracks what it reads.",
+  "expect": {
+    "codes": [
+      "E-CONTRACT-003"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-decl-invariant-unimplemented-s483",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=3",
+          "emitted:E-SCOPE-001=9",
+          "emitted:E-STATE-UNDECLARED=2",
+          "emitted:E-STMT-NO-EFFECT=1",
+          "missing:E-CONTRACT-003"
+        ]
+      }
+    }
+  }
+}

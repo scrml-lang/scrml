@@ -1,10 +1,10 @@
 {
   "id": "invariant-use-site-pure-call-accepted",
-  "description": "A locked field an invariant reads, given a call of a pure `fn` of compile-time constants at a use site (`<w b=(dbl(2))/>`): accepted (the value tracks nothing; the construction check holds it).",
+  "description": "A locked field an invariant reads, given a call of a `fn` of compile-time constants that reads nothing live (`<w b=(dbl(2))/>`, `dbl` reads only its argument): accepted (the value tracks nothing; the construction check holds it).",
   "language-version": "1.0",
   "spec": "§66.13.5, §48",
   "provenance": "ruling:user-voice-scrml.md-S483-invariant-derived-split (\"Split (Recommended)\")",
-  "rationale": "Ruling S483-invariant-derived-split: \"a field that tracks a cell or a live use-site value stays refused, PERMANENT, E-CONTRACT-003\" — a pure call of constants tracks nothing.",
+  "rationale": "Ruling S483-invariant-derived-split: \"a field that tracks a cell or a live use-site value stays refused, PERMANENT, E-CONTRACT-003\" — a call of constants that reads nothing live, at any depth, tracks nothing.",
   "expect": {
     "codes": []
   }

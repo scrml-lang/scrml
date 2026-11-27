@@ -245,3 +245,11 @@ impl#1 frozen (§66 Nominal there, §34.0).
   analyze invInvTypes (the types whose values hold an invariant at some depth, a fixed point, linear) prunes
   invDeepAt — a subtree that reaches no invariant is not entered (persist / whole writes / part writes / host
   returns). shared-graph-walks + the invariant set + server-runtime: 187 / 0; Chromium 18 / 0.
+- committed d18cf0a27 (hook PASS).
+- conformance: 4 new invariant cases (use-site-live-call-neg, use-site-function-call-accepted,
+  part-write-in-if-content-neg, write-only-whole-write-trap-rt; impl#1 xfail signatures captured, the function
+  case passes on impl#1); use-site-pure-call-accepted's comment / description corrected (the r2 premise).
+- bootstrap-conformance --filter invariant/ found server-only-const-neg and server-const-chain-neg FLIPPED to
+  accepted by the decided-construction omission (no write, constant defaults) — against
+  S483-invariant-const-read ("a server-only const stays refused"). invConstructDecided now never decides a clause
+  that reads a file-scope constant (directly or through a computed field it reads); SPEC 7a says so. 34 / 34 PASS.

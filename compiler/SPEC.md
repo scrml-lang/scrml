@@ -55589,7 +55589,9 @@ else:
    (ruling:user-voice-scrml.md-S482-write-only-secret: a whole write is not a read). A declaration's own clause
    the compiler decides at every construction — every field it reads seeded from a default that is a compile-time
    constant (rule 7a) and given no value by any use site, the clause `true` over them — is decided (rule 10) and
-   runs nowhere. *(r3 of #2128, re-review H6: the first run had kept each check's wrapper, which read the field it
+   runs nowhere; a clause that itself reads a file-scope constant (directly, or through a computed field it reads)
+   is never decided away, so the refusal of a server-only constant above holds whatever the defaults are
+   (ruling:user-voice-scrml.md-S483-invariant-const-read). *(r3 of #2128, re-review H6: the first run had kept each check's wrapper, which read the field it
    overwrote whole, so both runs agreed and a write-only cell's secret seed was printed into the client.)*
 7b. **Computed fields (S483).** A field with no write capability whose initializer is an expression (a derived
    field, `<span:int=(end - start)/>`) is read by an invariant as its initializer: the invariant is judged as if
