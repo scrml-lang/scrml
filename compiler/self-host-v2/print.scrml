@@ -6332,7 +6332,7 @@ ${
             .Lit(lit: x) :> false,
             .Local(sym: x) :> false,
             .Read(place: x) :> false,
-            .Prim(op: x) :> false,
+            .Prim(op: o, args: a) :> primTraps(o, a),
             .Match(scrut: x) :> false,
             .ArrayOf(elems: x) :> false,
             .StructOf(ty: x) :> false,
@@ -6352,6 +6352,66 @@ ${
             .InitOf(decl: x) :> true,
             .Validity(of: x) :> true,
             .BlockLambda(params: x) :> true
+        };
+    }
+
+    // s483 r1 (#2129 review LOW-3; RULED S483, ruling:user-voice-scrml.md-S483-unread-trapping-init-runs —
+    // *"per §7.6 R1 an initializer runs at its place whether or not anything reads it; a trapping
+    // initializer is not 'doing nothing', so the printer keeps it"*) — a primitive that can trap
+    // (§19.17) ACTS: an initializer holding one is never left out as unobservable, and runs in its
+    // place. The Core form of analyze.scrml trapSiteWhat's own sites: an index read (IndexRead —
+    // E-INDEX-OUT-OF-RANGE-RT); a `slice` / `repeat` / `padStart` / `padEnd` position that is not a
+    // non-negative int literal, an `insert` (TapeInsert); an unproven tape bound (LengthCheck —
+    // E-WRITE-INVARIANT-RT); a run-time refinement check (RefineCheck — E-CONTRACT-001-RT); a `%`
+    // whose divisor is not a non-zero number literal (its trap is owed:
+    // g-bootstrap-int-overflow-and-mod-zero-untrapped-s469). A call already acts (it may reach any
+    // of these), and so does a host call (the E-INT-CONVERSION-RT conversions are host calls).
+    fn primTraps(o: PrimOp, args: Expr[]) -> boolean {
+        if (o == PrimOp.IndexRead || o == PrimOp.TapeInsert || o == PrimOp.LengthCheck || o == PrimOp.RefineCheck) return true;
+        if (o == PrimOp.Mod) return args.length < 2 || !nonZeroNumLit(args[1]);
+        if (o == PrimOp.StrSlice) {
+            let i: int = 1;
+            for (; i < args.length; ) {
+                if (!nonNegIntLitCore(args[i])) return true;
+                i = i + 1;
+            }
+            return false;
+        }
+        if (o == PrimOp.StrRepeat || o == PrimOp.StrPadStart || o == PrimOp.StrPadEnd) return args.length < 2 || !nonNegIntLitCore(args[1]);
+        return false;
+    }
+
+    fn nonNegIntLitCore(e: Expr) -> boolean {
+        return match e {
+            .Lit(lit: l) :> litNonNegInt(l),
+            // no-default-arm: only a literal is a literal position
+            _ :> false
+        };
+    }
+
+    fn litNonNegInt(l: Literal) -> boolean {
+        return match l {
+            .Int(v: v) :> v >= 0,
+            .Num(v: v) :> v >= 0 && Math.floor(v) == v,
+            // no-default-arm: only a number literal is a position
+            _ :> false
+        };
+    }
+
+    fn nonZeroNumLit(e: Expr) -> boolean {
+        return match e {
+            .Lit(lit: l) :> litNonZero(l),
+            // no-default-arm: only a literal is proven non-zero here
+            _ :> false
+        };
+    }
+
+    fn litNonZero(l: Literal) -> boolean {
+        return match l {
+            .Int(v: v) :> v != 0,
+            .Num(v: v) :> v != 0,
+            // no-default-arm: only a number literal divides
+            _ :> false
         };
     }
 

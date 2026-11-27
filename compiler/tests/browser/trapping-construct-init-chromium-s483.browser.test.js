@@ -134,3 +134,36 @@ describe("the capable forms run (Chromium)", () => {
     expect(await load(out, ["a", "z"])).toEqual({ errors: [], texts: ["1", "end"] });
   }, 120000);
 });
+
+// r1 (#2129 review) — the fix round, in Chromium.
+describe("r1: the review's blank-page shapes are refused; the newly-accepted forms run", () => {
+  test("HIGH-1 / HIGH-2: an unproven tape bound and scrml:random randomInt in an untaken if= — refused, exit 1 (r0: compiled, page blank)", () => {
+    const b = compile(`<program>\n${HEAD}\${ const n: int = 2; }\n<p id="a" if=(n > 5)>\${ const c: int[1..=2] = items; }\${c.length}</p>\n<p id="z">end</p>\n</program>\n`);
+    expect(b.exitCode).toBe(1);
+    expect(b.text).toContain("E-WRITE-INVARIANT-RT");
+    const r = compile(`<program>\n\${ import { randomInt } from "scrml:random"; }\n\${ const big: number = 1e300; }\n\${ const n: int = 2; }\n<p id="a" if=(n > 5)>\${ const r: int = randomInt(big, big); }\${r}</p>\n<p id="z">end</p>\n</program>\n`);
+    expect(r.exitCode).toBe(1);
+    expect(r.text).toContain("E-FILE-SCOPE-INIT-IN-CONSTRUCT");
+  }, 120000);
+
+  test("MED-1: an index read in <textarea> — refused, exit 1 (r0: compiled, page blank)", () => {
+    const t = compile(`<program>\n${HEAD}<textarea>\${ const f: int = items[0]; }\${f}</textarea>\n<p id="z">end</p>\n</program>\n`);
+    expect(t.exitCode).toBe(1);
+    expect(t.text).toContain("E-FILE-SCOPE-INIT-IN-CONSTRUCT");
+  }, 120000);
+
+  test("LOW-1 / LOW-2: `/` by a number binding, `%` by a literal const, minOf, a passing literal to a refined parameter — compile and run", async () => {
+    if (skip()) return;
+    const out = build(`<program>\n${HEAD}\${ import { minOf } from "scrml:math"; }\n\${ const y: number = 0.0; }\n\${ const d: int(>0) = 3; }\n\${ function pos(p: int(>0)) -> int { return p; } }\n<p id="a" if=(items.length == 0)>\${ const q: number = 1.0 / y; }\${ const m: int = 7 % d; }\${ const lo: number | not = minOf([2.0, 1.0]); }\${ const p: int = pos(3); }\${m} \${p} \${lo is given}</p>\n<p id="z">end</p>\n</program>\n`);
+    expect(await load(out, ["a", "z"])).toEqual({ errors: [], texts: ["1 3 true", "end"] });
+  }, 120000);
+
+  test("LOW-3 (ruling S483-unread-trapping-init-runs): an unread body-top index read runs at its place and traps — as the same read through a call does", async () => {
+    if (skip()) return;
+    for (const ini of ["const f: int = items[0];", "const f: int = firstOf(items);"]) {
+      const out = build(`<program>\n${HEAD}\${ ${ini} }\n<p id="z">end</p>\n</program>\n`);
+      const r = await load(out, ["z"]);
+      expect([ini, r.errors.some((e) => e.includes("E-INDEX-OUT-OF-RANGE-RT"))]).toEqual([ini, true]);
+    }
+  }, 120000);
+});

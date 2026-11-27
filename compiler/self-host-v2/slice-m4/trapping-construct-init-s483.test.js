@@ -286,3 +286,36 @@ describe("r1 LOW-2: decidable cases are decided", () => {
     expect(d[0].message).toContain("reads `items[p]` by position");
   }, 120000);
 });
+
+// r1 (#2129 review LOW-3; RULED S483, ruling:user-voice-scrml.md-S483-unread-trapping-init-runs — "a trapping
+// initializer is not 'doing nothing', so the printer keeps it"): §7.6 R1 — a file-scope initializer runs at its
+// place whether or not anything reads it. Before r1 the printer left out an unread `const f: int = items[0];`
+// (it "did nothing"), while the same read through a call ran and trapped.
+describe("r1 LOW-3: an unread body-top initializer that can trap is kept and runs at its place", () => {
+  const UNREAD = (ini) => `<program>\n${HEAD}\${ ${ini} }\n<p id="z">end</p>\n</program>\n`;
+  for (const [label, ini, needle] of [
+    ["an index read", "const f: int = items[0];", "rt.indexRead(items, 0"],
+    ["an unproven tape bound", "const c: int[1..=2] = items;", "lengthCheck"],
+    ["a computed string position", "const t: string = \"abc\".slice(n - 3);", "slice"],
+    ["a remainder by a binding", "const r: int = 7 % (n - 2);", "% "],
+  ]) {
+    test(`kept: ${label}`, async () => {
+      const res = await result(UNREAD(ini));
+      expect(res.ok).toBe(true);
+      expect(res.client.js).toContain(needle);
+    }, 120000);
+  }
+  test("still left out: an unread initializer that cannot trap (arithmetic)", async () => {
+    const res = await result(UNREAD("const k: int = n * 7 + 1;"));
+    expect(res.ok).toBe(true);
+    expect(res.client.js).not.toContain("n * 7");
+  }, 120000);
+  test("runs: the unread index read traps at its place (E-INDEX-OUT-OF-RANGE-RT), as the same read through a call does", async () => {
+    for (const ini of ["const f: int = items[0];", "const f: int = firstOf(items);"]) {
+      const res = await result(UNREAD(ini));
+      let msg = "";
+      try { await runBootstrapArtifact(res.client.html, res.client.js, [], {}, [], undefined); } catch (e) { msg = String(e?.message ?? e); }
+      expect([ini, msg.includes("E-INDEX-OUT-OF-RANGE-RT")]).toEqual([ini, true]);
+    }
+  }, 120000);
+});
