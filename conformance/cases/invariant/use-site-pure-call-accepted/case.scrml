@@ -1,0 +1,15 @@
+// §66.13.5 rule 7b (r2 of #2128, re-review M3) — a locked field a use site gives a call of a pure `fn` of
+// compile-time constants: the value is the same at every evaluation (a `fn` is pure, §48), so it tracks nothing and
+// the construction check holds it. Admitted (only a value that tracks a cell or a live use-site value is the
+// PERMANENT E-CONTRACT-003 — ruling S483-invariant-derived-split).
+<program>
+    ${
+        fn dbl(x: int) -> int { return x * 2; }
+    }
+    <w:struct>
+        let <a:int=0/>
+        <b:int=5/>
+    </> renders <i class="sp">${a}/${b}</i>
+    invariant (b - a <= 5) [ab]
+    <main><w b=(dbl(2))/></main>
+</program>

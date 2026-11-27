@@ -1,0 +1,24 @@
+// §66.13.5 rule 7a (r2 of #2128 — g-boot-invariant-const-client-read-s483 closed) — `MAX_NIGHTS` is read by a server
+// validator AND by the page: the client holds it on its own account, so it is not server-only (§7.6 (b)) and the
+// invariant moves nothing into the client. Admitted (ruling S483-invariant-const-read: "… and that is not
+// server-only").
+<program db="./app.db">
+    ${
+        const MAX_NIGHTS = 14;
+        function check(n: int) -> string {
+            const t = ?{`SELECT 1 AS x WHERE ${n} = 1`}.get() !{ _ :> { return "no"; } };
+            return n <= MAX_NIGHTS ? "ok" : "no";
+        }
+    }
+    <dateRange:struct>
+        let <start:int=0/>
+        let <end:int=10/>
+    </>
+    invariant (end - start <= MAX_NIGHTS) [maxNights]
+    let <out:string=""/>
+    <main>
+        <p id="m">${MAX_NIGHTS}</p>
+        <p id="o">${@out}${@dateRange.end}</p>
+        <button onclick={ @out = check(3) !{ .Transport(_) :> return }; }>b</button>
+    </main>
+</program>

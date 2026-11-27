@@ -1,0 +1,22 @@
+// §66.13.5 rule 7a (r2 of #2128, re-review H2d; prov=pa-ruled:S483-invariant-attr-server-only) — the attribute `t`
+// is given `API_KEY`, which only server code reads; no client code reads `t`, so §7.6 (b) gives it an empty client
+// stand-in (ruling S483-component-attr-server-only). The invariant's construction check reads `t` in the client,
+// which would print `API_KEY` there: refused, naming the attribute and the secret.
+${
+    const API_KEY: string = "zz-sk-attr";
+}
+<program db="./app.db">
+    ${
+        type Row:struct = { name: string }
+        function label(id: int) -> string {
+            const r: Row = ?{`SELECT name FROM users WHERE id = ${id}`}.get() !{ _ :> { return "none"; } };
+            return r.name + API_KEY;
+        }
+    }
+    let <out:string=""/>
+    <button id="go" onclick={ @out = label(1) !{ .Transport(t) :> return }; }>go</button>
+    <p id="c">${@out}</p>
+    <card t:string="x"/> renders <b>x</b>
+    invariant (t != "") [nonEmpty]
+    <card t=(API_KEY)/>
+</program>

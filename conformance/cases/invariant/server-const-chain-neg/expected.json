@@ -1,0 +1,26 @@
+{
+  "id": "invariant-server-const-chain-neg",
+  "description": "An invariant reading a constant (`L`) whose initializer reads a constant only server code reads (`K`): E-DECL-INVARIANT-IMPURE (checking the invariant in the client would print `K` there). The set refused through a constant is the set refused directly.",
+  "language-version": "1.0",
+  "spec": "§66.13.5, §7.6",
+  "provenance": "ruling:user-voice-scrml.md-S483-invariant-const-read (\"Allow compile-time consts (Recommended)\")",
+  "rationale": "Ruling S483-invariant-const-read: \"A `let`, a host-derived const, or a server-only const stays refused.\" §66.13.5 rule 7a: what is server-only without the invariant and held by the client with it is refused.",
+  "expect": {
+    "codes": [
+      "E-DECL-INVARIANT-IMPURE"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-decl-invariant-unimplemented-s483",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=3",
+          "emitted:E-SCOPE-001=3",
+          "emitted:E-STATE-UNDECLARED=3",
+          "missing:E-DECL-INVARIANT-IMPURE"
+        ]
+      }
+    }
+  }
+}
