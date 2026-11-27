@@ -1,0 +1,8 @@
+// §7.6 rule (b) (S483 q8-fu, #2129 r1 review LOW-1 / MED-1) — inside `if=` content, a `%` whose divisor is a `number` (NaN by 0, no trap) and a literal `repeat` whose result provably fits the longest string cannot trap: both stay legal and run.
+<program>
+${ const items: int[] = []; }
+${ const y: number = 2.0; }
+${ const s: string = "ab"; }
+<p id="a" if=(items.length == 0)>${ const m: number = 7.5 % y; }${ const r: string = s.repeat(3); }${m} ${r}</p>
+<p id="z">end</p>
+</program>

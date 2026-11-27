@@ -6457,10 +6457,14 @@ ${
     // (§19.17) ACTS: an initializer holding one is never left out as unobservable, and runs in its
     // place. The Core form of analyze.scrml trapSiteWhat's own sites: an index read (IndexRead —
     // E-INDEX-OUT-OF-RANGE-RT); a `slice` / `repeat` / `padStart` / `padEnd` position that is not a
-    // non-negative int literal, an `insert` (TapeInsert); an unproven tape bound (LengthCheck —
+    // non-negative int literal, or a literal `repeat` count / pad width whose result is not proven
+    // to fit the longest string (textFitsCore — q8-fu, #2129 r1 MED-1), an `insert` (TapeInsert);
+    // an unproven tape bound (LengthCheck —
     // E-WRITE-INVARIANT-RT); a run-time refinement check (RefineCheck — E-CONTRACT-001-RT); a `%`
     // whose divisor is not a non-zero number literal (its trap is owed:
-    // g-bootstrap-int-overflow-and-mod-zero-untrapped-s469). A call already acts (it may reach any
+    // g-bootstrap-int-overflow-and-mod-zero-untrapped-s469; a `number` divisor cannot trap — q8-fu
+    // LOW-1 — but this Core form carries no operand type, so it is kept: over-keeping only runs it
+    // at its place). A call already acts (it may reach any
     // of these), and so does a host call (the E-INT-CONVERSION-RT conversions are host calls).
     fn primTraps(o: PrimOp, args: Expr[]) -> boolean {
         if (o == PrimOp.IndexRead || o == PrimOp.TapeInsert || o == PrimOp.LengthCheck || o == PrimOp.RefineCheck) return true;
@@ -6477,8 +6481,64 @@ ${
             }
             return false;
         }
-        if (o == PrimOp.StrRepeat || o == PrimOp.StrPadStart || o == PrimOp.StrPadEnd) return args.length < 2 || !nonNegIntLitCore(args[1]);
+        if (o == PrimOp.StrRepeat || o == PrimOp.StrPadStart || o == PrimOp.StrPadEnd) {
+            if (args.length < 2 || !nonNegIntLitCore(args[1])) return true;
+            return !textFitsCore(o == PrimOp.StrRepeat, litNumCore(args[1]), strLitLenCore(args[0]), args.length > 2);
+        }
         return false;
+    }
+
+    // s483 q8-fu (#2129 r1 review MED-1) — the mirror of analyze.scrml lengthTrapWhat / textFitsLit:
+    // a literal `repeat` count or `padStart` / `padEnd` width traps when the result may be longer
+    // than the longest string (runtime.js MAX_TEXT_UNITS = 2^29 − 24 UTF-16 units, requireFits —
+    // E-INDEX-OUT-OF-RANGE-RT). It is trap-free only when the result's length is PROVABLY within
+    // the limit. `recv` is the receiver's `.length` when it is a string literal, −1 otherwise (the
+    // analyzer also reads a never-written file-scope `const`; here only a literal — over-keeping,
+    // which runs the initializer at its place, is harmless). A string of length `k` is at most 2k
+    // units. repeat: a count of 0 or 1, or a literal receiver with 2·recv·n within the limit;
+    // pad: 2n within the limit (the result is at most `n` code points), or the default fill on a
+    // literal receiver with 2·recv + n within it.
+    fn textFitsCore(isRepeat: boolean, n: number, recv: int, fill: boolean) -> boolean {
+        const lim: int = 536870888;
+        if (isRepeat) {
+            if (n <= 1) return true;
+            return recv >= 0 && 2 * recv * n <= lim;
+        }
+        if (2 * n <= lim) return true;
+        return recv >= 0 && !fill && 2 * recv + n <= lim;
+    }
+
+    fn litNumCore(e: Expr) -> number {
+        return match e {
+            .Lit(lit: l) :> litNumValue(l),
+            // no-default-arm: the caller passes a literal
+            _ :> 0
+        };
+    }
+
+    fn litNumValue(l: Literal) -> number {
+        return match l {
+            .Int(v: v) :> v,
+            .Num(v: v) :> v,
+            // no-default-arm: only a number literal is a count
+            _ :> 0
+        };
+    }
+
+    fn strLitLenCore(e: Expr) -> int {
+        return match e {
+            .Lit(lit: l) :> litStrLen(l),
+            // no-default-arm: only a string literal has a known length
+            _ :> -1
+        };
+    }
+
+    fn litStrLen(l: Literal) -> int {
+        return match l {
+            .Str(v: s) :> s.length,
+            // no-default-arm: only a string literal has a known length
+            _ :> -1
+        };
     }
 
     fn nonNegIntLitCore(e: Expr) -> boolean {
