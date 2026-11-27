@@ -992,6 +992,23 @@ async function gradeCase(boot: Bootstrap, c: LoadedCase, g: GradeInput): Promise
       fe = { ...fe, diags: [...fe.diags, ...extra], core: null };
     }
   }
+  // s483 r2 (#2128 r1 re-review H2): a LANGUAGE error the printer reports — today only §66.13.5 rule 7a's
+  // client-reach rule, E-DECL-INVARIANT-IMPURE (print.scrml invLeakRefusal: the §7.6 (b) classification exists
+  // only over the Core program) — is part of the compile's code half, as `scrml-boot compile` reports it
+  // (refusalDiag). A printer refusal coded E-BOOTSTRAP-* stays what it was: an unsupported construct, judged
+  // where the runtime half prints (below). Read only when the front end reported no error; a printer throw here
+  // is left to the runtime half, which reports it as before.
+  if (fe.core != null && fe.core.tool == null && !fe.diags.some((d) => severityOfDiag(d) === "error")) {
+    try {
+      const pre = boot.mods.print.printProgram(fe.core, "program.client.js", "scrml-runtime.js");
+      for (const r of (pre.refused ?? []) as string[]) {
+        const m = /^([EWI]-[A-Z0-9]+(?:-[A-Z0-9]+)*):\s*([\s\S]*)$/.exec(String(r));
+        if (m && !m[1].startsWith("E-BOOTSTRAP-")) fe = { ...fe, diags: [...fe.diags, { code: m[1], severity: "Error", message: m[2], file: "case.scrml" } as Diag], core: null };
+      }
+    } catch {
+      // (the runtime half prints again and reports a throw as it always has)
+    }
+  }
   const expectedCodes = new Set<string>(ex.codes ?? []);
   const emitted = [...new Set(fe.diags.map((d) => d.code))].sort();
   const unexpected = emitted.filter((code) => !expectedCodes.has(code));

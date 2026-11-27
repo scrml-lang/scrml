@@ -177,3 +177,8 @@ impl#1 frozen (§66 Nominal there, §34.0).
   analyze trapSiteWhat → invConstructTrapWhat (an object literal of an invariant-bearing type not invProven);
   print primTraps → an InvariantGuard / InvariantValue with a check acts (an unread initializer holding one is
   kept). Tests: invariant-r2 +2 (refused undecided, decided accepted).
+- committed c350bb6da (merge, hook PASS), 347e41033 (SPEC + gaps), 5a9e4f778 (4 conformance cases).
+- bootstrap-conformance graded codes from the front end only, so the printer's E-DECL-INVARIANT-IMPURE was
+  "missing" (4 FAIL: server-only-const-neg, server-const-via-call-neg + the 2 new). scripts/bootstrap-conformance.ts
+  now adds the printer's NON-bootstrap refusal codes to the code half when the front end reported no error (as
+  `scrml-boot compile` reports them; E-BOOTSTRAP-* refusals stay where they were judged). invariant/: 30 PASS.
