@@ -14044,7 +14044,7 @@ ${
         // renders (a state-child body showing its own field, a field's `renders` holding its own
         // `<*f/>`): that markup is already being judged, at this place, by the enclosing `<*f/>` —
         // walking it again judges the same code at the same place, without end. (The render itself
-        // has no end: the resolver refuses it — starRendersSelf.)
+        // has no end: the resolver refuses it — starCycle, E-DECL-RENDER-CYCLE-STAR.)
         if (cx.stars.indexOf(e.nid) >= 0) return [];
         let scx: BodyCx = { g: cx.g, t: cx.t, sum: cx.sum, usesD: cx.usesD, binds: cx.binds, file: cx.file, places: cx.places, cells: cx.cells, prog: cx.prog, pfields: cx.pfields, at: cx.at, mfile: cx.mfile, mspan: cx.mspan, mount: cx.mount, dname: cx.dname, stack: cx.stack, idecl: cx.idecl, ifields: cx.ifields, stars: cx.stars.concat([e.nid]), via: " in the markup `<" + cx.dname + ">`'s render shows through `<*" + e.tag + "/>`" };
         if (cx.at < 0) {
@@ -31733,7 +31733,10 @@ ${
         // needs its own … `renders` … is a CHILD declaration") renders it here,
         // for THIS instance (§66.6.2) — resolved in this declaration's context.
         const own: ANode[] = fieldRenders(sf.src, f.nid);
-        if (own.length > 0 && fileErrs(env.g.files, env.file).length == 0 && starRendersSelf(st, e.nid, own, [])) return selfStarDiag(st, env, e);
+        if (own.length > 0 && fileErrs(env.g.files, env.file).length == 0) {
+            const cyc: AElem[] = starCycle(st, e.nid, own);
+            if (cyc.length > 0) return selfStarDiag(st, env, e, cyc);
+        }
         if (own.length > 0) return addElem(st, e.nid, ElemFact.MInline({ nodes: own, subst: not }));
         const g: TransitionGraph | not = f.graph;
         const children: AStateChild[] = fieldStateChildren(sf.src, f.nid);
@@ -31746,7 +31749,10 @@ ${
             if (arms.length > 0) {
                 let armNodes: ANode[] = [];
                 for (const am of arms) { armNodes = armNodes.concat(am.body); }
-                if (fileErrs(env.g.files, env.file).length == 0 && starRendersSelf(st, e.nid, armNodes, [])) return selfStarDiag(st, env, e);
+                if (fileErrs(env.g.files, env.file).length == 0) {
+                    const cyc2: AElem[] = starCycle(st, e.nid, armNodes);
+                    if (cyc2.length > 0) return selfStarDiag(st, env, e, cyc2);
+                }
                 const sv: StateView ={ decl: sf.decl.sym, inst: sf.inst, idx: sf.idx, enumSym: g.enumSym, arms: arms };
                 return addElem(st, e.nid, ElemFact.MStateView(sv));
             }
@@ -31754,20 +31760,28 @@ ${
         return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<*" + e.tag + "/>` — rendering a field is in the bootstrap only for a `rule=` graph field whose state-children have bodies (O5 (1i)); `" + e.tag + "` has none (a field with no markup of its own is ⚑ O51)");
     }
 
-    // s482 (lane s482-mount-reach-fu, #2112 r1 re-review F/U-2) — does the markup a `<*f/>` renders
+    // s482 (lane s482-mount-reach-fu, #2112 r1 re-review F/U-2); s483 (lane s483-self-render,
+    // ruling:user-voice-scrml.md-S483-star-self-render-error) — does the markup a `<*f/>` renders
     // (`nodes`) hold that same `<*f/>` (`start`) — directly (a state-child body showing its own field,
     // a field's `renders` holding its own `<*f/>`), or through the markup of another `<*g/>` already
     // resolved (two fields that render each other: the second one resolved sees the cycle)? Such a
-    // render has no end: each `<*f/>` renders the markup that holds it again. `seen`: the `<*g/>`s
-    // already walked (each at most once — the walk ends). Not judged in a file holding a parse error
-    // (Rule C: an unclosed state child swallows what follows it — recovery debris, not a render; the
-    // build fails on the parse error and nothing is lowered).
-    fn starRendersSelf(st: AS, start: int, nodes: ANode[], seen: int[]) -> boolean {
-        let sn: int[] = seen;
-        let todo: ANode[] = nodes;
+    // render never ends: each `<*f/>` renders the markup that holds it again, for the same field of
+    // the same instance, so every guard on the way (an `if=`, a state arm) answers the same at every
+    // level — guards are walked through, not around (§66.6.2 S483). The answer is the cycle: the
+    // `<*g/>`s walked from `start`'s markup to `start` itself, in order (the last one is `start`); []
+    // none. `seen`: the `<*g/>`s already walked (each at most once — the walk ends). Not judged in a
+    // file holding a parse error (Rule C: an unclosed state child swallows what follows it — recovery
+    // debris, not a render; the build fails on the parse error and nothing is lowered).
+    type StarHop:struct = { n: ANode, via: AElem[] }
+
+    fn starCycle(st: AS, start: int, nodes: ANode[]) -> AElem[] {
+        let sn: int[] = [];
+        let todo: StarHop[] = [];
+        for (const n0 of nodes) { todo = todo.concat([{ n: n0, via: [] }]); }
         for (; todo.length > 0; ) {
-            let next: ANode[] = [];
-            for (const n of todo) {
+            let next: StarHop[] = [];
+            for (const h of todo) {
+                const n: ANode = h.n;
                 const k: ANodeK = n.k;
                 const more: ANode[] = match k {
                     .Elem(e: el) :> el.kids,
@@ -31775,10 +31789,10 @@ ${
                     // no-default-arm: only an element's children and a gather's rows hold markup the render walks
                     _ :> []
                 };
-                next = next.concat(more);
+                for (const m of more) { next = next.concat([{ n: m, via: h.via }]); }
                 const ne: AElem | not = nodeElem(n);
                 if (ne is given && ne.star) {
-                    if (ne.nid == start) return true;
+                    if (ne.nid == start) return h.via.concat([ne]);
                     if (sn.indexOf(ne.nid) < 0) {
                         sn = sn.concat([ne.nid]);
                         const f: ElemFact | not = elemFactNow(st, ne.nid);
@@ -31788,17 +31802,27 @@ ${
                             // no-default-arm: only `<*f/>` of a field renders markup written elsewhere
                             _ :> []
                         };
-                        next = next.concat(inner);
+                        const via2: AElem[] = h.via.concat([ne]);
+                        for (const m2 of inner) { next = next.concat([{ n: m2, via: via2 }]); }
                     }
                 }
             }
             todo = next;
         }
-        return false;
+        return [];
     }
 
-    fn selfStarDiag(st: AS, env: Env, e: AElem) -> AS {
-        return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<*" + e.tag + "/>` stands inside the markup it renders (a state-child body that shows its own field, or a field's `renders` that holds its own `<*" + e.tag + "/>`, directly or through another `<*f/>`): while the arm holding it is shown, each one renders that markup again; every such cycle is refused, even one through states that cannot hold at the same time — not in the bootstrap (§66.6.2, O5 (1i); no ruling gives such a render an end). Render the field from outside its own markup");
+    // E-DECL-RENDER-CYCLE-STAR (§66.6.2 S483) — at the `<*f/>` whose markup holds it again, naming
+    // every `<*g/>` on the cycle with its place.
+    fn selfStarDiag(st: AS, env: Env, e: AElem, cyc: AElem[]) -> AS {
+        const here: string = "`<*" + e.tag + "/>` (" + placeIn(env.g.files, env.file, e.span.start) + ")";
+        let path: string = here + " stands inside the markup it renders: a state-child body of `" + e.tag + "`, or `" + e.tag + "`'s own `renders`, holds that same `<*" + e.tag + "/>`";
+        if (cyc.length > 1) {
+            path = here + " stands inside the markup it renders, through the cycle " + here;
+            for (const c of cyc) { path = path + " → `<*" + c.tag + "/>` (" + placeIn(env.g.files, env.file, c.span.start) + ")"; }
+            path = path + " (each arrow: the markup the left one renders — a state-child body or a field's `renders` — holds the right one)";
+        }
+        return addDiag(st, env.file, e.span, "E-DECL-RENDER-CYCLE-STAR", path + ". Rendering it never ends: each `<*f/>` on the cycle shows the same field of the same instance at every level, so any guard on the way (an `if=`, the state arm holding it) gives the same answer at every level, and every level renders the next (§66.6.2). Show a different field there, or make the nested part a component with a depth attribute — a plain use is a new instance, so its guard can end it: `<tree depth=(depth - 1) if=(depth > 0)/>`");
     }
 
     // The state-children of the field declared by the ADecl `fieldNid` inside
