@@ -72,11 +72,12 @@
  *     `;` / `{` / `}`;
  *   - a fence tagged as another language, an indented code block, an HTML `<pre>` block and prose are not
  *     read;
- *   - INTERIM (#2101 r5 HIGH-1): markdown marked 14 reads differently from CommonMark (a fence after a lazy
- *     continuation inside a list in a blockquote) exits 2 via the commonmark.js cross-check, asking the author to
- *     reshape valid CommonMark. The capable form: one reader that agrees with CommonMark — marked >= 18.0.0
- *     (2026-04-07) agrees on the r4 fuzz and the lazy reproducers, but the placement wrappers below hook marked
- *     internals and must be re-proven on it first (g-tool-retired-lint-marked-bump-s482);
+ *   - markdown the two readers read differently exits 2 via the commonmark.js cross-check. S483 bumped marked
+ *     14 → 18.2.0 and re-proved the placement wrappers on it (g-tool-retired-lint-marked-bump-s482, resolved):
+ *     the lazy-continuation class marked 14 mis-read (a fence after a lazy line inside a list in a blockquote)
+ *     is now read as CommonMark reads it. marked 18 still reads a fence differently where a fence opened in a
+ *     list item in a blockquote is followed by an indented line with no `>` (`> - ~~~scrml⏎    x` — CommonMark
+ *     closes the blockquote and the fence; marked runs the fence on lazily); that exits 2, fail closed;
  *   - a retired closer inside an unclosed raw body is raw text here (the bootstrap names it);
  *   - INTERIM: an unterminated string or template literal in a fence (a stray ``` line inside it opens one)
  *     hides the rest of that fence. The capable form: fail when a fence's text ends inside an unterminated
@@ -554,10 +555,15 @@ export function mdBlocks(md: string): { codes: MdCode[]; headings: MdHeading[] }
         if (k >= lines.length || containerless(lines[k]).trimEnd() !== first) fail(what, `line ${k + 1} is not that heading`);
         headings.push({ line: k, level: t.depth, top: isTop });
       } else if (t.type === "blockquote") {
-        // its text maps line for line onto its source lines; segment 1 starts it, and each later segment stands
-        // right after the previous one (or after a child marked re-read past it). A frame that does not stand
-        // exactly there — or a blockquote whose text and raw disagree in line count (marked re-joins a re-read
-        // with an extra line) — gets no line: a fence or heading in it then fails, nothing else does
+        // segment 1 (frame 0) is marked's first `blockTokens` call in this blockquote: the lines from the
+        // blockquote's first line, each with its `>` marker stripped (marked's marker and setext rewrites keep
+        // every line break), so it stands at the blockquote's line by construction — not by a text match: when
+        // marked re-reads a nested blockquote after a lazy line it splices `text` with the nested token's text
+        // length, not the source's, and `text` stops matching even though segment 1 is placed (S483, marked 18).
+        // Each later segment stands right after the previous one (or after a child marked re-read past it) in
+        // `text`. A later frame that does not stand exactly there — or a blockquote whose text and raw disagree
+        // in line count (marked re-joins a re-read with an extra line) — gets no line: a fence or heading in it
+        // then fails, nothing else does
         const L = lineIf(t);
         const text = String(t.text);
         const lineCount = (x: string) => x.replace(/\n+$/, "").split("\n").length;
@@ -575,7 +581,8 @@ export function mdBlocks(md: string): { codes: MdCode[]; headings: MdHeading[] }
             start = end + 1;
           }
           starts.push(start);
-          if (L !== null && (i === 0 || exact) && text.startsWith(frames[i].src, start)) base.set(frames[i], L + nlBefore(text, start));
+          if (L !== null && i === 0 && lineCount(frames[0].src) <= lineCount(String(t.raw))) base.set(frames[0], L);
+          else if (L !== null && i > 0 && exact && text.startsWith(frames[i].src, start)) base.set(frames[i], L + nlBefore(text, start));
         }
         visit(t.tokens ?? [], false);
       } else if (t.type === "list") {
@@ -637,15 +644,16 @@ export function readFences(md: string): Fence[] {
 const fenceKey = (text: string) => text.split("\n").map((l) => l.trim()).join("\n").replace(/\n+$/, "");
 
 /**
- * The second reader (#2101 r5 HIGH-1). marked 14 mis-reads some valid CommonMark — a fence after a lazy
- * continuation line inside a list in a blockquote (`> - a⏎b⏎> ```scrml…`) is lexed as paragraph text — and the
- * fence GitHub renders would go unread. commonmark.js, the reference implementation, reads the same text; when
- * the multiset of READ fence texts (`readsInfo`) of the two readers differs, the gate throws `PlacementError`
- * (exit 2): a fence one reader reads and the other does not is never silently passed. INTERIM: the capable form
- * is one reader that agrees with CommonMark. marked ≥ 18.0.0 (published 2026-04-07; 17.x and earlier do not)
- * agrees with commonmark.js on the 40,000 r4 fuzz documents and the lazy reproducers, but the placement wrappers
- * in `readFences` hook marked internals (`blockTokens`, tokenizer methods) and must be re-proven on marked ≥
- * 18.0.0 before the bump (g-tool-retired-lint-marked-bump-s482) — then this check only guards a regression.
+ * The second reader (#2101 r5 HIGH-1). marked 14 mis-read some valid CommonMark — a fence after a lazy
+ * continuation line inside a list in a blockquote (`> - a⏎b⏎> ```scrml…`) was lexed as paragraph text — and the
+ * fence GitHub renders would have gone unread. commonmark.js, the reference implementation, reads the same text;
+ * when the multiset of READ fence texts (`readsInfo`) of the two readers differs, the gate throws
+ * `PlacementError` (exit 2): a fence one reader reads and the other does not is never silently passed. S483
+ * bumped marked to 18.2.0 (g-tool-retired-lint-marked-bump-s482, resolved): it reads that class as CommonMark
+ * does (the r4 classify fuzz, seeds 11 and 23: 0 disagreements in 40,000). The check stays, as a regression guard
+ * and because marked 18 still reads one shape differently: a fence opened in a list item in a blockquote and
+ * followed by an indented line with no `>` (`> - ~~~scrml⏎    x`) — CommonMark ends the blockquote and the
+ * fence there, marked continues the fence lazily.
  */
 function crossCheck(md: string, read: Fence[]): void {
   const want = new Map<string, number>();
