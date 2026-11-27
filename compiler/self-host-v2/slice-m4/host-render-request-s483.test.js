@@ -38,6 +38,11 @@
 //      again once the page yields, and a loop that run restarts is stopped at its first re-run; the clock
 //      is read at each update's start (slow laps stop about the bound in); a MessageChannel that never
 //      delivers falls back to the load-time setTimeout.
+//   6. s483 fix r4 (review r3): a rendering opportunity (`requestAnimationFrame`) ends a watch, so a page
+//      that yields between tasks but falls behind a task backlog is not a stall (probe stream); a retry
+//      whose re-run is skipped runs once more about the bound later, so a late write is never lost
+//      (probes taskwrite / taskreq) and a real loop laps about once per bound; past twice the bound an
+//      effect's second re-run is skipped whatever the count (probe slow_rerun).
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -742,6 +747,200 @@ describe("s483 fix r3 — the stall bound: runtime `^{}` blocks, the re-run coun
   });
 });
 
+describe("s483 fix r4 — a frame is a yield, a skipped retry runs again later, slow laps stop about twice the bound in", () => {
+  const STALL_LOG = "[scrml] render effects stopped: the page has gone ";
+  const busy = (ms) => { const t = performance.now(); while (performance.now() - t < ms) { /* spin */ } };
+
+  // a FRESH runtime module loaded after `setup()` replaced host globals; `teardown()` puts them back
+  async function freshRuntime(tag, setup, teardown, fn) {
+    const d = mkdtempSync(join(tmpdir(), "s483-r4-" + tag + "-"));
+    copyFileSync(RUNTIME, join(d, "scrml-runtime.js"));
+    setup();
+    let fresh;
+    try {
+      fresh = await import(join(d, "scrml-runtime.js"));
+    } catch (err) {
+      teardown();
+      throw err;
+    }
+    const scope = fresh.root.child();
+    const logged = [];
+    const savedErr = console.error;
+    console.error = (...a) => logged.push(a.join(" "));
+    try {
+      await fn(fresh, scope, logged);
+    } finally {
+      console.error = savedErr;
+      teardown();
+      scope.dispose();
+      delete globalThis.__scrml_render_stall_ms;
+      rmSync(d, { recursive: true, force: true });
+    }
+  }
+  // a MessageChannel that never delivers, and a `requestAnimationFrame` whose frames the test fires
+  const deadMC = class { constructor() { this.port1 = { onmessage: null }; this.port2 = { postMessage() {} }; } };
+
+  test("HIGH-1 (#2123 r3 review, probe stream): a rendering opportunity ends the watch — writes from tasks the runtime's own tick is queued behind are not taken for a stall", async () => {
+    // The tick is a message queued behind every waiting task; a page with a backlog of tasks yields
+    // between each but its tick arrives late. Modelled: a MessageChannel that never delivers, and
+    // frames the test fires between the busy writes (each its own task in the browser). r3: the 5th
+    // write was skipped as a stall, with a false "possible infinite loop" log.
+    const RealMC = globalThis.MessageChannel;
+    const realRaf = globalThis.requestAnimationFrame;
+    const frames = [];
+    await freshRuntime("frame", () => {
+      globalThis.MessageChannel = deadMC;
+      globalThis.requestAnimationFrame = (f) => { frames.push(f); return frames.length; };
+    }, () => {
+      globalThis.MessageChannel = RealMC;
+      globalThis.requestAnimationFrame = realRaf;
+    }, async (fresh, scope, logged) => {
+      globalThis.__scrml_render_stall_ms = 50;
+      const x = fresh.cell(0);
+      const seen = [];
+      fresh.effect(scope, () => { seen.push(x.get()); });
+      const frame = () => { const fs = frames.splice(0); for (const f of fs) f(performance.now()); };
+      frame();
+      for (let i = 1; i <= 8; i++) { busy(20); x.set(i); frame(); }
+      expect(seen).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+      expect(logged).toEqual([]);
+      expect(frames.length).toBeLessThanOrEqual(1);  // one frame callback pending at a time
+      // with NO frame (a microtask-only loop never reaches one) the same writes are still bounded
+      for (let i = 9; i <= 16; i++) { busy(20); x.set(i); }
+      expect(seen.at(-1)).toBe(12);                  // its first run + 3 re-runs, then skipped
+      expect(logged.length).toBe(1);
+      expect(logged[0]).toContain(STALL_LOG + "50 ms");
+      frame();                                       // a frame: the skipped run runs
+      expect(seen.at(-1)).toBe(16);
+    });
+  });
+
+  test("HIGH-1: a frame callback that finds a watch begun after it was asked asks again rather than ending that watch", async () => {
+    const RealMC = globalThis.MessageChannel;
+    const realRaf = globalThis.requestAnimationFrame;
+    const frames = [];
+    let port = null;
+    await freshRuntime("frame2", () => {
+      // a MessageChannel the test delivers by hand
+      globalThis.MessageChannel = class { constructor() { const p1 = { onmessage: null }; this.port1 = p1; this.port2 = { postMessage() { port = p1; } }; } };
+      globalThis.requestAnimationFrame = (f) => { frames.push(f); return frames.length; };
+    }, () => {
+      globalThis.MessageChannel = RealMC;
+      globalThis.requestAnimationFrame = realRaf;
+    }, async (fresh, scope, logged) => {
+      globalThis.__scrml_render_stall_ms = 50;
+      const x = fresh.cell(0);
+      const seen = [];
+      fresh.effect(scope, () => { seen.push(x.get()); });
+      x.set(1);                                      // watch W1 begins; a frame is asked for W1
+      expect(frames.length).toBe(1);
+      port.onmessage();                              // W1's tick: W1 ends
+      x.set(2);                                      // W2 begins (no second frame asked while one is pending)
+      expect(frames.length).toBe(1);
+      frames.shift()(0);                             // the frame asked for W1 finds W2: it asks again
+      expect(frames.length).toBe(1);
+      for (let i = 3; i <= 7; i++) { busy(20); x.set(i); }   // still W2: bounded
+      expect(logged.length).toBe(1);
+      frames.shift()(0);                             // W2's frame: W2 ends, the skipped run runs
+      expect(seen.at(-1)).toBe(7);
+    });
+  });
+
+  test("MED-1 (#2123 r3 review, probes taskwrite / taskreq): a write arriving in the retry's watch is not lost — the skipped retry runs once more about the bound later", async () => {
+    // r3: the effect re-queued on the yield ran once; a write in the same watch re-ran it, the re-run
+    // was skipped as the retry's, and nothing ever ran it again — the display stayed stale for good.
+    const realRaf = globalThis.requestAnimationFrame;
+    await freshRuntime("retry", () => {
+      globalThis.requestAnimationFrame = undefined;   // no frames (a hidden tab): the tick alone
+    }, () => {
+      globalThis.requestAnimationFrame = realRaf;
+    }, async (fresh, scope, logged) => {
+      globalThis.__scrml_render_stall_ms = 50;
+      const x = fresh.cell(0);
+      let shown = -1;
+      let runs = 0;
+      let late = false;
+      fresh.effect(scope, () => {
+        runs++;
+        shown = x.get();
+        // the late write: it lands in the retry's own watch, after the retry run
+        if (late) { late = false; queueMicrotask(() => x.set(100)); }
+      });
+      await macrotask();
+      for (let i = 1; i <= 8; i++) { await Promise.resolve(); busy(20); x.set(i); }
+      expect(shown).toBe(4);                         // tripped (a finite slow chain: the ruled cost)
+      expect(logged.length).toBe(1);
+      late = true;
+      await macrotask(5);                            // the yield: the retry run shows 8; the late write's
+      expect(x.peek()).toBe(100);                    // re-run in that watch is skipped as the retry's
+      expect(shown).toBe(8);
+      await macrotask(150);                          // about the bound later: run once more
+      expect(shown).toBe(100);                       // r3: 8 for good
+      expect(logged.length).toBe(1);                 // not logged again
+      const settled = runs;
+      await macrotask(150);
+      expect(runs).toBe(settled);                    // nothing more to show: no further runs
+    });
+  });
+
+  test("LOW-1 (#2123 r3 review, probe slow_rerun): a loop whose every lap is slow stops about twice the bound in — the re-run count no longer applies there", async () => {
+    globalThis.__scrml_render_stall_ms = 50;
+    const scope = rt.root.child();
+    const logged = [];
+    const savedErr = console.error;
+    let runs = 0;
+    let runsAtLog = -1;
+    console.error = (...a) => { if (runsAtLog < 0) runsAtLog = runs; logged.push(a.join(" ")); };
+    try {
+      const n = rt.cell(0);
+      const r = rt.cell(0);
+      let armed = false;
+      rt.requestOn(scope, r, [n], () => ({ on: n.peek() + 1, then: (v) => { r.set(v); } }));
+      rt.effect(scope, () => { runs++; r.get(); if (armed) { busy(60); n.set(n.peek() + 1); } });
+      await macrotask();
+      armed = true;
+      runs = 0;
+      n.set(n.peek() + 1);
+      await macrotask();
+      armed = false;
+      // laps of 60 ms against a 50 ms bound: the first re-run (at ~60 ms) runs, the second (at ~120 ms,
+      // past twice the bound) is skipped. r3 ran the count out first: four re-runs, ~240 ms frozen —
+      // with 1 s laps at the default bound, five seconds.
+      expect(runsAtLog).toBeLessThanOrEqual(3);
+      expect(logged.length).toBe(1);
+    } finally {
+      delete globalThis.__scrml_render_stall_ms;
+      console.error = savedErr;
+      scope.dispose();
+    }
+  });
+
+  test("LOW-1: a first re-run past twice the bound still runs — one slow update is not a loop", async () => {
+    globalThis.__scrml_render_stall_ms = 20;
+    const scope = rt.root.child();
+    const logged = [];
+    const savedErr = console.error;
+    console.error = (...a) => logged.push(a.join(" "));
+    try {
+      const status = rt.cell("idle");
+      let shown = "";
+      rt.effect(scope, () => { shown = status.get(); });
+      await macrotask();
+      await Promise.resolve();
+      status.set("saving");
+      busy(60);                                      // three bounds without a yield
+      await Promise.resolve();
+      status.set("saved");
+      expect(shown).toBe("saved");
+      expect(logged).toEqual([]);
+    } finally {
+      delete globalThis.__scrml_render_stall_ms;
+      console.error = savedErr;
+      scope.dispose();
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 4. Chromium (SCRML_BROWSER_TESTS=1; SCRML_CHROMIUM names the binary) — the COMPILED probes
 // ---------------------------------------------------------------------------
@@ -785,6 +984,35 @@ const PROBES = {
   m2b: { src: LOADING, glue: null },
 };
 const STALL = "[scrml] render effects stopped: the page has gone 1000 ms without yielding to the browser";
+// s483 r4 — runtime-level Chromium pages (#2123 r3 review probes stream / taskwrite): the page imports the
+// bootstrap runtime and leaves its result in `window.__res`
+const RT_SCEN = (body) => `import * as rt from "./rt.js";\nconst logged = [];\n` +
+  `console.error = (...a) => { logged.push(a.join(" ")); };\n` +
+  `const busy = (ms) => { const t = performance.now(); while (performance.now() - t < ms) {} };\n` +
+  `const sleep = (ms) => new Promise((r) => setTimeout(r, ms));\nconst scope = rt.root.child();\n` +
+  `const res = await (async () => {\n${body}\n})();\nwindow.__res = { ...res, logs: logged.length };\n`;
+const RT_PAGES = {
+  // a worker streams 2000 messages faster than the page handles them (3 ms each): the page yields
+  // between every message but falls behind by more than a second — r3 took that for a stall
+  "stream.html": `<script type="module" src="./stream.js"></script>`,
+  "stream.js": RT_SCEN(`const x = rt.cell(0); let shown = -1;
+  rt.effect(scope, () => { shown = x.get(); });
+  await sleep(20);
+  const w = new Worker("./stream-worker.js");
+  await new Promise((done) => { w.onmessage = (e) => { busy(3); x.set(e.data); if (e.data === 2000) done(null); }; w.postMessage(2000); });
+  const atEnd = shown; await sleep(300);
+  return { cell: x.peek(), atEnd, after: shown };`),
+  "stream-worker.js": `onmessage = (e) => { const n = e.data; let i = 0; const go = () => { for (let k = 0; k < 2 && i < n; k++) postMessage(++i); if (i < n) setTimeout(go, 1); }; go(); };\n`,
+  // a finite slow chain (8 × 200 ms, the ruled cost: it trips), and a write from a timer queued during it
+  // — r3 dropped that write for good (the display stayed 8)
+  "taskwrite.html": `<script type="module" src="./taskwrite.js"></script>`,
+  "taskwrite.js": RT_SCEN(`const x = rt.cell(0); let shown = -1;
+  rt.effect(scope, () => { shown = x.get(); });
+  await sleep(20);
+  for (let i = 1; i <= 8; i++) { await Promise.resolve(); busy(200); x.set(i); if (i === 1) setTimeout(() => x.set(100), 0); }
+  await sleep(1600);
+  return { cell: x.peek(), after: shown };`),
+};
 let browser, server, cdir, port;
 beforeAll(async () => {
   if (!ON) return;
@@ -805,6 +1033,13 @@ beforeAll(async () => {
   server = createServer((req, res) => {
     const p = new URL(req.url, "http://localhost").pathname;
     if (p === "/favicon.ico") { res.writeHead(204); res.end(); return; }
+    if (p.startsWith("/rt/")) {
+      // s483 r4 — runtime-level pages: the runtime module, a scenario page, a worker
+      const f = p.slice(4);
+      if (f === "rt.js") { res.writeHead(200, { "content-type": "text/javascript" }); res.end(readFileSync(RUNTIME)); return; }
+      if (f in RT_PAGES) { res.writeHead(200, { "content-type": f.endsWith(".js") ? "text/javascript" : "text/html" }); res.end(RT_PAGES[f]); return; }
+      res.writeHead(404); res.end(); return;
+    }
     const [, name, ...rest] = p.split("/");
     const f = join(cdir, name ?? "", "dist", rest.join("/") || "index.html");
     if (!existsSync(f)) { res.writeHead(404); res.end(); return; }
@@ -960,5 +1195,36 @@ suite("s483 host-render-request — Chromium, the compiled probes", () => {
     } finally {
       page.close().catch(() => {});
     }
+  }, 60000);
+
+  // s483 r4 — runtime-level pages
+  async function rtPage(name) {
+    const page = await browser.newPage();
+    const errors = [];
+    page.on("pageerror", (e) => errors.push("pageerror " + e.message));
+    try {
+      await page.goto(`http://127.0.0.1:${port}/rt/${name}.html`);
+      await page.waitForFunction(() => window.__res !== undefined, { timeout: 40000, polling: 200 });
+      return { ...(await page.evaluate(() => window.__res)), errors };
+    } finally {
+      page.close().catch(() => {});
+    }
+  }
+
+  test("r4 HIGH-1 (#2123 r3 review, probe stream): a message stream the page falls behind on — yielding between every message — is not a stall: every value shown, no log", async () => {
+    const r = await rtPage("stream");
+    expect(r.errors).toEqual([]);
+    expect(r.cell).toBe(2000);
+    expect(r.atEnd).toBe(2000);                      // r3: 1438–1915, with a false log
+    expect(r.after).toBe(2000);
+    expect(r.logs).toBe(0);
+  }, 60000);
+
+  test("r4 MED-1 (#2123 r3 review, probe taskwrite): a write from a timer queued during a stall is shown — not lost", async () => {
+    const r = await rtPage("taskwrite");
+    expect(r.errors).toEqual([]);
+    expect(r.cell).toBe(100);
+    expect(r.after).toBe(100);                       // r3: 8 for good
+    expect(r.logs).toBe(1);                          // the finite slow chain trips: the ruled cost
   }, 60000);
 });
