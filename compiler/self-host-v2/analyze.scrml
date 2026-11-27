@@ -11883,9 +11883,9 @@ ${
         // closures (`writes`: the file-scope `let`s a callable writes, at any depth; `uses`: the
         // file-scope bindings it reads or writes, at any depth)
         out = out.concat(valueLetDiags(g, t, sum, writes, sites, lets));
-        // s483 (lane s483-trapping-construct-init) — a construct's initializer that can trap, on the
-        // references of every callable (the same edges as `writes`)
-        out = out.concat(constructTrapDiags(g, t, sum, fnE));
+        // s483 (lane s483-trapping-construct-init) — a construct's initializer that can trap is judged
+        // AFTER the typer (constructTrapPass, analyzeProgram): an unproven tape bound is a typer fact
+        // (Typing.bounds), empty in these bound tables (r1, #2129 review HIGH-1)
         out = out.concat(derivedUntrackedDiags(g, t, sum, reads, lets));
         // s482 (lane s482-display-untracked) — §6.15 A5, W-DISPLAY-UNTRACKED, on the same closures
         out = out.concat(displayUntrackedDiags(g, t, sum, writes, sites, reads, lets));
@@ -13068,6 +13068,15 @@ ${
             out = out.concat([ts]);
         }
         return out;
+    }
+
+    // s483 r1 (#2129 review HIGH-1) — the pass, run over the TYPED tables (analyzeProgram, after
+    // typeProgram): the reference edges of every callable (fileScopePass's `fnE`), then the judgment.
+    fn constructTrapPass(g: Globals, t: Tables, sum: Summary) -> Diag[] {
+        const six: SymIx = nodeSymIx(sum.nodes);
+        let fnE: int[][] = [];
+        for (const c of sum.nodes) { fnE = fnE.concat([refTargets(sum.nodes, six, c.f.scan.refs, false)]); }
+        return constructTrapDiags(g, t, sum, fnE);
     }
 
     fn constructTrapDiags(g: Globals, t: Tables, sum: Summary, fnE: int[][]) -> Diag[] {
@@ -52950,6 +52959,15 @@ ${
                  novalidate: t.novalidate, resets: t.resets, gated: t.gated, persists: t.persists, timings: t.timings, server: t.server, css: t.css, consts: t.consts, requests: t.requests, taliases: t.taliases, tscope: t.tscope, waits: ws, rows: t.rows };
     }
 
+    // s483 r1 (#2129 review HIGH-1) — `t` with the typer's facts (an unproven tape bound, a
+    // run-time refinement check: Typing.bounds / .refines).
+    fn withTyping(t: Tables, ty: Typing) -> Tables {
+        return { program: t.program, types: t.types, decls: t.decls, fns: t.fns, handles: t.handles,
+                 names: t.names, values: t.values, effects: t.effects, binds: t.binds, elems: t.elems,
+                 attrs: t.attrs, fails: t.fails, annots: t.annots, unresolved: t.unresolved, typing: ty,
+                 novalidate: t.novalidate, resets: t.resets, gated: t.gated, persists: t.persists, timings: t.timings, server: t.server, css: t.css, consts: t.consts, requests: t.requests, taliases: t.taliases, tscope: t.tscope, waits: t.waits, rows: t.rows };
+    }
+
     fn nodeIdx(nodes: Callable[], sym: int) -> int {
         let i: int = 0;
         for (const c of nodes) {
@@ -58531,6 +58549,9 @@ ${
         // s468: static executable attribute values (§5.2 S464) and impure `fn` bodies (§48.3.3)
         const sinkDiags: Diag[] = staticExecPass(ra.g, bound).concat(fnWritePass(ra.g, sum)).concat(fileScopePass(ra.g, bound, sum)).concat(fallOffPass(ra.g, bound)).concat(invReachPass(ra.g, bound, st.diags)).concat(txRulesPass(ra.g)).concat(css.diags).concat(styleOverlaps(ra.g));
         const typed: RTyping = typeProgram(files, withWaits(bound, waitingFns(sum)), st.diags.concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags), ra.g.te.link);
+        // s483 r1 (#2129 review HIGH-1) — a trapping initializer inside a construct, judged over the
+        // TYPED tables: boundCheckAt reads Typing.bounds, which typeProgram fills
+        const trapDiags: Diag[] = constructTrapPass(ra.g, withTyping(bound, typed.typing), sum);
         // s451 (U1a): route placement, the queries and the databases
         const pp: RPlaced = placePass(ra.g, bound, st, sum);
         // s454 (U1b): the suspension plan — per client site, after placement (it
@@ -58573,7 +58594,7 @@ ${
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
                             novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, timings: bound.timings, server: sf, css: css.facts, consts: bound.consts, requests: bound.requests, taliases: bound.taliases, tscope: bound.tscope, waits: waitingFns(sum), rows: bound.rows };
-        const base0: Diag[] = chScopeQuiet(domScopeDropped(cps.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags).concat(hostPlacedDiags(fns, pp.facts.servers)).concat(hostServerDiags(ra.g, pp.facts.servers)).concat(nestedFnPass(ra.g, t)).concat(eps.diags), chs.quiet, chs.calls).concat(chs.diags);
+        const base0: Diag[] = chScopeQuiet(domScopeDropped(cps.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags).concat(trapDiags).concat(hostPlacedDiags(fns, pp.facts.servers)).concat(hostServerDiags(ra.g, pp.facts.servers)).concat(nestedFnPass(ra.g, t)).concat(eps.diags), chs.quiet, chs.calls).concat(chs.diags);
         // s471: the linear pass (§35) — after the typer (§35.5: "after type resolution and
         // route inference"; a non-exhaustive `match`'s E-TYPE-020 is in `base0`, §35.4.3)
         const base: Diag[] = base0.concat(linPass(ra.g, t, base0));
