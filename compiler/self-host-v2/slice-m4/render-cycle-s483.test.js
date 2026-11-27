@@ -98,6 +98,55 @@ let <show:bool=false/>
 </>
 <main><*ph/></main>`), ["o"])).toEqual(["y"]);
   }, 120000);
+
+  // s483 r1 (#2139 review MED-1) — the cycle runs through a declaration's render
+  test("s08 (r1): a program field's arm mounts `<card/>`, whose render shows that field — refused, every hop named", async () => {
+    const { es, name } = await errors(P(`${PH}
+<ph:Ph=.B single>
+  <A rule=.B><b>x</b></>
+  <B rule=.A><div><card/></div></>
+</>
+<card t:string="c">
+</> renders <i><*ph/></i>
+<main><*ph/></main>`));
+    expect(es.map((d) => d.code)).toEqual(["E-DECL-RENDER-CYCLE-STAR"]);
+    expect(es[0].message).toContain(`through the cycle \`<*ph/>\` (${name}:8:16) → \`<card>\` (${name}:5:19) → \`<*ph/>\` (${name}:8:16)`);
+    expect(es[0].message).toContain("`<*ph/>`'s `<B>` state-child body holds `<card>`; `<card>`'s `renders` (a new `<card>` instance) holds `<*ph/>`");
+  }, 120000);
+
+  test("s09 (r1): through the shared instance `<*card/>`, and guarded inside the render — refused", async () => {
+    const { es, name } = await errors(P(`${PH}
+<ph:Ph=.B single>
+  <A rule=.B><b>x</b></>
+  <B rule=.A><div><*card/></div></>
+</>
+<card t:string="c">
+</> renders <i><*ph/></i>
+<main><*ph/></main>`));
+    expect(es.map((d) => d.code)).toEqual(["E-DECL-RENDER-CYCLE-STAR"]);
+    expect(es[0].message).toContain("`renders` (the shared `<card>` instance) holds `<*ph/>`");
+    const g = await errors(P(`${PH}
+<ph:Ph=.B single>
+  <A rule=.B><b>x</b></>
+  <B rule=.A><div><card/></div></>
+</>
+<card t:string="c">
+</> renders <i><span if=(t == "q")><*ph/></span></i>
+<main><*ph/></main>`));
+    expect(g.es.map((d) => d.code)).toEqual(["E-DECL-RENDER-CYCLE-STAR"]);
+    void name;
+  }, 120000);
+
+  test("r1: a component's render showing a program field that does not lead back still renders", async () => {
+    expect(await texts(P(`${PH}
+<ph:Ph=.B single>
+  <A rule=.B><b>x</b></>
+  <B rule=.A><b>y</b></>
+</>
+<card t:string="c">
+</> renders <i id="o"><*ph/></i>
+<main><card/></main>`), ["o"])).toEqual(["y"]);
+  }, 120000);
 });
 
 describe("item 2: E-DECL-RENDER-CYCLE-USE — a use inside its own render, unconditional on every path", () => {
@@ -119,7 +168,7 @@ describe("item 2: E-DECL-RENDER-CYCLE-USE — a use inside its own render, uncon
 </> renders <span><pa/></span>
 <main id="o"><pa/></main>`));
     expect(es.map((d) => d.code)).toEqual(["E-DECL-RENDER-CYCLE-USE", "E-DECL-RENDER-CYCLE-USE"]);
-    expect(es[0].message).toContain(`\`<pa>\`'s render mounts \`<pb>\` (${name}:3:18), whose render mounts \`<pa>\` (${name}:5:19)`);
+    expect(es[0].message).toContain(`\`<pa>\`'s render mounts \`<pb>\` (${name}:3:18); \`<pb>\`'s render mounts \`<pa>\` (${name}:5:19)`);
   }, 120000);
 
   test("through a child field's own `renders` shown by `<*v/>` — refused", async () => {
@@ -185,5 +234,108 @@ renders <div id="o"><*v/></div>
 </> renders <wrap><card/></wrap>
 <main id="o"><card/></main>
 <p id="o2">z</p>`), ["o", "o2"])).toEqual(["", "z"]);
+  }, 240000);
+});
+
+describe("item 2 (r1, #2139 review MED-2): every branch mounts it — PA reading pa-ruled:S483-every-path-mounts", () => {
+  test("m03: both branches of an `if=` / `else` chain — refused quickly (was a compile hang), one use per branch named", async () => {
+    const { es, name } = await errors(P(`<card t:string="x">
+</> renders <div><card if=(t == "a")/><card else/></div>
+<main><card/></main>`));
+    expect(es.map((d) => d.code)).toEqual(["E-DECL-RENDER-CYCLE-USE"]);
+    expect(es[0].message).toContain(`\`<card>\` in every branch of the \`if=\` chain at ${name}:3:18 (\`<card>\` (${name}:3:18) in the \`if=\` branch; \`<card>\` (${name}:3:39) in the \`else\` branch)`);
+  }, 120000);
+
+  test("m03b / n11: wrapped branches, and a three-branch chain into a mutual pair — refused", async () => {
+    const a = await errors(P(`<card t:string="x">
+</> renders <div><span if=(t == "a")><card/></span><span else><card/></span></div>
+<main><card/></main>`));
+    expect(a.es.map((d) => d.code)).toEqual(["E-DECL-RENDER-CYCLE-USE"]);
+    const b = await errors(P(`<pa t:string="x">
+</> renders <div><pb if=(t == "a")/><span else-if=(t == "b")><pb/></span><pb else/></div>
+<pb t:string="y">
+</> renders <p><pa/></p>
+<main><pa/></main>`));
+    expect(b.es.map((d) => d.code)).toEqual(["E-DECL-RENDER-CYCLE-USE", "E-DECL-RENDER-CYCLE-USE"]);
+  }, 120000);
+
+  test("m04 / n10: every arm of an exhaustive `<match>` (variants, or `<_>`) — refused (was a compile hang)", async () => {
+    const a = await errors(P(`${PH}
+<card t:string="x">
+</> renders <div><match for=Ph on=(t == "a" ? Ph.A : Ph.B)><A><card/></A><B><card/></B></match></div>
+<main><card/></main>`));
+    expect(a.es.map((d) => d.code)).toEqual(["E-DECL-RENDER-CYCLE-USE"]);
+    expect(a.es[0].message).toContain("in every arm of the `<match>`");
+    expect(a.es[0].message).toContain("in the `<A>` arm");
+    expect(a.es[0].message).toContain("in the `<B>` arm");
+    const b = await errors(P(`\${ type Ph3:enum = { A, B, C } }
+<card t:string="x">
+</> renders <div><match for=Ph3 on=(t == "a" ? Ph3.A : Ph3.B)><A><card/></A><_><span><card/></span></_></match></div>
+<main><card/></main>`));
+    expect(b.es.map((d) => d.code)).toEqual(["E-DECL-RENDER-CYCLE-USE"]);
+  }, 120000);
+
+  test("m15: a `<slot/>` in both branches of an `if=` / `else` — slot content mounting its holder is refused", async () => {
+    const { es } = await errors(P(`<wrap t:string="w">
+</> renders <div><b if=(t == "q")><slot/></b><i else><slot/></i></div>
+<card t:string="x">
+</> renders <wrap><card/></wrap>
+<main><card/></main>`));
+    expect(es.map((d) => d.code)).toEqual(["E-DECL-RENDER-CYCLE-USE"]);
+    expect(es[0].message).toContain("whose render shows its `<slot/>` in every branch of the `if=` chain");
+  }, 120000);
+
+  test("n03: every state arm of the declaration's own field mounts it — refused", async () => {
+    const { es } = await errors(P(`${PH}
+<card t:string="x">
+    <ph:Ph=.B>
+      <A rule=.B><i><card/></i></>
+      <B rule=.A><div><card/></div></>
+    </>
+</> renders <div><*ph/></div>
+<main><card/></main>`));
+    expect(es.map((d) => d.code)).toEqual(["E-DECL-RENDER-CYCLE-USE"]);
+    expect(es[0].message).toContain("in every state arm of `<*ph/>`");
+  }, 120000);
+
+  test("LOW-1: the message names every hop — the slot carriers, the `<*v/>` / `<*w/>` a use stands in", async () => {
+    const a = await errors(P(`<w2 t:string="w">
+</> renders <div><slot/></div>
+<w1 t:string="w">
+</> renders <w2><slot/></w2>
+<card t:string="x">
+</> renders <w1><card/></w1>
+<main><card/></main>`));
+    expect(a.es.map((d) => d.code)).toEqual(["E-DECL-RENDER-CYCLE-USE"]);
+    expect(a.es[0].message).toContain(`\`<card>\` (${a.name}:7:17) in the slot content of \`<w1>\` (${a.name}:7:13), whose render shows its \`<slot/>\` through \`<w2>\` (${a.name}:5:13)`);
+    const b = await errors(P(`<card t:string="x">
+    let <v:int=1/>
+    renders <i><*w/></i>
+    let <w:int=2/>
+    renders <u><card/></u>
+</>
+renders <div><*v/></div>
+<main><card/></main>`));
+    expect(b.es.map((d) => d.code)).toEqual(["E-DECL-RENDER-CYCLE-USE"]);
+    expect(b.es[0].message).toContain(`in \`<*w/>\` (${b.name}:4:16)'s own \`renders\` in \`<*v/>\` (${b.name}:8:14)'s own \`renders\``);
+  }, 120000);
+
+  test("legal: a branch that does not mount it ends the recursion — chain, `<match>` arm into a mutual pair, slot in one branch", async () => {
+    expect(await texts(P(`<leaf t:string="L">
+</> renders <b>\${t}</b>
+<tree d:int=2>
+</> renders <div>\${d}<leaf if=(d == 0)/><tree d=(d - 1) else/></div>
+<main id="o"><tree/></main>`), ["o"])).toEqual(["210L"]);
+    expect(await texts(P(`${PH}
+<pa d:int=2>
+</> renders <div>\${d}<match for=Ph on=(d > 0 ? Ph.B : Ph.A)><A><b>leaf</b></A><B><pb d=(d - 1)/></B></match></div>
+<pb d:int=2>
+</> renders <span><pa d=(d)/></span>
+<main id="o"><pa/></main>`), ["o"])).toEqual(["210leaf"]);
+    expect(await texts(P(`<wrap t:string="w">
+</> renders <div><b if=(t == "q")><slot/></b><i else>none</i></div>
+<card t:string="x">
+</> renders <wrap><card/></wrap>
+<main id="o"><card/></main>`), ["o"])).toEqual(["none"]);
   }, 240000);
 });

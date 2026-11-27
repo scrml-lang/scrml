@@ -31734,7 +31734,7 @@ ${
         // for THIS instance (§66.6.2) — resolved in this declaration's context.
         const own: ANode[] = fieldRenders(sf.src, f.nid);
         if (own.length > 0 && fileErrs(env.g.files, env.file).length == 0) {
-            const cyc: AElem[] = starCycle(st, e.nid, own);
+            const cyc: CycStep[] = starCycle(env.g, st, e, [{ what: "own `renders`", nodes: own, file: sf.src.file, decl: false }]);
             if (cyc.length > 0) return selfStarDiag(st, env, e, cyc);
         }
         if (own.length > 0) return addElem(st, e.nid, ElemFact.MInline({ nodes: own, subst: not }));
@@ -31747,10 +31747,10 @@ ${
                 if (v >= 0 && c.body.length > 0) arms = arms.concat([{ variant: v, body: c.body }]);
             }
             if (arms.length > 0) {
-                let armNodes: ANode[] = [];
-                for (const am of arms) { armNodes = armNodes.concat(am.body); }
+                let armGroups: RGroup[] = [];
+                for (const am of arms) { armGroups = armGroups.concat([{ what: "`<" + armName(env.g, g.enumSym, am.variant) + ">` state-child body", nodes: am.body, file: sf.src.file, decl: false }]); }
                 if (fileErrs(env.g.files, env.file).length == 0) {
-                    const cyc2: AElem[] = starCycle(st, e.nid, armNodes);
+                    const cyc2: CycStep[] = starCycle(env.g, st, e, armGroups);
                     if (cyc2.length > 0) return selfStarDiag(st, env, e, cyc2);
                 }
                 const sv: StateView ={ decl: sf.decl.sym, inst: sf.inst, idx: sf.idx, enumSym: g.enumSym, arms: arms };
@@ -31762,22 +31762,32 @@ ${
 
     // s482 (lane s482-mount-reach-fu, #2112 r1 re-review F/U-2); s483 (lane s483-self-render,
     // ruling:user-voice-scrml.md-S483-star-self-render-error) — does the markup a `<*f/>` renders
-    // (`nodes`) hold that same `<*f/>` (`start`) — directly (a state-child body showing its own field,
-    // a field's `renders` holding its own `<*f/>`), or through the markup of another `<*g/>` already
-    // resolved (two fields that render each other: the second one resolved sees the cycle)? Such a
-    // render never ends: each `<*f/>` renders the markup that holds it again, for the same field of
-    // the same instance, so every guard on the way (an `if=`, a state arm) answers the same at every
-    // level — guards are walked through, not around (§66.6.2 S483). The answer is the cycle: the
-    // `<*g/>`s walked from `start`'s markup to `start` itself, in order (the last one is `start`); []
-    // none. `seen`: the `<*g/>`s already walked (each at most once — the walk ends). Not judged in a
-    // file holding a parse error (Rule C: an unclosed state child swallows what follows it — recovery
-    // debris, not a render; the build fails on the parse error and nothing is lowered).
-    type StarHop:struct = { n: ANode, via: AElem[] }
+    // (`groups`: its state-child bodies, or its own `renders`) hold that same `<*f/>` (`start`) —
+    // directly (a state-child body showing its own field, a field's `renders` holding its own
+    // `<*f/>`), or through the markup of another `<*g/>` already resolved (two fields that render each
+    // other: the second one resolved sees the cycle)? Such a render never ends: each `<*f/>` renders
+    // the markup that holds it again, for the same field of the same instance, so every guard on the
+    // way (an `if=`, a state arm) answers the same at every level — guards are walked through, not
+    // around (§66.6.2 S483). The answer is the cycle (cycleSteps); [] none. Each `<*g/>` is walked at
+    // most once (the walk ends). A cycle that runs through a declaration's render (a use, or a shared
+    // instance's `<*x/>`) is judged after resolution, over every fact: starThroughPass. Not judged in
+    // a file holding a parse error (Rule C: an unclosed state child swallows what follows it —
+    // recovery debris, not a render; the build fails on the parse error and nothing is lowered).
+    //
+    // A step of a render cycle: the element `e` (a `<*g/>`, or a use), in `file`, and `what` — the
+    // markup of `e` that holds the next step (a state-child body, its own `renders`, …; "" on the
+    // last step). `decl`: the step goes through a declaration's render.
+    type CycStep:struct = { e: AElem, file: string, what: string, decl: boolean }
+    // Markup a step renders: `what` names it (for the message), `file` is where it is written.
+    type RGroup:struct = { what: string, nodes: ANode[], file: string, decl: boolean }
+    type StarHop:struct = { n: ANode, file: string, first: RGroup, via: CycStep[] }
 
-    fn starCycle(st: AS, start: int, nodes: ANode[]) -> AElem[] {
+    fn starCycle(g: Globals, st: AS, start: AElem, groups: RGroup[]) -> CycStep[] {
         let sn: int[] = [];
         let todo: StarHop[] = [];
-        for (const n0 of nodes) { todo = todo.concat([{ n: n0, via: [] }]); }
+        for (const gr of groups) {
+            for (const n0 of gr.nodes) { todo = todo.concat([{ n: n0, file: gr.file, first: gr, via: [] }]); }
+        }
         for (; todo.length > 0; ) {
             let next: StarHop[] = [];
             for (const h of todo) {
@@ -31789,21 +31799,16 @@ ${
                     // no-default-arm: only an element's children and a gather's rows hold markup the render walks
                     _ :> []
                 };
-                for (const m of more) { next = next.concat([{ n: m, via: h.via }]); }
+                for (const m of more) { next = next.concat([{ n: m, file: h.file, first: h.first, via: h.via }]); }
                 const ne: AElem | not = nodeElem(n);
                 if (ne is given && ne.star) {
-                    if (ne.nid == start) return h.via.concat([ne]);
+                    if (ne.nid == start.nid) return cycleSteps(h, ne);
                     if (sn.indexOf(ne.nid) < 0) {
                         sn = sn.concat([ne.nid]);
-                        const f: ElemFact | not = elemFactNow(st, ne.nid);
-                        const inner: ANode[] = match f {
-                            .MInline(v: iv) :> inlineOwnNodes(iv),
-                            .MStateView(v: sv) :> stateArmBodies(sv),
-                            // no-default-arm: only `<*f/>` of a field renders markup written elsewhere
-                            _ :> []
-                        };
-                        const via2: AElem[] = h.via.concat([ne]);
-                        for (const m2 of inner) { next = next.concat([{ n: m2, via: via2 }]); }
+                        for (const gr of starGroups(g, elemFactNow(st, ne.nid), h.file, false)) {
+                            const via2: CycStep[] = h.via.concat([{ e: ne, file: h.file, what: gr.what, decl: gr.decl }]);
+                            for (const m2 of gr.nodes) { next = next.concat([{ n: m2, file: gr.file, first: h.first, via: via2 }]); }
+                        }
                     }
                 }
             }
@@ -31812,17 +31817,256 @@ ${
         return [];
     }
 
-    // E-DECL-RENDER-CYCLE-STAR (§66.6.2 S483) — at the `<*f/>` whose markup holds it again, naming
-    // every `<*g/>` on the cycle with its place.
-    fn selfStarDiag(st: AS, env: Env, e: AElem, cyc: AElem[]) -> AS {
-        const here: string = "`<*" + e.tag + "/>` (" + placeIn(env.g.files, env.file, e.span.start) + ")";
-        let path: string = here + " stands inside the markup it renders: a state-child body of `" + e.tag + "`, or `" + e.tag + "`'s own `renders`, holds that same `<*" + e.tag + "/>`";
-        if (cyc.length > 1) {
-            path = here + " stands inside the markup it renders, through the cycle " + here;
-            for (const c of cyc) { path = path + " → `<*" + c.tag + "/>` (" + placeIn(env.g.files, env.file, c.span.start) + ")"; }
-            path = path + " (each arrow: the markup the left one renders — a state-child body or a field's `renders` — holds the right one)";
+    // The whole cycle a walk closed at `last` (the start again): the start (with the markup of it the
+    // walk began in), every step walked through, and the start once more.
+    fn cycleSteps(h: StarHop, last: AElem) -> CycStep[] {
+        const head: CycStep = { e: last, file: h.file, what: h.first.what, decl: h.first.decl };
+        return [head].concat(h.via).concat([{ e: last, file: h.file, what: "", decl: false }]);
+    }
+
+    // The markup a `<*f/>` (or, with `decls`, a use or a shared instance's `<*x/>`) renders, by its
+    // fact: each state-child body of a graph field (named by its variant), a child field's own
+    // `renders`; with `decls`, the used / shown declaration's `renders`. `file`: where the element
+    // stands (a child field's `renders` is written beside it).
+    fn starGroups(g: Globals, f: ElemFact | not, file: string, decls: boolean) -> RGroup[] {
+        return match f {
+            .MInline(v: iv) :> [{ what: "own `renders`", nodes: iv.nodes, file: file, decl: false }],
+            .MStateView(v: sv) :> stateGroups(g, sv, file),
+            .MStar(decl: d) :> declGroups(g, d, decls, "`renders` (the shared `<" + d.hint + ">` instance)"),
+            .MUse(decl: d) :> declGroups(g, d, decls, "`renders` (a new `<" + d.hint + ">` instance)"),
+            // no-default-arm: only `<*f/>` of a field (and a use / a shared `<*x/>`) renders markup written elsewhere
+            _ :> []
+        };
+    }
+
+    fn stateGroups(g: Globals, sv: StateView, file: string) -> RGroup[] {
+        let f: string = file;
+        const ds: DeclSrc | not = findDeclSrc(g, sv.decl);
+        if (ds is given) f = ds.file;
+        let out: RGroup[] = [];
+        for (const a of sv.arms) { out = out.concat([{ what: "`<" + armName(g, sv.enumSym, a.variant) + ">` state-child body", nodes: a.body, file: f, decl: false }]); }
+        return out;
+    }
+
+    fn declGroups(g: Globals, s: Sym, decls: boolean, what: string) -> RGroup[] {
+        if (!decls) return [];
+        const ds: DeclSrc | not = findDeclSrc(g, s);
+        if (ds is not) return [];
+        if (ds.isProgram) return [];
+        const d: ADecl | not = ds.d;
+        if (d is not) return [];
+        return [{ what: what, nodes: rendersOf(d), file: ds.file, decl: true }];
+    }
+
+    // The name of variant `v` of the enum `es` (`_` for the wildcard arm, -1).
+    fn armName(g: Globals, es: Sym, v: int) -> string {
+        const vs: VariantDef[] = enumVariantsOf(g, es);
+        if (v < 0 || v >= vs.length) return "_";
+        return vs[v].sym.hint;
+    }
+
+    // An element of a cycle, as written: `<*f/>` or `<x>`.
+    fn cycElem(e: AElem) -> string {
+        if (e.star) return "`<*" + e.tag + "/>`";
+        return "`<" + e.tag + ">`";
+    }
+
+    // The cycle named in order, each step with its place, then what holds what.
+    fn renderCycleText(files: FileAst[], cyc: CycStep[]) -> string {
+        let path: string = "";
+        let holds: string = "";
+        let i: int = 0;
+        for (; i < cyc.length; ) {
+            const c: CycStep = cyc[i];
+            if (i > 0) path = path + " → ";
+            path = path + cycElem(c.e) + " (" + placeIn(files, c.file, c.e.span.start) + ")";
+            if (i + 1 < cyc.length) {
+                if (i > 0) holds = holds + "; ";
+                holds = holds + cycElem(c.e) + "'s " + c.what + " holds " + cycElem(cyc[i + 1].e);
+            }
+            i = i + 1;
         }
-        return addDiag(st, env.file, e.span, "E-DECL-RENDER-CYCLE-STAR", path + ". Rendering it never ends: each `<*f/>` on the cycle shows the same field of the same instance at every level, so any guard on the way (an `if=`, the state arm holding it) gives the same answer at every level, and every level renders the next (§66.6.2). Show a different field there, or make the nested part a component with a depth attribute — a plain use is a new instance, so its guard can end it: `<tree depth=(depth - 1) if=(depth > 0)/>`");
+        return path + " (" + holds + ")";
+    }
+
+    // E-DECL-RENDER-CYCLE-STAR (§66.6.2 S483) — the message, at the `<*f/>` that closes the cycle
+    // `cyc` (its first and last step), naming every step with its place and the markup that holds the next.
+    fn starCycleMsg(files: FileAst[], cyc: CycStep[]) -> string {
+        const e: AElem = cyc[0].e;
+        const here: string = "`<*" + e.tag + "/>` (" + placeIn(files, cyc[0].file, e.span.start) + ")";
+        let path: string = here + " stands inside the markup it renders: its " + cyc[0].what + " holds that same `<*" + e.tag + "/>`";
+        if (cyc.length > 2) path = here + " stands inside the markup it renders, through the cycle " + renderCycleText(files, cyc);
+        return path + ". Rendering it never ends: each `<*f/>` on the cycle shows the same field of the same instance at every level — a declaration's render on the way is mounted from the same values at every level — so any guard on the way (an `if=`, the state arm holding it) gives the same answer at every level, and every level renders the next (§66.6.2). Show a different field there, or make the nested part a component with a depth attribute — a plain use is a new instance, so its guard can end it: `<tree depth=(depth - 1) if=(depth > 0)/>`";
+    }
+
+    fn selfStarDiag(st: AS, env: Env, e: AElem, cyc: CycStep[]) -> AS {
+        return addDiag(st, env.file, e.span, "E-DECL-RENDER-CYCLE-STAR", starCycleMsg(env.g.files, cyc));
+    }
+
+    // s483 r1 (#2139 review MED-1; ruling:user-voice-scrml.md-S483-star-self-render-error — "every
+    // such cycle") — a `<*f/>` cycle that runs through a declaration's render: a program field's state
+    // arm mounts `<card/>` (or shows the shared `<*card/>`), whose render shows `<*f/>` again. The
+    // program's field and a shared instance are ONE instance, at every level (a used declaration's own
+    // fields are new per mount, but set from the same values every time), so it never ends, guarded
+    // or not. Judged after resolution, over every fact, from each `<*f/>` of a program field and each
+    // shared instance's `<*x/>`: the walk follows a `<*g/>`'s markup, a use's render (and its slot
+    // content, when the declaration's render holds a `<slot/>`), a shared `<*x/>`'s render, and
+    // returns to the start. A cycle with no declaration's render on it is the resolver's (starCycle).
+    // One report per cycle, at the start the walk found it from first.
+    fn starThroughPass(g: Globals, t: Tables) -> Diag[] {
+        let out: Diag[] = [];
+        let done: string[] = [];
+        let i: int = 0;
+        for (; i < t.elems.nids.length; ) {
+            const f: ElemFact = t.elems.facts[i];
+            const sf: string = outsideStarFile(g, f);
+            if (sf != "" && fileErrs(g.files, sf).length == 0) {
+                const cyc: CycStep[] = throughCycle(g, t, t.elems.nids[i], starGroups(g, f, sf, true));
+                let through = false;
+                for (const c of cyc) { if (c.decl) through = true; }
+                if (through) {
+                    const key: string = cycleKey(cyc);
+                    if (done.indexOf(key) < 0) {
+                        done = done.concat([key]);
+                        out = out.concat([newDiag("E-DECL-RENDER-CYCLE-STAR", starCycleMsg(g.files, cyc), cyc[0].file, cyc[0].e.span)]);
+                    }
+                }
+            }
+            i = i + 1;
+        }
+        return out;
+    }
+
+    // The file a `<*f/>` of a program field / a shared instance's `<*x/>` is judged in (where the
+    // markup it renders is written); "" for any other fact.
+    fn outsideStarFile(g: Globals, f: ElemFact) -> string {
+        return match f {
+            .MStateView(v: sv) :> programFile(g, sv.decl),
+            .MInline(v: iv) :> inlineProgramFile(g, iv),
+            .MStar(decl: d) :> declFile(g, d),
+            // no-default-arm: only a program field's `<*f/>` and a shared `<*x/>` show ONE instance at every level
+            _ :> ""
+        };
+    }
+
+    fn programFile(g: Globals, s: Sym) -> string {
+        for (const ds of g.decls) {
+            if (ds.isProgram && ds.info.sym.id == s.id) return ds.file;
+        }
+        return "";
+    }
+
+    fn declFile(g: Globals, s: Sym) -> string {
+        const ds: DeclSrc | not = findDeclSrc(g, s);
+        if (ds is not) return "";
+        return ds.file;
+    }
+
+    // The file of the program whose field's own `renders` the inlined markup `iv` is; "" when it is a
+    // user declaration's child field (an instance of that declaration — new per mount).
+    fn inlineProgramFile(g: Globals, iv: InlineView) -> string {
+        if (iv.nodes.length == 0) return "";
+        const ne: AElem | not = nodeElem(iv.nodes[0]);
+        if (ne is not) return "";
+        for (const ds of g.decls) {
+            if (ds.isProgram) {
+                for (const fd of fieldDecls(ds)) {
+                    const r: AElem | not = fd.renders;
+                    if (r is given && r.nid == ne.nid) return ds.file;
+                }
+            }
+        }
+        return "";
+    }
+
+    // The elements of a cycle, as a key: one report per cycle, whichever start found it.
+    fn cycleKey(cyc: CycStep[]) -> string {
+        let ids: string[] = [];
+        let i: int = 0;
+        for (; i + 1 < cyc.length; ) {
+            const s: string = "" + cyc[i].e.nid;
+            if (ids.indexOf(s) < 0) ids = ids.concat([s]);
+            i = i + 1;
+        }
+        return ids.sort().join(",");
+    }
+
+    fn throughCycle(g: Globals, t: Tables, start: int, groups: RGroup[]) -> CycStep[] {
+        let sn: int[] = [];
+        let sd: int[] = [];
+        let todo: StarHop[] = [];
+        for (const gr of groups) {
+            for (const n0 of gr.nodes) { todo = todo.concat([{ n: n0, file: gr.file, first: gr, via: [] }]); }
+        }
+        for (; todo.length > 0; ) {
+            let next: StarHop[] = [];
+            for (const h of todo) {
+                const n: ANode = h.n;
+                const k: ANodeK = n.k;
+                const ne: AElem | not = nodeElem(n);
+                let f: ElemFact | not = not;
+                if (ne is given) f = elemFact(t.elems, ne.nid);
+                const u: Sym | not = useDecl(f);
+                if (ne is given && ne.star && ne.nid == start) return cycleSteps(h, ne);
+                if (ne is given && u is given) {
+                    // a use: a new instance, whose render runs at its mount; its children are slot
+                    // content, rendered where the render's `<slot/>` stands
+                    if (ne.kids.length > 0 && declHoldsSlot(g, u)) {
+                        const vk: CycStep[] = h.via.concat([{ e: ne, file: h.file, what: "slot content", decl: true }]);
+                        for (const m of ne.kids) { next = next.concat([{ n: m, file: h.file, first: h.first, via: vk }]); }
+                    }
+                } else {
+                    const more: ANode[] = match k {
+                        .Elem(e: el) :> el.kids,
+                        .Gather(f: gf) :> gatherRows(gf),
+                        // no-default-arm: only an element's children and a gather's rows hold markup the render walks
+                        _ :> []
+                    };
+                    for (const m of more) { next = next.concat([{ n: m, file: h.file, first: h.first, via: h.via }]); }
+                }
+                if (ne is given) {
+                    let walk = false;
+                    if (u is given) {
+                        if (sd.indexOf(u.id) < 0) {
+                            sd = sd.concat([u.id]);
+                            walk = true;
+                        }
+                    } else if (ne.star && sn.indexOf(ne.nid) < 0) {
+                        sn = sn.concat([ne.nid]);
+                        walk = true;
+                    }
+                    if (walk) {
+                        for (const gr of starGroups(g, f, h.file, true)) {
+                            const via2: CycStep[] = h.via.concat([{ e: ne, file: h.file, what: gr.what, decl: gr.decl }]);
+                            for (const m2 of gr.nodes) { next = next.concat([{ n: m2, file: gr.file, first: h.first, via: via2 }]); }
+                        }
+                    }
+                }
+            }
+            todo = next;
+        }
+        return [];
+    }
+
+    // Does the declaration `s`'s render hold a `<slot/>` (anywhere — a guard on the way gives the same
+    // answer at every level of a star cycle)?
+    fn declHoldsSlot(g: Globals, s: Sym) -> boolean {
+        const ds: DeclSrc | not = findDeclSrc(g, s);
+        if (ds is not) return false;
+        const d: ADecl | not = ds.d;
+        if (d is not) return false;
+        return holdsSlot(rendersOf(d));
+    }
+
+    fn holdsSlot(nodes: ANode[]) -> boolean {
+        for (const n of nodes) {
+            const e: AElem | not = nodeElem(n);
+            if (e is given) {
+                if (!e.star && e.tag == "slot") return true;
+                if (holdsSlot(e.kids)) return true;
+            }
+        }
+        return false;
     }
 
     // ---- s483 (lane s483-self-render) — a declaration whose render mounts itself ---------------
@@ -31831,26 +32075,47 @@ ${
     // unconditional on every path is E-DECL-RENDER-CYCLE-USE, at the use. A plain use is a NEW
     // instance (§66.6.1) whose render runs at its mount (§66.7.6), so such a render mounts another of
     // itself, without end (before S483 it compiled, and the page overflowed the stack at load —
-    // g-boot-component-mounts-self-s483). Unconditional: the use stands in the render's markup with no
-    // `if=` / `else-if=` / `else` on it or on any element around it, outside every `<each>` row, block
-    // `<match>` arm, state-child body shown by `<*f/>` (#2116 review y04) and Tier-0 gather row; markup
-    // that always renders is walked through — a child field's own `renders` shown by `<*f/>`
-    // (MInline), a `<db>` block's children, and the slot content given to a use whose declaration's
-    // render shows its `<slot/>` unconditionally. Guarded recursion stays legal: each level is a new
-    // instance, and its guard can read something that changes per level (a depth attribute). Each
+    // g-boot-component-mounts-self-s483). Unconditional on every path (s483 r1, #2139 review MED-2;
+    // PA reading pa-ruled:S483-every-path-mounts): every way the render can go mounts it — the use
+    // stands in the render's markup with no `if=` / `else-if=` / `else` on it or on any element around
+    // it, outside every `<each>` row and Tier-0 gather row; OR every branch of the construct holding
+    // it mounts the declaration: each branch of an `if=` / `else-if=` / `else` chain that ends in
+    // `else`, each arm of a block `<match>` whose arms cover every variant (or hold `<_>`), each state
+    // arm of a user declaration's graph field shown by `<*f/>` when every variant has one (a program
+    // field's / a shared instance's `<*f/>` is one instance at every level — rule 1's,
+    // starThroughPass). Markup that always renders is walked through — a child field's own `renders`
+    // shown by `<*f/>` (MInline), a `<db>` block's children, and the slot content given to a use whose
+    // declaration's render shows its `<slot/>` on every path (slotTable — once per declaration).
+    // Guarded recursion stays legal: a nested use some branch does not mount is a new instance at each
+    // level, and its guard can read something that changes per level (a depth attribute). Each
     // declaration's walk is reported at its own uses on a cycle through it (a mutual pair: one report
     // at each of the two uses). Not judged in a file holding a parse error (Rule C).
-    type MountHop:struct = { use: AElem, decl: int, file: string }
-    type MountWalk:struct = { hops: MountHop[], slot: boolean }
+    //
+    // `desc`: the use as the message names it — `<x>` with its place, and every hop that makes it
+    // mount on every path (the slot carriers, the `<*v/>` whose `renders` it stands in, one use per branch).
+    type MountHop:struct = { use: AElem, decl: int, file: string, desc: string }
+    type MountWalk:struct = { hops: MountHop[], slot: boolean, slotHow: string }
     type MountPath:struct = { hops: MountHop[] }
     type DeclMounts:struct = { decl: int, name: string, hops: MountHop[] }
+    // Does the declaration `decl`'s render show its `<slot/>` on every path (`how`: through which
+    // uses' slot content / in every branch of what)?
+    type SlotInfo:struct = { decl: int, shows: boolean, how: string }
+    type SlotSrc:struct = { decl: int, file: string, nodes: ANode[] }
 
     fn selfMountPass(g: Globals, t: Tables) -> Diag[] {
+        let srcs: SlotSrc[] = [];
+        for (const ds of g.decls) {
+            const d: ADecl | not = ds.d;
+            if (!ds.isProgram && d is given && fileErrs(g.files, ds.file).length == 0) {
+                srcs = srcs.concat([{ decl: ds.info.sym.id, file: ds.file, nodes: rendersOf(d) }]);
+            }
+        }
+        const slots: SlotInfo[] = slotTable(g, t, srcs);
         let tab: DeclMounts[] = [];
         for (const ds of g.decls) {
             const d: ADecl | not = ds.d;
             if (!ds.isProgram && d is given && fileErrs(g.files, ds.file).length == 0) {
-                tab = tab.concat([{ decl: ds.info.sym.id, name: d.name, hops: mountWalk(g, t, ds.file, rendersOf(d), []).hops }]);
+                tab = tab.concat([{ decl: ds.info.sym.id, name: d.name, hops: mountWalk(g, t, slots, ds.file, rendersOf(d), "").hops }]);
             }
         }
         let out: Diag[] = [];
@@ -31863,87 +32128,253 @@ ${
         return out;
     }
 
-    // The uses `nodes` mount unconditionally (in the declaration's file `file`), and whether they
-    // show the render's `<slot/>` unconditionally. `seen`: the declarations whose slot is being asked
-    // about (declShowsSlot) — each at most once on the way.
-    fn mountWalk(g: Globals, t: Tables, file: string, nodes: ANode[], seen: int[]) -> MountWalk {
+    // s483 r1 (#2139 review LOW-2) — which declarations show their `<slot/>` on every path, computed
+    // once per declaration: a declaration's answer depends only on the answers of the declarations it
+    // gives slot content to, so it is the least fixed point — start with none, and recompute the ones
+    // still not showing until nothing changes (each round adds one at least, or ends).
+    fn slotTable(g: Globals, t: Tables, srcs: SlotSrc[]) -> SlotInfo[] {
+        let tab: SlotInfo[] = [];
+        for (const s of srcs) { tab = tab.concat([{ decl: s.decl, shows: false, how: "" }]); }
+        let changed = true;
+        for (; changed; ) {
+            changed = false;
+            let nt: SlotInfo[] = [];
+            let i: int = 0;
+            for (; i < tab.length; ) {
+                const si: SlotInfo = tab[i];
+                if (si.shows) {
+                    nt = nt.concat([si]);
+                } else {
+                    const w: MountWalk = mountWalk(g, t, tab, srcs[i].file, srcs[i].nodes, "");
+                    if (w.slot) {
+                        nt = nt.concat([{ decl: si.decl, shows: true, how: w.slotHow }]);
+                        changed = true;
+                    } else {
+                        nt = nt.concat([si]);
+                    }
+                }
+                i = i + 1;
+            }
+            tab = nt;
+        }
+        return tab;
+    }
+
+    fn slotInfoOf(slots: SlotInfo[], id: int) -> SlotInfo | not {
+        for (const s of slots) {
+            if (s.decl == id) return s;
+        }
+        return not;
+    }
+
+    // The uses `nodes` mount on every path (in the file `file`; `ctx` — where `nodes` stand, for the
+    // message), and whether they show the render's `<slot/>` on every path. An `if=` element opens a
+    // chain (its `else-if=` / `else` siblings, blank text between): a chain ending in `else` mounts
+    // what every one of its branches mounts; one without `else` mounts nothing on every path.
+    fn mountWalk(g: Globals, t: Tables, slots: SlotInfo[], file: string, nodes: ANode[], ctx: string) -> MountWalk {
         let hops: MountHop[] = [];
         let slot = false;
-        for (const n of nodes) {
-            const e: AElem | not = nodeElem(n);
-            if (e is given && !chainGuarded(e)) {
-                const f: ElemFact | not = elemFact(t.elems, e.nid);
-                const u: Sym | not = useDecl(f);
-                let walk: ANode[] = [];
-                if (u is given) {
-                    hops = hops.concat([{ use: e, decl: u.id, file: file }]);
-                    // slot content is rendered where the used declaration's `<slot/>` stands
-                    if (e.kids.length > 0 && declShowsSlot(g, t, u.id, seen)) walk = e.kids;
-                } else {
-                    walk = alwaysRenders(f, e);
-                    if (slotFact(f)) slot = true;
+        let slotHow: string = "";
+        let i: int = 0;
+        for (; i < nodes.length; ) {
+            const e: AElem | not = nodeElem(nodes[i]);
+            let w: MountWalk = { hops: [], slot: false, slotHow: "" };
+            let step: int = 1;
+            if (e is given && attrNamed(e.attrs, "if") is given) {
+                let br: AElem[] = [e];
+                let j: int = i + 1;
+                let open = true;
+                let closed = false;
+                for (; open && j < nodes.length; ) {
+                    const x: AElem | not = nodeElem(nodes[j]);
+                    if (x is given) {
+                        if (attrNamed(x.attrs, "if") is not && attrNamed(x.attrs, "else-if") is given) {
+                            br = br.concat([x]);
+                            j = j + 1;
+                        } else if (attrNamed(x.attrs, "if") is not && attrNamed(x.attrs, "else") is given) {
+                            br = br.concat([x]);
+                            j = j + 1;
+                            closed = true;
+                            open = false;
+                        } else {
+                            open = false;
+                        }
+                    } else if (blankNode(nodes[j])) {
+                        j = j + 1;
+                    } else {
+                        open = false;
+                    }
                 }
-                const w: MountWalk = mountWalk(g, t, file, walk, seen);
+                step = j - i;
+                if (closed) {
+                    let ws: MountWalk[] = [];
+                    let labels: string[] = [];
+                    for (const b of br) {
+                        ws = ws.concat([walkOne(g, t, slots, file, b, "")]);
+                        // a branch that is itself the use is placed by the use's own place
+                        let lb: string = chainLabel(b);
+                        if (useDecl(elemFact(t.elems, b.nid)) is not) lb = lb + " (" + placeIn(g.files, file, b.span.start) + ")";
+                        labels = labels.concat([lb]);
+                    }
+                    w = everyBranch(ws, labels, "branch of the `if=` chain at " + placeIn(g.files, file, e.span.start), ctx);
+                }
+            } else if (e is given && !chainGuarded(e)) {
+                w = walkOne(g, t, slots, file, e, ctx);
+            }
+            hops = hops.concat(w.hops);
+            if (w.slot && !slot) {
+                slot = true;
+                slotHow = w.slotHow;
+            }
+            i = i + step;
+        }
+        return { hops: hops, slot: slot, slotHow: slotHow };
+    }
+
+    fn chainLabel(e: AElem) -> string {
+        if (attrNamed(e.attrs, "if") is given) return "the `if=` branch";
+        if (attrNamed(e.attrs, "else-if") is given) return "the `else-if=` branch";
+        return "the `else` branch";
+    }
+
+    // What one element mounts on every path, its own `if=` / `else-if=` / `else` aside (a chain's
+    // branch is judged by mountWalk).
+    fn walkOne(g: Globals, t: Tables, slots: SlotInfo[], file: string, e: AElem, ctx: string) -> MountWalk {
+        const f: ElemFact | not = elemFact(t.elems, e.nid);
+        const place: string = placeIn(g.files, file, e.span.start);
+        const u: Sym | not = useDecl(f);
+        if (u is given) {
+            let hops: MountHop[] = [{ use: e, decl: u.id, file: file, desc: "`<" + e.tag + ">` (" + place + ")" + ctx }];
+            let slot = false;
+            let slotHow: string = "";
+            const si: SlotInfo | not = slotInfoOf(slots, u.id);
+            // slot content is rendered where the used declaration's `<slot/>` stands
+            if (e.kids.length > 0 && si is given && si.shows) {
+                const carrier: string = " in the slot content of `<" + e.tag + ">` (" + place + "), whose render shows its `<slot/>`" + si.how;
+                const w: MountWalk = mountWalk(g, t, slots, file, e.kids, carrier + ctx);
                 hops = hops.concat(w.hops);
-                if (w.slot) slot = true;
+                if (w.slot) {
+                    slot = true;
+                    slotHow = w.slotHow + " through `<" + e.tag + ">` (" + place + ")" + si.how;
+                }
+            }
+            return { hops: hops, slot: slot, slotHow: slotHow };
+        }
+        const none: MountWalk = { hops: [], slot: false, slotHow: "" };
+        return match f {
+            .MHtml :> mountWalk(g, t, slots, file, e.kids, ctx),
+            .MDb :> mountWalk(g, t, slots, file, e.kids, ctx),
+            .MSlot :> { hops: [], slot: true, slotHow: "" },
+            .MInline(v: iv) :> inlineEvery(g, t, slots, file, e, iv, ctx),
+            .MMatch(m: mb) :> matchEvery(g, t, slots, file, e, mb, ctx),
+            .MStateView(v: sv) :> stateEvery(g, t, slots, file, e, sv, ctx),
+            // an `<each>` row renders only for a row; a shared instance's `<*x/>` constructs nothing
+            // (rule 1's: starThroughPass); `<errors>`, `<schema>` hold no use
+            .MUse(decl: d) :> none,
+            .MEach(bind: b) :> none,
+            .MStar(decl: d) :> none,
+            .MErrors(of: x) :> none,
+            .MSchema :> none,
+            not :> mountWalk(g, t, slots, file, e.kids, ctx)
+        };
+    }
+
+    // A child field's own `renders` shown by `<*v/>` always renders; a program field's is one instance
+    // at every level (rule 1's: starThroughPass).
+    fn inlineEvery(g: Globals, t: Tables, slots: SlotInfo[], file: string, e: AElem, iv: InlineView, ctx: string) -> MountWalk {
+        if (inlineProgramFile(g, iv) != "") return { hops: [], slot: false, slotHow: "" };
+        return mountWalk(g, t, slots, file, inlineOwnNodes(iv), " in `<*" + e.tag + "/>` (" + placeIn(g.files, file, e.span.start) + ")'s own `renders`" + ctx);
+    }
+
+    // A block `<match>` whose arms cover every variant (or hold `<_>`) mounts what every arm mounts.
+    fn matchEvery(g: Globals, t: Tables, slots: SlotInfo[], file: string, e: AElem, mb: MatchBlock, ctx: string) -> MountWalk {
+        let vs: int[] = [];
+        for (const a of mb.arms) { vs = vs.concat([a.variant]); }
+        if (!coversAll(vs, enumVariantsOf(g, mb.es).length)) return { hops: [], slot: false, slotHow: "" };
+        let ws: MountWalk[] = [];
+        let labels: string[] = [];
+        for (const a of mb.arms) {
+            ws = ws.concat([mountWalk(g, t, slots, file, a.elem.kids, "")]);
+            labels = labels.concat(["the `<" + armName(g, mb.es, a.variant) + ">` arm (" + placeIn(g.files, file, a.elem.span.start) + ")"]);
+        }
+        return everyBranch(ws, labels, "arm of the `<match>` at " + placeIn(g.files, file, e.span.start), ctx);
+    }
+
+    // `<*f/>` of a user declaration's graph field, with a state arm for every variant, mounts what
+    // every arm mounts: whichever state a new instance holds, its arm mounts it.
+    fn stateEvery(g: Globals, t: Tables, slots: SlotInfo[], file: string, e: AElem, sv: StateView, ctx: string) -> MountWalk {
+        const none: MountWalk = { hops: [], slot: false, slotHow: "" };
+        if (programFile(g, sv.decl) != "") return none;
+        let vs: int[] = [];
+        for (const a of sv.arms) { vs = vs.concat([a.variant]); }
+        if (!coversAll(vs, enumVariantsOf(g, sv.enumSym).length)) return none;
+        let af: string = file;
+        const ds: DeclSrc | not = findDeclSrc(g, sv.decl);
+        if (ds is given) af = ds.file;
+        let ws: MountWalk[] = [];
+        let labels: string[] = [];
+        for (const a of sv.arms) {
+            ws = ws.concat([mountWalk(g, t, slots, af, a.body, "")]);
+            labels = labels.concat(["the `<" + armName(g, sv.enumSym, a.variant) + ">` state arm"]);
+        }
+        return everyBranch(ws, labels, "state arm of `<*" + e.tag + "/>` (" + placeIn(g.files, file, e.span.start) + ")", ctx);
+    }
+
+    // Do the variants `vs` (-1: the wildcard) cover all `n` variants of their enum?
+    fn coversAll(vs: int[], n: int) -> boolean {
+        if (vs.indexOf(-1) >= 0) return true;
+        if (n == 0) return false;
+        let v: int = 0;
+        for (; v < n; ) {
+            if (vs.indexOf(v) < 0) return false;
+            v = v + 1;
+        }
+        return true;
+    }
+
+    // What every branch mounts (`ws`: each branch's walk; `labels`: each branch, for the message):
+    // the declarations a use of which every branch holds — one use per branch named — and the
+    // `<slot/>` when every branch shows it.
+    fn everyBranch(ws: MountWalk[], labels: string[], what: string, ctx: string) -> MountWalk {
+        if (ws.length == 0) return { hops: [], slot: false, slotHow: "" };
+        let hops: MountHop[] = [];
+        let done: int[] = [];
+        for (const h0 of ws[0].hops) {
+            if (done.indexOf(h0.decl) < 0) {
+                done = done.concat([h0.decl]);
+                let per: string[] = [];
+                let all = true;
+                let k: int = 0;
+                for (; k < ws.length; ) {
+                    const hk: MountHop | not = hopFor(ws[k].hops, h0.decl);
+                    if (hk is given) {
+                        per = per.concat([hk.desc + " in " + labels[k]]);
+                    } else {
+                        all = false;
+                    }
+                    k = k + 1;
+                }
+                if (all) hops = hops.concat([{ use: h0.use, decl: h0.decl, file: h0.file, desc: "`<" + h0.use.tag + ">` in every " + what + " (" + per.join("; ") + ")" + ctx }]);
             }
         }
-        return { hops: hops, slot: slot };
+        let slot = true;
+        for (const w of ws) { if (!w.slot) slot = false; }
+        let slotHow: string = "";
+        if (slot) slotHow = " in every " + what;
+        return { hops: hops, slot: slot, slotHow: slotHow };
+    }
+
+    fn hopFor(hops: MountHop[], decl: int) -> MountHop | not {
+        for (const h of hops) {
+            if (h.decl == decl) return h;
+        }
+        return not;
     }
 
     // An element carrying `if=` / `else-if=` / `else` renders only on its branch.
     fn chainGuarded(e: AElem) -> boolean {
         for (const a of e.attrs) {
             if (isChainAttr(a.name)) return true;
-        }
-        return false;
-    }
-
-    // The markup an element (not a use) renders every time it renders: an HTML element's or a `<db>`
-    // block's children, a child field's own `renders` shown by `<*f/>`. An `<each>` row, a block
-    // `<match>` arm and a state-child body render only on their condition; a shared instance's
-    // `<*x/>` constructs nothing (InlineView, MStar); `<slot/>`, `<errors>`, `<schema>` hold no use.
-    fn alwaysRenders(f: ElemFact | not, e: AElem) -> ANode[] {
-        return match f {
-            .MHtml :> e.kids,
-            .MUse(decl: d) :> [],
-            .MEach(bind: b) :> [],
-            .MSlot :> [],
-            .MStateView(v: sv) :> [],
-            .MInline(v: iv) :> inlineOwnNodes(iv),
-            .MStar(decl: d) :> [],
-            .MErrors(of: x) :> [],
-            .MDb :> e.kids,
-            .MMatch(m: mb) :> [],
-            .MSchema :> [],
-            not :> e.kids
-        };
-    }
-
-    fn slotFact(f: ElemFact | not) -> boolean {
-        return match f {
-            .MSlot :> true,
-            .MHtml :> false,
-            .MUse(decl: d) :> false,
-            .MEach(bind: b) :> false,
-            .MStateView(v: sv) :> false,
-            .MInline(v: iv) :> false,
-            .MStar(decl: d) :> false,
-            .MErrors(of: x) :> false,
-            .MDb :> false,
-            .MMatch(m: mb) :> false,
-            .MSchema :> false,
-            not :> false
-        };
-    }
-
-    // Does the declaration `id`'s render show its `<slot/>` unconditionally (so a use's children render
-    // whenever the use does)?
-    fn declShowsSlot(g: Globals, t: Tables, id: int, seen: int[]) -> boolean {
-        if (seen.indexOf(id) >= 0) return false;
-        for (const ds of g.decls) {
-            const d: ADecl | not = ds.d;
-            if (ds.info.sym.id == id && !ds.isProgram && d is given) return mountWalk(g, t, ds.file, rendersOf(d), seen.concat([id])).slot;
         }
         return false;
     }
@@ -31974,19 +32405,19 @@ ${
     }
 
     // E-DECL-RENDER-CYCLE-USE — at the first use on the cycle (the one written in `dname`'s render),
-    // naming every use on it with its place.
+    // naming every use on it with its place and every hop that makes it mount on every path.
     fn selfMountDiag(g: Globals, dname: string, cyc: MountHop[]) -> Diag {
         const h0: MountHop = cyc[0];
-        let path: string = "`<" + dname + ">`'s render mounts `<" + h0.use.tag + ">` (" + placeIn(g.files, h0.file, h0.use.span.start) + ")";
+        let path: string = "`<" + dname + ">`'s render mounts " + h0.desc;
         let i: int = 1;
         for (; i < cyc.length; ) {
             const h: MountHop = cyc[i];
-            path = path + ", whose render mounts `<" + h.use.tag + ">` (" + placeIn(g.files, h.file, h.use.span.start) + ")";
+            path = path + "; `<" + cyc[i - 1].use.tag + ">`'s render mounts " + h.desc;
             i = i + 1;
         }
         let head: string = "`<" + dname + ">` is used inside its own render";
         if (cyc.length > 1) head = "this `<" + h0.use.tag + ">` mounts `<" + dname + ">` again inside `<" + dname + ">`'s own render";
-        return newDiag("E-DECL-RENDER-CYCLE-USE", head + ": " + path + ". Every use on the way is unconditional — no `if=` / `else-if=` / `else` on it or around it, and not in an `<each>` row, a `<match>` arm or a state-child body — and a plain use is a new instance whose render runs at its mount (§66.6.1, §66.7.6), so mounting one `<" + dname + ">` mounts another, without end (§66.6.2). Guard the nested use with something that changes per level, so the recursion ends: `<" + dname + " depth=(depth - 1) if=(depth > 0)/>`, or a `<match>` arm on a value that reaches a leaf", h0.file, h0.use.span);
+        return newDiag("E-DECL-RENDER-CYCLE-USE", head + ": " + path + ". Every use on the way mounts on every path — it has no `if=` / `else-if=` / `else` on it or around it and stands in no `<each>` row, or every branch around it mounts it (each branch of an `if=` chain ending in `else`, each arm of a `<match>` that covers every variant, each state arm of a field) — and a plain use is a new instance whose render runs at its mount (§66.6.1, §66.7.6), so mounting one `<" + dname + ">` mounts another, without end (§66.6.2). Guard the nested use so that some path does not mount it, with something that changes per level: `<" + dname + " depth=(depth - 1) if=(depth > 0)/>`, or a `<match>` arm on a value that reaches a leaf", h0.file, h0.use.span);
     }
 
     // The state-children of the field declared by the ADecl `fieldNid` inside
@@ -59046,7 +59477,7 @@ ${
         // s444 Phase B: dead validators (RULED S442 (5)) and the forms that take `novalidate` (RULED S442 (3))
         const vp: ValPass = validatorPass(ra.g, bound);
         // s468: static executable attribute values (§5.2 S464) and impure `fn` bodies (§48.3.3)
-        const sinkDiags: Diag[] = staticExecPass(ra.g, bound).concat(fnWritePass(ra.g, sum)).concat(fileScopePass(ra.g, bound, sum)).concat(fallOffPass(ra.g, bound)).concat(invReachPass(ra.g, bound, st.diags)).concat(txRulesPass(ra.g)).concat(selfMountPass(ra.g, bound)).concat(css.diags).concat(styleOverlaps(ra.g));
+        const sinkDiags: Diag[] = staticExecPass(ra.g, bound).concat(fnWritePass(ra.g, sum)).concat(fileScopePass(ra.g, bound, sum)).concat(fallOffPass(ra.g, bound)).concat(invReachPass(ra.g, bound, st.diags)).concat(txRulesPass(ra.g)).concat(selfMountPass(ra.g, bound)).concat(starThroughPass(ra.g, bound)).concat(css.diags).concat(styleOverlaps(ra.g));
         const typed: RTyping = typeProgram(files, withWaits(bound, waitingFns(sum)), st.diags.concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags), ra.g.te.link);
         // s483 r1 (#2129 review HIGH-1) — a trapping initializer inside a construct, judged over the
         // TYPED tables: boundCheckAt reads Typing.bounds, which typeProgram fills
