@@ -12,5 +12,6 @@ Source: #2129 r1 re-review (MED-1, LOW-1). Branch s483-q8-fu off origin/main 22a
 - [x] bootstrap-conformance --json: CRASH 0/0; PASS 872 → 875; only the 3 new cases differ
 - [x] corpus differential (2998 files): 0 crash, 0 newly rejected/accepted, 0 diag/msg diffs, 0 byte diffs over 330 compiling on both → 0 newly trapping
 - [x] Chromium s482/s483 (15 files): 102 pass / 0 fail (3 new q8-fu tests)
-- [ ] host-global-scan x2, slice-m4 full trapping set
+- [x] host-global-scan --check mode-shard 1/2 and 2/2: exit 0, 0 violations; throws all pinned (none from the new cases)
+- [x] slice-m4 set (14 files: every E-FILE-SCOPE-INIT-IN-CONSTRUCT test, run-order, client-roots, secret / server-only, math-port): 352 pass / 0 fail
 - [ ] PR (#2128 still OPEN at start → note in PR body)
