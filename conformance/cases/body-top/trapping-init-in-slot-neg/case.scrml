@@ -1,0 +1,9 @@
+// §7.6 rule (b) (S483) — a file-scope initializer that can trap through a function it calls (`firstOf` indexes its argument), written inside a component's slot content: it runs once, just before the component use — E-FILE-SCOPE-INIT-IN-CONSTRUCT (INTERIM, g-boot-trapping-construct-init-s482).
+<card t:string="x">
+</> renders <div>${t}<slot/></div>
+<program>
+${ const items: int[] = []; }
+${ function firstOf(xs: int[]) -> int { return xs[0]; } }
+<card><b>${ const first: int = firstOf(items); }${first}</b></card>
+<p id="z">end</p>
+</program>
