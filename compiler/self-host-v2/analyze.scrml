@@ -12889,10 +12889,12 @@ ${
     // own expression, or a function / formula / construction it reaches (a call, a function value
     // handed on — §6.7.4 rule 3 —, a derived cell read), at any depth, holds a §19.17 trap site
     // (trapSiteWhat): an index read or an index write (`xs[i]`, `s[i]`, E-INDEX-OUT-OF-RANGE-RT); a
-    // `slice` / `repeat` / `padStart` / `padEnd` position that is not a literal, or an `insert`
+    // `slice` / `repeat` / `padStart` / `padEnd` position that is not a literal, a literal `repeat`
+    // count / pad width whose result is not proven to fit the longest string (lengthTrapWhat — q8-fu,
+    // #2129 r1 MED-1), or an `insert`
     // (isPositionArg, E-INDEX-OUT-OF-RANGE-RT); a length the typer could not prove inside a tape's
     // bound (boundCheckAt, E-WRITE-INVARIANT-RT — a typer fact: the pass runs after typeProgram, r1
-    // HIGH-1); a ~~`/` or~~ `%` whose divisor is not proven non-zero (divTrapWhat — r1, RULED S483
+    // HIGH-1); a ~~`/` or~~ `%` whose divisor is not proven non-zero nor a `number` (divTrapWhat — r1 / q8-fu LOW-1, RULED S483
     // ruling:user-voice-scrml.md-S483-q8-division: `/` never traps); a refinement checked at run time (a
     // refined parameter — not at a call handing it a passing literal, literalCallPasses —, a refined
     // `const` local whose value is not a literal the static zone passes — lower.scrml paramRefineChecks /
@@ -12935,10 +12937,26 @@ ${
     // non-zero number literal, or a file-scope `const` whose initializer is one (nonZeroConst).
     // (Integer division, `div(a, b, .Mode)`, is not in the bootstrap; its by-zero site belongs
     // here when it lands.)
+    // s483 q8-fu (#2129 r1 review LOW-1) — the ruling's governing clause is "refuse only what can
+    // actually trap"; its refusal is "`%` … by a possibly-zero int". A `%` whose divisor is proven a
+    // `number` (no `int` member: numberOnly) gives NaN by 0 — no trap is owed — and is accepted, as
+    // `/` is. A divisor the typer proved `int` in whole or in part, or did not type, stays refused
+    // (fail closed).
     fn divTrapWhat(t: Tables, o: BinOp, r: AExpr) -> string {
         if (o != BinOp.Mod) return "";
         if (positiveLit(r) || negLiteral(r) || nonZeroConst(t, r)) return "";
-        return "divides by `" + trapShown(r) + "` (`%`), which is not proven non-zero (`n % 0` has no `int` value: the trap it owes is g-bootstrap-int-overflow-and-mod-zero-untrapped-s469 — refused fail closed, ruling:user-voice-scrml.md-S483-q8-division)";
+        if (numberOnly(exprType(t, r.nid))) return "";
+        return "divides by `" + trapShown(r) + "` (`%`), which is not proven a non-zero value nor a `number` (`n % 0` by an `int` has no `int` value: the trap it owes is g-bootstrap-int-overflow-and-mod-zero-untrapped-s469 — refused fail closed, ruling:user-voice-scrml.md-S483-q8-division: \"refuse only what can actually trap: keep `%` … by a possibly-zero int refused\")";
+    }
+
+    // The typer proved the value a `number` on every branch: no `int` member, no unknown one.
+    fn numberOnly(v: VType) -> boolean {
+        const xs: Type[] = memberTypes(v);
+        if (xs.length == 0) return false;
+        for (const x of xs) {
+            if (kindOf(unMaybe(x)) != 1) return false;
+        }
+        return true;
     }
 
     // s483 r1 (#2129 review LOW-2, o05 / o06) — `r` names a file-scope `const` (never written) whose
@@ -12972,7 +12990,88 @@ ${
             if (isPositionArg(op, i) && !nonNegIntLit(a)) return "calls `" + trapShown(c) + "(…)` with the computed position `" + trapShown(a) + "` (a negative one is the E-INDEX-OUT-OF-RANGE-RT trap, §19.17)";
             i = i + 1;
         }
-        return "";
+        return lengthTrapWhat(t, op, c, args);
+    }
+
+    // s483 q8-fu (#2129 r1 review MED-1) — a `repeat` count or a `padStart` / `padEnd` width that IS
+    // a literal can still trap: the runtime refuses a result longer than the longest string
+    // (MAX_TEXT_UNITS = 2^29 − 24 UTF-16 units, runtime.js requireFits — E-INDEX-OUT-OF-RANGE-RT,
+    // checked up front). A literal is not a site only when the result's length is PROVABLY within
+    // that limit (textFitsLit); otherwise it is one — fail closed: the receiver's length is not
+    // known (`big.repeat(2)` on a receiver of 2^28 units traps). The mirror is print.scrml primTraps.
+    fn lengthTrapWhat(t: Tables, op: PrimOp, c: AExpr, args: AExpr[]) -> string {
+        if (op != PrimOp.StrRepeat && op != PrimOp.StrPadStart && op != PrimOp.StrPadEnd) return "";
+        if (args.length == 0) return "";
+        const n: number = litNumOf(args[0]);
+        const recv: int = recvLitLen(t, c);
+        if (textFitsLit(op == PrimOp.StrRepeat, n, recv, args.length > 1)) return "";
+        const what: string = op == PrimOp.StrRepeat ? "count" : "width";
+        return "calls `" + trapShown(c) + "(…)` with the " + what + " `" + trapShown(args[0]) + "`, whose result is not proven to fit the longest string (" + maxTextUnits() + " UTF-16 units; a longer one is the E-INDEX-OUT-OF-RANGE-RT trap, §19.17)";
+    }
+
+    // The longest string a result may be, in UTF-16 units — runtime.js MAX_TEXT_UNITS (2^29 − 24).
+    fn maxTextUnits() -> int { return 536870888; }
+
+    // Does a `repeat` (`isRepeat`) / `padStart` / `padEnd` with the literal count or width `n` fit
+    // the longest string, whatever it runs on? `recv` is the receiver's `.length` when it is a
+    // literal (or a never-written file-scope `const` holding one), −1 otherwise; `fill` — a fill
+    // argument is given. A code point is at most 2 UTF-16 units, so a string of length `k` is at
+    // most 2k units (the bound holds whether `k` counts code points or units).
+    //   repeat: a count of 0 or 1 gives "" or the receiver itself; otherwise the receiver is a
+    //           literal and 2·recv·n fits.
+    //   pad:    the result is the receiver (width ≤ its length) or exactly `n` code points — at most
+    //           2n units, whatever the receiver and fill; with the default fill (" ", one unit) and
+    //           a literal receiver, at most 2·recv + n units.
+    fn textFitsLit(isRepeat: boolean, n: number, recv: int, fill: boolean) -> boolean {
+        const lim: int = maxTextUnits();
+        if (isRepeat) {
+            if (n <= 1) return true;
+            return recv >= 0 && 2 * recv * n <= lim;
+        }
+        if (2 * n <= lim) return true;
+        return recv >= 0 && !fill && 2 * recv + n <= lim;
+    }
+
+    // The value of a number literal as written (`nonNegIntLit` holds for it).
+    fn litNumOf(x: AExpr) -> number {
+        const k: AExprK = x.k;
+        return match k {
+            .Num(raw: r) :> Number(r),
+            // no-default-arm: the caller passes a literal
+            _ :> 0
+        };
+    }
+
+    // The `.length` of a method call's receiver when it is a string literal, or a file-scope
+    // `const` (never written) whose initializer is one; −1 otherwise.
+    fn recvLitLen(t: Tables, c: AExpr) -> int {
+        const ck: AExprK = c.k;
+        const recv: AExpr | not = match ck {
+            .Member(obj: o) :> o,
+            // no-default-arm: only a method call has a receiver
+            _ :> not
+        };
+        if (recv is not) return -1;
+        const own: int = strLitLen(recv);
+        if (own >= 0) return own;
+        const id: int = constSymOfFact(nameFact(t.names, recv.nid));
+        if (id < 0) return -1;
+        for (const k of t.consts) {
+            if (k.sym.id == id) {
+                if (!k.ok || k.mutable) return -1;
+                return strLitLen(k.init);
+            }
+        }
+        return -1;
+    }
+
+    fn strLitLen(x: AExpr) -> int {
+        const k: AExprK = x.k;
+        return match k {
+            .Str(v: s) :> s.length,
+            // no-default-arm: only a string literal has a known length
+            _ :> -1
+        };
     }
 
     // A non-negative integer literal as written (`0`, `3`).
