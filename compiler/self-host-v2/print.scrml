@@ -9846,6 +9846,9 @@ ${
             if (w is given) what = w;
         }
         let at: string = "";
+        // r3 (#2128 r2 re-review nit): an owner declared in another file carries its own `(file:line)`
+        // (lower invOwnerAt) — the write site is then the secondary location
+        if (owner.endsWith(")") && loc != "") return "the invariant " + what + " on " + owner.substring(0, owner.length - 1) + "; written at " + loc + ")";
         if (loc != "") at = " (" + loc + ")";
         return "the invariant " + what + " on " + owner + at;
     }

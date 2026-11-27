@@ -258,8 +258,15 @@ describe("M3 — a use-site call is not a tracking value", () => {
     expect(r.client.js).toContain("dbl(2)");
   }, 120000);
 
-  test("a call of a `function`: refused INTERIM (E-BOOTSTRAP-UNSUPPORTED, the gap named), not PERMANENT", async () => {
+  // r3 (#2128 r2 re-review H7): a named call is judged by its chain, not its keyword — a `function` of constants that
+  // reads nothing live is admitted (invariant-r3-s483.test.js refuses the live ones, E-CONTRACT-003)
+  test("a call of a `function` of compile-time constants that reads nothing live: admitted (r3)", async () => {
     const r = await result(W("    function seed(x: int) -> int { return x * 2; }", "<w b=(seed(2))/>"));
+    expect(codes(r)).toEqual([]);
+  }, 120000);
+
+  test("a value the bootstrap does not judge (a built-in property of a constant): refused INTERIM (E-BOOTSTRAP-UNSUPPORTED, the gap named), not PERMANENT", async () => {
+    const r = await result(W("    const S = \"abc\";", "<w b=(S.length)/>"));
     expect(codes(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     const m = errs(r)[0].message;
     expect(m).toContain("INTERIM, g-boot-invariant-derived-field-s483");

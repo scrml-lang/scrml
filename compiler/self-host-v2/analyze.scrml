@@ -568,7 +568,17 @@ ${
         // s483 (Q21 lane 2): each file's line starts — the run-time invariant check names the
         // write's "file:line" (lower.scrml, invLoc)
         lines: FileLines[],
+        // s483 r3 (#2128 r2 re-review H7): the `fn`s whose body, through every function it calls,
+        // reads something LIVE (invLiveFns) — known before the typer, whose useInvs refuses a
+        // use-site value calling one (it tracks what it reads). [] outside the typer's input.
+        invLive: InvLiveFn[],
+        // s483 r3 (#2128 r2 re-review L9): the host-backed functions whose declared return type holds an
+        // invariant-bearing type (invHostFns) — lower.scrml checks each call's value where it is returned.
+        // Filled on the final tables lower reads; [] before them.
+        invHost: int[],
     }
+    // One such `fn` (its Sym id) and the first live read it reaches, with the call chain.
+    export type InvLiveFn:struct = { sym: int, hit: InvHit }
     export type FileLines:struct = { file: string, starts: int[] }
 
     // s474 r1 (#1715 review F7): `file` binds the user type `sym` (declared `orig` in
@@ -12935,7 +12945,41 @@ ${
         };
         if (own != "") return own;
         if (boundCheckAt(t, e.nid) is given) return "makes a tape whose length the compiler could not prove inside its type's bound (it is checked when it runs: the E-WRITE-INVARIANT-RT trap, §19.17)";
+        const pw: string = invPartWriteTrapWhat(t, e);
+        if (pw != "") return pw;
         return invConstructTrapWhat(t, e);
+    }
+
+    // s483 r3 (#2128 r2 re-review M8; cross-lane with #2129) — EVERY invariant check lower emits is a
+    // trap site, not only a construction `{ … }`: a local's PART write (lower.scrml assignLocal →
+    // invValue) is checked when it runs — the candidate (the local with the part written) against the
+    // invariants of the root's type at the written value's whole depth (invValueWholeChecks, the very
+    // set lower prints; no fold decides a part write) — the E-WRITE-INVARIANT-RT trap. (A cell write's
+    // check, an InvariantGuard, is a write — an initializer that writes is refused already, A1.)
+    fn invPartWriteTrapWhat(t: Tables, e: AExpr) -> string {
+        const f: EffectFact | not = effectFact(t.effects, e.nid);
+        const pw: InvPartW | not = match f {
+            .EAssignLocal(sym: s, path: pa, root: rt) :> { sym: s, path: pa, root: rt },
+            // no-default-arm: one question of an effect — is it a local's part write
+            _ :> not
+        };
+        if (pw is not || pw.path.length == 0) return "";
+        let names: string[] = [];
+        for (const st of pw.path) { names = names.concat(invLStepNames(t, st)); }
+        const root: Type | not = pw.root;
+        if (root is not) return "";
+        if (invValueWholeChecks(t, root, names).length == 0) return "";
+        return "writes a part of `" + pw.sym.hint + "`, a value whose type has invariants — the write is checked when it runs (the E-WRITE-INVARIANT-RT trap, §19.17)";
+    }
+
+    type InvPartW:struct = { sym: Sym, path: LStep[], root: Type | not }
+
+    // the member names one step of a local part write's path names (lower.scrml invStepName)
+    fn invLStepNames(t: Tables, st: LStep) -> string[] {
+        return match st {
+            .LField(ref: r) :> invRefNames(t, [r]),
+            .LIndex(index: ix) :> []
+        };
     }
 
     // s483 r2 (#2128 r1 re-review item 8; cross-lane with #2129) — a CONSTRUCTION `{ … }` of a value
@@ -34372,7 +34416,7 @@ ${
     // payload-variant construction, `parseVariant`) that writes nothing; a host
     // call, `print`, a call through a value is E-DECL-INVARIANT-IMPURE.
     // A clause with an error already inside it is not judged again (no cascade).
-    type InvHit:struct = { code: string, what: string, chain: string }
+    export type InvHit:struct = { code: string, what: string, chain: string }
 
     fn invReachPass(g: Globals, t: Tables, prior: Diag[]) -> Diag[] {
         let out: Diag[] = [];
@@ -34553,6 +34597,124 @@ ${
             i = i + 1;
         }
         return not;
+    }
+
+    // s483 r3 (#2128 r2 re-review H7; ruling:user-voice-scrml.md-S483-invariant-derived-split — "a
+    // field that tracks a cell or a live use-site value stays refused, PERMANENT, E-CONTRACT-003") —
+    // §48 lets a `fn` READ outer bindings (it may not mutate them), so a call of a `fn` is not the same
+    // value at every evaluation by being a `fn`: `fn dbl(x) -> int { return x * @k; }` tracks `@k`.
+    // The functions (`fn` and `function`) whose body, through every function it calls (each body
+    // scanned once, then a fixed point over the calls — the reach invChainHit follows for an
+    // invariant's own calls), reads something LIVE: a cell (`@x`, `@.`), a declared value or its field,
+    // a `<request>`'s or a validity surface's state, a lifecycle element, a mutable binding (a
+    // file-scope `let` a handler may write), a query, a foreign block, or a host function (its value
+    // may change between evaluations); a function whose body the compiler cannot see counts (fail
+    // closed).
+    fn invLiveFns(g: Globals, t: Tables) -> InvLiveFn[] {
+        // only a use site of a declaration with invariants asks (useInvs): none — nothing to judge
+        let anyInv: boolean = false;
+        for (const di of t.decls) { if (di.invs.length > 0) anyInv = true; }
+        if (!anyInv) return [];
+        // each function's own live read (its body scanned once), and who calls whom (by g.fns index)
+        const nf: int = g.fns.length;
+        let live: boolean[] = falses(nf);
+        let what: string[] = emptyTexts(nf);
+        let chain: string[] = emptyTexts(nf);
+        let callers: int[][] = emptyIntLists(nf);
+        let queue: int[] = [];
+        // the mutable file-scope bindings (a `let` — a write can change it), once
+        let muts: ConstInfo[] = [];
+        for (const kc of g.consts) { if (kc.mutable) muts = muts.concat([kc]); }
+        let i: int = 0;
+        for (const fs of g.fns) {
+            const ch: string = "`" + fs.info.name + "`";
+            let hit: InvHit | not = not;
+            let cs: int[] = [];
+            if (fs.info.host is given) hit = { code: "E-CONTRACT-003", what: "is a host function — its value may change between evaluations", chain: ch };
+            if (hit is not) {
+                for (const x of invBodyExprs(fs.f.body)) {
+                    if (hit is not) {
+                        hit = invLiveRead(muts, t, x, ch);
+                        const sym: int = invFnSymOf(nameFact(t.names, x.nid));
+                        if (hit is not && sym >= 0) {
+                            const j: int = ixGet(g.fnSyms, sym);
+                            if (j < 0) hit = { code: "E-CONTRACT-003", what: "calls `" + exprName(x) + "`, whose body the compiler cannot see — it may read a live value", chain: ch };
+                            else if (cs.indexOf(j) < 0) cs = cs.concat([j]);
+                        }
+                    }
+                }
+            }
+            if (hit is given) {
+                live[i] = true;
+                what[i] = hit.what;
+                chain[i] = hit.chain;
+                queue = queue.concat([i]);
+            } else {
+                for (const j2 of cs) { callers[j2] = callers[j2].concat([i]); }
+            }
+            i = i + 1;
+        }
+        // then back along the calls (breadth-first, each function once): a function that calls a live one
+        // is live, its chain the call followed by the callee's
+        let k: int = 0;
+        for (; k < queue.length; ) {
+            const j3: int = queue[k];
+            for (const c of callers[j3]) {
+                if (!live[c]) {
+                    live[c] = true;
+                    what[c] = what[j3];
+                    chain[c] = "`" + g.fns[c].info.name + "` → " + chain[j3];
+                    queue = queue.concat([c]);
+                }
+            }
+            k = k + 1;
+        }
+        let out: InvLiveFn[] = [];
+        let m: int = 0;
+        for (const fs2 of g.fns) {
+            if (live[m]) out = out.concat([{ sym: fs2.info.sym.id, hit: { code: "E-CONTRACT-003", what: what[m], chain: chain[m] } }]);
+            m = m + 1;
+        }
+        return out;
+    }
+
+    // One node of a reached `fn` body: a LIVE read (invLiveFns), else `not`.
+    fn invLiveRead(muts: ConstInfo[], t: Tables, x: AExpr, chain: string) -> InvHit | not {
+        const tag: string = exprTag(x);
+        if (tag == "At") return { code: "E-CONTRACT-003", what: "reads the cell `@" + atName(x) + "`", chain: chain };
+        if (tag == "AtItem") return { code: "E-CONTRACT-003", what: "reads the row value `@.`", chain: chain };
+        if (tag == "HashRef") return { code: "E-CONTRACT-003", what: "reads a lifecycle element (`<#id>`)", chain: chain };
+        if (tag == "Sql") return { code: "E-CONTRACT-003", what: "runs a query — what it reads may change between evaluations", chain: chain };
+        if (tag == "Foreign") return { code: "E-CONTRACT-003", what: "holds a foreign block, whose reads the compiler cannot see", chain: chain };
+        if (tag == "Call") {
+            const callee: AExpr = callCallee(x);
+            if (invFnSymOf(nameFact(t.names, callee.nid)) < 0 && (!invBuiltinOk(valueFact(t.values, x.nid)) || effectFact(t.effects, x.nid) is given)) {
+                return { code: "E-CONTRACT-003", what: "calls `" + invCallText(callee) + "(…)`, a host function or a call through a value — its value may change between evaluations", chain: chain };
+            }
+        }
+        const f: NameFact | not = nameFact(t.names, x.nid);
+        const what: string = match f {
+            .NConst(sym: s) :> invMutableRead(muts, s.id),
+            .NField(decl: d) :> "reads a field of a declared value",
+            .NInst(decl: d) :> "reads a declared value",
+            .NSurface(of: o) :> "reads a validity surface",
+            .NReq(id: r) :> "reads a `<request>`'s state",
+            .NLocal(sym: s) :> "",
+            .NStruct(owner: o) :> "",
+            .NFn(sym: s) :> "",
+            .NLength :> "",
+            not :> ""
+        };
+        if (what == "") return not;
+        return { code: "E-CONTRACT-003", what: what, chain: chain };
+    }
+
+    // "" unless the file-scope binding `id` is mutable (a `let` — a write can change it)
+    fn invMutableRead(muts: ConstInfo[], id: int) -> string {
+        for (const c of muts) {
+            if (c.sym.id == id) return "reads the mutable binding `" + c.sym.hint + "` (a write can change it)";
+        }
+        return "";
     }
 
     // One node of a reached `fn` body: a read an invariant may not make, else `not`.
@@ -35392,9 +35554,12 @@ ${
         return fvKind(invConstFold(t, e, 0)) != 0;
     }
 
-    // r2 (#2128 r1 re-review M3) — a use-site value that is a call of a pure `fn` (not a host function)
-    // whose arguments are compile-time constants (or such calls): a `fn` is pure (§48), so the value
-    // is the same at every evaluation — it tracks nothing.
+    // r2 (#2128 r1 re-review M3) — a use-site value that is a call of a named function whose arguments
+    // are compile-time constants (or such calls). r3 (#2128 r2 re-review H7): that alone does NOT make
+    // the value the same at every evaluation — §48 lets a `fn` read outer bindings (SPEC §48: "they may
+    // read outer bindings but may not mutate them"), and r2's premise ("a `fn` is pure, so the value is
+    // the same at every evaluation") was false — so useInvs follows each call's chain (invUseLiveCall)
+    // and refuses one that reads something live; the keyword (`fn` / `function`) decides nothing.
     fn invUsePureCall(t: Tables, v: AAttrValue) -> boolean {
         const e: AExpr | not = valueExpr(v);
         if (e is not) return false;
@@ -35414,15 +35579,39 @@ ${
     fn invPureCallOf(t: Tables, c: AExpr, xs: AExpr[], depth: int) -> boolean {
         const sym: int = invFnSymOf(nameFact(t.names, c.nid));
         if (sym < 0) return false;
-        let pure: boolean = false;
+        // r3 (#2128 r2 re-review H7): any named function (`fn` or `function`, host-backed included) — what
+        // makes the value change is judged by its call chain (invUseLiveCall over Tables.invLive), not by
+        // the keyword
+        let known: boolean = false;
         for (const fi of t.fns) {
-            if (fi.sym.id == sym && fi.pure && fi.host is not) pure = true;
+            if (fi.sym.id == sym) known = true;
         }
-        if (!pure) return false;
+        if (!known) return false;
         for (const x of xs) {
             if (fvKind(invConstFold(t, x, 0)) == 0 && !invPureCallExpr(t, x, depth + 1)) return false;
         }
         return true;
+    }
+
+    // r3 (#2128 r2 re-review H7) — the first call in the use-site value `v` (the call, or one in its
+    // arguments) of a `fn` that reads something live (Tables.invLive), else `not`.
+    fn invUseLiveCall(t: Tables, v: AAttrValue) -> InvLiveFn | not {
+        const e: AExpr | not = valueExpr(v);
+        if (e is not) return not;
+        for (const c of invCallsIn(e)) {
+            const sym: int = invFnSymOf(nameFact(t.names, callCallee(c).nid));
+            for (const lv of t.invLive) {
+                if (lv.sym == sym) return lv;
+            }
+        }
+        return not;
+    }
+
+    fn invUseLiveCallMsg(iv: InvInfo, what: string, field: string, lv: InvLiveFn) -> string {
+        const ar: int = lv.hit.chain.indexOf(" → ");
+        const via: string = ar >= 0 ? " (through " + lv.hit.chain + ")" : "";
+        const first: string = ar >= 0 ? lv.hit.chain.substring(0, ar) : lv.hit.chain;
+        return "`invariant (" + iv.text + ")` on " + what + " reads `" + field + "` (directly, or through a field computed from it), a locked field this use gives a call of " + first + via + ", which " + lv.hit.what + " — a `fn` may READ outer bindings too (§48), so the value TRACKS what it reads: it changes with no write to check, and a declaration's invariant reads only the value's own fields (§66.13.5 rule 6, §66.9 rule 8; ruling:user-voice-scrml.md-S483-invariant-derived-split: a field that tracks a cell or a live use-site value stays refused, PERMANENT). Pass what the `fn` reads in as an argument that is a compile-time constant, make the field a `let` field (seeded once from the use site's value, then checked on every write), or write a derived check (e.g. `<over=(…)/>`) and use it where the value changes";
     }
 
     // a use-site value that reads what can change: a cell, a row value, a local (a row binder), a
@@ -35484,15 +35673,19 @@ ${
                     if (di.fields[i].wcap is not && invUseHeads(di, iv).indexOf(i) >= 0 && !hasErrIn(env.blame.spans, iv.span)) {
                         if (!invUseConst(env.t, a.value)) {
                             // r2 (#2128 r1 re-review M3): only a value that TRACKS (a cell, a row binder, a
-                            // local, a declared value) is the ruled PERMANENT refusal; a call of a pure `fn` of
-                            // compile-time constants never changes — the construction check holds it (admitted);
-                            // any other call is INTERIM (its reach is not judged here)
+                            // local, a declared value) is the ruled PERMANENT refusal.
+                            // r3 (#2128 r2 re-review H7): a call of a named function (`fn` or `function`) whose
+                            // arguments are compile-time constants is admitted only when nothing it calls, at any
+                            // depth, reads something live (invLiveFns) — §48 lets a `fn` read outer bindings, so
+                            // the keyword does not make the value constant; one that does TRACKS it (PERMANENT).
+                            // Any other value (a built-in method, a call through a value) is INTERIM
                             if (invUsePureCall(env.t, a.value)) {
-                                // (admitted: `fn` is pure, §48 — the same value at every evaluation)
+                                const lv: InvLiveFn | not = invUseLiveCall(env.t, a.value);
+                                if (lv is given) tsu = report(tsu, env, a.span, "E-CONTRACT-003", invUseLiveCallMsg(iv, "`<" + e.tag + ">`", f, lv));
                             } else if (invUseTracks(env.t, a.value)) {
                                 tsu = report(tsu, env, a.span, "E-CONTRACT-003", invUseLiveMsg(iv, "`<" + e.tag + ">`", f));
                             } else {
-                                tsu = report(tsu, env, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`invariant (" + iv.text + ")` on `<" + e.tag + ">` reads `" + f + "`, a locked field this use gives a call that is not a pure `fn` of compile-time constants — whether that value can change (a `function` may read a cell) is not judged here yet, so the bootstrap refuses it (INTERIM, g-boot-invariant-derived-field-s483; the capable form follows the call's chain as an invariant's own calls are followed and admits one that reads no cell). Give the field a compile-time constant or a pure `fn` of constants here, or make it a `let` field (seeded once from the use site's value, then checked on every write)");
+                                tsu = report(tsu, env, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`invariant (" + iv.text + ")` on `<" + e.tag + ">` reads `" + f + "`, a locked field this use gives a value that is neither a compile-time constant nor a call of a named function of compile-time constants (a built-in method, a call through a value) — whether that value can change is not judged here yet, so the bootstrap refuses it (INTERIM, g-boot-invariant-derived-field-s483; the capable form follows what the value reads as a named call's chain is followed, and admits one that reads nothing live). Give the field a compile-time constant or a call of a named function of constants here, or make it a `let` field (seeded once from the use site's value, then checked on every write)");
                             }
                         } else if (invSiblingDerived(di, i)) {
                             // the run-time check recomputes this field from its initializer (invDeriveFor) — a
@@ -35743,17 +35936,79 @@ ${
     // r2 (#2128 r1 re-review H5): the deeper values' checks first, then the type's own clauses (as
     // invWalk orders them) — and the same walk judges a whole value WRITTEN (invWholeChecks).
     export fn invDeepChecks(t: Tables, ty: Type) -> InvCheck[] {
-        return invDeepAt(t.types, t.decls, ty, [], [], 0);
+        return invDeepAt(t.types, t.decls, invInvTypes(t.types, t.decls), ty, [], [], 0);
     }
 
-    fn invDeepAt(ts: TypeInfo[], ds: DeclInfo[], ty0: Type, at: string[], path: int[], depth: int) -> InvCheck[] {
+    // r3 (#2128 r2 re-review — compile-scaling-fn-count / shared-graph-walks-s480): the named types and
+    // declarations whose values hold an invariant at some depth — their own clauses, or a field's /
+    // tape element's / payload's type that does — to a fixed point, each type once (linear in the
+    // types). invDeepAt walks by PATH (each path is one check's `at`), so a struct graph with sharing
+    // (`D0 { f0: D1, f1: D1 }` …) has exponentially many paths; a subtree that reaches no invariant is
+    // not entered, so a walk costs what it emits, never the whole graph (a `<host>` function returning
+    // a 16-wide, 8-deep shared graph with no invariant walked 16^8 paths at every compile).
+    fn invInvTypes(ts: TypeInfo[], ds: DeclInfo[]) -> int[] {
+        let syms: int[] = [];
+        let kids: int[][] = [];
+        let live: int[] = [];
+        for (const ti of ts) {
+            const id: int = typeDefSym(ti.def).id;
+            let ks: int[] = [];
+            for (const fd of invFieldDefs(ti.def)) { ks = ks.concat(invDirectSyms(fd.ty)); }
+            for (const vd of enumVariants(ti.def)) {
+                for (const fd2 of vd.fields) { ks = ks.concat(invDirectSyms(fd2.ty)); }
+            }
+            syms = syms.concat([id]);
+            kids = kids.concat([ks]);
+            if (ti.invs.length > 0) live = live.concat([id]);
+        }
+        for (const d of ds) {
+            if (d.kind == DeclKind.User) {
+                let ks2: int[] = [];
+                for (const f of d.fields) { ks2 = ks2.concat(invDirectSyms(f.ty)); }
+                syms = syms.concat([d.sym.id]);
+                kids = kids.concat([ks2]);
+                if (d.invs.length > 0) live = live.concat([d.sym.id]);
+            }
+        }
+        if (live.length == 0) return live;
+        let more: boolean = true;
+        for (; more; ) {
+            more = false;
+            let i: int = 0;
+            for (const id2 of syms) {
+                if (live.indexOf(id2) < 0) {
+                    let hit: boolean = false;
+                    for (const k of kids[i]) { if (live.indexOf(k) >= 0) hit = true; }
+                    if (hit) {
+                        live = live.concat([id2]);
+                        more = true;
+                    }
+                }
+                i = i + 1;
+            }
+        }
+        return live;
+    }
+
+    // the named type a value of type `ty0` is (through `T | not` and tapes), as a Sym id list
+    fn invDirectSyms(ty0: Type) -> int[] {
+        const ty: Type = unMaybe(ty0);
+        const el: Type | not = seqElem(ty);
+        if (el is given) return invDirectSyms(el);
+        const s: Sym | not = namedSym(ty);
+        if (s is not) return [];
+        return [s.id];
+    }
+
+    fn invDeepAt(ts: TypeInfo[], ds: DeclInfo[], live: int[], ty0: Type, at: string[], path: int[], depth: int) -> InvCheck[] {
         if (depth > 16) return [];
         const ty: Type = unMaybe(ty0);
         const el: Type | not = seqElem(ty);
-        if (el is given) return invDeepAt(ts, ds, el, at.concat(["*"]), path, depth + 1);
+        if (el is given) return invDeepAt(ts, ds, live, el, at.concat(["*"]), path, depth + 1);
         const s: Sym | not = namedSym(ty);
         if (s is not) return [];
         if (path.indexOf(s.id) >= 0) return [];
+        if (live.indexOf(s.id) < 0) return [];
         const here: int[] = path.concat([s.id]);
         let out: InvCheck[] = [];
         const ti: TypeInfo | not = typeInfoOf(ts, s);
@@ -35767,7 +36022,7 @@ ${
         if (o is given) {
             let i: int = 0;
             for (const n of o.names) {
-                out = out.concat(invDeepAt(ts, ds, o.tys[i], at.concat([n]), here, depth + 1));
+                out = out.concat(invDeepAt(ts, ds, live, o.tys[i], at.concat([n]), here, depth + 1));
                 i = i + 1;
             }
             for (const iv of o.invs) {
@@ -35782,7 +36037,7 @@ ${
             for (const fd of vd.fields) {
                 // `#V.n.name`: the payload's position (a decoded or constructed value's `data` is positional,
                 // §57.8 decPayload) and its declared name (the wire's named `data` object) — runtime invEnsureAt
-                out = out.concat(invDeepAt(ts, ds, fd.ty, at.concat(["#" + vd.sym.hint + "." + j + "." + fd.sym.hint]), here, depth + 1));
+                out = out.concat(invDeepAt(ts, ds, live, fd.ty, at.concat(["#" + vd.sym.hint + "." + j + "." + fd.sym.hint]), here, depth + 1));
                 j = j + 1;
             }
         }
@@ -35802,7 +36057,7 @@ ${
         const ty: Type | not = invTypeAt(t.types, t.decls, invOwnerOfDecl(d), names);
         if (ty is not) return base;
         let deep: InvCheck[] = [];
-        for (const ck of invDeepAt(t.types, t.decls, ty, names, [], 0)) {
+        for (const ck of invDeepAt(t.types, t.decls, invInvTypes(t.types, t.decls), ty, names, [], 0)) {
             if (!invHasCheck(base, ck) && !invHasCheck(deep, ck)) deep = deep.concat([ck]);
         }
         return deep.concat(base);
@@ -35818,7 +36073,7 @@ ${
         const vt: Type | not = invTypeAt(t.types, t.decls, o, path);
         if (vt is not) return base;
         let deep: InvCheck[] = [];
-        for (const ck of invDeepAt(t.types, t.decls, vt, path, [], 0)) {
+        for (const ck of invDeepAt(t.types, t.decls, invInvTypes(t.types, t.decls), vt, path, [], 0)) {
             if (!invHasCheck(base, ck) && !invHasCheck(deep, ck)) deep = deep.concat([ck]);
         }
         return deep.concat(base);
@@ -54380,7 +54635,28 @@ ${
         return { program: t.program, types: t.types, decls: t.decls, fns: t.fns, handles: t.handles,
                  names: t.names, values: t.values, effects: t.effects, binds: t.binds, elems: t.elems,
                  attrs: t.attrs, fails: t.fails, annots: t.annots, unresolved: t.unresolved, typing: t.typing,
-                 novalidate: t.novalidate, resets: t.resets, gated: t.gated, persists: t.persists, timings: t.timings, server: t.server, css: t.css, consts: t.consts, requests: t.requests, taliases: t.taliases, tscope: t.tscope, waits: ws, rows: t.rows, lines: t.lines };
+                 novalidate: t.novalidate, resets: t.resets, gated: t.gated, persists: t.persists, timings: t.timings, server: t.server, css: t.css, consts: t.consts, requests: t.requests, taliases: t.taliases, tscope: t.tscope, waits: ws, rows: t.rows, lines: t.lines, invLive: t.invLive, invHost: t.invHost };
+    }
+
+    // s483 r3 (#2128 r2 re-review L9) — the host-backed functions whose declared return type holds an
+    // invariant-bearing type (its own, a struct field's, a tape element's, a payload's — invDeepChecks)
+    fn invHostFns(t: Tables) -> int[] {
+        let out: int[] = [];
+        for (const fi of t.fns) {
+            const rt: Type | not = fi.ret;
+            if (fi.host is given && rt is given) {
+                if (invDeepChecks(t, rt).length > 0) out = out.concat([fi.sym.id]);
+            }
+        }
+        return out;
+    }
+
+    // s483 r3 (#2128 r2 re-review H7) — `t` with the live `fn`s (invLiveFns)
+    fn withLive(t: Tables, lv: InvLiveFn[]) -> Tables {
+        return { program: t.program, types: t.types, decls: t.decls, fns: t.fns, handles: t.handles,
+                 names: t.names, values: t.values, effects: t.effects, binds: t.binds, elems: t.elems,
+                 attrs: t.attrs, fails: t.fails, annots: t.annots, unresolved: t.unresolved, typing: t.typing,
+                 novalidate: t.novalidate, resets: t.resets, gated: t.gated, persists: t.persists, timings: t.timings, server: t.server, css: t.css, consts: t.consts, requests: t.requests, taliases: t.taliases, tscope: t.tscope, waits: t.waits, rows: t.rows, lines: t.lines, invLive: lv, invHost: t.invHost };
     }
 
     // s483 r1 (#2129 review HIGH-1) — `t` with the typer's facts (an unproven tape bound, a
@@ -54389,7 +54665,7 @@ ${
         return { program: t.program, types: t.types, decls: t.decls, fns: t.fns, handles: t.handles,
                  names: t.names, values: t.values, effects: t.effects, binds: t.binds, elems: t.elems,
                  attrs: t.attrs, fails: t.fails, annots: t.annots, unresolved: t.unresolved, typing: ty,
-                 novalidate: t.novalidate, resets: t.resets, gated: t.gated, persists: t.persists, timings: t.timings, server: t.server, css: t.css, consts: t.consts, requests: t.requests, taliases: t.taliases, tscope: t.tscope, waits: t.waits, rows: t.rows, lines: t.lines };
+                 novalidate: t.novalidate, resets: t.resets, gated: t.gated, persists: t.persists, timings: t.timings, server: t.server, css: t.css, consts: t.consts, requests: t.requests, taliases: t.taliases, tscope: t.tscope, waits: t.waits, rows: t.rows, lines: t.lines, invLive: t.invLive, invHost: t.invHost };
     }
 
     fn nodeIdx(nodes: Callable[], sym: int) -> int {
@@ -59962,7 +60238,7 @@ ${
         const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns, handles: ra.g.handles,
                                 names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
                                 attrs: fs.attrs, fails: fs.fails, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [], bounds: [], refines: [] },
-                                novalidate: [], resets: prr.infos, gated: [], persists: rp.infos, timings: rt.infos, server: noServerFacts(), css: css.facts, consts: ra.g.consts, requests: st.reqs, taliases: typeAliases(ra.g.te.link, ra.g.types), tscope: typeScopes(ra.g.te.link), waits: [], rows: ra.g.rows, lines: fileLinesOf(ra.g.files) };
+                                novalidate: [], resets: prr.infos, gated: [], persists: rp.infos, timings: rt.infos, server: noServerFacts(), css: css.facts, consts: ra.g.consts, requests: st.reqs, taliases: typeAliases(ra.g.te.link, ra.g.types), tscope: typeScopes(ra.g.te.link), waits: [], rows: ra.g.rows, lines: fileLinesOf(ra.g.files), invLive: [], invHost: [] };
         const scopeDiags: Diag[] = checkScopes(files, bound, ra.g.te.link);
         // s452 (dpa-066): THE EFFECT SUMMARY — once, over the bound tables —
         // and the binder's decisions that read it (rulesPass, M3)
@@ -59974,7 +60250,8 @@ ${
         const vp: ValPass = validatorPass(ra.g, bound);
         // s468: static executable attribute values (§5.2 S464) and impure `fn` bodies (§48.3.3)
         const sinkDiags: Diag[] = staticExecPass(ra.g, bound).concat(fnWritePass(ra.g, sum)).concat(fileScopePass(ra.g, bound, sum)).concat(fallOffPass(ra.g, bound)).concat(invReachPass(ra.g, bound, st.diags)).concat(txRulesPass(ra.g)).concat(css.diags).concat(styleOverlaps(ra.g));
-        const typed: RTyping = typeProgram(files, withWaits(bound, waitingFns(sum)), st.diags.concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags), ra.g.te.link);
+        // s483 r3 (#2128 r2 re-review H7): the `fn`s that read something live, for the typer's useInvs
+        const typed: RTyping = typeProgram(files, withLive(withWaits(bound, waitingFns(sum)), invLiveFns(ra.g, bound)), st.diags.concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags), ra.g.te.link);
         // s483 r1 (#2129 review HIGH-1) — a trapping initializer inside a construct, judged over the
         // TYPED tables: boundCheckAt reads Typing.bounds, which typeProgram fills
         const trapDiags: Diag[] = constructTrapPass(ra.g, withTyping(bound, typed.typing), sum);
@@ -59985,7 +60262,7 @@ ${
         const typedT: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                                  names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                                  elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
-                                 novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, timings: bound.timings, server: pp.facts, css: css.facts, consts: bound.consts, requests: bound.requests, taliases: bound.taliases, tscope: bound.tscope, waits: waitingFns(sum), rows: bound.rows, lines: bound.lines };
+                                 novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, timings: bound.timings, server: pp.facts, css: css.facts, consts: bound.consts, requests: bound.requests, taliases: bound.taliases, tscope: bound.tscope, waits: waitingFns(sum), rows: bound.rows, lines: bound.lines, invLive: [], invHost: [] };
         // s474: the client `!` functions whose server calls compose into one request
         const cp: RCompose = composePass(ra.g, typedT, sum, allow, pp.st);
         // s475-boot-caller-transport: the transport carriers (the composed functions and the client `!`
@@ -60019,7 +60296,7 @@ ${
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
-                            novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, timings: bound.timings, server: sf, css: css.facts, consts: bound.consts, requests: bound.requests, taliases: bound.taliases, tscope: bound.tscope, waits: waitingFns(sum), rows: bound.rows, lines: bound.lines };
+                            novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, timings: bound.timings, server: sf, css: css.facts, consts: bound.consts, requests: bound.requests, taliases: bound.taliases, tscope: bound.tscope, waits: waitingFns(sum), rows: bound.rows, lines: bound.lines, invLive: [], invHost: invHostFns(bound) };
         const base0: Diag[] = chScopeQuiet(domScopeDropped(cps.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags).concat(trapDiags).concat(hostPlacedDiags(fns, pp.facts.servers)).concat(hostServerDiags(ra.g, pp.facts.servers)).concat(nestedFnPass(ra.g, t)).concat(eps.diags), chs.quiet, chs.calls).concat(chs.diags);
         // s471: the linear pass (§35) — after the typer (§35.5: "after type resolution and
         // route inference"; a non-exhaustive `match`'s E-TYPE-020 is in `base0`, §35.4.3)

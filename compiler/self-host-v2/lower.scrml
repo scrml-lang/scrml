@@ -577,7 +577,40 @@ ${
 
     // s444 — a call: a host call / a sequence function (the binder's value
     // fact on the call), else a call of a named function.
+    // s483 r3 (#2128 r2 re-review L9; §66.13.5 "a value the program did not construct (… a host
+    // function's return) was never checked"): a HOST-BACKED function's return value whose type holds
+    // an invariant-bearing type (its own, a struct field's, a tape element's, a payload's — invDeepChecks)
+    // is checked where it is returned, at its whole depth — the E-WRITE-INVARIANT-RT trap — so a host
+    // value held in a local (`const x: Outer = mk2()`), built into a construction (`{ o: mk2() }`) or
+    // passed on is checked too, not only one written to a cell (whose guard judges the raw value once:
+    // unconstructed).
     fn callOrBuiltin(c: LC, e: AExpr, cal: AExpr, args: AExpr[]) -> Expr {
+        return hostReturnChecked(c, e, cal, callOrBuiltin0(c, e, cal, args));
+    }
+
+    fn hostReturnChecked(c: LC, e: AExpr, cal: AExpr, v: Expr) -> Expr {
+        const nf: NameFact | not = nameFact(c.t.names, cal.nid);
+        const sym: int = match nf {
+            .NFn(sym: s) :> s.id,
+            // no-default-arm: one question of a callee — is it a named function
+            _ :> -1
+        };
+        // Tables.invHost: the host-backed functions whose return type holds an invariant (usually none —
+        // one list read per call, never a scan of every function: compile time stays linear in the calls)
+        if (sym < 0 || c.t.invHost.indexOf(sym) < 0) return v;
+        for (const fi of c.t.fns) {
+            if (fi.sym.id == sym && fi.host is given) {
+                const rt: Type | not = fi.ret;
+                if (rt is not) return v;
+                const cks: InvCheck[] = invDeepChecks(c.t, rt);
+                if (cks.length == 0) return v;
+                return Expr.Prim(PrimOp.InvariantValue, [Expr.Lit(Literal.Absent), invStrs([]), litStr("set"), v, invChecksExpr(c, cks), litStr(invLoc(c.t, c.file, e.span.start))]);
+            }
+        }
+        return v;
+    }
+
+    fn callOrBuiltin0(c: LC, e: AExpr, cal: AExpr, args: AExpr[]) -> Expr {
         const f: ValueFact | not = valueFact(c.t.values, e.nid);
         return match f {
             .VHost(call: h) :> Expr.Host(h),
@@ -1701,6 +1734,22 @@ ${
         return Expr.Lambda(params, lowerExpr({ t: c.t, file: c.file, subst: not, snap: sn, rows: [] }, ck.inv.e));
     }
 
+    // r3 (#2128 r2 re-review nit): the owner a check names — with the file:line of the invariant's
+    // declaration when that is another file than the write's (a library type's invariant names
+    // `lib.scrml:N`; the write site stays the check's own location, the secondary one)
+    fn invOwnerAt(c: LC, ck: InvCheck) -> string {
+        const owner: string = ck.owner.replaceAll("`", "");
+        let file: string = "";
+        for (const ti of c.t.types) {
+            if (typeDefSym(ti.def).id == ck.sym.id) file = ti.file;
+        }
+        for (const di of c.t.decls) {
+            if (di.sym.id == ck.sym.id) file = di.file;
+        }
+        if (file == "" || file == c.file) return owner;
+        return owner + " (" + invLoc(c.t, file, ck.inv.span.start) + ")";
+    }
+
     fn invWhat(iv: InvInfo) -> string {
         if (iv.label != "") return "[" + iv.label + "]";
         return "`" + iv.text + "`";
@@ -1715,7 +1764,7 @@ ${
     fn invChecksExpr(c: LC, cks: InvCheck[]) -> Expr {
         let out: Expr[] = [];
         for (const ck of cks) {
-            let parts: Expr[] = [invStrs(ck.at), invPredicate(c, ck), invStrs(ck.names), litStr(ck.owner.replaceAll("`", "")), litStr(invWhat(ck.inv))];
+            let parts: Expr[] = [invStrs(ck.at), invPredicate(c, ck), invStrs(ck.names), litStr(invOwnerAt(c, ck)), litStr(invWhat(ck.inv))];
             if (ck.derive.length > 0) parts = parts.concat([invDeriveExpr(c, ck)]);
             out = out.concat([Expr.ArrayOf(parts)]);
         }
@@ -5586,7 +5635,7 @@ ${
     fn serverView(t: Tables, plan: SuspendPlan, inherited: int[]) -> Tables {
         const f: ServerFacts = t.server;
         const sf: ServerFacts = { servers: f.servers, sqls: f.sqls, dbs: f.dbs, places: f.places, inherited: inherited, plan: plan, loads: f.loads, envelopes: f.envelopes, txs: f.txs, reqReads: f.reqReads, tool: f.tool, endpoints: f.endpoints, channels: f.channels, copies: f.copies, onServer: true };
-        return { program: t.program, types: t.types, decls: t.decls, fns: t.fns, handles: t.handles, names: t.names, values: t.values, effects: t.effects, binds: t.binds, elems: t.elems, attrs: t.attrs, fails: t.fails, annots: t.annots, unresolved: t.unresolved, typing: t.typing, novalidate: t.novalidate, resets: t.resets, gated: t.gated, persists: t.persists, timings: t.timings, server: sf, css: t.css, consts: t.consts, requests: t.requests, taliases: t.taliases, tscope: t.tscope, waits: t.waits, rows: t.rows, lines: t.lines };
+        return { program: t.program, types: t.types, decls: t.decls, fns: t.fns, handles: t.handles, names: t.names, values: t.values, effects: t.effects, binds: t.binds, elems: t.elems, attrs: t.attrs, fails: t.fails, annots: t.annots, unresolved: t.unresolved, typing: t.typing, novalidate: t.novalidate, resets: t.resets, gated: t.gated, persists: t.persists, timings: t.timings, server: sf, css: t.css, consts: t.consts, requests: t.requests, taliases: t.taliases, tscope: t.tscope, waits: t.waits, rows: t.rows, lines: t.lines, invLive: t.invLive, invHost: t.invHost };
     }
 
     export fn lower(tp: TypedProgram) -> Lowered {

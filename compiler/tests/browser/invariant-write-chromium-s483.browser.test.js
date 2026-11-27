@@ -403,3 +403,100 @@ let <r:Range=({ lo: 0, hi: 0 })/>
     for (const e of traps) expect(e).toContain("lo = 9, hi = 3");
   }, 120000);
 });
+
+// ---------------------------------------------------------------------------------------------------------------
+// r3 (#2128 r2 re-review H6, L9): a write-only cell whose seed reaches a secret stays a shell AND its whole writes
+// are checked; a host function's return is checked where it is returned
+// ---------------------------------------------------------------------------------------------------------------
+const { readdirSync, readFileSync } = await import("node:fs");
+// every client-side file of an output directory (the server artifact and its runtime excluded)
+function clientFiles(out) {
+  let txt = "";
+  const walk = (d) => {
+    for (const f of readdirSync(d, { withFileTypes: true })) {
+      const q = join(d, f.name);
+      if (f.isDirectory()) walk(q);
+      else if (!/server/.test(f.name)) txt += readFileSync(q, "utf8") + "\n";
+    }
+  };
+  walk(out);
+  return txt;
+}
+
+const secretProg = (secret, cells, write) => `\${
+    const API_KEY: string = "${secret}";
+}
+<program db="./app.db">
+\${
+    type Row:struct = { name: string }
+    type Tok:struct = { v: string } invariant (v != "") [nonEmpty]
+    function label(id: int) -> string {
+        const r: Row = ?{\`SELECT name FROM users WHERE id = \${id}\`}.get() !{ _ :> { return "none"; } };
+        return r.name + API_KEY;
+    }
+}
+let <out:string=""/>
+let <s:string=""/>
+let <n:int=0/>
+${cells}
+<main>
+<button id="go" onclick={ @out = label(1) !{ .Transport(t) :> return }; }>go</button>
+<p id="c">\${@out}</p><p id="n">\${@n}</p>
+<button id="fill" onclick={ @s = "ok"; }>fill</button>
+<button id="w" onclick={ ${write} @n = @n + 1; }>w</button>
+</main>
+</program>
+`;
+
+describe("Chromium r3: a write-only cell seeded from a secret — no secret in the client, every whole write still checked", () => {
+  for (const [id, cells, write] of [
+    ["w1 a body cell of an invariant-bearing type", `let <tk:Tok=({ v: API_KEY })/>`, "@tk = { v: @s };"],
+    ["w3 a component's cell", `<widget:struct>\n    let <tk:string=(API_KEY)/>\n</> renders <i>w</i>\ninvariant (tk != "") [nonEmpty]\n<widget/>`, "@widget.tk = @s;"],
+    ["w4 a struct declaration's field", `<tok:struct>\n    let <v:string=(API_KEY)/>\n</>\ninvariant (v != "") [nonEmpty]`, "@tok.v = @s;"],
+  ]) {
+    test(`${id}: a bad whole write traps (the handler stops), a good one lands`, async () => {
+      if (skip()) return;
+      const secret = "zz-sk-r3c-" + id.split(" ")[0];
+      const out = build(secretProg(secret, cells, write));
+      expect(clientFiles(out)).not.toContain(secret);
+      const r = await load(out, ["n"], ["#w", "#fill", "#w"]);
+      expect(r.texts).toEqual([["0"], ["0"], ["0"], ["1"]]);
+      expect(r.errors.length).toBe(1);
+      expect(r.errors[0]).toContain("E-WRITE-INVARIANT-RT");
+      expect(r.errors[0]).toContain("[nonEmpty]");
+    }, 120000);
+  }
+});
+
+describe("Chromium r3: a host function's return is checked where it is returned (L9)", () => {
+  test("held in a local, built into a construction: traps before anything reads it; a good value lands", async () => {
+    if (skip()) return;
+    const { out } = buildFiles({
+      "glue.js": "export function mk2() { return { r: { lo: 9, hi: 3 }, n: 1 }; }\nexport function ok2() { return { r: { lo: 1, hi: 3 }, n: 1 }; }\n",
+      "main.scrml": `<host src="./glue.js">
+  mk2() -> Outer
+  ok2() -> Outer
+</host>
+<program>
+\${
+    type Range:struct = { lo: int, hi: int } invariant (lo <= hi) [rng]
+    type Outer:struct = { r: Range, n: int }
+    type Box:struct = { o: Outer }
+}
+let <out:int=0/>
+<main><p id="s">\${@out}</p>
+<button id="b" onclick={ const x: Outer = mk2(); @out = x.r.lo; }>b</button>
+<button id="c" onclick={ const y: Box = { o: mk2() }; @out = y.o.r.lo; }>c</button>
+<button id="g" onclick={ const z: Outer = ok2(); @out = z.r.lo; }>g</button></main>
+</program>
+`,
+    });
+    const r = await load(out, ["s"], ["#b", "#c", "#g"]);
+    expect(r.texts).toEqual([["0"], ["0"], ["0"], ["1"]]);
+    expect(r.errors.length).toBe(2);
+    for (const e of r.errors) {
+      expect(e).toContain("E-WRITE-INVARIANT-RT");
+      expect(e).toContain("lo = 9, hi = 3");
+    }
+  }, 120000);
+});

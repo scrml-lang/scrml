@@ -215,3 +215,33 @@ impl#1 frozen (§66 Nominal there, §34.0).
 - tests re-pinned (the decided construction no longer runs a check): invariant-r1 H2 page, invariant-r2 leaks page +
   M1, invariant-write SECRET_TAG — each page now WRITES `v`; m02 default made a non-folding call; new test: a decided
   construction is admitted with no leak and no guard.
+- committed 129c0f5ca (hook 58874 / 0 / 255 PASS).
+- H7: analyze invLiveFns (before the typer → Tables.invLive): each function's body scanned once for a LIVE read
+  (cell, `@.`, declared value / field, request / surface state, lifecycle element, mutable binding, query, foreign
+  block, host function, unseen body), then a fixed point over the calls; useInvs refuses a use-site call of a named
+  function of constants that reaches one — E-CONTRACT-003 PERMANENT, chain named. The keyword decides nothing: a
+  `function` of constants reading nothing live is admitted (r2's INTERIM for it retired); still INTERIM: a built-in
+  method / property, a call through a value. m3cell / chain / mutable let / `function` reading a cell → E-CONTRACT-003.
+- M8: analyze invPartWriteTrapWhat — a local's part write (EAssignLocal, path non-empty, invValueWholeChecks > 0)
+  is a trap site; x6/c1 → E-FILE-SCOPE-INIT-IN-CONSTRUCT; the same outside a construct clean. A cell write in an
+  initializer is refused already (probe m8write).
+- L9: lower hostReturnChecked — a host-backed function's return whose type holds invariants is wrapped in an
+  InvariantValue (invDeepChecks) where it is returned (local, construction, write — the write's guard strips it via
+  unconstructed). The server-return-in-a-local half filed OPEN in g-boot-invariant-boundaries-lints-s483.
+- nit: lower invOwnerAt — an owner declared in another file names `lib.scrml:N`; print invCheckLabel: "on type Tok
+  (lib.scrml:4; written at main.scrml:12)".
+- SPEC §66.13.5 7a / 7b / When-it-is-checked / Status, §34 E-WRITE-INVARIANT-RT row; known-gaps: boundaries (r3 L9,
+  server half open), derived-field (r3 H7), trapping-construct-init (M8 built).
+- tests: slice-m4/invariant-r3-s483.test.js (H6 ×6, H7 ×5, M8 ×2, L9, nit); invariant-r2 M3 re-pinned (`function`
+  admitted; `S.length` INTERIM); Chromium invariant-write-chromium-s483 "r3" (+4: w1 w3 w4 trap / land, h1 host).
+  invariant slice set 195 / 0; Chromium file 18 / 0.
+- hook attempt 1 timed out (shard 6, compile-scaling-fn-count-s480): hostReturnChecked scanned every function
+  per call (O(calls × fns)). Now Tables.invHost (invHostFns, filled on the final tables) — one list read per call;
+  invLiveFns: indexed (g.fnSyms), callers + BFS (linear), mutable bindings collected once, skipped when no
+  declaration has an invariant. compile-scaling s477 / s480, recursive-enum-perf pass.
+- hook attempts 2-5: one group-1 shard timed out each time. Found by bisecting the shard file list:
+  slice-m4/shared-graph-walks-s480.test.js hung ALONE — F2's `<host src>` `dg() -> D0` over a 16-wide,
+  8-deep shared struct graph: invHostFns → invDeepChecks walked all 16^8 PATHS (no invariant anywhere).
+  analyze invInvTypes (the types whose values hold an invariant at some depth, a fixed point, linear) prunes
+  invDeepAt — a subtree that reaches no invariant is not entered (persist / whole writes / part writes / host
+  returns). shared-graph-walks + the invariant set + server-runtime: 187 / 0; Chromium 18 / 0.
