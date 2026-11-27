@@ -350,6 +350,9 @@ describe("each fence's line is commonmark.js's own sourcepos (#2101 r4 F1; S483 
     expect(ids([neg, "", "```scrml", W, "```", ""].join("\n"))).toEqual([[]]);                               // a blank line between
     expect(ids(["> " + neg, "> > ```scrml", "> > " + W, "> > ```", ""].join("\n"))).toEqual([[]]);           // a nested blockquote
     expect(ids([neg.replace("while-loop", "x-row"), neg, "```scrml", W, "```", ""].join("\n"))).toEqual([["while-loop", "x-row"]]);   // markers stack
+    // r4rev b28: a marker line that closes an earlier `<!--` is the last line of one multi-line HTML block, not a
+    // marker of its own — it marks nothing (the r0 line-based reader marked it; S483 r1 reads by AST, fail-safe)
+    expect(ids(["<!--", neg, "```scrml", W, "```", ""].join("\n"))).toEqual([[]]);
   });
   // S483 r0 LOW-1: marked 18.2.0's lexer throws a TypeError on this text; the gate rethrew it (exit 1 — the
   // "hits found" code — a raw stack, no file named). Every reader failure is now a named exit 2.
