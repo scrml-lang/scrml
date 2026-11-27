@@ -142,6 +142,26 @@ describe("#2130 review LOW-1 — a refused cell whose only reader is a dropped u
   }, 300000);
 });
 
+describe("#2130 review INFO-1 — compile time is not exponential in the depth of components forwarding an attribute", () => {
+  // Each component renders the next and passes `t=(t + "i")`. lower.scrml rendersFields (the gate's static
+  // reach) walked a use's kids twice per level: 25 deep took 11 s, 30 deep over 300 s (353ffe643). Now ~0.6 s at
+  // 30. The bound leaves room for a loaded runner and fails the exponential walk by orders of magnitude.
+  test("a 32-deep forwarding chain compiles in well under a minute, with no secret in the client", async () => {
+    let body = "";
+    for (let i = 0; i < 32; i++) {
+      const next = i < 31 ? `<b><c${i + 1} t=(t + "${i}")/></b>` : `<b>x</b>`;
+      body += `<c${i} t:string="d">\n  let <k:string=(t + "k")/>\n</> renders ${next}\n`;
+    }
+    const s = PROG(body + `<c0 t=(API_KEY)/>`);
+    const t0 = performance.now();
+    const res = await compileSource(writeApp(s));
+    const ms = performance.now() - t0;
+    expect(res.ok).toBe(true);
+    expect(res.client.js).not.toContain("zz-sk-live-123");
+    expect(ms).toBeLessThan(60000);
+  }, 300000);
+});
+
 describe("a dropped value that reaches a secret cannot run in the client — its trap is lost (gap g-boot-dropped-value-trap-s483, pinned)", () => {
   test("r12c a use-site value, r12d a default, r12h a component cell's seed: no secret in the client, the page loads", async () => {
     for (const extra of [
