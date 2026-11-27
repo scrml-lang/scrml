@@ -3319,7 +3319,10 @@ export function refineCheck(v, base, spec, shown, what, at) {
 // `at` (an optional field that holds no value) has nothing to check. Two more `at`
 // steps reach the values a DECODED value holds (r1, #2128 review H1 — a restored
 // `persist=` value is checked whole, §6.14.2 rule 3): `"*"` — every element of a tape;
-// `"#V.n"` — payload position `n` of a value of variant `V` (any other variant: nothing).
+// `"#V.n.name"` — the payload value of a value of variant `V` (any other variant: nothing):
+// position `n` of a positional `data` (the decoded / constructed value, §57.8), or the
+// declared field `name` of a named `data` object (the §57.8 wire form) — r2 (#2128 r1
+// re-review H4).
 // r1 (#2128 review H3; ruling:user-voice-scrml.md-S483-invariant-derived-split): an
 // optional sixth element `derive` — `[[name, fn, deps], …]`, the declaration's DERIVED
 // fields the invariant reads, dependencies first: each is recomputed on the candidate,
@@ -3370,8 +3373,11 @@ function invEnsureAt(val, at, i, check, loc) {
     return;
   }
   if (typeof k === "string" && k.startsWith("#")) {
-    const dot = k.lastIndexOf(".");
-    if (typeof val === "object" && val.variant === k.slice(1, dot) && Array.isArray(val.data)) invEnsureAt(val.data[Number(k.slice(dot + 1))], at, i + 1, check, loc);
+    const [variant, pos, name] = k.slice(1).split(".");
+    if (typeof val !== "object" || val.variant !== variant) return;
+    const data = val.data;
+    if (Array.isArray(data)) invEnsureAt(data[Number(pos)], at, i + 1, check, loc);
+    else if (data !== null && typeof data === "object") invEnsureAt(data[name], at, i + 1, check, loc);
     return;
   }
   invEnsureAt(val[k], at, i + 1, check, loc);
@@ -7152,7 +7158,7 @@ function storageArea(store) {
 /**
  * r1 (#2128 review H1) — §6.14.2 r3 "decoded against the cell's current declared type and its
  * full declared contract": does the decoded value `v` keep every invariant `checks` names
- * (the type's, and those of every value it holds — `at` steps "*" / "#V.n")? A value that
+ * (the type's, and those of every value it holds — `at` steps "*" / "#V.n.name")? A value that
  * does not is a contract failure: it SHALL NOT reach the cell (the default is taken).
  */
 function invariantsHold(v, checks, loc) {

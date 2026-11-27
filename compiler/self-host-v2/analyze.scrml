@@ -35018,48 +35018,104 @@ ${
 
     // r1 (#2128 review H1) — every invariant a DECODED value of type `ty` must keep, at its whole
     // depth: its own type's clauses, and those of every value it holds — a struct field (its
-    // name), each element of a tape (`"*"`), a payload position of an enum variant (`"#V.n"`).
+    // name), each element of a tape (`"*"`), a payload of an enum variant (`"#V.n.name"`).
     // §6.14.2 rule 3: a restored value is "decoded against the cell's current declared type
     // and its full declared contract", and rule 1 "Restore is construction" — a decoded value
     // was never constructed by the program, so nothing inside it was checked. A type already on
     // the path is not entered again (a recursive type's deeper values: g-boot-invariant-boundaries-lints-s483).
+    // r2 (#2128 r1 re-review H5): the deeper values' checks first, then the type's own clauses (as
+    // invWalk orders them) — and the same walk judges a whole value WRITTEN (invWholeChecks).
     export fn invDeepChecks(t: Tables, ty: Type) -> InvCheck[] {
-        return invDeepAt(t, ty, [], [], 0);
+        return invDeepAt(t.types, t.decls, ty, [], [], 0);
     }
 
-    fn invDeepAt(t: Tables, ty0: Type, at: string[], path: int[], depth: int) -> InvCheck[] {
+    fn invDeepAt(ts: TypeInfo[], ds: DeclInfo[], ty0: Type, at: string[], path: int[], depth: int) -> InvCheck[] {
         if (depth > 16) return [];
         const ty: Type = unMaybe(ty0);
         const el: Type | not = seqElem(ty);
-        if (el is given) return invDeepAt(t, el, at.concat(["*"]), path, depth + 1);
+        if (el is given) return invDeepAt(ts, ds, el, at.concat(["*"]), path, depth + 1);
         const s: Sym | not = namedSym(ty);
         if (s is not) return [];
         if (path.indexOf(s.id) >= 0) return [];
         const here: int[] = path.concat([s.id]);
         let out: InvCheck[] = [];
-        const o: InvOwner | not = invOwnerOfType(t.types, t.decls, ty);
+        const ti: TypeInfo | not = typeInfoOf(ts, s);
+        // r2 (#2128 r1 re-review H4): an ENUM's payloads are walked below — invOwnerOfType gives every
+        // named type an owner (an enum's with no clauses and no fields), so taking the owner branch for
+        // one ended the walk there, and a Range inside `Held(r: Range)` went unchecked
+        let isEnum: boolean = false;
+        if (ti is given) isEnum = enumVariants(ti.def).length > 0;
+        let o: InvOwner | not = not;
+        if (!isEnum) o = invOwnerOfType(ts, ds, ty);
         if (o is given) {
+            let i: int = 0;
+            for (const n of o.names) {
+                out = out.concat(invDeepAt(ts, ds, o.tys[i], at.concat([n]), here, depth + 1));
+                i = i + 1;
+            }
             for (const iv of o.invs) {
                 const hn: string[] = invHeadNames(iv, o.names);
                 out = out.concat([{ at: at, inv: iv, owner: o.name, sym: o.sym, decl: o.decl, names: hn, derive: invDeriveFor(o, hn) }]);
             }
-            let i: int = 0;
-            for (const n of o.names) {
-                out = out.concat(invDeepAt(t, o.tys[i], at.concat([n]), here, depth + 1));
-                i = i + 1;
-            }
             return out;
         }
-        const ti: TypeInfo | not = typeInfoOf(t.types, s);
         if (ti is not) return [];
         for (const vd of enumVariants(ti.def)) {
             let j: int = 0;
             for (const fd of vd.fields) {
-                out = out.concat(invDeepAt(t, fd.ty, at.concat(["#" + vd.sym.hint + "." + j]), here, depth + 1));
+                // `#V.n.name`: the payload's position (a decoded or constructed value's `data` is positional,
+                // §57.8 decPayload) and its declared name (the wire's named `data` object) — runtime invEnsureAt
+                out = out.concat(invDeepAt(ts, ds, fd.ty, at.concat(["#" + vd.sym.hint + "." + j + "." + fd.sym.hint]), here, depth + 1));
                 j = j + 1;
             }
         }
         return out;
+    }
+
+    // r2 (#2128 r1 re-review H5) — the checks a write that puts a WHOLE value at `names` below an
+    // instance of `d` needs (a replace, a struct-path set, a tape append / prepend — its element):
+    // those of the values the write passes and of the declaration (invInstanceChecks), and every
+    // invariant the written value must keep at its whole depth (invDeepAt — a tape's elements, a
+    // struct field's value, an enum payload), each once, the deeper first. A value the program
+    // constructs was checked when it was built; one it did not — a server function's return (rows
+    // too), a host function's return, a decoded value — was not, so a whole-value write judges all of
+    // it before it is written (§66.13.5 "When it is checked": every write).
+    export fn invWholeChecks(t: Tables, d: DeclInfo, names: string[]) -> InvCheck[] {
+        const base: InvCheck[] = invInstanceChecks(t, d, names);
+        const ty: Type | not = invTypeAt(t.types, t.decls, invOwnerOfDecl(d), names);
+        if (ty is not) return base;
+        let deep: InvCheck[] = [];
+        for (const ck of invDeepAt(t.types, t.decls, ty, names, [], 0)) {
+            if (!invHasCheck(base, ck) && !invHasCheck(deep, ck)) deep = deep.concat([ck]);
+        }
+        return deep.concat(base);
+    }
+
+    // The same for a local's PART write (`b.f = v`, a value of type `ty` written at `path` below its root):
+    // the checks of the values it passes, and the written value at its whole depth.
+    export fn invValueWholeChecks(t: Tables, ty: Type | not, path: string[]) -> InvCheck[] {
+        const base: InvCheck[] = invValueChecks(t, ty, path);
+        if (ty is not || path.length == 0) return base;
+        const o: InvOwner | not = invOwnerOfType(t.types, t.decls, ty);
+        if (o is not) return base;
+        const vt: Type | not = invTypeAt(t.types, t.decls, o, path);
+        if (vt is not) return base;
+        let deep: InvCheck[] = [];
+        for (const ck of invDeepAt(t.types, t.decls, vt, path, [], 0)) {
+            if (!invHasCheck(base, ck) && !invHasCheck(deep, ck)) deep = deep.concat([ck]);
+        }
+        return deep.concat(base);
+    }
+
+    // the declared type of the value at `names` below owner `o` (field names), or `not`
+    fn invTypeAt(ts: TypeInfo[], ds: DeclInfo[], o: InvOwner, names: string[]) -> Type | not {
+        if (names.length == 0) return not;
+        const i: int = o.names.indexOf(names[0]);
+        if (i < 0) return not;
+        if (names.length == 1) return o.tys[i];
+        const sub: InvOwner | not = invOwnerOfType(ts, ds, o.tys[i]);
+        if (sub is not) return not;
+        return invTypeAt(ts, ds, sub, names.slice(1));
     }
 
     fn invDeclInfos(g: Globals) -> DeclInfo[] {
@@ -35181,11 +35237,12 @@ ${
     // A group of writes (a spread's overrides, a sequence shape's edits) to one instance:
     // the checks of every path, each check once — the deeper values' first, then the
     // declaration's own clauses in source order, each once (checked once, ruling S483 item 2).
+    // r2 (#2128 r1 re-review H5): each path's written value at its whole depth (invWholeChecks).
     export fn invGroupChecks(t: Tables, d: DeclInfo, paths: string[][]) -> InvCheck[] {
         let deep: InvCheck[] = [];
         let own: InvCheck[] = [];
         for (const p of paths) {
-            for (const ck of invInstanceChecks(t, d, p)) {
+            for (const ck of invWholeChecks(t, d, p)) {
                 if (ck.at.length == 0) {
                     if (!invHasCheck(own, ck)) own = own.concat([ck]);
                 } else if (!invHasCheck(deep, ck)) {

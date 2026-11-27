@@ -47,7 +47,7 @@ ${
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest, sqlInfo, isServerPlaced,
              failFact, builtinFile, blockReference, suspendAtOf, tempOf, joinOf, retOf, remoteCaller, serverCallErrorName, typeInfoName, fieldInfoName, ServerFacts, SrvCopy, sideCallee,
              sqlParamRep, distinctSqlParams, CssFacts, CssInline, CssBridge, LStep, LocalEdit, BoundCheck, boundCheckAt, editBoundNid, RefineCheck, refineCheckAt, txAtOf, txPlainAt, rowOfSite,
-             InvInfo, InvCheck, InvCapField, invDeepChecks, invInstanceChecks, invValueChecks, invGroupChecks, invCapField, invRefNames, invLoc, invProven } from "./analyze.scrml";
+             InvInfo, InvCheck, InvCapField, invDeepChecks, invInstanceChecks, invWholeChecks, invValueWholeChecks, invValueChecks, invGroupChecks, invCapField, invRefNames, invLoc, invProven } from "./analyze.scrml";
     import { RefineTop, refineTopOf, refineSpec, refineLitVerdict } from "./parse.scrml";
 
     // s451 — THE DIAGNOSTICS GATE. `core` is `not` whenever the analysis
@@ -1804,9 +1804,14 @@ ${
 
     // The checks one write to field `idx` of `d` needs (none: an edit analyze refused, or
     // one that touches no read path).
+    // r2 (#2128 r1 re-review H5): a write that puts a whole value in place — a replace, a struct-path
+    // set, a tape append / prepend (the element) — judges that value at its whole depth
+    // (invWholeChecks: a server or host function's return, rows included, was never constructed here).
     fn invEditChecks(c: LC, d: DeclInfo, idx: int, ie: InvEdit) -> InvCheck[] {
         if (ie.op == "" || idx < 0 || idx >= d.fields.length) return [];
-        return invInstanceChecks(c.t, d, [d.fields[idx].sym.hint].concat(ie.path));
+        const names: string[] = [d.fields[idx].sym.hint].concat(ie.path);
+        if (ie.op == "set" || ie.op == "append" || ie.op == "prepend") return invWholeChecks(c.t, d, names);
+        return invInstanceChecks(c.t, d, names);
     }
 
     // A lone write's value through its invariant check, or as it is.
@@ -1875,8 +1880,12 @@ ${
 
     // A value of a type with invariants written at `path` below `cur` (a local's part
     // write), or — `cur` not, `path` empty — constructed whole.
+    // r2 (#2128 r1 re-review H5): a part write judges its written value at its whole depth
+    // (invValueWholeChecks); a construction (`path` empty) judges its own clauses — every value it
+    // holds was built, and checked, before it.
     fn invValue(c: LC, ty: Type | not, cur: Expr, path: string[], v: Expr, at: int) -> Expr {
-        const cks: InvCheck[] = invValueChecks(c.t, ty, path);
+        let cks: InvCheck[] = invValueChecks(c.t, ty, path);
+        if (path.length > 0) cks = invValueWholeChecks(c.t, ty, path);
         if (cks.length == 0) return v;
         return Expr.Prim(PrimOp.InvariantValue, [cur, invStrs(path), litStr("set"), v, invChecksExpr(c, cks), litStr(invLoc(c.t, c.file, at))]);
     }

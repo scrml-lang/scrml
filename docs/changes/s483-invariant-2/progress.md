@@ -152,3 +152,12 @@ impl#1 frozen (§66 Nominal there, §34.0).
   over `n`, a server-only attribute `t` it does not read) admitted, no leak (bodyUseAll precision). n09 (lib
   type invariant over K, construction proven at compile time — no check runs anywhere) now admitted, no leak.
   Tests re-pinned: invariant-r1 (H2 messages), invariant-write (SECRET_TAG message).
+- committed 0d7339fd7 (hook PASS).
+- item 3 (H4): analyze invDeepAt took the owner branch for an ENUM (invOwnerOfType gives every named type an
+  owner) and stopped — now enums walk their payloads; step `#V.n.name` (runtime invEnsureAt: positional `data`
+  by n — the decoded / constructed value — or a named `data` object by name). Chromium: n21 reload → default
+  (-1), cross-tab refused; n22 / n24 / n26 / c03c / c03d unchanged.
+- item 4 (H5): analyze invWholeChecks (invInstanceChecks + the written value at its whole depth, invDeepAt —
+  now (ts, ds) and deeper-first) for a lone set / append / prepend (lower invEditChecks) and every Commit path
+  (invGroupChecks); invValueWholeChecks for a local part write. Chromium: n29 `@rs = mk()` and `@o = mk2()`
+  trap; n27 server rows trap; c04 still traps. (Host probes must compile outside a dot path — E-IMPORT-011.)
