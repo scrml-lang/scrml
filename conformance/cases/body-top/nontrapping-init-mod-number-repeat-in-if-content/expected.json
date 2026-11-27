@@ -1,0 +1,23 @@
+{
+  "id": "body-top-nontrapping-init-mod-number-repeat-in-if-content",
+  "description": "§7.6 rule (b) (S483 q8-fu) — initializers inside `if=` content that cannot trap stay legal and run: a `%` by a `number` divisor (`7.5 % y`, y: number) and a literal `repeat` on a const holding a short literal (`s.repeat(3)`).",
+  "language-version": "1.0",
+  "spec": "§7.6 rule (b) (S483), §7.6 R3, §19.17, §34",
+  "source-test": "compiler/self-host-v2/slice-m4/trapping-construct-init-s483.test.js",
+  "rationale": "ruling:user-voice-scrml.md-S483-q8-division: \"inside a construct refuse only what can actually trap: keep `%` and integer division by a possibly-zero int refused; `/` on a `number` divisor is accepted (gives ±∞/NaN, no trap)\" — a `%` by a `number` gives NaN by 0 and owes no trap (#2129 r1 review LOW-1). A literal `repeat` count whose result is provably within the longest string cannot trap (#2129 r1 review MED-1).",
+  "expect": {
+    "notCodes": [
+      "E-FILE-SCOPE-INIT-IN-CONSTRUCT"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#a",
+        "text": "1.5 ababab"
+      },
+      {
+        "selector": "#z",
+        "text": "end"
+      }
+    ]
+  }
+}

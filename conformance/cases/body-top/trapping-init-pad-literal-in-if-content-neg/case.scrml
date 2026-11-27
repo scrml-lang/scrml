@@ -1,0 +1,7 @@
+// §7.6 rule (b) (S483 q8-fu, #2129 r1 review MED-1) — a LITERAL `padStart` width can trap: a result longer than the longest string (2^29 − 24 UTF-16 units) is E-INDEX-OUT-OF-RANGE-RT (§19.17), and the initializer runs before the `if=` test — E-FILE-SCOPE-INIT-IN-CONSTRUCT.
+<program>
+${ const n: int = 2; }
+${ const s: string = "ab"; }
+<p id="a" if=(n > 5)>${ const c: string = s.padStart(600000000); }${c}</p>
+<p id="z">end</p>
+</program>
