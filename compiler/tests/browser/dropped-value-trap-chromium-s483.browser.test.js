@@ -141,3 +141,26 @@ describe("a dropped value that reaches nothing server-only still traps (Chromium
     }
   }, 240000);
 });
+
+// s483 r1 (#2134 review HIGH-1 / LOW-1). `S` is read only by `const X = mk() + S` (a binding the server artifact
+// runs), so only server code reads it (S472). A value reaching `S` is judged itself against the drop-all
+// classification and dropped, however the field is read (n11 a sibling default reads t; n12 the same value also
+// traps — its trap is the ruled loss); a value that would be a derived thunk (n33: it reads a cell) is not kept.
+const HELD = (extra) => PROG(extra)
+  .replace("    function mk()", `    const S: string = "zz-held-S";\n    function mk()`)
+  .replace("\n}\n<program", `\n    const X: string = mk() + S;\n}\n<program`);
+
+describe("#2134 r1 — a value reaching a binding only server code reads stays out of the client (Chromium)", () => {
+  test("n11 / n12 / n33: no `zz-` string in any client file; the page mounts", async () => {
+    if (skip()) return;
+    for (const extra of [
+      `<card t:string="x" w:string=(t + mk())/> renders <b>x</b>\n<card t=(tag(S))/>\n<card t=(API_KEY)/>`,
+      `<card t:string="x" w:string=(t + mk())/> renders <b>x</b>\n<card t=(S + XS[5])/>\n<card t=(API_KEY)/>`,
+      `let <cc:string=("c")/>\n<card t:string="x"/> renders <b>x</b>\n<card t=(@cc + XS[5])/>\n<card t=(API_KEY)/>`,
+    ]) {
+      const out = build(HELD(extra));
+      expect(clientHolds(out, "zz-")).toEqual([]);
+      expect(await load(out, ["h", "c"])).toEqual({ errors: [], texts: ["alive", "[]"] });
+    }
+  }, 240000);
+});

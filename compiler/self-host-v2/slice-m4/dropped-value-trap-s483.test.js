@@ -7,10 +7,13 @@
 // Ruled S483 (ruling:user-voice-scrml.md-S483-dropped-attr-trap): "Run secret-free ones" — *"a dropped value that
 // reaches nothing server-only is still evaluated for its trap and the result discarded; a dropped value that
 // reaches a secret cannot run in the client, so its trap loss is documented in SPEC with a gap"*. Built:
-// print.scrml keptVals judges each value of such a field ALONE by the same classification and keeps (runs in the
-// client, at its place) the ones that reach nothing server-only; a kept default runs only for an instance that
-// gives the field none (an instance whose own value is dropped passes `not`). The trap loss of a value that
-// reaches a secret (r12c, r12d, r12h) is gap g-boot-dropped-value-trap-s483.
+// print.scrml keptVals judges each value of such a field ITSELF against the drop-all classification (r1, #2134
+// review HIGH-1: not by whether the field stays server-only holding it alone — n11–n16 / x7 shipped a secret)
+// and keeps (runs in the client, seeded at its instance's mount) the ones that reach nothing server-only; a value
+// printed as a lazy derived thunk is not kept (r1, LOW-1: it would never run); a kept default runs only for an
+// instance that gives the field none (an instance whose own value is dropped passes `not`), and is kept only when
+// such an instance exists. The trap loss of a value that reaches a secret (r12c, r12d, r12h, n12) is gap
+// g-boot-dropped-value-trap-s483.
 // Chromium: compiler/tests/browser/dropped-value-trap-chromium-s483.browser.test.js.
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
@@ -37,9 +40,19 @@ const ROOT = resolve(import.meta.dir, "..", "..", "..");
 const CLI = join(ROOT, "scripts", "scrml-boot.ts");
 const SERVER_FILES = ["program.server.js", "scrml-server-runtime.js", "runtime.js", ".scrml-boot-manifest.json"];
 
+// a program of several files (`files`: name → source); the path of its main.scrml
+function writeFiles(files) {
+  const sub = join(dir, `app${n++}`);
+  mkdirSync(sub, { recursive: true });
+  for (const [f, src] of Object.entries(files)) writeFileSync(join(sub, f), src);
+  return join(sub, "main.scrml");
+}
+
 // Compile through the CLI; every CLIENT file read back; the server artifact imported (a load failure fails the test).
 async function build(src) {
-  const main = writeApp(src);
+  return buildAt(writeApp(src));
+}
+async function buildAt(main) {
   const out = main.replace(/main\.scrml$/, "out");
   const p = Bun.spawnSync(["bun", CLI, "compile", main, "--output-dir", out], { cwd: ROOT, env: { ...process.env, NO_COLOR: "1" }, stdout: "pipe", stderr: "pipe" });
   if (p.exitCode !== 0) return { ok: false, err: p.stderr.toString() + p.stdout.toString() };
@@ -107,16 +120,20 @@ describe("a dropped value that reaches nothing server-only still runs for its tr
     }
   }, 900000);
 
-  test("a kept DEFAULT runs only for an instance that gives the field none: k01 traps (a bare `<card/>`), k02 does not (every instance gives t)", async () => {
+  test("a kept DEFAULT runs only for an instance that gives the field none: k01 traps (a bare `<card/>`); k02 (every instance gives t) keeps nothing — the default would never run (r1, #2134 review LOW-1)", async () => {
     const k01 = PROG(`<card t:string=("p" + XS[5])/> renders <b>x</b>\n<card t=(API_KEY)/>\n<card/>`);
     const k02 = PROG(`<card t:string=("p" + XS[5])/> renders <b>x</b>\n<card t=(API_KEY)/>`);
-    for (const s of [k01, k02]) {
-      const b = await build(s);
-      expect(b.ok).toBe(true);
-      expect(leaked(b.client)).toEqual([]);
-      // the instance whose secret value is dropped passes `not`, so the default does not run for it
-      expect(b.js).toMatch(/mk_card_\w+\(rt\.instance\(decl_card_\w+, inst\$\.scope\), \(\) => null\)/);
-    }
+    const b1 = await build(k01);
+    expect(b1.ok).toBe(true);
+    expect(leaked(b1.client)).toEqual([]);
+    // the instance whose secret value is dropped passes `not`, so the default does not run for it
+    expect(b1.js).toMatch(/mk_card_\w+\(rt\.instance\(decl_card_\w+, inst\$\.scope\), \(\) => null\)/);
+    const b2 = await build(k02);
+    expect(b2.ok).toBe(true);
+    expect(leaked(b2.client)).toEqual([]);
+    // nothing kept: the use site passes nothing and the default is not printed (as with every value dropped)
+    expect(b2.js).toMatch(/mk_card_\w+\(rt\.instance\(decl_card_\w+, inst\$\.scope\)\)/);
+    expect(b2.js).not.toContain("rt.indexRead(");
     expect(await outcome(k01)).toBe("E-INDEX-OUT-OF-RANGE-RT");
     expect(await outcome(k02)).toBe("alive");
   }, 600000);
@@ -187,4 +204,107 @@ describe("a dropped value that reaches a secret cannot run in the client — its
       expect(await outcome(s)).toBe("alive");
     }
   }, 600000);
+});
+
+// s483 r1 (#2134 review HIGH-1). r0 kept a value when "the field is not server-only holding that value alone". A
+// field another server-only initializer reads (a sibling default `w:string=(t + mk())`, another use site's value
+// through a handle, a component cell's reader) is server-READ from the classification's second round on and is
+// never judged server-only again, so a value reaching its secret only from that round on (`S`, read only by
+// `const X = mk() + S`, a binding the server artifact runs) was kept and printed `const S = "zz-held-S"` into
+// program.client.js. Now the value is judged itself against the drop-all classification (print.scrml
+// valueReachesServer), and a confirm classification with the kept values in keeps nothing when any binding or
+// function server-only before becomes client-held (sameServerSide). Every probe: no secret in any client file.
+const HELD = (extra) => PROG(extra).replace("    function pick5", `    const S: string = "zz-held-S";\n    const X: string = mk() + S;\n    function pick5`);
+function leakedAny(client) {
+  return client.filter((c) => c.text.includes("zz-")).map((c) => c.f);
+}
+
+describe("#2134 review HIGH-1 — a value that reaches a binding only server code reads is not kept, however the field is read", () => {
+  test("n10 (control) and n11–n16: a sibling default reads t, a kept-looking default, a handle, a component cell, a function — no secret in any client file; the page loads", async () => {
+    for (const extra of [
+      // n10 control: nothing reads t
+      `<card t:string="x"/> renders <b>x</b>\n<card t=(tag(S))/>\n<card t=(API_KEY)/>`,
+      // n11 a sibling default reads t
+      `<card t:string="x" w:string=(t + mk())/> renders <b>x</b>\n<card t=(tag(S))/>\n<card t=(API_KEY)/>`,
+      // n12 the same, the value traps too (its trap is lost: it reaches S — the ruled cost)
+      `<card t:string="x" w:string=(t + mk())/> renders <b>x</b>\n<card t=(S + XS[5])/>\n<card t=(API_KEY)/>`,
+      // n13 the value is t's default, run for a bare <card/>
+      `<card t:string=(tag(S)) w:string=(t + mk())/> renders <b>x</b>\n<card/>\n<card t=(API_KEY)/>`,
+      // n14 another component's use-site value reads t through a handle
+      `<card t:string="x"/> renders <b>x</b>\n<card as=h1 t=(tag(S))/>\n<card t=(API_KEY)/>\n<inner u:string="y"/> renders <i>y</i>\n<inner u=(@h1.t + mk())/>`,
+      // n15 a component cell a use site gives a value, read by a sibling default
+      `<card t:string="x" w:string=(k + mk())>\n  let <k:string=("q")/>\n</> renders <b>x</b>\n<card k=(tag(S))/>\n<card k=(API_KEY)/>`,
+      // n16 the value reaches S through a function
+      `<card t:string="x" w:string=(t + mk())/> renders <b>x</b>\n\${ function peekS() -> string { return S + "!"; } }\n<card t=(peekS())/>\n<card t=(API_KEY)/>`,
+    ]) {
+      const s = HELD(extra);
+      const b = await build(s);
+      expect(b.ok).toBe(true);
+      expect(leakedAny(b.client)).toEqual([]);
+      expect(b.js).not.toContain("givenSeed");
+      expect(await outcome(s)).toBe("alive");
+    }
+  }, 900000);
+
+  test("x7 cross-file: the component and the bindings in a library, the use sites in the program — no secret in any client file", async () => {
+    const lib = `\${
+    export const SECRET: string = "zz-imp-999";
+    export const S: string = "zz-imp-held";
+    export const X: string = SECRET + S;
+    export fn tagS() -> string { return "[" + SECRET + "]"; }
+    export fn tag(s: string) -> string { return "[" + s + "]"; }
+    export fn mk() -> string { return SECRET + "?"; }
+}
+export <card t:string="x" w:string=(t + mk())/> renders <b>x</b>
+`;
+    const main = `<program db="./app.db">
+\${
+    import { SECRET, tagS, card, S, tag, mk } from "./lib.scrml";
+    type Row:struct = { name: string }
+    function label(id: int) -> string {
+        const r: Row = ?{\`SELECT name FROM users WHERE id = \${id}\`}.get() !{ _ :> { return "none"; } };
+        return r.name + SECRET;
+    }
+}
+let <out:string=""/>
+<button id="go" onclick={ @out = label(1) !{ .Transport(t) :> return }; }>go</button>
+<p id="c">\${@out}</p>
+<card t=(SECRET)/>
+<card t=(tag(S))/>
+\${ const X2: string = mk() + S; }
+</program>
+`;
+    const b = await buildAt(writeFiles({ "lib.scrml": lib, "main.scrml": main }));
+    expect(b.ok).toBe(true);
+    expect(leakedAny(b.client)).toEqual([]);
+  }, 300000);
+
+  test("a value reading a binding the client reads anyway (k10: `L` displayed, and read by the secret value's function) is still kept and traps", async () => {
+    const s = PROG(`\${ const L: string[] = ["l"]; }\n\${ function lim() -> string { return L[0] + API_KEY; } }\n<p id="l">\${L[0]}</p>\n<card t:string="x"/> renders <b>x</b>\n<card t=(L[0] + XS[5])/>\n<card t=(lim())/>`);
+    const b = await build(s);
+    expect(b.ok).toBe(true);
+    expect(leaked(b.client)).toEqual([]);
+    expect(await outcome(s)).toBe("E-INDEX-OUT-OF-RANGE-RT");
+  }, 300000);
+});
+
+// s483 r1 (#2134 review LOW-1). A value printed as a lazy derived thunk — it reads a cell, an `<each>` row binding,
+// or a field it forwards — runs only when the field is read, and nothing reads it: r0 kept it in the client, where
+// it never ran (no trap, bytes only). Now only a value seeded at its instance's mount is kept (valueRunsAtMount);
+// these stay dropped, and the page is as with every value dropped.
+describe("#2134 review LOW-1 — a value that would be a derived thunk is not kept (it would never run)", () => {
+  test("n33 a cell read, n20 an `<each>` row index, n23 a forwarded field: the use site passes nothing; the page loads", async () => {
+    for (const extra of [
+      `let <c:string=("c")/>\n<card t:string="x"/> renders <b>x</b>\n<card t=(@c + XS[5])/>\n<card t=(API_KEY)/>`,
+      `\${ const IS: int[] = [0, 5]; }\n<card t:string="x"/> renders <b>x</b>\n<each in=IS as i><card t=("p" + XS[i])/></each>\n<card t=(API_KEY)/>`,
+      `<card t:string="x"/> renders <b>x</b>\n<outer u:string="o"/> renders <div><card t=(u + XS[5])/></div>\n<outer u=("p")/>\n<outer u=(API_KEY)/>`,
+    ]) {
+      const s = HELD(extra);
+      const b = await build(s);
+      expect(b.ok).toBe(true);
+      expect(leakedAny(b.client)).toEqual([]);
+      expect(b.js).not.toContain("rt.indexRead(");
+      expect(await outcome(s)).toBe("alive");
+    }
+  }, 900000);
 });

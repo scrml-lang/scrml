@@ -6709,12 +6709,23 @@ ${
     // reach (clientLiveFns), and the server runs every one (print-server.scrml serverConsts).
     fn serverInitsExposing(p1: CoreProgram, keep: int[]) -> int[] {
         if (p1.consts.length == 0) return [];
+        return serverInitsOf(withoutPlaces(p1), keep);
+    }
+
+    // `p1` as the classification judges it: without its body places (View.Init reads every binding
+    // it places)
+    fn withoutPlaces(p1: CoreProgram) -> CoreProgram {
         let p: CoreProgram = p1;
         const pd: Decl | not = programDeclOf(p1);
         if (pd is given) {
             const rs: View[] | not = pd.renders;
             if (rs is given) p = withProgramRenders(p1, withoutInits(rs));
         }
+        return p;
+    }
+
+    // the fixed point, on a program withoutPlaces gave
+    fn serverInitsOf(p: CoreProgram, keep: int[]) -> int[] {
         let si: int[] = [];
         let more = true;
         for (; more; ) {
@@ -6725,7 +6736,12 @@ ${
         return si;
     }
 
-    fn serverInitsRound(p: CoreProgram, keep: int[], prev: int[]) -> int[] {
+    // What a round of the classification judges from: the functions the client artifact does not
+    // hold (`serverOnly`), the bindings the client's own code reads (`cread`), and the bindings
+    // server code reads (`sread`) — server code counting the initializers of `si` (serverRoots).
+    type RoundState:struct = { serverOnly: int[], cread: int[], sread: int[] }
+
+    fn roundState(p: CoreProgram, keep: int[], si: int[]) -> RoundState {
         const serverOnly: int[] = serverOnlyFns(p).concat(reachedOnlyByServer(p));
         let croots: Node[] = [];
         for (const d of p.decls) { croots = croots.concat([Node.NDecl(d)]); }
@@ -6743,7 +6759,15 @@ ${
         // not client-read (§7.6 rule (b): "no code reads it"); the client gets a shell to write to
         // (clientConsts), never the initializer
         const cread: int[] = constsOnlyRead(p, croots);
-        const sread: int[] = constsReached(p, serverRoots(p, serverOnly, prev));
+        const sread: int[] = constsReached(p, serverRoots(p, serverOnly, si));
+        return { serverOnly: serverOnly, cread: cread, sread: sread };
+    }
+
+    fn serverInitsRound(p: CoreProgram, keep: int[], prev: int[]) -> int[] {
+        const st: RoundState = roundState(p, keep, prev);
+        const serverOnly: int[] = st.serverOnly;
+        const cread: int[] = st.cread;
+        const sread: int[] = st.sread;
         // the bindings only server code reads
         let held: int[] = [];
         for (const s of sread) { if (!hasInt(cread, s)) held = held.concat([s]); }
@@ -8191,7 +8215,7 @@ ${
         if (moved.length == 0 && bmoved.length == 0) return p;
         let q: CoreProgram = p;
         if (moved.length > 0) q = outerAsConsts(p, moved, true);
-        if (bmoved.length > 0) q = bodyAsConsts(q, p, bmoved, true, keptVals(p, outs, bcs, bmoved, si, keep));
+        if (bmoved.length > 0) q = bodyAsConsts(q, p, bmoved, true, keptVals(p, outs, bcs, bmoved, keep));
         return q;
     }
 
@@ -8203,28 +8227,45 @@ ${
     // value) has several values — its default and each use site's — and the classification judges
     // them JOINED (joinVals): one that reaches a secret makes the field server-only, and every value
     // was dropped, so a trap in another value that reaches nothing server-only stopped firing (#2130
-    // review MED-1: r12g, r12i, r12j). Each value of such a field is now judged ALONE, by the same
-    // classification (serverInitsExposing, no second classifier): the program with the field's binding
-    // holding that value only. One that leaves the field not server-only reaches nothing server-only,
-    // and it is KEPT — it runs in the client, at its place, as it did before the field was dropped (a
-    // use site's value at the instance's mount; a kept default at the mount of each instance that gives
-    // the field none), and nothing reads the field it fills, so its result is discarded. The others
-    // are dropped as before (their trap is lost: they cannot run in the client — §7.6 rule (b)).
+    // review MED-1: r12g, r12i, r12j).
+    // s483 r1 (#2134 review HIGH-1): each such value is judged ITSELF — never by whether the field
+    // would stay server-only holding it alone (r0: a field another server-only initializer reads is
+    // server-read from the second round on and is never judged again, so a value reaching its secret
+    // only from that round on was kept and shipped the secret, n11–n16 / x7). The value is judged
+    // against the DROP-ALL classification — the one outerPlaced made, with every value dropped
+    // (dropAllOf: the same classification, serverInitsOf / roundState, no second classifier): it
+    // reaches nothing server-only (valueReachesServer) when no function it calls, transitively and
+    // through the bindings it reads, is one the client artifact does not hold, and no binding it
+    // reaches — a file-scope binding, a cell, a component field (its own reads, a handle's, a
+    // sibling default's), directly, through a function, or through another binding's initializer —
+    // is server-only there: run by the server artifact, or read only by server code. "Server code"
+    // there is what the server artifact runs: the dropped values of a component field run in NO
+    // artifact (bodyAsConsts `fin` gives such a field no binding), so their binding's initializer is
+    // not counted as server code (`cut`). Such a value is KEPT, and nothing reads the field it fills,
+    // so its result is discarded.
+    // s483 r1 (#2134 review LOW-1): only a value that RUNS is kept — one seeded at its instance's
+    // mount (valueRunsAtMount): a use site's value for a cell (its seed), or for a locked attribute
+    // when it is a constant seed (givenSeedExpr — it reads no cell, `rt.givenSeed`); a default of a
+    // cell, or a constant default (constSeedField), when some instance gives the field no value. A
+    // value printed as a lazy derived thunk (it reads a cell, a row binding, a field it forwards)
+    // runs only when the field is read, and nothing reads it, so keeping it runs nothing: it stays
+    // dropped (no byte change).
     // Only a value that CAN trap is judged and kept: one that acts (initActs — a call, a host call, or,
     // since #2129 r1, a primitive that can trap, primTraps: the Core form of analyze.scrml
     // trapSiteWhat's own sites; ruling:user-voice-scrml.md-S483-unread-trapping-init-runs). One that
     // does not act cannot trap, and running it shows nothing, so it stays dropped (no byte change).
     // The trap of a value that reaches server-only code is lost — PERMANENT, ruled
     // (gap g-boot-dropped-value-trap-s483).
-    // FAIL CLOSED: the classification with the kept values as client code must give the same
-    // server-only fields and cells, else nothing is kept (every value dropped, as before).
+    // FAIL CLOSED (sameServerSide): the classification with the kept values as client code is made
+    // again; when ANY binding (a file-scope binding, a cell, a field) server-only in the drop-all one
+    // is not server-only there or is read by the client, or any function the client did not hold is
+    // one it holds, nothing is kept (every value dropped, as on main).
     // =========================================================================
-    // `keep`: the values kept in the client (each by its field's key and its expression); `solo`: in a
-    // classification, the one value a field's binding holds (the per-value judgment).
-    type ValPick:struct = { keep: UseVal[], solo: UseVal[] }
+    // `keep`: the values kept in the client (each by its field's key and its expression).
+    type ValPick:struct = { keep: UseVal[] }
 
     fn noPick() -> ValPick {
-        return { keep: [], solo: [] };
+        return { keep: [] };
     }
 
     fn hasVal(vs: UseVal[], key: string, e: Expr) -> boolean {
@@ -8240,9 +8281,85 @@ ${
         };
     }
 
-    fn keptVals(p: CoreProgram, outs: OuterCell[], bcs: int[], bmoved: int[], si: int[], keep: int[]) -> ValPick {
+    // A classification as the value test reads it: `p` the classified program (withoutPlaces), `si`
+    // its server-only bindings (the fixed point, serverInitsOf), and what its last round judges from
+    // (roundState) with server code counting the initializers of `si` less `cut` — the component
+    // fields whose values are dropped, which no artifact runs.
+    type DropAll:struct = { p: CoreProgram, si: int[], serverOnly: int[], cread: int[], sread: int[] }
+
+    fn dropAllOf(q: CoreProgram, keep: int[], cut: int[]) -> DropAll {
+        const pr: CoreProgram = withoutPlaces(q);
+        let si: int[] = [];
+        if (q.consts.length > 0) si = serverInitsOf(pr, keep);
+        let run: int[] = [];
+        for (const id of si) { if (!hasInt(cut, id)) run = run.concat([id]); }
+        const st: RoundState = roundState(pr, keep, run);
+        return { p: pr, si: si, serverOnly: st.serverOnly, cread: st.cread, sread: st.sread };
+    }
+
+    // a binding server-only in `c`: the server artifact runs it, or only server code reads it
+    fn srvOnlyIn(c: DropAll, id: int) -> boolean {
+        return hasInt(c.si, id) || (hasInt(c.sread, id) && !hasInt(c.cread, id));
+    }
+
+    // Does `v` reach something server-only in `c` — a function the client artifact does not hold
+    // (called, transitively, or by the initializer of a binding it reads), or a server-only binding
+    // (read directly, by a function it calls, or by the initializer of a binding it reaches)?
+    fn valueReachesServer(c: DropAll, v: Expr) -> boolean {
+        for (const id of fnClosureThroughConsts(c.p, [Node.NExpr(v)])) { if (hasInt(c.serverOnly, id)) return true; }
+        for (const r of constsReached(c.p, [Node.NExpr(v)])) { if (srvOnlyIn(c, r)) return true; }
+        return false;
+    }
+
+    // `c1` (the kept values as client code) holds on the server side everything `c0` (drop-all) does:
+    // each binding server-only in `c0` is still run by the server artifact when `c0` ran it, and the
+    // client reads none of them; each function the client did not hold it still does not hold.
+    fn sameServerSide(c0: DropAll, c1: DropAll) -> boolean {
+        for (const id of c0.si) { if (!hasInt(c1.si, id) || hasInt(c1.cread, id)) return false; }
+        for (const id of c0.sread) { if (srvOnlyIn(c0, id) && hasInt(c1.cread, id)) return false; }
+        for (const id of c0.serverOnly) { if (!hasInt(c1.serverOnly, id)) return false; }
+        return true;
+    }
+
+    // Does value `v` of field `i` of `d` (its default when `dflt`) run when it is kept — seeded at its
+    // instance's mount? A use site's value for a cell is the cell's seed (`rt.seeded`); one for a
+    // locked attribute is seeded at the mount when it is a constant seed (givenSeedField /
+    // givenSeedExpr: `rt.givenSeed`), else it is derived (computed when read — never, here). A
+    // default runs at the mount of an instance that gives the field no value (instanceOmits), when
+    // it is a cell's seed or a constant seed (constSeedField); a derived default never runs. A
+    // persisted field's seed runs only when nothing is stored: not kept.
+    fn valueRunsAtMount(p: CoreProgram, d: Decl, i: int, v: Expr, dflt: boolean) -> boolean {
+        const f: Field = d.fields[i];
+        if (f.persist is given) return false;
+        if (dflt) return (f.wcap is given || constSeedField(p, f)) && instanceOmits(p, d.sym, i);
+        if (f.wcap is given) return true;
+        return f.init is given && givenSeedExpr(p, v);
+    }
+
+    // some use site of `d` gives field `i` no value
+    fn instanceOmits(p: CoreProgram, d: Sym, i: int) -> boolean {
+        for (const n of allNodes(Node.NProgram(p))) {
+            const g: GivenAt | not = givenAtOf(n);
+            if (g is given && g.decl.id == d.id) {
+                let gives: boolean = false;
+                for (const a of g.attrs) { if (a.field == i) gives = true; }
+                if (!gives) return true;
+            }
+        }
+        return false;
+    }
+
+    fn keptVals(p: CoreProgram, outs: OuterCell[], bcs: int[], bmoved: int[], keep: int[]) -> ValPick {
         const base: CoreProgram = outerAsConsts(p, outs, false);
         const uv: UseVal[] = compUseVals(p);
+        // the component fields whose values are dropped: no artifact runs their binding
+        let cut: int[] = [];
+        for (const d0 of p.decls) {
+            if (d0.kind == DeclKind.User) {
+                for (const f0 of d0.fields) { if (hasInt(bmoved, f0.sym.id)) cut = cut.concat([f0.sym.id]); }
+            }
+        }
+        let c0: DropAll | not = not;
         let kv: UseVal[] = [];
         for (const d of p.decls) {
             if (d.kind == DeclKind.User) {
@@ -8255,23 +8372,26 @@ ${
                     for (const v0 of vs) { if (!isLitExpr(v0)) live = live + 1; }
                     if (hasInt(bmoved, f.sym.id) && live > 1) {
                         const key: string = fieldKey(d.sym, i);
+                        let j: int = 0;
                         for (const v of vs) {
-                            if (initActs(v) && !hasVal(kv, key, v)) {
-                                const one: ValPick = { keep: [], solo: [{ key: key, value: v }] };
-                                const s1: int[] = serverInitsExposing(bodyAsConsts(base, p, bcs, false, one), keep);
-                                if (!hasInt(s1, f.sym.id)) kv = kv.concat([{ key: key, value: v }]);
+                            // fieldVals: the default first, when the field has one
+                            const dflt: boolean = j == 0 && f.init is given;
+                            if (initActs(v) && !hasVal(kv, key, v) && valueRunsAtMount(p, d, i, v, dflt)) {
+                                if (c0 is not) c0 = dropAllOf(bodyAsConsts(base, p, bcs, false, noPick()), keep, cut);
+                                if (c0 is given && !valueReachesServer(c0, v)) kv = kv.concat([{ key: key, value: v }]);
                             }
+                            j = j + 1;
                         }
                     }
                     i = i + 1;
                 }
             }
         }
-        if (kv.length == 0) return noPick();
-        const pick: ValPick = { keep: kv, solo: [] };
-        const s2: int[] = serverInitsExposing(bodyAsConsts(base, p, bcs, false, pick), keep);
-        for (const oc of outs) { if (hasInt(si, oc.decl.id) != hasInt(s2, oc.decl.id)) return noPick(); }
-        for (const b of bcs) { if (hasInt(si, b) != hasInt(s2, b)) return noPick(); }
+        const cd: DropAll | not = c0;
+        if (kv.length == 0 || cd is not) return noPick();
+        const pick: ValPick = { keep: kv };
+        const c1: DropAll = dropAllOf(bodyAsConsts(base, p, bcs, false, pick), keep, cut);
+        if (!sameServerSide(cd, c1)) return noPick();
         return pick;
     }
 
@@ -8782,10 +8902,9 @@ ${
         return Expr.ArrayOf(vs);
     }
 
-    // the values the binding of field `key` stands for (bodyAsConsts): `pick.solo`'s one, else every
-    // value `pick.keep` does not keep
+    // the values the binding of field `key` stands for (bodyAsConsts): every value `pick.keep` does
+    // not keep
     fn boundVals(vs: Expr[], key: string, pick: ValPick) -> Expr[] {
-        for (const s of pick.solo) { if (s.key == key) return [s.value]; }
         let out: Expr[] = [];
         for (const v of vs) { if (!hasVal(pick.keep, key, v)) out = out.concat([v]); }
         return out;
@@ -8933,7 +9052,7 @@ ${
         // (keptVals — it reaches nothing server-only) is not dropped: a use site's stays in the renders, and
         // a kept default stays the field's seed — then an instance whose own value IS dropped passes `not`
         // (`absent`), so the default does not run where it did not before. The binding stands for the
-        // dropped values only, or for `pick.solo`'s one value (the per-value judgment).
+        // dropped values only.
         const uv: UseVal[] = compUseVals(p);
         let dropKeys: string[] = [];
         let absent: string[] = [];
