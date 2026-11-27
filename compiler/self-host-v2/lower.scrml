@@ -47,7 +47,7 @@ ${
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest, sqlInfo, isServerPlaced,
              failFact, builtinFile, blockReference, suspendAtOf, tempOf, joinOf, retOf, remoteCaller, serverCallErrorName, typeInfoName, fieldInfoName, ServerFacts, SrvCopy, sideCallee,
              sqlParamRep, distinctSqlParams, CssFacts, CssInline, CssBridge, LStep, LocalEdit, BoundCheck, boundCheckAt, editBoundNid, RefineCheck, refineCheckAt, txAtOf, txPlainAt, rowOfSite,
-             InvInfo, InvCheck, InvCapField, invInstanceChecks, invValueChecks, invGroupChecks, invCapField, invRefNames, invLoc, invProven } from "./analyze.scrml";
+             InvInfo, InvCheck, InvCapField, invDeepChecks, invInstanceChecks, invValueChecks, invGroupChecks, invCapField, invRefNames, invLoc, invProven } from "./analyze.scrml";
     import { RefineTop, refineTopOf, refineSpec, refineLitVerdict } from "./parse.scrml";
 
     // s451 — THE DIAGNOSTICS GATE. `core` is `not` whenever the analysis
@@ -1715,9 +1715,59 @@ ${
     fn invChecksExpr(c: LC, cks: InvCheck[]) -> Expr {
         let out: Expr[] = [];
         for (const ck of cks) {
-            out = out.concat([Expr.ArrayOf([invStrs(ck.at), invPredicate(c, ck), invStrs(ck.names), litStr(ck.owner.replaceAll("`", "")), litStr(invWhat(ck.inv))])]);
+            let parts: Expr[] = [invStrs(ck.at), invPredicate(c, ck), invStrs(ck.names), litStr(ck.owner.replaceAll("`", "")), litStr(invWhat(ck.inv))];
+            if (ck.derive.length > 0) parts = parts.concat([invDeriveExpr(c, ck)]);
+            out = out.concat([Expr.ArrayOf(parts)]);
         }
         return Expr.ArrayOf(out);
+    }
+
+    // r1 (#2128 review H3; ruling:user-voice-scrml.md-S483-invariant-derived-split) — the derived
+    // fields the clause reads, recomputed on the candidate before it is judged:
+    // `[[name, (deps…) => initializer, [deps]], …]`, dependencies first (analyze invDeriveFor).
+    // Each initializer is lowered as a function of the sibling fields it reads, its parameters
+    // the clause's per-field BInv locals (one per field of the declaration).
+    fn invDeriveExpr(c: LC, ck: InvCheck) -> Expr {
+        const ps: Sym[] = invParamsOf(bindFact(c.t.binds, ck.inv.nid));
+        let d: DeclInfo | not = not;
+        for (const x of c.t.decls) {
+            if (x.sym.id == ck.sym.id) d = x;
+        }
+        let out: Expr[] = [];
+        if (d is not) return Expr.ArrayOf(out);
+        let names: string[] = [];
+        for (const f of d.fields) { names = names.concat([f.sym.hint]); }
+        for (const dv of ck.derive) {
+            let params: Sym[] = [];
+            let fields: SnapField[] = [];
+            for (const dep of dv.deps) {
+                const j: int = names.indexOf(dep);
+                if (j >= 0 && j < ps.length) {
+                    params = params.concat([ps[j]]);
+                    fields = fields.concat([{ ref: { owner: ck.sym, idx: j }, local: ps[j] }]);
+                }
+            }
+            const e: AExpr | not = invInitExpr(d.fields[dv.idx].init);
+            if (e is given && params.length == dv.deps.length && params.length > 0) {
+                const sn: SnapB = { decl: ck.sym, inst: InstRef.Lexical(0), path: [], whole: params[0], fields: fields };
+                const f: Expr = Expr.Lambda(params, lowerExpr({ t: c.t, file: d.file, subst: not, snap: sn, rows: [] }, e));
+                out = out.concat([Expr.ArrayOf([litStr(dv.name), f, invStrs(dv.deps)])]);
+            } else {
+                out = out.concat([missing()]);
+            }
+        }
+        return Expr.ArrayOf(out);
+    }
+
+    fn invInitExpr(v: AAttrValue) -> AExpr | not {
+        return match v {
+            .Bare(e: e) :> e,
+            .Paren(e: e) :> e,
+            .Quoted(v: x) :> not,
+            .Dur(text: x) :> not,
+            .NoValue :> not,
+            .Braced(b: x) :> not
+        };
     }
 
     // One write of a guarded group: `[field, path, op, value]`.
@@ -3150,7 +3200,7 @@ ${
         return {
             sym: f.sym, ty: f.ty, init: init, mode: f.mode, role: f.role,
             grants: f.grants, graph: f.graph, exported: f.exported, wcap: f.wcap, vals: valCores(f.vals),
-            persist: persistOf(c.t, f.sym), timing: timingOf(c.t, f.sym),
+            persist: persistCore(c, f), timing: timingOf(c.t, f.sym),
         };
     }
 
@@ -3160,6 +3210,16 @@ ${
             if (p.sym.id == s.id) return p.persist;
         }
         return not;
+    }
+
+    // r1 (#2128 review H1): the field's Core persistence, with the invariant checks a restored
+    // value passes (§6.14.2 rules 1, 3, 5 — analyze invDeepChecks; `not` when the type has none).
+    fn persistCore(c: LC, f: FieldInfo) -> Persist | not {
+        const p: Persist | not = persistOf(c.t, f.sym);
+        if (p is not) return not;
+        const cks: InvCheck[] = invDeepChecks(c.t, f.ty);
+        if (cks.length == 0) return p;
+        return { store: p.store, key: p.key, invs: invChecksExpr(c, cks), loc: invLoc(c.t, c.file, f.span.start) };
     }
 
     // s478 — the field's accepted `debounced=` / `throttled=` (§6.13; analyze timingPass).

@@ -109,7 +109,9 @@ describe("refused at the declaration", () => {
     ["a file-scope `let` (r1 F6: named a `let`, not a constant)", "    ${ let lim = 3; }\n", "invariant (end <= lim)", "the file-scope `let` `lim`"],
     // s483-invariant-2 (ruling:user-voice-scrml.md-S483-invariant-const-read): a compile-time constant
     // (`const LIMIT = 3`) is admitted — invariant-write-s483.test.js; a non-constant initializer stays refused
-    ["a file-scope constant whose initializer is not a compile-time constant", "    ${ const LIMIT = 1 + 2; }\n", "invariant (end <= LIMIT)", "not a compile-time constant"],
+    // r1 (ruling:user-voice-scrml.md-S483-invariant-const-fold): `1 + 2` folds, so it is a constant now — a
+    // function call is the non-constant stand-in
+    ["a file-scope constant whose initializer is not a compile-time constant", "    ${ fn three() -> int { return 3; } const LIMIT = three(); }\n", "invariant (end <= LIMIT)", "not a compile-time constant"],
     ["a write", "", "invariant (start = 1)", "writes a value"],
   ];
   for (const [name, pre, clause, msg] of impure) {
@@ -183,7 +185,7 @@ describe("r1 F1 — a `fn` reached from an invariant reads no cell and no outer 
     ["b04: a `fn` reading a mutable file-scope `let`", "    ${ let lim = 3;\n       fn ok(a: int, b: int) -> bool { return b - a <= lim; }\n       function bump() { lim = lim + 1; } }\n", "invariant (ok(start, end))", "E-DECL-INVARIANT-IMPURE", ["the file-scope `let` `lim`", "a write can change it"]],
     ["a two-deep chain to a cell, naming the chain", "    let <limit:int=3/>\n    ${ fn inner(a: int) -> int { return a + @limit; }\n       fn ok(a: int, b: int) -> bool { return b <= inner(a); } }\n", "invariant (ok(start, end))", "E-CONTRACT-003", ["(through `ok` → `inner`)", "`@limit`"]],
     // s483-invariant-2: a compile-time constant is admitted through the chain too; a non-constant one is not
-    ["a `fn` reading a non-constant file-scope constant (the direct-read rule, exactly)", "    ${ const MAXW = 10 + 20;\n       fn ok(a: int, b: int) -> bool { return b - a <= MAXW; } }\n", "invariant (ok(start, end))", "E-DECL-INVARIANT-IMPURE", ["the file-scope constant `MAXW`", "not a compile-time constant"]],
+    ["a `fn` reading a non-constant file-scope constant (the direct-read rule, exactly)", "    ${ fn thirty() -> int { return 30; }\n       const MAXW = thirty();\n       fn ok(a: int, b: int) -> bool { return b - a <= MAXW; } }\n", "invariant (ok(start, end))", "E-DECL-INVARIANT-IMPURE", ["the file-scope constant `MAXW`", "not a compile-time constant"]],
     ["a `fn` reading a cell on one branch only", "    let <limit:int=3/>\n    ${ fn ok(a: int, b: int) -> bool { if (a > 100) { return b <= @limit; } return a <= b; } }\n", "invariant (ok(start, end))", "E-CONTRACT-003", ["`@limit`"]],
   ];
   for (const [name, pre, clause, code, msgs] of cases) {
@@ -236,7 +238,7 @@ describe("r1 F3 — direct purity equals pure-`fn` purity", () => {
   }, 120000);
 
   test("a callback reading a non-constant file-scope constant: E-DECL-INVARIANT-IMPURE", async () => {
-    const r = await result(prog(`    \${ const K = 2 + 3; }\n${RANGE}\n    invariant ([start, end].some(x => x > K))\n    <main><p>\${@dateRange.start}</p></main>`));
+    const r = await result(prog(`    \${ fn five() -> int { return 5; } const K = five(); }\n${RANGE}\n    invariant ([start, end].some(x => x > K))\n    <main><p>\${@dateRange.start}</p></main>`));
     expect(codes(r)).toEqual(["E-DECL-INVARIANT-IMPURE"]);
     expect(errs(r)[0].message).toContain("`K`");
   }, 120000);

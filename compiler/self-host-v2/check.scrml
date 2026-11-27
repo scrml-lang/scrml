@@ -4502,7 +4502,7 @@ ${
     fn checkStmt(p: CoreProgram, ob: OnceBinds, encl: Decl[], s: Stmt) -> string[] {
         return match s {
             .Write(cap: cap, inst: inst, edit: edit, value: v, check: ck) :> checkWrite(p, ob, encl, cap, inst, edit, v, ck),
-            .Commit(writes: ws) :> checkCommit(ws),
+            .Commit(writes: ws) :> checkCommit(p, ws),
             .Let(sym: sym) :> [],
             .Assign(local: l) :> [],
             .If(cond: c) :> [],
@@ -5354,23 +5354,192 @@ ${
     // Eval of its declaration-invariant check (Prim InvariantGuard, §66.13.5 —
     // the group checked once): the printer runs it after every Write's own
     // contract check and before any write (print.scrml commitJs).
-    fn checkCommit(ws: Stmt[]) -> string[] {
+    // r1 (#2128 review L2): the check itself is verified, not only its position — a Commit holds
+    // at most ONE invariant check; that check names exactly the Commit's Writes, in order (each
+    // entry's field index is its Write's field, its value the Write's Local, through the same
+    // instance); and a Commit whose whole-field Writes touch a field its declaration's invariants
+    // read (Decl.invs, the construction check — every clause of the declaration) HOLDS one. A
+    // lowering that drops, duplicates or mis-targets the check fails here. (A type's invariants
+    // are not in Core, so a check owed only to the invariant of a field's TYPE is not required
+    // here — g-boot-invariant-boundaries-lints-s483.)
+    fn checkCommit(p: CoreProgram, ws: Stmt[]) -> string[] {
         let out: string[] = [];
         let writes: int = 0;
-        let sawCheck: boolean = false;
+        let checks: int = 0;
+        let guard: Expr | not = not;
+        let ownWrites: Stmt[] = [];
         for (const w of ws) {
             const g: boolean = isInvGuardEval(w);
             if (g) {
-                sawCheck = true;
+                checks = checks + 1;
+                guard = evalExpr(w);
             } else {
                 writes = writes + 1;
-                if (sawCheck) out = out.concat(["C7: a Write follows the Commit's invariant check — the check stands after every Write"]);
+                ownWrites = ownWrites.concat([w]);
+                if (checks > 0) out = out.concat(["C7: a Write follows the Commit's invariant check — the check stands after every Write"]);
                 const problem: string = commitMember(w);
                 if (problem != "") out = out.concat(["C7: " + problem]);
             }
         }
         if (writes < 2) out = out.concat(["C7: a Commit groups " + writes + " write(s); one write is already all-or-nothing — it must be a plain Write"]);
+        if (checks > 1) out = out.concat(["C7: a Commit holds " + checks + " invariant checks — the group is checked once, by one check after its Writes"]);
+        const gd: Expr | not = guard;
+        if (gd is given) out = out.concat(commitGuardMatches(p, gd, ownWrites));
+        if (checks == 0) out = out.concat(commitGuardOwed(p, ownWrites));
         return out;
+    }
+
+    fn evalExpr(s: Stmt) -> Expr | not {
+        return match s {
+            .Eval(e: e) :> e,
+            // no-default-arm: one question of a Commit member — the expression it evaluates
+            _ :> not
+        };
+    }
+
+    type CommitW:struct = { cap: Sym, inst: InstRef, edit: EditKind, value: Expr }
+
+    fn commitWrite(s: Stmt) -> CommitW | not {
+        return match s {
+            .Write(cap: c, inst: i, edit: e, value: v) :> { cap: c, inst: i, edit: e, value: v },
+            // no-default-arm: one question of a Commit member — is it a Write
+            _ :> not
+        };
+    }
+
+    // The Commit's invariant check names its Writes, one entry each, in order.
+    fn commitGuardMatches(p: CoreProgram, g: Expr, ws: Stmt[]) -> string[] {
+        const a: Expr[] = guardArgs(g);
+        if (a.length != 4) return ["C7: the Commit's invariant check has " + a.length + " argument(s), not 4 (instance, writes, checks, location)"];
+        const entries: Expr[] = arrayItems(a[1]);
+        if (entries.length != ws.length) return ["C7: the Commit's invariant check names " + entries.length + " write(s), and the Commit holds " + ws.length + " — the check judges exactly the Commit's Writes"];
+        let out: string[] = [];
+        let i: int = 0;
+        for (const s of ws) {
+            const w: CommitW | not = commitWrite(s);
+            const en: Expr[] = arrayItems(entries[i]);
+            if (w is given && en.length == 4) {
+                const owner: CapOwner | not = capOwner(p, w.cap);
+                if (owner is given && litIntOf(en[0]) != owner.idx) out = out.concat(["C7: entry " + i + " of the Commit's invariant check names field " + litIntOf(en[0]) + ", and its Write writes field " + owner.idx + " (`" + owner.decl.fields[owner.idx].sym.hint + "`)"]);
+                if (localIdOf(en[3]) < 0 || localIdOf(en[3]) != localIdOf(w.value)) out = out.concat(["C7: entry " + i + " of the Commit's invariant check does not judge its Write's value (the Write's Local)"]);
+                if (handleText(a[0]) != instText(w.inst)) out = out.concat(["C7: the Commit's invariant check judges " + handleText(a[0]) + ", and its Write " + i + " writes through " + instText(w.inst)]);
+            } else if (w is given) {
+                out = out.concat(["C7: entry " + i + " of the Commit's invariant check is not `[field, path, op, value]`"]);
+            }
+            i = i + 1;
+        }
+        return out;
+    }
+
+    // A Commit with no invariant check whose whole-field Writes touch a field its declaration's
+    // invariants read: the check was dropped.
+    fn commitGuardOwed(p: CoreProgram, ws: Stmt[]) -> string[] {
+        for (const s of ws) {
+            const w: CommitW | not = commitWrite(s);
+            if (w is given && !isFieldAtEdit(w.edit)) {
+                const owner: CapOwner | not = capOwner(p, w.cap);
+                if (owner is given) {
+                    const ci: Expr | not = owner.decl.invs;
+                    if (ci is given) {
+                        const f: string = owner.decl.fields[owner.idx].sym.hint;
+                        if (invReadFields(ci).indexOf(f) >= 0) return ["C7: the Commit writes `" + f + "` of <" + owner.decl.sym.hint + ">, which an invariant of the declaration reads, and holds no invariant check (§66.13.5: the group is checked once, after its Writes)"];
+                    }
+                }
+            }
+        }
+        return [];
+    }
+
+    fn isFieldAtEdit(e: EditKind) -> boolean {
+        return match e {
+            .FieldAt(path: x) :> true,
+            // no-default-arm: one question of an edit — does it write below its field
+            _ :> false
+        };
+    }
+
+    // The top fields a declaration's construction check reads: each check's `names` (a clause of
+    // the declaration itself, `at` []) with the siblings its derived fields are computed from, or
+    // the field its `at` starts at.
+    fn invReadFields(ci: Expr) -> string[] {
+        const a: Expr[] = guardArgs(ci);
+        if (a.length != 4) return [];
+        let out: string[] = [];
+        for (const ck of arrayItems(a[2])) {
+            const it: Expr[] = arrayItems(ck);
+            if (it.length >= 3) {
+                const at: string[] = strItems(it[0]);
+                if (at.length > 0) {
+                    out = out.concat([at[0]]);
+                } else {
+                    out = out.concat(strItems(it[2]));
+                    if (it.length >= 6) {
+                        for (const dv of arrayItems(it[5])) {
+                            const dd: Expr[] = arrayItems(dv);
+                            if (dd.length == 3) out = out.concat(strItems(dd[2]));
+                        }
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    fn strItems(e: Expr) -> string[] {
+        let out: string[] = [];
+        for (const x of arrayItems(e)) {
+            const s: string = litStrOf(x);
+            if (s != "") out = out.concat([s]);
+        }
+        return out;
+    }
+
+    fn litStrOf(e: Expr) -> string {
+        return match e {
+            .Lit(lit: l) :> litStrIn(l),
+            // no-default-arm: one question of an expression — the string literal it is
+            _ :> ""
+        };
+    }
+
+    fn litStrIn(l: Literal) -> string {
+        return match l {
+            .Str(v: s) :> s,
+            // no-default-arm: one question of a literal — its string
+            _ :> ""
+        };
+    }
+
+    fn litIntOf(e: Expr) -> int {
+        return match e {
+            .Lit(lit: l) :> litIntIn(l),
+            // no-default-arm: one question of an expression — the int literal it is
+            _ :> -1
+        };
+    }
+
+    fn litIntIn(l: Literal) -> int {
+        return match l {
+            .Int(v: n) :> n,
+            // no-default-arm: one question of a literal — its int
+            _ :> -1
+        };
+    }
+
+    fn localIdOf(e: Expr) -> int {
+        return match e {
+            .Local(sym: s) :> s.id,
+            // no-default-arm: one question of an expression — the local it reads
+            _ :> -1
+        };
+    }
+
+    fn handleText(e: Expr) -> string {
+        return match e {
+            .Handle(inst: i) :> instText(i),
+            // no-default-arm: one question of an expression — the instance a Handle names
+            _ :> "a value that is not an instance"
+        };
     }
 
     fn isInvGuardEval(s: Stmt) -> boolean {
@@ -5478,6 +5647,15 @@ ${
         const value: Expr = unguarded(value0);
         const owner: CapOwner | not = capOwner(p, cap);
         if (owner is not) return ["C2: a write names sym " + cap.id + " (`" + cap.hint + "`), which is not a write capability"];
+        // r1 (#2128 review L2): the guard judges THIS write — one entry, its field, through its instance
+        const ga: Expr[] = guardArgs(value0);
+        if (ga.length == 4) {
+            const ge: Expr[] = arrayItems(ga[1]);
+            if (ge.length != 1) return ["C7: a lone write's invariant check names " + ge.length + " write(s), not its one"];
+            const e0: Expr[] = arrayItems(ge[0]);
+            if (e0.length != 4 || litIntOf(e0[0]) != owner.idx) return ["C7: a lone write's invariant check names another field than the write's (`" + owner.decl.fields[owner.idx].sym.hint + "`)"];
+            if (handleText(ga[0]) != instText(inst)) return ["C7: a lone write's invariant check judges " + handleText(ga[0]) + ", and the write goes through " + instText(inst)];
+        }
         const d: Decl = owner.decl;
         const f: Field = d.fields[owner.idx];
         const where: string = "<" + d.sym.hint + ">." + f.sym.hint;

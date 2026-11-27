@@ -55,14 +55,16 @@ function build(src) {
   return case_;
 }
 
-// load `out`, read each `#id` after the load and after each click; the page errors raised
-async function load(out, ids, clicks = []) {
+// load `out`, read each `#id` after the load and after each click (a `js:` step evaluates its script in the
+// page); `init` (optional) runs before the page's own scripts; the page errors raised
+async function load(out, ids, clicks = [], init = null) {
   const srv = Bun.serve({ port: 0, fetch(req) {
     const p = new URL(req.url).pathname;
     return new Response(Bun.file(join(out, p === "/" ? "index.html" : p)), { headers: { "content-type": p.endsWith(".js") ? "text/javascript" : "text/html" } });
   } });
   const page = await browser.newPage();
   page.setDefaultTimeout(5000);
+  if (init) await page.addInitScript(init);
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
@@ -73,7 +75,8 @@ async function load(out, ids, clicks = []) {
     await page.waitForTimeout(100);
     const texts = [await read()];
     for (const c of clicks) {
-      await page.click(c);
+      if (c.startsWith("js:")) await page.evaluate(c.slice(3));
+      else await page.click(c);
       await page.waitForTimeout(100);
       texts.push(await read());
     }
@@ -184,5 +187,81 @@ ${RANGE}
     expect(r.texts).toEqual([["10"], ["14"], ["14"]]);
     expect(r.errors.length).toBe(1);
     expect(r.errors[0]).toContain("[maxNights]");
+  }, 120000);
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// r1 (#2128 review). H3 — ruling:user-voice-scrml.md-S483-invariant-derived-split ("Split"): an invariant over a
+// field derived only from its sibling fields is checked at the sibling's write (the candidate recomputes it).
+// H1 — §6.14.2 rules 1, 3, 5: a restored or cross-tab `persist=` value is decoded against the full declared
+// contract, the type's invariant included; a value that breaks it takes the default.
+// ---------------------------------------------------------------------------------------------------------------
+describe("Chromium r1: derived fields are checked at the source write; a restored value is checked", () => {
+  test("H3 i08: a field derived from siblings — a sibling write that breaks the invariant traps, nothing written", async () => {
+    if (skip()) return;
+    const out = build(prog(`    <w:struct>
+        let <a:int=0/>
+        let <b:int=5/>
+        <span:int=(b - a)/>
+    </>
+    invariant (span <= 10) [ab]
+    let <after:string="-"/>
+    function setB(n: int) { @w.b = n; @after = "ran"; }
+    <main><p id="s">\${@w.span}</p><p id="b">\${@w.b}</p><p id="x">\${@after}</p>
+    <button id="ok" onclick=setB(8)>ok</button><button id="bad" onclick=setB(20)>bad</button></main>`));
+    const r = await load(out, ["s", "b", "x"], ["#ok", "#bad"]);
+    expect(r.texts).toEqual([["5", "5", "-"], ["8", "8", "ran"], ["8", "8", "ran"]]);
+    expect(r.errors.length).toBe(1);
+    expect(r.errors[0]).toContain("E-WRITE-INVARIANT-RT");
+    expect(r.errors[0]).toContain("span = 20");
+  }, 120000);
+
+  test("H3 i10: a bool field derived from siblings, through a cell's value", async () => {
+    if (skip()) return;
+    const out = build(prog(`    <w:struct>
+        let <a:int=0/>
+        let <b:int=5/>
+        <ok:bool=(a <= b)/>
+    </>
+    invariant (ok) [ab]
+    let <k:int=-20/>
+    <main><p id="s">\${@w.ok}</p><p id="b">\${@w.b}</p><button id="bad" onclick={ @w.b = @k; }>b</button></main>`));
+    const r = await load(out, ["s", "b"], ["#bad"]);
+    expect(r.texts).toEqual([["true", "5"], ["true", "5"]]);
+    expect(r.errors.length).toBe(1);
+    expect(r.errors[0]).toContain("ok = false");
+  }, 120000);
+
+  const PERSIST = "type Range:struct = { lo: int, hi: int } invariant (lo <= hi) [rng]\n" + prog(`    let <r:Range=({ lo: 1, hi: 2 }) persist="local" key="app.r"/>
+    <main><p id="lo">\${@r.lo}</p><p id="hi">\${@r.hi}</p></main>`);
+
+  test("H1 c03c: a stored value that breaks the invariant is not restored — the default is", async () => {
+    if (skip()) return;
+    const out = build(PERSIST);
+    const bad = await load(out, ["lo", "hi"], [], `localStorage.setItem("app.r", JSON.stringify({ lo: 14, hi: 10 }))`);
+    expect(bad.texts).toEqual([["1", "2"]]);
+    expect(bad.errors).toEqual([]);
+    // control: a stored value that keeps it is restored
+    const good = await load(out, ["lo", "hi"], [], `localStorage.setItem("app.r", JSON.stringify({ lo: 3, hi: 7 }))`);
+    expect(good.texts).toEqual([["3", "7"]]);
+  }, 120000);
+
+  test("H1 c03d: a cross-tab value that breaks the invariant takes the default; one that keeps it applies", async () => {
+    if (skip()) return;
+    const out = build(PERSIST);
+    const ev = (v) => `js:localStorage.setItem("app.r", ${JSON.stringify(JSON.stringify(v))}); window.dispatchEvent(new StorageEvent("storage", { key: "app.r", newValue: ${JSON.stringify(JSON.stringify(v))}, storageArea: localStorage }))`;
+    const r = await load(out, ["lo", "hi"], [ev({ lo: 3, hi: 7 }), ev({ lo: 14, hi: 10 })], `localStorage.clear()`);
+    expect(r.texts).toEqual([["1", "2"], ["3", "7"], ["1", "2"]]);
+    expect(r.errors).toEqual([]);
+  }, 120000);
+
+  test("H1: an element of a restored tape is checked too (the whole depth)", async () => {
+    if (skip()) return;
+    const out = build("type Range:struct = { lo: int, hi: int } invariant (lo <= hi) [rng]\n" + prog(`    <rs:Range[0..=5, replace]=([{ lo: 1, hi: 2 }]) persist="local" key="app.rs"/>
+    <main><p id="n">\${@rs.length}</p></main>`));
+    const bad = await load(out, ["n"], [], `localStorage.setItem("app.rs", JSON.stringify([{ lo: 1, hi: 2 }, { lo: 9, hi: 3 }]))`);
+    expect(bad.texts).toEqual([["1"]]);
+    const good = await load(out, ["n"], [], `localStorage.setItem("app.rs", JSON.stringify([{ lo: 1, hi: 2 }, { lo: 3, hi: 9 }]))`);
+    expect(good.texts).toEqual([["2"]]);
   }, 120000);
 });

@@ -950,9 +950,10 @@ class Request {
       try {
         load = untrack(() => this.body(task));
       } catch (e) {
-        // F4 (A5): a Let initializer threw — a host error; the run is over
+        // F4 (A5): a Let initializer threw — a host error (r1 L3: or a trap, reported as one); the run is over
         task.cancel();
-        reportHostError(e);
+        if (isTrap(e)) reportLater(e);
+        else reportHostError(e);
         this.idle();
         return;
       } finally {
@@ -1133,7 +1134,12 @@ export function suspend(task, value, k, onLiveReject) {
         const lift = callee !== undefined ? callee.restarts : null;
         batch(() => untrack(() => withStamp(stamp, frame, lift, k, v)));
       } catch (e) {
-        reportHostError(e);
+        // r1 (#2128 review L3): a TRAP raised in a continuation (a reload's invariant check, an
+        // index past the end …) is a trap, not a host error — §19.17: it ends this unit (the
+        // continuation) and is reported once with its code and location, as a hole's trap is
+        // (reportLater: the page's error event); it is not a `!` error, so no `.error` is set.
+        if (isTrap(e)) reportLater(e);
+        else reportHostError(e);
         abandonWaiting(task);
       } finally {
         task.owner.settled(task);
@@ -1142,7 +1148,10 @@ export function suspend(task, value, k, onLiveReject) {
     (e) => {
       task.pending--;
       if (!task.cancelled) {
-        if (e !== REPORTED) reportHostError(e);
+        if (e !== REPORTED) {
+          if (isTrap(e)) reportLater(e);
+          else reportHostError(e);
+        }
         // s475 r1 (F4): the owner's own end-of-run on a live host rejection (a request's signals)
         if (onLiveReject) {
           try { onLiveReject(e); } catch (e2) { reportHostError(e2); }
@@ -3306,7 +3315,15 @@ export function refineCheck(v, base, spec, shown, what, at) {
 // with invariants); `pred` the invariant as a function of the fields it reads, in
 // the order of `names`; `owner` / `what` name the declaration or type and the
 // invariant (its `[label]`, else its expression) for the trap. A `not` value at
-// `at` (an optional field that holds no value) has nothing to check.
+// `at` (an optional field that holds no value) has nothing to check. Two more `at`
+// steps reach the values a DECODED value holds (r1, #2128 review H1 — a restored
+// `persist=` value is checked whole, §6.14.2 rule 3): `"*"` — every element of a tape;
+// `"#V.n"` — payload position `n` of a value of variant `V` (any other variant: nothing).
+// r1 (#2128 review H3; ruling:user-voice-scrml.md-S483-invariant-derived-split): an
+// optional sixth element `derive` — `[[name, fn, deps], …]`, the declaration's DERIVED
+// fields the invariant reads, dependencies first: each is recomputed on the candidate,
+// `fn(...deps' candidate values)`, before the invariant is judged, so a write to a field
+// a derived field is computed from is checked at that write ("check-at-source").
 // One write is `[name-or-index, path, op, v]`: `op` "set" writes `v` at `path`
 // below the field; "append" / "prepend" add the element `v`; "dropEnd" /
 // "dropFront" remove `v` elements (a tape edit, §66.12.6).
@@ -3340,10 +3357,32 @@ function invApply(cur, path, op, v) {
 }
 
 function invEnsure(cand, check, loc) {
-  const [at, pred, names, owner, what] = check;
-  let val = cand;
-  for (const k of at) { val = val === null || val === undefined ? val : val[k]; }
+  invEnsureAt(cand, check[0], 0, check, loc);
+}
+
+function invEnsureAt(val, at, i, check, loc) {
   if (val === null || val === undefined) return;
+  if (i === at.length) { invJudge(val, check, loc); return; }
+  const k = at[i];
+  if (k === "*") {
+    if (Array.isArray(val)) for (const x of val) invEnsureAt(x, at, i + 1, check, loc);
+    return;
+  }
+  if (typeof k === "string" && k.startsWith("#")) {
+    const dot = k.lastIndexOf(".");
+    if (typeof val === "object" && val.variant === k.slice(1, dot) && Array.isArray(val.data)) invEnsureAt(val.data[Number(k.slice(dot + 1))], at, i + 1, check, loc);
+    return;
+  }
+  invEnsureAt(val[k], at, i + 1, check, loc);
+}
+
+function invJudge(val0, check, loc) {
+  const [, pred, names, owner, what, derive] = check;
+  let val = val0;
+  if (derive) {
+    val = { ...val0 };
+    for (const [n, f, deps] of derive) val[n] = f(...deps.map((d) => val[d]));
+  }
   const args = names.map((n) => val[n]);
   if (pred(...args) === true) return;
   const shown = names.map((n, i) => n + " = " + invShow(args[i])).join(", ");
@@ -3366,7 +3405,10 @@ export function invariantGuard(inst, writes, checks, loc, pre) {
   for (const w of writes) need.add(typeof w[0] === "number" ? names[w[0]] : w[0]);
   for (const c of checks) {
     if (c[0].length > 0) need.add(c[0][0]);
-    else for (const n of c[2]) need.add(n);
+    else {
+      for (const n of c[2]) need.add(n);
+      if (c[5]) for (const dv of c[5]) for (const d of dv[2]) need.add(d);
+    }
   }
   const cand = {};
   for (const n of need) {
@@ -7106,8 +7148,25 @@ function storageArea(store) {
   return store === "local" ? globalThis.localStorage : globalThis.sessionStorage;
 }
 
+/**
+ * r1 (#2128 review H1) — §6.14.2 r3 "decoded against the cell's current declared type and its
+ * full declared contract": does the decoded value `v` keep every invariant `checks` names
+ * (the type's, and those of every value it holds — `at` steps "*" / "#V.n")? A value that
+ * does not is a contract failure: it SHALL NOT reach the cell (the default is taken).
+ */
+function invariantsHold(v, checks, loc) {
+  if (!checks) return true;
+  try {
+    for (const c of checks) invEnsure(v, c, loc);
+    return true;
+  } catch (e) {
+    if (e instanceof ScrmlTrap) return false;
+    throw e;
+  }
+}
+
 /** §6.14.2 r3: the stored value of `key`, decoded — or null (take the default). Never throws. */
-function readStored(store, key, wire) {
+function readStored(store, key, wire, invs, loc) {
   let text = null;
   try {
     const area = storageArea(store);
@@ -7118,16 +7177,18 @@ function readStored(store, key, wire) {
   }
   if (text === null) return null;
   const r = decodeText(wire, text);
-  return r.ok ? r : null;
+  return r.ok && invariantsHold(r.value, invs, loc) ? r : null;
 }
 
 class Persisted {
-  constructor(scope, cell, init, store, key, wire) {
+  constructor(scope, cell, init, store, key, wire, invs, loc) {
     this.cell = cell;
     this.init = init;
     this.store = store;
     this.key = key;
     this.wire = wire;
+    this.invs = invs;
+    this.loc = loc;
     this.disposed = false;
     this.applying = false;
     // r6: the last store failed (no synthesized property reads it yet — O-061-1).
@@ -7181,7 +7242,8 @@ class Persisted {
     if (!mine) return;
     const text = e.key === null ? null : e.newValue;
     const r = text === null ? null : decodeText(this.wire, text);
-    const v = r !== null && r.ok ? r.value : untrack(this.init);
+    // r1 (H1): rule 5's failure half — a value that breaks an invariant takes the default
+    const v = r !== null && r.ok && invariantsHold(r.value, this.invs, this.loc) ? r.value : untrack(this.init);
     this.applying = true;
     try { batch(() => this.cell.set(v)); } finally { this.applying = false; }
   }
@@ -7191,15 +7253,19 @@ class Persisted {
  * A `persist=` cell (§6.14.2): seeded with its stored value decoded against
  * `wire`, else with `init()`; written on change; "local" synced across tabs.
  * Owned by `scope` (the instance's): its listener and observer go with it.
+ * `invs` / `loc` (r1, #2128 review H1; optional): the invariant checks of the
+ * cell's type, the value's whole depth — a stored or cross-tab value that breaks
+ * one is a contract failure and takes the default (§6.14.2 r1 "Restore is
+ * construction", r3, r5).
  */
-export function persisted(scope, init, store, key, wire) {
+export function persisted(scope, init, store, key, wire, invs, loc) {
   requireScope(scope, "a persisted cell");
   if (store !== "local" && store !== "session") throw new Error(`persist= storage ${JSON.stringify(store)} is not "local" or "session" (§6.14.1, E-PERSIST-STORAGE-UNKNOWN)`);
   const c = seeded(() => {
-    const r = readStored(store, key, wire);
+    const r = readStored(store, key, wire, invs, loc);
     return r !== null ? r.value : init();
   });
-  persistedCells.set(c, new Persisted(scope, c, init, store, key, wire));
+  persistedCells.set(c, new Persisted(scope, c, init, store, key, wire, invs, loc));
   return c;
 }
 

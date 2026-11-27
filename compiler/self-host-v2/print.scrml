@@ -5071,6 +5071,9 @@ ${
             .Local :> "local",
             .Session :> "session"
         };
+        const invs: Expr | not = ps.invs;
+        // r1 (#2128 review H1): the restore's invariant checks (§6.14.2 rules 1, 3, 5)
+        if (invs is given) return rtCall(ctx, "persisted", [jmember(jid("inst$"), "scope"), init, jstr(store), jstr(ps.key), wire, exprJs(ctx, invs), jstr(ps.loc)]);
         return rtCall(ctx, "persisted", [jmember(jid("inst$"), "scope"), init, jstr(store), jstr(ps.key), wire]);
     }
 

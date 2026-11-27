@@ -91,3 +91,28 @@ impl#1 frozen (§66 Nominal there, §34.0).
   call, any placement → program-cell seeds and constant initializers they read; each once). g03 now refused;
   slice-m4/invariant-r1-s483.test.js (H2 block, 6) — each refused variant's no-invariant control has the secret
   in no client file.
+- L1: invConstInit admits what invFold folds (Binary / Ternary / Unary over literals and such constants,
+  invConstFoldG over the binder's tables); invConstFold (Tables) folds the same, so E-WRITE-INVARIANT and
+  invProven see `const LIM = BASE * 2 - 1`. The 3 lane-1 re-pins that used `1 + 2` / `10 + 20` / `2 + 3` as the
+  non-constant now use a `fn` call.
+- H3: InvCheck.derive / InvOwner.derived (invDerivedOf / invDeriveFor / invTouchSet): a field derived from its
+  siblings is recomputed on the candidate (runtime invJudge `derive`), and a write to any sibling it reads
+  touches the clause. invDerivedDiags (in invReachPass): a computed field reading a cell / row / declared
+  value's state → E-CONTRACT-003 PERMANENT; a host call / non-constant binding → E-DECL-INVARIANT-IMPURE.
+  useInvs: a locked field given a non-constant use-site value → E-CONTRACT-003 PERMANENT; a use-site value
+  for a recomputed field → E-BOOTSTRAP-UNSUPPORTED INTERIM. A `{ … }` initializer stays INTERIM.
+- H1: Core Persist.invs / loc (analyze invDeepChecks — the type's invariants at its whole depth, `at` steps
+  "*" (tape elements) and "#V.n" (payload positions)); rt.persisted(…, invs, loc): restore and cross-tab
+  decode take the default when a check fails (invariantsHold). walk.scrml visits Persist.invs.
+- tests: slice-m4/invariant-r1-s483.test.js (23); Chromium invariant-write-chromium-s483 +5 (i08, i10,
+  c03c, c03d, restored tape element).
+- L2: check.scrml checkCommit(p, ws) — at most one invariant check; its entries name exactly the Commit's
+  Writes (field index, the Write's Local, the same instance); a Commit whose whole-field Writes touch a field
+  the declaration's invariants read (Decl.invs) and holds no check fails. checkWrite: a lone write's check names
+  its one write (field, instance). slice-m4/invariant-c7-r1-s483.test.js (4). c7 probe: d, f now caught; g, h as
+  on base.
+- L3: runtime suspend / Request.run — a trap raised in a continuation (a reload's invariant check) is reported
+  as a trap (reportLater: the page's error event, as a hole's trap), not "a host error in a continuation".
+  `<#rq>.error` is NOT set: §19.17 "A trap SHALL NOT be a `!` error" and §6.7.7 `.error: Error | not` — surfaced.
+- nit: the E-WRITE-INVARIANT lone-write message no longer doubles the label's backticks.
+- persist.test.js pin: Field.persist carries `invs: null, loc: ""` (H1).

@@ -68,7 +68,8 @@ describe("§6.14.2 — restore, codec, write on change, reset, cross-tab sync", 
   test("Core: Field.persist on the program cell; the reset's Write is followed by ONE Unpersist (rule 9); C17 holds", () => {
     const core = coreOf(COUNTER("c0"));
     const f = fieldsOf(core);
-    expect(f[0].persist).toEqual({ store: "Local", key: "c0.count" });
+    // s483-invariant-2 r1 (H1): `invs` / `loc` — the restore's invariant checks (none: an int has no invariant)
+    expect(f[0].persist).toEqual({ store: "Local", key: "c0.count", invs: null, loc: "" });
     expect(f[1].persist).toBe(null);
     expect(f[2].persist).toBe(null);
     const un = walkCore(core, (n) => n.variant === "Unpersist");

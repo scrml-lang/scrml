@@ -114,3 +114,103 @@ let <out:string=""/>
     expect(errs(r)[0].message).toContain("the server function `srv`, through `wrap` → `key`");
   }, 120000);
 });
+
+// ---------------------------------------------------------------------------------------------------------------
+// L1 — ruling:user-voice-scrml.md-S483-invariant-const-fold: "any initializer the compiler folds to a value at compile
+// time (+ - * … over literals and other such consts) is a compile-time constant".
+// ---------------------------------------------------------------------------------------------------------------
+const RANGE = `    <dateRange:struct>
+        let <start:int=0/>
+        let <end:int=10/>
+    </>`;
+const prog = (body) => `<program>\n${body}\n</program>\n`;
+
+describe("L1 — foldable arithmetic over constants is a compile-time constant", () => {
+  for (const [name, consts] of [
+    ["`10 + 2`", "const LIM = 10 + 2;"],
+    ["arithmetic over another constant", "const BASE = 10; const LIM = BASE * 2 - 1;"],
+    ["a negated constant", "const NEG = -20; const LIM = -NEG;"],
+    ["a ternary over constants", "const BIG = true; const LIM = BIG ? 30 : 3;"],
+  ]) {
+    test(`${name}: admitted`, async () => {
+      const r = await result(prog(`    \${ ${consts} }\n${RANGE}\n    invariant (end - start <= LIM)\n    <main><p>\${@dateRange.start}</p></main>`));
+      expect(codes(r)).toEqual([]);
+    }, 120000);
+  }
+
+  test("a folded constant decides a lone literal write at compile time (E-WRITE-INVARIANT)", async () => {
+    const r = await result(prog(`    \${ const BASE = 10; const LIM = BASE * 2 - 1; }\n${RANGE}\n    invariant (end <= LIM) [maxLen]\n    function f() { @dateRange.end = 30; }\n    <main><button onclick=f()>\${@dateRange.start}</button></main>`));
+    expect(codes(r)).toEqual(["E-WRITE-INVARIANT"]);
+    expect(errs(r)[0].message).toContain("[maxLen]");
+  }, 120000);
+
+  test("a call is still not a constant: refused (E-DECL-INVARIANT-IMPURE)", async () => {
+    const r = await result(prog(`    \${ fn three() -> int { return 3; } const LIM: int = three() + 1; }\n${RANGE}\n    invariant (end - start <= LIM)\n    <main><p>\${@dateRange.start}</p></main>`));
+    expect(codes(r)).toEqual(["E-DECL-INVARIANT-IMPURE"]);
+    expect(errs(r)[0].message).toContain("not a compile-time constant");
+  }, 120000);
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// H3 — ruling:user-voice-scrml.md-S483-invariant-derived-split ("Split"): a field derived only from its sibling fields
+// is checked at the source write (built); a field that tracks a cell or a live use-site value is E-CONTRACT-003,
+// PERMANENT. The run-time traps: invariant-write-chromium-s483.browser.test.js (i08, i10).
+// ---------------------------------------------------------------------------------------------------------------
+describe("H3 — derived fields: built from siblings, refused when they track", () => {
+  test("i08: a sibling-derived field — a write to a sibling carries the check, recomputing the field", async () => {
+    const r = await result(prog(`    <w:struct>\n        let <a:int=0/>\n        let <b:int=5/>\n        <span:int=(b - a)/>\n    </>\n    invariant (span <= 10) [ab]\n    function setB(n: int) { @w.b = n; }\n    <main><p>\${@w.span}</p><button onclick=setB(20)>b</button></main>`));
+    expect(codes(r)).toEqual([]);
+    // the write to `b` is guarded; the check recomputes `span` from `a` and `b` on the candidate
+    expect(r.client.js).toMatch(/\.fields\[1 \/\* b \*\/\]\.set\(rt\.invariantGuard\(w\$, \[\[1, \[\], "set", n\w*\]\], \[\[\[\], span\w* => span\w* <= 10, \["span"\], "<w>", "\[ab\]", \[\["span", \(b\w*, a\w*\) => b\w* - a\w*, \["b", "a"\]\]\]\]\]/);
+  }, 120000);
+
+  test("a chain of derived fields recomputes dependencies first", async () => {
+    const r = await result(prog(`    <w:struct>\n        let <a:int=0/>\n        let <b:int=5/>\n        <span:int=(b - a)/>\n        <twice:int=(span * 2)/>\n    </>\n    invariant (twice <= 20)\n    function setA(n: int) { @w.a = n; }\n    <main><p>\${@w.twice}</p><button onclick=setA(-20)>a</button></main>`));
+    expect(codes(r)).toEqual([]);
+    expect(r.client.js).toMatch(/\[\["span", [^\]]*\["b", "a"\]\], \["twice", [^\]]*\["span"\]\]\]/);
+  }, 120000);
+
+  for (const [name, pre, field, code, msg] of [
+    ["i02: a field derived from a cell", "    let <k:int=0/>\n", "<b:int=(@k)/>", "E-CONTRACT-003", "reads the cell `@k`"],
+    ["a field derived from siblings and a cell", "    let <k:int=0/>\n", "<b:int=(a + @k)/>", "E-CONTRACT-003", "TRACKS"],
+    ["a field derived through a `fn` that reads a cell", "    let <k:int=0/>\n    ${ fn lim(x: int) -> int { return x + @k; } }\n", "<b:int=(lim(a))/>", "E-CONTRACT-003", "calls `lim`"],
+    ["a field derived through a host global", "", "<b:int=(Date.now())/>", "E-DECL-INVARIANT-IMPURE", "not a pure `fn`"],
+  ]) {
+    test(`${name}: ${code}`, async () => {
+      const r = await result(prog(`${pre}    <w:struct>\n        let <a:int=0/>\n        ${field}\n    </>\n    invariant (a <= b) [ab]\n    <main><p>\${@w.a}</p></main>`));
+      expect(codes(r)).toContain(code);
+      const d = errs(r).find((x) => x.code === code);
+      expect(d.message).toContain(msg);
+      if (code === "E-CONTRACT-003") expect(d.message).toContain("PERMANENT");
+    }, 120000);
+  }
+
+  test("a field derived from siblings and a compile-time constant: admitted", async () => {
+    const r = await result(prog(`    \${ const PAD = 2; }\n    <w:struct>\n        let <a:int=0/>\n        let <b:int=5/>\n        <span:int=(b - a + PAD)/>\n    </>\n    invariant (span <= 10)\n    <main><p>\${@w.span}</p></main>`));
+    expect(codes(r)).toEqual([]);
+  }, 120000);
+
+  const SLIDER = `    <slider min:int=0 max:int=100>\n        let <value:int=50/>\n    </> renders <b>\${value}</b>\n    invariant (min <= value && value <= max) [inRange]\n`;
+  for (const [name, pre, use] of [
+    ["i01: a locked attribute given a cell", "    let <k:int=0/>\n", "<slider min=(@k)/>"],
+    ["i09: a locked attribute given a row binder", "    <xs:int[replace]=([10])/>\n", "<each in=(@xs) as=x><slider min=(x)/></each>"],
+  ]) {
+    test(`${name}: E-CONTRACT-003 at the use site (PERMANENT)`, async () => {
+      const r = await result(prog(`${pre}${SLIDER}    <main>${use}</main>`));
+      expect(codes(r)).toEqual(["E-CONTRACT-003"]);
+      expect(errs(r)[0].message).toContain("TRACKS");
+      expect(errs(r)[0].message).toContain("PERMANENT");
+    }, 120000);
+  }
+
+  test("a locked attribute given a compile-time constant at a use site: admitted (the construction check holds it)", async () => {
+    const r = await result(prog(`    \${ const LO = 10; }\n${SLIDER}    <main><slider min=(LO + 5)/></main>`));
+    expect(codes(r)).toEqual([]);
+  }, 120000);
+
+  test("a use-site value given to a field the check recomputes: refused by name (INTERIM)", async () => {
+    const r = await result(prog(`    <w:struct>\n        let <a:int=0/>\n        let <b:int=5/>\n        <span:int=(b - a)/>\n    </> renders <i>\${span}</i>\n    invariant (span <= 10)\n    <main><w span=3/></main>`));
+    expect(codes(r)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(errs(r)[0].message).toContain("g-boot-invariant-derived-field-s483");
+  }, 120000);
+});

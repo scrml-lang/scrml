@@ -33815,13 +33815,108 @@ ${
         for (const ds of g.decls) {
             const d: ADecl | not = ds.d;
             if (d is given && !ds.isProgram) {
-                for (const iv of ds.info.invs) { out = out.concat(invReachDiags(g, t, ds.file, iv, "`<" + d.name + ">`", prior)); }
+                for (const iv of ds.info.invs) {
+                    out = out.concat(invReachDiags(g, t, ds.file, iv, "`<" + d.name + ">`", prior));
+                    out = out.concat(invDerivedDiags(g, t, ds.file, ds.info, iv, "`<" + d.name + ">`", prior));
+                }
             }
         }
         for (const ti of g.types) {
             for (const iv of ti.invs) { out = out.concat(invReachDiags(g, t, ti.file, iv, "`type " + ti.name + "`", prior)); }
         }
         return out;
+    }
+
+    // r1 (#2128 review H3) — ruling:user-voice-scrml.md-S483-invariant-derived-split ("Split"):
+    // "check-at-source is built for a field derived only from the value's own sibling fields (a
+    // sibling write re-checks the candidate); a field that tracks a cell or a live use-site value
+    // stays refused, PERMANENT, E-CONTRACT-003 (an @ read by another route)". A COMPUTED field the
+    // clause reads — no write capability, an expression initializer — is judged as if the clause
+    // read its initializer directly, at any depth of computed fields: a sibling field, a literal,
+    // a compile-time constant and a pure `fn` call are what an invariant may read (built: lower
+    // recomputes it on the candidate, invDeriveFor); a cell, a row value, a declared value's state
+    // is E-CONTRACT-003; any other outer read (a host call, a lifecycle element, a non-constant
+    // binding) is E-DECL-INVARIANT-IMPURE, exactly as the direct read (§66.13.5 rules 6, 7).
+    // (A `{ … }` initializer stays refused by the typer, INTERIM — invComputedMsg.) The use-site
+    // half (a locked field given a live value) is the typer's (useInvs).
+    fn invDerivedDiags(g: Globals, t: Tables, file: string, d: DeclInfo, iv: InvInfo, what: string, prior: Diag[]) -> Diag[] {
+        if (invErrIn(prior, file, iv.span)) return [];
+        let queue: int[] = [];
+        for (const h of iv.heads) {
+            if (queue.indexOf(h) < 0) queue = queue.concat([h]);
+        }
+        let names: string[] = [];
+        for (const f of d.fields) { names = names.concat([f.sym.hint]); }
+        let i: int = 0;
+        for (; i < queue.length; ) {
+            const fi: int = queue[i];
+            if (fi < d.fields.length && d.fields[fi].wcap is not) {
+                const f: FieldInfo = d.fields[fi];
+                const e: AExpr | not = valueExpr(f.init);
+                if (e is given) {
+                    const h: InvHit | not = invFieldHit(g, t, d, e);
+                    if (h is given) return [newDiag(h.code, invDerivedMsg(iv, what, f.sym.hint, h), file, iv.span)];
+                    for (const p of invReads(e, names, [])) {
+                        const dot: int = p.indexOf(".");
+                        const j: int = names.indexOf(dot < 0 ? p : p.substring(0, dot));
+                        if (j >= 0 && queue.indexOf(j) < 0) queue = queue.concat([j]);
+                    }
+                }
+            }
+            i = i + 1;
+        }
+        return [];
+    }
+
+    // The first read of a computed field's initializer `e` an invariant may not make, else `not`.
+    fn invFieldHit(g: Globals, t: Tables, d: DeclInfo, e: AExpr) -> InvHit | not {
+        for (const x of invExprsDeep(e)) {
+            const tag: string = exprTag(x);
+            if (tag == "At") return { code: "E-CONTRACT-003", what: "reads the cell `@" + atName(x) + "`", chain: "" };
+            if (tag == "AtItem") return { code: "E-CONTRACT-003", what: "reads the row value `@.`", chain: "" };
+            if (tag == "HashRef") return { code: "E-DECL-INVARIANT-IMPURE", what: "reads a lifecycle element (`<#id>`)", chain: "" };
+            if (tag == "Sql") return { code: "E-DECL-INVARIANT-IMPURE", what: "runs a query", chain: "" };
+            if (tag == "Foreign") return { code: "E-DECL-INVARIANT-IMPURE", what: "holds a foreign block", chain: "" };
+            if (tag == "Call") {
+                const callee: AExpr = callCallee(x);
+                const sym: int = invFnSymOf(nameFact(t.names, callee.nid));
+                if (sym >= 0) {
+                    const fs: FnSrc | not = fnSrcOfSym(g, sym);
+                    if (fs is not) return { code: "E-DECL-INVARIANT-IMPURE", what: "calls `" + exprName(callee) + "`, whose body the compiler cannot see", chain: "" };
+                    const h: InvHit | not = invChainHit(g, t, fs);
+                    if (h is given) return { code: h.code, what: "calls `" + fs.info.name + "`" + (h.chain.indexOf(" → ") >= 0 ? " (through " + h.chain + ")" : "") + ", which " + h.what, chain: "" };
+                } else if (!invBuiltinOk(valueFact(t.values, x.nid)) || effectFact(t.effects, x.nid) is given) {
+                    return { code: "E-DECL-INVARIANT-IMPURE", what: "calls `" + invCallText(callee) + "(…)`, which is not a pure `fn` or a deterministic built-in method on a value", chain: "" };
+                }
+            }
+            const nf: NameFact | not = nameFact(t.names, x.nid);
+            const w: InvHit | not = match nf {
+                .NConst(sym: s) :> invFieldConst(g, s.id),
+                .NField(decl: o) :> (o.id == d.sym.id ? not : { code: "E-CONTRACT-003", what: "reads a field of another declared value", chain: "" }),
+                .NInst(decl: o) :> { code: "E-CONTRACT-003", what: "reads a declared value", chain: "" },
+                .NSurface(of: o) :> { code: "E-CONTRACT-003", what: "reads a validity surface", chain: "" },
+                .NReq(id: r) :> { code: "E-CONTRACT-003", what: "reads a `<request>`'s state", chain: "" },
+                .NLocal(sym: s) :> not,
+                .NStruct(owner: o) :> not,
+                .NFn(sym: s) :> not,
+                .NLength :> not,
+                not :> not
+            };
+            if (w is given) return w;
+        }
+        return not;
+    }
+
+    fn invFieldConst(g: Globals, id: int) -> InvHit | not {
+        const why: string = invConstRead(g, id);
+        if (why == "") return not;
+        return { code: "E-DECL-INVARIANT-IMPURE", what: why, chain: "" };
+    }
+
+    fn invDerivedMsg(iv: InvInfo, what: string, field: string, h: InvHit) -> string {
+        const shown: string = "`invariant (" + iv.text + ")` on " + what + " reads `" + field + "`, a field computed from its initializer, which " + h.what;
+        if (h.code == "E-CONTRACT-003") return shown + " — the field TRACKS that live value, so reading it is reading it by another route, and a declaration's invariant reads only the value's own fields (§66.13.5 rule 6; ruling:user-voice-scrml.md-S483-invariant-derived-split: a field that tracks a cell or a live use-site value stays refused, PERMANENT). A field computed only from its sibling fields is checked at the source write. To compare against a cell, write a derived check (e.g. `<over=(@x.end > @limit)/>`, where `@x` is the declared value) and use it in markup or the handler that changes the value; or make the field a `let` field (seeded once, then checked on every write)";
+        return shown + " — reading the field reads that by another route, and an invariant reads only the value's own fields, literals, compile-time constants, deterministic built-in methods and calls of a pure `fn` (§66.13.5 rule 7). Compute the field from its sibling fields, or make it a `let` field (seeded once, then checked on every write)";
     }
 
     // s483 (Q21 lane 2) — ruling:user-voice-scrml.md-S483-invariant-const-read: "A `let`, a
@@ -34139,7 +34234,7 @@ ${
     // after placement (invServerConstPass).
     fn invConstWhy(g: Globals, kc: ConstInfo, depth: int) -> string {
         if (kc.mutable) return " — a mutable binding: a write can change it, so the invariant would not be a function of the value's fields (an invariant may read a file-scope `const` initialized by a compile-time constant; ruling:user-voice-scrml.md-S483-invariant-const-read)";
-        if (!invConstInit(g, kc.file, kc.init, depth)) return ", whose initializer is not a compile-time constant — an invariant may read a file-scope `const` only when it is initialized by a literal, an enum variant or another such constant, so its value is the same wherever the value is written and known at compile time (ruling:user-voice-scrml.md-S483-invariant-const-read)";
+        if (!invConstInit(g, kc.file, kc.init, depth)) return ", whose initializer is not a compile-time constant — an invariant may read a file-scope `const` only when it is initialized by a literal, an enum variant, another such constant, or arithmetic the compiler folds over them (`+ - *`, comparisons, `&&` / `||`, `? :`), so its value is the same wherever the value is written and known at compile time (ruling:user-voice-scrml.md-S483-invariant-const-read; ruling:user-voice-scrml.md-S483-invariant-const-fold)";
         return "";
     }
 
@@ -34154,7 +34249,8 @@ ${
                 // no-default-arm: one question — is it a negated number literal
                 _ :> false
             };
-            return neg;
+            if (neg) return true;
+            return fvKind(invConstFoldG(g, file, e, depth + 1)) != 0;     // r1 L1: `-LIM`, `!FLAG` fold too
         }
         if (tag == "Member") {
             // an enum variant written `E.V`
@@ -34170,7 +34266,44 @@ ${
             if (kc is not) return false;
             return invConstWhy(g, kc, depth + 1) == "";
         }
+        // r1 (#2128 review L1) — ruling:user-voice-scrml.md-S483-invariant-const-fold ("Admit foldable
+        // arithmetic"): "any initializer the compiler folds to a value at compile time (+ - * … over
+        // literals and other such consts) is a compile-time constant" — exactly what invFold folds.
+        if (tag == "Binary" || tag == "Ternary") return fvKind(invConstFoldG(g, file, e, depth + 1)) != 0;
         return false;
+    }
+
+    // The compile-time value of the constant initializer `e` in `file` (over the binder's tables):
+    // a literal, an enum variant `E.V`, another constant's value, or invFold over those; else FNo.
+    fn invConstFoldG(g: Globals, file: string, e: AExpr, depth: int) -> FV {
+        if (depth > 16) return FV.FNo;
+        const v: FV = fvLit(e);
+        if (fvKind(v) != 0) return v;
+        const tag: string = exprTag(e);
+        if (tag == "Member") {
+            if (!invConstInit(g, file, e, depth)) return FV.FNo;
+            const k: AExprK = e.k;
+            const m: string = match k {
+                .Member(name: n) :> n,
+                // no-default-arm: one question — the variant's name, written `E.V`
+                _ :> ""
+            };
+            return m == "" ? FV.FNo : FV.FVar(m);
+        }
+        if (tag == "Name") {
+            const kc: ConstInfo | not = constNamed(g, file, nameOfExpr(e));
+            if (kc is not || kc.mutable) return FV.FNo;
+            return invConstFoldG(g, kc.file, kc.init, depth + 1);
+        }
+        let ents: FEnt[] = [];
+        for (const x of invNameNodes(e)) {
+            const kc: ConstInfo | not = constNamed(g, file, nameOfExpr(x));
+            if (kc is given && !kc.mutable) {
+                const kv: FV = invConstFoldG(g, kc.file, kc.init, depth + 1);
+                if (fvKind(kv) != 0) ents = ents.concat([{ path: "$" + nameOfExpr(x), v: kv }]);
+            }
+        }
+        return invFold(e, ents, []);
     }
 
     fn invFnSymOf(f: NameFact | not) -> int {
@@ -34292,8 +34425,9 @@ ${
             ts = r.ts;
             // s483 (Q21 lane 2): a field the clause reads whose value is computed — no write
             // capability and an initializer that tracks — changes with no write to check (INTERIM)
+            // r1 (H3): an expression initializer is judged by invDerivedDiags (built, or refused by name)
             for (const h of iv.heads) {
-                if (h < di.fields.length && invComputed(di.fields[h], di.fields[h].init)) ts = report(ts, env, iv.span, "E-BOOTSTRAP-UNSUPPORTED", invComputedMsg(iv, "`<" + d.name + ">`", di.fields[h].sym.hint));
+                if (h < di.fields.length && invBracedField(di.fields[h])) ts = report(ts, env, iv.span, "E-BOOTSTRAP-UNSUPPORTED", invComputedMsg(iv, "`<" + d.name + ">`", di.fields[h].sym.hint));
             }
             if (r.ok) ts = invVerdict(env, iv, env0, d.span, "the defaults of `<" + d.name + ">` (its shared instance and `reset` target)", ts);
         }
@@ -34656,6 +34790,10 @@ ${
     // one entry `$name` each (no field path begins with `$`), so a value the clause's
     // constants and literal fields decide is decided at compile time.
     fn invConstEnts(t: Tables, e: AExpr) -> FEnt[] {
+        return invConstEntsAt(t, e, 0);
+    }
+
+    fn invConstEntsAt(t: Tables, e: AExpr, depth: int) -> FEnt[] {
         let out: FEnt[] = [];
         for (const x of invNameNodes(e)) {
             const nf: NameFact | not = nameFact(t.names, x.nid);
@@ -34672,7 +34810,7 @@ ${
                 not :> not
             };
             if (ks is given) {
-                const v: FV = invConstValue(t, ks.id, 0);
+                const v: FV = invConstValue(t, ks.id, depth);
                 if (fvKind(v) != 0) out = out.concat([{ path: "$" + nameOfExpr(x), v: v }]);
             }
         }
@@ -34680,7 +34818,7 @@ ${
     }
 
     // A compile-time constant's value (an immutable constant initialized by a literal, an
-    // enum variant or another such constant), else FNo.
+    // enum variant, another such constant, or arithmetic invFold folds over them), else FNo.
     fn invConstValue(t: Tables, id: int, depth: int) -> FV {
         if (depth > 16) return FV.FNo;
         for (const k of t.consts) {
@@ -34707,6 +34845,10 @@ ${
             };
             if (m != "") return FV.FVar(m);
         }
+        // r1 (#2128 review L1; ruling:user-voice-scrml.md-S483-invariant-const-fold): arithmetic over
+        // literals and such constants folds (`const LIM = BASE + 2`) — what invFold folds
+        const tag: string = exprTag(e);
+        if (tag == "Unary" || tag == "Binary" || tag == "Ternary") return invFold(e, invConstEntsAt(t, e, depth + 1), []);
         const nf: NameFact | not = nameFact(t.names, e.nid);
         return match nf {
             .NConst(sym: s) :> invConstValue(t, s.id, depth),
@@ -34738,35 +34880,85 @@ ${
         return true;
     }
 
-    // s483 (Q21 lane 2) — a field with no write capability whose value expression can
-    // CHANGE (it reads a cell or calls a function: a derived field, or a locked attribute a
-    // use site gives a live value — §66.9 rule 8) cannot be held by a write-time check: its
-    // value moves with no write to the declaration. Refused, E-BOOTSTRAP-UNSUPPORTED (INTERIM,
-    // g-boot-invariant-derived-field-s483 — what an invariant over a tracking field means is
-    // not ruled).
-    fn invComputed(f: FieldInfo, v: AAttrValue) -> boolean {
+    // s483 (Q21 lane 2) / r1 (#2128 review H3) — a field with no write capability whose
+    // initializer is a `{ … }` block: what it computes is not judged by the bootstrap yet, so an
+    // invariant over it is refused, E-BOOTSTRAP-UNSUPPORTED (INTERIM, g-boot-invariant-derived-field-s483).
+    // An expression initializer is judged by invDerivedDiags (S483 derived-split); a live value a
+    // use site gives a locked field, by useInvs.
+    fn invBracedField(f: FieldInfo) -> boolean {
         if (f.wcap is given) return false;
+        const v: AAttrValue = f.init;
         return match v {
-            .Bare(e: x) :> invLiveExpr(x),
-            .Paren(e: x) :> invLiveExpr(x),
+            .Braced(b: b) :> true,
+            .Bare(e: x) :> false,
+            .Paren(e: x) :> false,
             .Quoted(v: q) :> false,
             .Dur(text: q) :> false,
-            .NoValue :> false,
-            .Braced(b: b) :> true
+            .NoValue :> false
         };
     }
 
-    fn invLiveExpr(e: AExpr) -> boolean {
-        const tag: string = exprTag(e);
-        if (tag == "At" || tag == "AtItem" || tag == "Call" || tag == "HashRef" || tag == "Sql" || tag == "Foreign") return true;
-        for (const x of exprKids(e)) {
-            if (invLiveExpr(x)) return true;
+    fn invComputedMsg(iv: InvInfo, what: string, field: string) -> string {
+        return "`invariant (" + iv.text + ")` on " + what + " reads `" + field + "`, a field with no write capability whose value a `{ … }` block computes — the bootstrap does not judge what such a block reads yet, so no write-time check is proven to hold it (§66.13.5; INTERIM, g-boot-invariant-derived-field-s483). Compute it with an expression over its sibling fields (checked at the source write), make it a `let` field (seeded once), or state the invariant over the fields it is computed from";
+    }
+
+    // r1 (#2128 review H3) — the fields a clause reaches at a use site: the fields it reads and,
+    // through each computed field it reads, the sibling fields that field is computed from.
+    fn invUseHeads(di: DeclInfo, iv: InvInfo) -> int[] {
+        let out: int[] = iv.heads;
+        let names: string[] = [];
+        for (const f of di.fields) { names = names.concat([f.sym.hint]); }
+        let i: int = 0;
+        for (; i < out.length; ) {
+            const fi: int = out[i];
+            if (fi < di.fields.length && di.fields[fi].wcap is not) {
+                const e: AExpr | not = valueExpr(di.fields[fi].init);
+                if (e is given) {
+                    for (const p of invReads(e, names, [])) {
+                        const dot: int = p.indexOf(".");
+                        const j: int = names.indexOf(dot < 0 ? p : p.substring(0, dot));
+                        if (j >= 0 && out.indexOf(j) < 0) out = out.concat([j]);
+                    }
+                }
+            }
+            i = i + 1;
+        }
+        return out;
+    }
+
+    // Field `i` of `di`: computed from its sibling fields (what invDerivedOf recomputes)?
+    fn invSiblingDerived(di: DeclInfo, i: int) -> boolean {
+        if (i < 0 || i >= di.fields.length || di.fields[i].wcap is given) return false;
+        const e: AExpr | not = valueExpr(di.fields[i].init);
+        if (e is not) return false;
+        let names: string[] = [];
+        for (const f of di.fields) { names = names.concat([f.sym.hint]); }
+        for (const p of invReads(e, names, [])) {
+            const dot: int = p.indexOf(".");
+            if ((dot < 0 ? p : p.substring(0, dot)) != di.fields[i].sym.hint) return true;
         }
         return false;
     }
 
-    fn invComputedMsg(iv: InvInfo, what: string, field: string) -> string {
-        return "`invariant (" + iv.text + ")` on " + what + " reads `" + field + "`, a field with no write capability whose value is computed from what it reads (a derived field, or a locked attribute given a live value, §66.9 rule 8) — it can change with no write to the declaration, so no write-time check holds it (§66.13.5; INTERIM, g-boot-invariant-derived-field-s483). Make it a `let` field (seeded once), or state the invariant over the fields it is computed from";
+    // A use-site value a compile-time constant gives (a literal, a constant, arithmetic over
+    // them — invConstFold): it never changes, so the construction check holds it.
+    fn invUseConst(t: Tables, v: AAttrValue) -> boolean {
+        const e: AExpr | not = valueExpr(v);
+        if (e is not) {
+            return match v {
+                .Braced(b: b) :> false,
+                .Bare(e: x) :> true,
+                .Paren(e: x) :> true,
+                .Quoted(v: q) :> true,
+                .Dur(text: q) :> true,
+                .NoValue :> true
+            };
+        }
+        return fvKind(invConstFold(t, e, 0)) != 0;
+    }
+
+    fn invUseLiveMsg(iv: InvInfo, what: string, field: string) -> string {
+        return "`invariant (" + iv.text + ")` on " + what + " reads `" + field + "` (directly, or through a field computed from it), a locked field this use gives a value that is not a compile-time constant (a cell, a row binder, a local, a call) — a locked field given a live value TRACKS it, so the invariant would read that value by another route, and a declaration's invariant reads only the value's own fields (§66.13.5 rule 6, §66.9 rule 8; ruling:user-voice-scrml.md-S483-invariant-derived-split: a field that tracks a cell or a live use-site value stays refused, PERMANENT). Make it a `let` field (seeded once from the use site's value, then checked on every write), give it a constant here, or write a derived check (e.g. `<over=(…)/>`) and use it where the value changes";
     }
 
     // The field names an invariant's paths are read against: the heads of its reads.
@@ -34793,8 +34985,17 @@ ${
                 ents = fvDrop(ents, f).concat(fvAttr(f, a.value));
                 // s483 (Q21 lane 2): a live value given to a locked field an invariant reads makes it
                 // track — it changes with no write to check (INTERIM)
+                // r1 (#2128 review H3; S483 derived-split): E-CONTRACT-003, PERMANENT
                 for (const iv of di.invs) {
-                    if (iv.heads.indexOf(i) >= 0 && invComputed(di.fields[i], a.value) && !hasErrIn(env.blame.spans, iv.span)) tsu = report(tsu, env, a.span, "E-BOOTSTRAP-UNSUPPORTED", invComputedMsg(iv, "`<" + e.tag + ">`", f));
+                    if (di.fields[i].wcap is not && invUseHeads(di, iv).indexOf(i) >= 0 && !hasErrIn(env.blame.spans, iv.span)) {
+                        if (!invUseConst(env.t, a.value)) {
+                            tsu = report(tsu, env, a.span, "E-CONTRACT-003", invUseLiveMsg(iv, "`<" + e.tag + ">`", f));
+                        } else if (invSiblingDerived(di, i)) {
+                            // the run-time check recomputes this field from its initializer (invDeriveFor) — a
+                            // use-site value would make that recomputation wrong for this instance (INTERIM)
+                            tsu = report(tsu, env, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`invariant (" + iv.text + ")` on `<" + e.tag + ">` reads `" + f + "`, a field computed from its sibling fields, which this use gives a value of its own — the run-time check recomputes the field from its initializer on the candidate (ruling:user-voice-scrml.md-S483-invariant-derived-split), and a use-site value is not built into that recomputation yet (INTERIM, g-boot-invariant-derived-field-s483). Leave the field to its initializer here, or make it a `let` field");
+                        }
+                    }
                 }
             }
         }
@@ -34847,9 +35048,20 @@ ${
     // Sym `sym`; `decl` — a declaration's, whose clause names its fields as NField facts),
     // on the value at `at` (field names from the written value's root); `names` the
     // fields the clause reads, in its `heads` order — the clause's parameters.
-    export type InvCheck:struct = { at: string[], inv: InvInfo, owner: string, sym: Sym, decl: boolean, names: string[] }
-    // What a value's invariants are judged against: its owner's clauses, field names and types.
-    type InvOwner:struct = { sym: Sym, name: string, decl: boolean, invs: InvInfo[], names: string[], tys: Type[] }
+    // r1 (#2128 review H3; ruling:user-voice-scrml.md-S483-invariant-derived-split — "check-at-source
+    // is built for a field derived only from the value's own sibling fields (a sibling write
+    // re-checks the candidate)"): `derive` — the declaration's DERIVED fields the clause reads,
+    // directly or through another derived field, each with the sibling fields its value is
+    // computed from, dependencies first. The run-time check recomputes each on the candidate
+    // (rt invEnsure) before it judges the clause, and a write to any field a derived field is
+    // computed from touches the clause (invTouchSet). [] for a `type X:struct` (no derived fields).
+    export type InvCheck:struct = { at: string[], inv: InvInfo, owner: string, sym: Sym, decl: boolean, names: string[], derive: InvDerive[] }
+    // One derived field of a declaration: its index and name, and the sibling fields its
+    // initializer reads (by name, in first-read order).
+    export type InvDerive:struct = { idx: int, name: string, deps: string[] }
+    // What a value's invariants are judged against: its owner's clauses, field names and types,
+    // and (a declaration) its derived fields.
+    type InvOwner:struct = { sym: Sym, name: string, decl: boolean, invs: InvInfo[], names: string[], tys: Type[], derived: InvDerive[] }
 
     fn invOwnerOfDecl(d: DeclInfo) -> InvOwner {
         let names: string[] = [];
@@ -34858,7 +35070,70 @@ ${
             names = names.concat([f.sym.hint]);
             tys = tys.concat([f.ty]);
         }
-        return { sym: d.sym, name: "`<" + d.sym.hint + ">`", decl: true, invs: d.invs, names: names, tys: tys };
+        return { sym: d.sym, name: "`<" + d.sym.hint + ">`", decl: true, invs: d.invs, names: names, tys: tys, derived: invDerivedOf(d, names) };
+    }
+
+    // A declaration's derived fields: no write capability, and an expression initializer that
+    // reads a sibling field (a locked field with a constant value, or one that reads no
+    // sibling, is not recomputed — its value is the instance's; what it may read at all is
+    // judged by invDerivedDiags).
+    fn invDerivedOf(d: DeclInfo, names: string[]) -> InvDerive[] {
+        let out: InvDerive[] = [];
+        let i: int = 0;
+        for (const f of d.fields) {
+            if (f.wcap is not) {
+                const e: AExpr | not = valueExpr(f.init);
+                if (e is given) {
+                    let deps: string[] = [];
+                    for (const p of invReads(e, names, [])) {
+                        const dot: int = p.indexOf(".");
+                        const h: string = dot < 0 ? p : p.substring(0, dot);
+                        if (h != f.sym.hint && deps.indexOf(h) < 0) deps = deps.concat([h]);
+                    }
+                    if (deps.length > 0) out = out.concat([{ idx: i, name: f.sym.hint, deps: deps }]);
+                }
+            }
+            i = i + 1;
+        }
+        return out;
+    }
+
+    // The derived fields a clause reading the fields `heads` (names) needs recomputed, each after
+    // the derived fields it reads (dependencies first; each once).
+    fn invDeriveFor(o: InvOwner, heads: string[]) -> InvDerive[] {
+        let out: InvDerive[] = [];
+        for (const h of heads) { out = invDeriveAdd(o, h, out, 0); }
+        return out;
+    }
+
+    fn invDeriveAdd(o: InvOwner, name: string, acc: InvDerive[], depth: int) -> InvDerive[] {
+        if (depth > 32) return acc;
+        for (const x of acc) {
+            if (x.name == name) return acc;
+        }
+        for (const dv of o.derived) {
+            if (dv.name == name) {
+                let out: InvDerive[] = acc;
+                for (const dep of dv.deps) { out = invDeriveAdd(o, dep, out, depth + 1); }
+                for (const x of out) {
+                    if (x.name == name) return out;
+                }
+                return out.concat([dv]);
+            }
+        }
+        return acc;
+    }
+
+    // The paths a write must touch to need the clause: its read set, plus every sibling a
+    // derived field it reads is computed from (§66.13.5 "The read set"; S483 derived-split).
+    fn invTouchSet(iv: InvInfo, dv: InvDerive[]) -> string[] {
+        let out: string[] = iv.reads;
+        for (const x of dv) {
+            for (const dep of x.deps) {
+                if (out.indexOf(dep) < 0) out = out.concat([dep]);
+            }
+        }
+        return out;
     }
 
     // The owner of a value of type `ty` (a `type X:struct`, or a declaration's value), else `not`.
@@ -34873,7 +35148,7 @@ ${
                     names = names.concat([fd.sym.hint]);
                     tys = tys.concat([fd.ty]);
                 }
-                return { sym: s, name: "`type " + ti.name + "`", decl: false, invs: ti.invs, names: names, tys: tys };
+                return { sym: s, name: "`type " + ti.name + "`", decl: false, invs: ti.invs, names: names, tys: tys, derived: [] };
             }
         }
         for (const d of ds) {
@@ -34913,7 +35188,9 @@ ${
             }
         }
         for (const iv of o.invs) {
-            if (invTouches(iv.reads, path)) out = out.concat([{ at: at, inv: iv, owner: o.name, sym: o.sym, decl: o.decl, names: invHeadNames(iv, o.names) }]);
+            const hn: string[] = invHeadNames(iv, o.names);
+            const dv: InvDerive[] = invDeriveFor(o, hn);
+            if (invTouches(invTouchSet(iv, dv), path)) out = out.concat([{ at: at, inv: iv, owner: o.name, sym: o.sym, decl: o.decl, names: hn, derive: dv }]);
         }
         return out;
     }
@@ -34937,6 +35214,52 @@ ${
         const o: InvOwner | not = invOwnerOfType(ts, ds, ty);
         if (o is not) return [];
         return invWalk(ts, ds, o, [], path, 0);
+    }
+
+    // r1 (#2128 review H1) — every invariant a DECODED value of type `ty` must keep, at its whole
+    // depth: its own type's clauses, and those of every value it holds — a struct field (its
+    // name), each element of a tape (`"*"`), a payload position of an enum variant (`"#V.n"`).
+    // §6.14.2 rule 3: a restored value is "decoded against the cell's current declared type
+    // and its full declared contract", and rule 1 "Restore is construction" — a decoded value
+    // was never constructed by the program, so nothing inside it was checked. A type already on
+    // the path is not entered again (a recursive type's deeper values: g-boot-invariant-boundaries-lints-s483).
+    export fn invDeepChecks(t: Tables, ty: Type) -> InvCheck[] {
+        return invDeepAt(t, ty, [], [], 0);
+    }
+
+    fn invDeepAt(t: Tables, ty0: Type, at: string[], path: int[], depth: int) -> InvCheck[] {
+        if (depth > 16) return [];
+        const ty: Type = unMaybe(ty0);
+        const el: Type | not = seqElem(ty);
+        if (el is given) return invDeepAt(t, el, at.concat(["*"]), path, depth + 1);
+        const s: Sym | not = namedSym(ty);
+        if (s is not) return [];
+        if (path.indexOf(s.id) >= 0) return [];
+        const here: int[] = path.concat([s.id]);
+        let out: InvCheck[] = [];
+        const o: InvOwner | not = invOwnerOfType(t.types, t.decls, ty);
+        if (o is given) {
+            for (const iv of o.invs) {
+                const hn: string[] = invHeadNames(iv, o.names);
+                out = out.concat([{ at: at, inv: iv, owner: o.name, sym: o.sym, decl: o.decl, names: hn, derive: invDeriveFor(o, hn) }]);
+            }
+            let i: int = 0;
+            for (const n of o.names) {
+                out = out.concat(invDeepAt(t, o.tys[i], at.concat([n]), here, depth + 1));
+                i = i + 1;
+            }
+            return out;
+        }
+        const ti: TypeInfo | not = typeInfoOf(t.types, s);
+        if (ti is not) return [];
+        for (const vd of enumVariants(ti.def)) {
+            let j: int = 0;
+            for (const fd of vd.fields) {
+                out = out.concat(invDeepAt(t, fd.ty, at.concat(["#" + vd.sym.hint + "." + j]), here, depth + 1));
+                j = j + 1;
+            }
+        }
+        return out;
     }
 
     fn invDeclInfos(g: Globals) -> DeclInfo[] {
@@ -35010,7 +35333,8 @@ ${
             if (o is given) {
                 const rest: string[] = invStepNames(env, ds, steps, k);
                 for (const iv of o.invs) {
-                    if (invTouches(iv.reads, rest)) return { at: [], inv: iv, owner: o.name, sym: o.sym, decl: o.decl, names: [] };
+                    const dv: InvDerive[] = invDeriveFor(o, invHeadNames(iv, o.names));
+                    if (invTouches(invTouchSet(iv, dv), rest)) return { at: [], inv: iv, owner: o.name, sym: o.sym, decl: o.decl, names: [], derive: dv };
                 }
             }
             ty = invStepType(env, ds, s, here);
@@ -43589,7 +43913,7 @@ ${
         for (const ck of invInstanceChecks(env.t, cf.d, names)) {
             const rel: string[] = names.slice(ck.at.length);
             if (rel.length > 0 && !hasErrIn(env.blame.spans, ck.inv.span)) {
-                ts = invVerdict(env, ck.inv, fvEntries(rel.join("."), value), span, "the write `" + label + " = …`", ts);
+                ts = invVerdict(env, ck.inv, fvEntries(rel.join("."), value), span, "the write `" + label.replaceAll("`", "") + " = …`", ts);  // r1 nit: placeLabel quotes its own label
             }
         }
         return ts;
@@ -47921,7 +48245,7 @@ ${
             ok = false;
         }
         if (!ok) return { info: not, st: st };
-        if (store is given) return { info: { sym: f.sym, persist: { store: store, key: key } }, st: st };
+        if (store is given) return { info: { sym: f.sym, persist: { store: store, key: key, invs: not, loc: "" } }, st: st };
         return { info: not, st: st };
     }
 
