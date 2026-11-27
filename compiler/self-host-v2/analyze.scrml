@@ -12778,13 +12778,31 @@ ${
                         .MarkupItem(n: x) :> not
                     };
                     if (c is given) {
-                        const where: string = constructAt(t, tops, ci.span.start);
+                        let where: string = constructAt(t, tops, ci.span.start);
+                        // s483 r1 (#2129 review MED-1) — §7.6 R3's "an element whose content holds no
+                        // place (`<textarea>`, `<title>`)": the elements the HTML parser reads as text
+                        // (parserTextElem — `<pre>` / `<code>` raw content, `<textarea>`, `<title>`,
+                        // `<script>`, `<style>`) whose places valueLetDiags already judges (noPlaceAt).
+                        // An initializer there runs just before the element, so both halves — one that
+                        // acts, one that can trap — are judged there too. (An `<each>` row and a
+                        // component's body refuse any declaration already: E-BOOTSTRAP-UNSUPPORTED.)
+                        if (where == "") where = textHostAt(t, tops, ci.span.start);
                         if (where != "") out = out.concat([{ c: c, where: where, file: f.path }]);
                     }
                 }
             }
         }
         return out;
+    }
+
+    // s483 r1 (#2129 review MED-1) — placeHostAt's answer when the element holding `pos` is one the
+    // HTML parser reads as text (parserTextElem), else "".
+    fn textHostAt(t: Tables, ns: ANode[], pos: int) -> string {
+        const h: string = placeHostAt(t, ns, pos);
+        for (const tg of ["pre", "code", "textarea", "title", "script", "style"]) {
+            if (h.toLowerCase() == "`<" + tg + ">`") return h;
+        }
+        return "";
     }
 
     // The construct whose content holds source position `pos`, named for a message: the
@@ -12884,14 +12902,16 @@ ${
     // that runs before it), and an unresolvable call by rule (b) (initReachDiags). Fail closed: a site
     // the walk reaches is counted whether or not that path runs.
     // =========================================================================
-    type TrapSite:struct = { what: string, file: string, span: ASpan }
+    // `param`: a refined parameter's check (fnTrapSites) — judged at each call, by its argument
+    // (r1, #2129 review LOW-2: a literal the static zone passes is not a trap there).
+    type TrapSite:struct = { what: string, file: string, span: ASpan, param: boolean }
 
     // The §19.17 trap a single expression node can raise, described for a message; "" — none.
     fn trapSiteWhat(t: Tables, e: AExpr) -> string {
         const k: AExprK = e.k;
         const own: string = match k {
             .Index(obj: o, idx: ix) :> "reads `" + trapShown(e) + "` by position (a position outside it is the E-INDEX-OUT-OF-RANGE-RT trap, §19.17)",
-            .Binary(op: o, l: l, r: r) :> divTrapWhat(o, r),
+            .Binary(op: o, l: l, r: r) :> divTrapWhat(t, o, r),
             .Call(callee: c, args: a) :> callTrapWhat(t, e, c, a),
             // no-default-arm: every other expression traps only through its parts
             _ :> ""
@@ -12901,12 +12921,31 @@ ${
         return "";
     }
 
-    fn divTrapWhat(o: BinOp, r: AExpr) -> string {
-        if (o != BinOp.Div && o != BinOp.Mod) return "";
-        if (positiveLit(r) || negLiteral(r)) return "";
-        let sign: string = "/";
-        if (o == BinOp.Mod) sign = "%";
-        return "divides by `" + trapShown(r) + "` (`" + sign + "`), which is not proven non-zero";
+    // s483 r1 (#2129 review LOW-1 / LOW-2; RULED S483, ruling:user-voice-scrml.md-S483-q8-division —
+    // *"inside a construct refuse only what can actually trap: keep `%` and integer division by a
+    // possibly-zero int refused; `/` on a `number` divisor is accepted (gives ±∞/NaN, no trap)"*):
+    // `/` is float-only (§66.20: `/` between two `int`s is E-INT-DIVISION, so every `/` that
+    // compiles divides `number`s) — it gives ±∞ or NaN, never a trap. `%` by a divisor not proven
+    // non-zero stays refused: `n % 0` has no `int` value, and its trap is owed
+    // (g-bootstrap-int-overflow-and-mod-zero-untrapped-s469 — today it is NaN). Proven non-zero: a
+    // non-zero number literal, or a file-scope `const` whose initializer is one (nonZeroConst).
+    // (Integer division, `div(a, b, .Mode)`, is not in the bootstrap; its by-zero site belongs
+    // here when it lands.)
+    fn divTrapWhat(t: Tables, o: BinOp, r: AExpr) -> string {
+        if (o != BinOp.Mod) return "";
+        if (positiveLit(r) || negLiteral(r) || nonZeroConst(t, r)) return "";
+        return "divides by `" + trapShown(r) + "` (`%`), which is not proven non-zero (`n % 0` has no `int` value: the trap it owes is g-bootstrap-int-overflow-and-mod-zero-untrapped-s469 — refused fail closed, ruling:user-voice-scrml.md-S483-q8-division)";
+    }
+
+    // s483 r1 (#2129 review LOW-2, o05 / o06) — `r` names a file-scope `const` (never written) whose
+    // initializer is a non-zero number literal (`const d: int(>0) = 3;`), so its value is not 0.
+    fn nonZeroConst(t: Tables, r: AExpr) -> boolean {
+        const id: int = constSymOfFact(nameFact(t.names, r.nid));
+        if (id < 0) return false;
+        for (const c of t.consts) {
+            if (c.sym.id == id) return c.ok && !c.mutable && (positiveLit(c.init) || negLiteral(c.init));
+        }
+        return false;
     }
 
     fn callTrapWhat(t: Tables, e: AExpr, c: AExpr, args: AExpr[]) -> string {
@@ -13005,7 +13044,7 @@ ${
             if (e.nid < 0 || seen.indexOf(e.nid) < 0) {
                 seen = seen.concat([e.nid]);
                 const w: string = trapSiteWhat(t, e);
-                if (w != "") out = out.concat([{ what: w, file: file, span: e.span }]);
+                if (w != "") out = out.concat([{ what: w, file: file, span: e.span, param: false }]);
             }
         }
         return out;
@@ -13016,28 +13055,56 @@ ${
     fn fnTrapSites(t: Tables, fs: FnSrc) -> TrapSite[] {
         let out: TrapSite[] = [];
         const hw: string = hostTrapWhat(fs.info.host);
-        if (hw != "") out = out.concat([{ what: hw, file: fs.info.file, span: fs.f.span }]);
+        if (hw != "") out = out.concat([{ what: hw, file: fs.info.file, span: fs.f.span, param: false }]);
         for (const p of fs.f.params) {
             const top: RefineTop = refineTopOf(p.ty);
-            if (top.base != "") out = out.concat([{ what: "checks its parameter `" + p.name + "` against the refinement `" + top.base + "(" + top.pred + ")` when it is called (a value outside it is the E-CONTRACT-001-RT trap, §53.4.5)", file: fs.info.file, span: p.span }]);
+            if (top.base != "") out = out.concat([{ what: "checks its parameter `" + p.name + "` against the refinement `" + top.base + "(" + top.pred + ")` when it is called (a value outside it is the E-CONTRACT-001-RT trap, §53.4.5)", file: fs.info.file, span: p.span, param: true }]);
         }
         for (const s of allStmtsIn(fs.f.body)) {
             const rw: string = refinedLocalWhat(s);
-            if (rw != "") out = out.concat([{ what: rw, file: fs.info.file, span: s.span }]);
+            if (rw != "") out = out.concat([{ what: rw, file: fs.info.file, span: s.span, param: false }]);
         }
         return out.concat(exprTrapSites(t, allExprsIn(fs.f.body), fs.info.file));
     }
 
-    // A host-backed function's trap (§19.17): "" — not host-backed, or a PURE_HOST_FILES export
-    // that cannot trap.
+    // A host-backed function's trap (§19.17): "" — not host-backed, or a stdlib host export on
+    // TRAP_FREE_HOST_EXPORTS (hostExportTrapFree). s483 r1 (#2129 review HIGH-2): PURE_HOST_FILES
+    // (pureHostFile) says a host file calls back into no page code — not that its exports cannot
+    // trap: scrml:random's `randomInt` returns NaN or 1e300 for such a bound, and the §21.3.1.1
+    // return decode of its `int` is the E-HOST-VALUE-MISMATCH-RT trap. Every export not listed
+    // fails closed.
     fn hostTrapWhat(h: HostFn | not) -> string {
         if (h is not) return "";
         if (h.bind is given) return "calls a `<host>` binding (a host that throws, or returns a value outside its declared type, is the E-HOST-THROW-RT / E-HOST-VALUE-MISMATCH-RT trap, §19.17)";
-        if (h.module != "" && pureHostFile(h.module, h.file)) {
-            if (h.module == "math" && (h.name == "floor" || h.name == "ceil" || h.name == "trunc" || h.name == "roundHalfEven" || h.name == "roundHalfUp")) return "converts a `number` to an `int` (`scrml:math`; NaN, ±∞ or a value outside ±(2^53−1) is the E-INT-CONVERSION-RT trap, §19.17)";
-            return "";
-        }
+        if (h.module != "" && hostExportTrapFree(h.module, h.file, h.name)) return "";
+        if (h.module == "math" && h.file == "host.js" && (h.name == "floor" || h.name == "ceil" || h.name == "trunc" || h.name == "roundHalfEven" || h.name == "roundHalfUp")) return "converts a `number` to an `int` (`scrml:math`; NaN, ±∞ or a value outside ±(2^53−1) is the E-INT-CONVERSION-RT trap, §19.17)";
+        if (h.module != "") return "calls `" + h.name + "`, a host-backed function of `scrml:" + h.module + "` (§21.3.1.1; a host value outside its declared type is the E-HOST-VALUE-MISMATCH-RT trap and a host throw the E-HOST-THROW-RT trap, §19.17 — it is not on the compiler's list of stdlib host exports proven not to trap)";
         return "calls a host-backed function (§21.3.1; a host value outside its declared type is the E-HOST-VALUE-MISMATCH-RT trap, §19.17)";
+    }
+
+    // s483 r1 (#2129 review HIGH-2) — TRAP_FREE_HOST_EXPORTS: the stdlib host exports whose JS
+    // provably neither throws nor returns a value outside the wrapper's declared type, so the
+    // §21.3.1.1 return decode (slice-m1 runtime hostResult: an `int` integral within ±(2^53−1),
+    // a `number` any JS number — NaN and ±∞ included —, a `bool` a boolean, `T | not` also
+    // `null`) cannot trap. Each entry was read in its file's JS, as PURE_HOST_FILES' entries are:
+    //   - `math/host.js` `abs` / `min` / `max` (-> number): `Math.abs` / `Math.min` / `Math.max`
+    //     of numbers is a JS number (NaN for a NaN argument — still a `number`);
+    //   - `math/host.js` `isNaN` (-> bool): `Number.isNaN` is a boolean;
+    //   - `math/host.js` `parseInt` (-> int | not): `null`, or an integer it built digit by digit
+    //     and returned `null` for past 2^53−1 — never NaN, never fractional;
+    //   - `math/host.js` `parseFloat` / `toNumber` (-> number | not): `parseNumber` is `null` or a
+    //     finite number;
+    //   - `random/host.js` `random` (-> number): `Math.random()` is a number in [0, 1).
+    // NOT listed (each is a trap site): `math/host.js` `floor` / `ceil` / `trunc` /
+    // `roundHalfUp` / `roundHalfEven` (intOf throws E-INT-CONVERSION-RT); `random/host.js`
+    // `randomInt` (`Math.ceil` / `Math.floor` of a NaN or huge bound make a NaN or a value outside
+    // ±(2^53−1): its `int` decode is E-HOST-VALUE-MISMATCH-RT, probe m46c); every export of
+    // every other host file. A new entry needs the same reading of its JS.
+    fn hostExportTrapFree(module: string, file: string, name: string) -> boolean {
+        if (file != "host.js") return false;
+        if (module == "math") return name == "abs" || name == "min" || name == "max" || name == "isNaN" || name == "parseInt" || name == "parseFloat" || name == "toNumber";
+        if (module == "random") return name == "random";
+        return false;
     }
 
     // The trap sites of a value (a field's initializer, a formula).
@@ -13055,7 +13122,7 @@ ${
             let ts: TrapSite[] = [];
             if (c.kind == CallableK.KFn) {
                 const fsrc: FnSrc | not = fnSrcOfSym(g, c.f.sym);
-                if (fsrc is given) ts = fnTrapSites(t, fsrc);
+                if (fsrc is given && !trapFreeStdlibFn(fsrc.info.file, fsrc.info.name)) ts = fnTrapSites(t, fsrc);
             } else {
                 for (const ds of g.decls) {
                     for (const fi of ds.info.fields) {
@@ -13070,12 +13137,78 @@ ${
         return out;
     }
 
+    // s483 r1 (#2129 review LOW-2, o16) — TRAP_FREE_STDLIB_FNS: the stdlib functions (scrml source,
+    // not host exports — those are TRAP_FREE_HOST_EXPORTS) documented to return `not` where they
+    // could fail, and whose bodies were read to hold no trap a call can reach. The walk counts a
+    // guarded site as a site (fail closed), so each is listed, with its reason:
+    //   - `scrml:math` `minOf` / `maxOf` (§41.18, "`not` for an empty tape"): `xs[0]` is read only
+    //     after `if (xs.length == 0) return not;`; the loop reads by `for … of`; `min` / `max` are
+    //     TRAP_FREE_HOST_EXPORTS.
+    // A function on this list is trap-free as a whole: its own sites and its callees' are not
+    // counted. A new entry needs the same reading of its body.
+    fn trapFreeStdlibFn(file: string, name: string) -> boolean {
+        if (file == "scrml:math/index.scrml") return name == "minOf" || name == "maxOf";
+        return false;
+    }
+
+    // s483 r1 (#2129 review LOW-2, o09) — the call `r` names in the initializer `init` (the `Call`
+    // at `r`'s span), when every argument handed to a refined parameter
+    // of function `fs` is a literal its static zone passes (refineLitVerdict "pass"): that call's
+    // parameter checks cannot trap. `false` — not such a call (a function value handed on, an
+    // argument that is not a passing literal, a call not found).
+    fn literalCallPasses(init: AExpr, r: FnRef, fs: FnSrc) -> boolean {
+        if (r.asValue) return false;
+        for (const e of allExprsOf(init)) {
+            const args: AExpr[] | not = callArgsAt(e, r.span);
+            if (args is given) {
+                if (args.length != fs.f.params.length) return false;
+                let i: int = 0;
+                for (const p of fs.f.params) {
+                    const top: RefineTop = refineTopOf(p.ty);
+                    if (top.base != "" && refineLitVerdict(top.base, top.pred, args[i]) != "pass") return false;
+                    i = i + 1;
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // The arguments of `e` when it is the call at `sp` (a FnRef's span is its call's, scanCall), else not.
+    fn callArgsAt(e: AExpr, sp: ASpan) -> AExpr[] | not {
+        if (e.span.start != sp.start || e.span.end != sp.end) return not;
+        const k: AExprK = e.k;
+        return match k {
+            .Call(callee: c, args: a) :> a,
+            // no-default-arm: only a call has arguments
+            _ :> not
+        };
+    }
+
+    // Does callable `j` reach itself again through a callee (a cycle — its parameters may then be
+    // checked with an argument of its own body's making)? `reach`: each callable's closed `n:<i>` atoms.
+    fn reachesSelf(reach: FxAtom[][], fnE: int[][], j: int) -> boolean {
+        for (const k of fnE[j]) {
+            for (const a of reach[k]) { if (a.key == "n:" + j) return true; }
+        }
+        return false;
+    }
+
     // s483 r1 (#2129 review HIGH-1) — the pass, run over the TYPED tables (analyzeProgram, after
     // typeProgram): the reference edges of every callable (fileScopePass's `fnE`), then the judgment.
     fn constructTrapPass(g: Globals, t: Tables, sum: Summary) -> Diag[] {
         const six: SymIx = nodeSymIx(sum.nodes);
         let fnE: int[][] = [];
-        for (const c of sum.nodes) { fnE = fnE.concat([refTargets(sum.nodes, six, c.f.scan.refs, false)]); }
+        for (const c of sum.nodes) {
+            // a TRAP_FREE_STDLIB_FNS function's whole call (its callees included) is proven not to trap
+            let free = false;
+            if (c.kind == CallableK.KFn) {
+                const fsrc: FnSrc | not = fnSrcOfSym(g, c.f.sym);
+                if (fsrc is given) free = trapFreeStdlibFn(fsrc.info.file, fsrc.info.name);
+            }
+            if (free) fnE = fnE.concat([[]]);
+            else fnE = fnE.concat([refTargets(sum.nodes, six, c.f.scan.refs, false)]);
+        }
         return constructTrapDiags(g, t, sum, fnE);
     }
 
@@ -13100,6 +13233,13 @@ ${
         }
         const traps: FxAtom[][] = closeDim(own, fnE);
         const six: SymIx = nodeSymIx(sum.nodes);
+        let ownN: FxAtom[][] = [];
+        let ni: int = 0;
+        for (const nn of sum.nodes) {
+            ownN = ownN.concat([[ownAtom("n:" + ni, ni, 0)]]);
+            ni = ni + 1;
+        }
+        const reach: FxAtom[][] = closeDim(ownN, fnE);
         let out: Diag[] = [];
         for (const ci of cis) {
             const c: AConst = ci.c;
@@ -13110,7 +13250,19 @@ ${
                 for (const r of scanExpr({ t: t, file: ci.file }, c.init, emptyScan()).refs) {
                     const j: int = ixGet(six, r.sym);
                     if (how == "" && j >= 0) {
-                        const a: FxAtom | not = witnessOf(traps[j]);
+                        // a direct call whose refined parameters all get a passing literal: the
+                        // callee's own parameter checks are not traps at this call (unless it
+                        // calls itself back, where its own arguments are checked too)
+                        let cand: FxAtom[] = traps[j];
+                        const jf: FnSrc | not = fnSrcOfSym(g, sum.nodes[j].f.sym);
+                        if (sum.nodes[j].kind == CallableK.KFn && jf is given && literalCallPasses(c.init, r, jf) && !reachesSelf(reach, fnE, j)) {
+                            let kept: FxAtom[] = [];
+                            for (const x of cand) {
+                                if (!(x.root == j && sites[x.root][x.pos].param)) kept = kept.concat([x]);
+                            }
+                            cand = kept;
+                        }
+                        const a: FxAtom | not = witnessOf(cand);
                         if (a is given) {
                             const s: TrapSite = sites[a.root][a.pos];
                             const labels: string[] = fxChain(sum, traps, j, a);

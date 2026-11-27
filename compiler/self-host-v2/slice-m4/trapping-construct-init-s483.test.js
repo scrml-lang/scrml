@@ -85,10 +85,18 @@ describe("refused: an initializer inside a construct that can trap (E-FILE-SCOPE
       expect(d[0].message).toContain("E-INT-CONVERSION-RT");
     }, 120000);
 
-    test(`division by a binding — in ${label}`, async () => {
-      const d = await errors(wrap("const c: number = 1.0 / y;"));
+    test(`a remainder by a computed int, 7 % items.length — in ${label}`, async () => {
+      const d = await errors(wrap("const c: int = 7 % items.length;"));
       expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
-      expect(d[0].message).toContain("divides by `y`");
+      expect(d[0].message).toContain("divides by `items.length` (`%`)");
+      expect(d[0].message).toContain("g-bootstrap-int-overflow-and-mod-zero-untrapped-s469");
+    }, 120000);
+
+    test(`r1: an unproven tape bound, const c: int[1..=2] = items — in ${label} (#2129 review HIGH-1)`, async () => {
+      const d = await errors(wrap("const c: int[1..=2] = items;"));
+      expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+      expect(d[0].message).toContain("E-WRITE-INVARIANT-RT");
+      expect(d[0].message).toContain(where);
     }, 120000);
 
     test(`a call of a function that indexes — in ${label}`, async () => {
@@ -103,18 +111,20 @@ describe("refused: an initializer inside a construct that can trap (E-FILE-SCOPE
       expect(d.map((x) => x.code)).toEqual(["E-TYPE-046"]);
     }, 120000);
 
-    test(`accepted: a literal, pure arithmetic, division by a non-zero literal, items.at(0) — in ${label}`, async () => {
-      for (const ini of ["const a: int = 5;", "const b: int = n + 2 * n - 1;", "const c: number = x / 2.0;", "const first: int | not = items.at(0);"]) {
+    test(`accepted: a literal, pure arithmetic, division by a non-zero literal, items.at(0), \`/\` by a number binding — in ${label}`, async () => {
+      // r1 (ruling:user-voice-scrml.md-S483-q8-division): `/` on a `number` divisor gives ±∞ / NaN, no trap
+      for (const ini of ["const a: int = 5;", "const b: int = n + 2 * n - 1;", "const c: number = x / 2.0;", "const first: int | not = items.at(0);", "const q: number = 1.0 / y;", "const r: number = y / n;"]) {
         const d = await errors(wrap(ini));
         expect(d.map((x) => x.code)).toEqual([]);
       }
     }, 120000);
   }
 
-  test("modulo by a binding", async () => {
-    const d = await errors(inIf("const c: int = 7 % n;"));
+  test("modulo by a binding not proven non-zero (n - 2)", async () => {
+    const d = await errors(inIf("const c: int = 7 % (n - 2);"));
     expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
-    expect(d[0].message).toContain("divides by `n` (`%`)");
+    expect(d[0].message).toContain("(`%`), which is not proven non-zero");
+    expect(d[0].message).toContain("ruling:user-voice-scrml.md-S483-q8-division");
   }, 120000);
 
   test("an `else` member", async () => {
@@ -165,5 +175,114 @@ describe("unchanged: outside a construct, and the capable forms", () => {
   test("a non-trapping initializer inside the construct still runs (items.at(0))", async () => {
     const t = await texts(inIf("const first: int | not = items.at(0);"), ["a", "z"]);
     expect(t).toEqual(["<none>", "end"]);
+  }, 120000);
+});
+
+// r1 (#2129 review) — the fix round.
+function inIfPre(pre, ini) {
+  return `<program>\n${HEAD}${pre}\n<p id="a" if=(n > 5)>\${ ${ini} }in</p>\n<p id="z">end</p>\n</program>\n`;
+}
+
+describe("r1 HIGH-1: an unproven tape bound is judged over the typed tables (E-WRITE-INVARIANT-RT)", () => {
+  const SHAPES = [
+    ["a const", "", "const c: int[1..=2] = items;"],
+    ["a let", "", "let c: int[1..=2] = items;"],
+    ["a function's bounded return", "${ function mk(xs: int[]) -> int[1..=2] { return xs; } }", "const c: int[1..=2] = mk(items);"],
+    ["a function's bounded parameter", "${ function len2(xs: int[1..=2]) -> int { return xs.length; } }", "const c: int = len2(items);"],
+    ["a struct field's bound", "${ type Two:struct = { xs: int[1..=2] } }", "const c: Two = { xs: items };"],
+  ];
+  for (const [label, pre, ini] of SHAPES) {
+    test(`refused: ${label}`, async () => {
+      const d = await errors(inIfPre(pre, ini));
+      expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+      expect(d[0].message).toContain("E-WRITE-INVARIANT-RT");
+    }, 120000);
+  }
+  test("accepted: a literal tape the typer proves inside the bound", async () => {
+    const d = await errors(inIf("const c: int[1..=2] = [1, 2];"));
+    expect(d.map((x) => x.code)).toEqual([]);
+  }, 120000);
+});
+
+describe("r1 HIGH-2: a stdlib host export is a trap site unless it is listed as trap-free", () => {
+  test("refused: scrml:random randomInt (its int decode is E-HOST-VALUE-MISMATCH-RT)", async () => {
+    const d = await errors(inIfPre('${ import { randomInt } from "scrml:random"; }', "const r: int = randomInt(1, 6);"));
+    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(d[0].message).toContain("`randomInt`, a host-backed function of `scrml:random`");
+    expect(d[0].message).toContain("E-HOST-VALUE-MISMATCH-RT");
+  }, 120000);
+  test("accepted: the listed exports — random, min, max, abs, isNaN, parseInt, parseFloat, toNumber", async () => {
+    const cases = [
+      ['${ import { random } from "scrml:random"; }', "const r: number = random();"],
+      ['${ import { min, max, abs } from "scrml:math"; }', "const r: number = abs(min(y, max(y, 1.0)));"],
+      ['${ import { isNaN } from "scrml:math"; }', "const r: bool = isNaN(y);"],
+      ['${ import { parseInt, parseFloat, toNumber } from "scrml:math"; }', 'const r: int | not = parseInt("12", 10);'],
+      ['${ import { parseFloat } from "scrml:math"; }', 'const r: number | not = parseFloat("1.5");'],
+      ['${ import { toNumber } from "scrml:math"; }', 'const r: number | not = toNumber("1.5");'],
+    ];
+    for (const [pre, ini] of cases) {
+      const d = await errors(inIfPre(pre, ini));
+      expect([ini, d.map((x) => x.code)]).toEqual([ini, []]);
+    }
+  }, 240000);
+});
+
+describe("r1 MED-1: <textarea> / <title> content (§7.6 R3: an element whose content holds no place)", () => {
+  for (const tag of ["textarea", "title"]) {
+    test(`refused: an index read in <${tag}>`, async () => {
+      const d = await errors(`<program>\n${HEAD}<${tag}>\${ const f: int = items[0]; }\${f}</${tag}>\n<p id="z">end</p>\n</program>\n`);
+      expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+      expect(d[0].message).toContain("written inside `<" + tag + ">`");
+    }, 120000);
+    test(`accepted: a non-trapping initializer in <${tag}>`, async () => {
+      const d = await errors(`<program>\n${HEAD}<${tag}>\${ const s: string = "hi"; }\${s}</${tag}>\n<p id="z">end</p>\n</program>\n`);
+      expect(d.map((x) => x.code)).toEqual([]);
+    }, 120000);
+  }
+  test("refused: a foreign block in <textarea> (the acting half)", async () => {
+    const d = await errors(`<program>\n${HEAD}<textarea>\${ const r: int = _={ 1 }=; }\${r}</textarea>\n<p id="z">end</p>\n</program>\n`);
+    const c = d.find((x) => x.code === "E-FILE-SCOPE-INIT-IN-CONSTRUCT");
+    expect(c?.message).toContain("runs a foreign `_={ }=` block");
+    expect(c?.message).toContain("`<textarea>`");
+  }, 120000);
+});
+
+describe("r1 LOW-2: decidable cases are decided", () => {
+  test("accepted: scrml:math minOf / maxOf (documented `not` on an empty tape; TRAP_FREE_STDLIB_FNS)", async () => {
+    for (const fn of ["minOf", "maxOf"]) {
+      const d = await errors(inIfPre(`\${ import { ${fn} } from "scrml:math"; }\n\${ const xs: number[] = []; }`, `const c: number | not = ${fn}(xs);`));
+      expect([fn, d.map((x) => x.code)]).toEqual([fn, []]);
+    }
+  }, 240000);
+  test("accepted: % by a const whose initializer is a non-zero literal (a refined one too)", async () => {
+    for (const pre of ["${ const d: int = 3; }", "${ const d: int(>0) = 3; }"]) {
+      const d = await errors(inIfPre(pre, "const c: int = 7 % d;"));
+      expect([pre, d.map((x) => x.code)]).toEqual([pre, []]);
+    }
+  }, 240000);
+  test("refused: % by a const 0, and by a let (it can be written)", async () => {
+    for (const pre of ["${ const d: int = 0; }", "${ let d: int = 3; }"]) {
+      const d = await errors(inIfPre(pre, "const c: int = 7 % d;"));
+      expect([pre, d.map((x) => x.code)]).toEqual([pre, ["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]]);
+    }
+  }, 240000);
+  const POS = "${ function pos(p: int(>0)) -> int { return p; } }";
+  test("accepted: a call whose refined parameter gets a literal its static zone passes, pos(3)", async () => {
+    const d = await errors(inIfPre(POS, "const c: int = pos(3);"));
+    expect(d.map((x) => x.code)).toEqual([]);
+  }, 120000);
+  test("refused: the same call with a binding, pos(n)", async () => {
+    const d = await errors(inIfPre(POS, "const c: int = pos(n);"));
+    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(d[0].message).toContain("checks its parameter `p` against the refinement `int(>0)`");
+  }, 120000);
+  test("refused: a literal call of a function that calls itself back (its own arguments are checked too)", async () => {
+    const d = await errors(inIfPre("${ function pos(p: int(>0)) -> int { if (p > 5) { return pos(p - 1); } return p; } }", "const c: int = pos(9);"));
+    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+  }, 120000);
+  test("refused: a literal call of a function whose body traps — the body's site is named", async () => {
+    const d = await errors(inIfPre("${ function pos(p: int(>0)) -> int { return items[p]; } }", "const c: int = pos(3);"));
+    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(d[0].message).toContain("reads `items[p]` by position");
   }, 120000);
 });

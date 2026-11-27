@@ -28,3 +28,19 @@ Gap: g-boot-trapping-construct-init-s482 (INTERIM; PERMANENT = branch-scoped dec
   bootstrap-conformance --json base vs head: CRASH 0, the only verdict / emitted-code diffs are the 3 new cases
   (FAIL → PASS); host-global-scan --check both mode shards exit 0 (no unpinned thrower; new cases do not throw);
   types-gate --check OK; s34-census --check-new PASS; retired-forms-lint ✓; Chromium test 5 pass.
+
+## Fix round r1 (#2129 review, verdict FIX) — branch s483-tci-r1 → pushed to origin s483-trapping-construct-init
+
+- Tip verified e366b44af (unmoved). Merged origin/main (b5f071c46) → 14c96f5a4. Reviewer probe set (104 probes +
+  extras) on r0 vs merged: byte-identical outputs. PR #2128 not on main (open) — E-WRITE-INVARIANT-RT construction
+  sites noted in the PR body instead.
+- HIGH-1 reproduced (m40* exit 0, Chromium blank E-WRITE-INVARIANT-RT). Fix: constructTrapPass runs after
+  typeProgram over the typed tables (withTyping). Commit 4f9931d01.
+- HIGH-2 reproduced (m46c exit 0, blank, E-HOST-VALUE-MISMATCH-RT). Fix: hostExportTrapFree — an explicit
+  TRAP_FREE_HOST_EXPORTS list, each with its reason; randomInt and every unlisted export fail closed.
+- MED-1: constructInits also judges the elements the HTML parser reads as text (textHostAt over placeHostAt —
+  the same no-place judgment valueLetDiags uses); m05b / m05c / n07 refused.
+- LOW-1 (ruling S483-q8-division): `/` never a trap site; `%` by a divisor not proven non-zero stays refused, the
+  message names the owed trap gap g-bootstrap-int-overflow-and-mod-zero-untrapped-s469.
+- LOW-2: nonZeroConst (o05 / o06), TRAP_FREE_STDLIB_FNS minOf / maxOf (o16), a literal call passing its refined
+  parameters' static zone (o09; a self-reaching callee stays fail-closed). o01 / o02 left fail-closed (gap).
