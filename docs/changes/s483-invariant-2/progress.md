@@ -182,3 +182,16 @@ impl#1 frozen (§66 Nominal there, §34.0).
   "missing" (4 FAIL: server-only-const-neg, server-const-via-call-neg + the 2 new). scripts/bootstrap-conformance.ts
   now adds the printer's NON-bootstrap refusal codes to the code half when the front end reported no error (as
   `scrml-boot compile` reports them; E-BOOTSTRAP-* refusals stay where they were judged). invariant/: 30 PASS.
+- committed 547a407df (harness), b998f7e67 (3 host-global-scan pins).
+- PHASE 3 (base = origin/main 22a6a42a9, r1 = ff62b9319, r2 = b998f7e67): 168 probes (r0's 81 + the r1 re-review's
+  pr1 / pr1rt / fix3 / fix4 / fix5 / fixrt / m2130 + 4 r2 probes) compiled on all three — client-file `zz-` leaks:
+  base 0 / r1 8 (n01 n02 n02b n51 n60 m01 m02 p01) / r2 0. #2130's leak table (87): base = r2, 35 / 35, 0 diff.
+  Server-load (import program.server.js + createServer): 72 / 72 OK on base and r2 (h2130), 18 / 18 r2 probes.
+  Values (Chromium, 91 runtime probes): r1 → r2 differ only on n21 ×2 (default restored, cross-tab refused), n29
+  (trap ×2), n27 (rows trap), n42 ×2 (E-WRITE-INVARIANT); 85 identical.
+- GATES: bootstrap-conformance head PASS 889 / FAIL 3 / NOT-TWINNED 628 / UNSUPPORTED 491 / CRASH 0 / INVALID 0
+  (base 872 / 3 / 628 / 491 / 0 / 0), 0 diffs on 1994 shared, 17 head-only all PASS; impl#1 1788 pass + 223 xfail /
+  2011, 0 FAIL; corpus compileFile 2998 shared: 0 newly rejected / accepted, 0 code changes, 0 crashes, 1 byte diff
+  (invariant/accepted); corpus Chromium load (328): identical base / head (319 clean, 9 CLI non-zero both);
+  host-global-scan 1/2, 2/2 exit 0 (after pinning 3); Chromium 16 s482/s483 files 113 / 0; types-gate OK;
+  s34-census PASS (8 rows); retired-forms OK; spec-coverage 0 violations. runtime.js 431346 → 431686 (+340).
