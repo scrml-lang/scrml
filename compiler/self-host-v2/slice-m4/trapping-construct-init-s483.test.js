@@ -123,7 +123,7 @@ describe("refused: an initializer inside a construct that can trap (E-FILE-SCOPE
   test("modulo by a binding not proven non-zero (n - 2)", async () => {
     const d = await errors(inIf("const c: int = 7 % (n - 2);"));
     expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
-    expect(d[0].message).toContain("(`%`), which is not proven non-zero");
+    expect(d[0].message).toContain("(`%`), which is not proven a non-zero value nor a `number`");
     expect(d[0].message).toContain("ruling:user-voice-scrml.md-S483-q8-division");
   }, 120000);
 
@@ -317,5 +317,98 @@ describe("r1 LOW-3: an unread body-top initializer that can trap is kept and run
       try { await runBootstrapArtifact(res.client.html, res.client.js, [], {}, [], undefined); } catch (e) { msg = String(e?.message ?? e); }
       expect([ini, msg.includes("E-INDEX-OUT-OF-RANGE-RT")]).toEqual([ini, true]);
     }
+  }, 120000);
+});
+
+// q8-fu (#2129 r1 review MED-1): a LITERAL `repeat` count or `padStart` / `padEnd` width can trap too — the
+// runtime refuses a result longer than the longest string (runtime.js MAX_TEXT_UNITS = 2^29 − 24 UTF-16 units,
+// requireFits: E-INDEX-OUT-OF-RANGE-RT). Before, both halves exempted every literal: `s.repeat(600000000)` in an
+// untaken `if=` blanked the page, and unread at the body top the printer dropped it (it did not run at its place,
+// against ruling:user-voice-scrml.md-S483-unread-trapping-init-runs). A literal is trap-free only when the
+// result's length is provable: repeat — a count of 0 / 1, or a literal receiver with 2·len·count ≤ MAX; pad —
+// 2·width ≤ MAX, or the default fill on a literal receiver with 2·len + width ≤ MAX.
+describe("q8-fu MED-1: a literal repeat count / pad width whose result may pass the longest string", () => {
+  const PRE = `<program>\n${HEAD}\${ const s: string = "ab"; }\n\${ let w: string = "xy"; }\n`;
+  const inIfS = (ini) => `${PRE}<p id="a" if=(n > 5)>\${ ${ini} }\${c}</p>\n<p id="z">end</p>\n</program>\n`;
+  for (const ini of [
+    "const c: string = s.repeat(600000000);",            // #2129 r1 probe t01
+    "const c: string = s.padStart(600000000);",          // t02
+    "const c: string = w.padEnd(600000000, \"-\");",
+    "const c: string = w.repeat(2);",                    // receiver length not known: fail closed (big.repeat(2))
+    "const c: string = \"ab\".repeat(134217723);",       // 2·2·134217723 > MAX
+    "const c: string = w.padEnd(268435445);",            // 2·268435445 > MAX, receiver not a literal
+    "const c: string = \"ab\".padEnd(536870885);",       // 2·2 + 536870885 > MAX
+    "const c: string = \"ab\".padEnd(300000000, \"-\");", // a fill given: only 2·width counts
+  ]) {
+    test(`refused: ${ini}`, async () => {
+      const d = await errors(inIfS(ini));
+      expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+      expect(d[0].message).toContain("whose result is not proven to fit the longest string (536870888 UTF-16 units");
+      expect(d[0].message).toContain("E-INDEX-OUT-OF-RANGE-RT");
+    }, 120000);
+  }
+  test("refused: the same through a function (#2129 r1 probe t06)", async () => {
+    const d = await errors(`${PRE}\${ function rep() -> string { return s.repeat(600000000); } }\n<p id="a" if=(n > 5)>\${ const c: string = rep(); }\${c}</p>\n</program>\n`);
+    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(d[0].message).toContain("with the count `600000000`");
+  }, 120000);
+  test("accepted: a result the compiler proves fits", async () => {
+    for (const ini of [
+      "const c: string = \"ab\".repeat(3);",
+      "const c: string = s.repeat(3);",                  // a never-written const holding a literal
+      "const c: string = \"ab\".repeat(134217722);",     // 2·2·134217722 = MAX
+      "const c: string = w.repeat(1);",
+      "const c: string = w.repeat(0);",
+      "const c: string = w.padStart(10, \"-\");",
+      "const c: string = w.padEnd(268435444);",          // 2·268435444 = MAX
+      "const c: string = \"ab\".padEnd(536870884);",     // 2·2 + 536870884 = MAX
+    ]) {
+      const d = await errors(inIfS(ini));
+      expect([ini, d.map((x) => x.code)]).toEqual([ini, []]);
+    }
+  }, 120000);
+  test("runs: an accepted literal repeat inside an untaken if= does not trap", async () => {
+    expect(await texts(inIfS("const c: string = s.repeat(3);"), ["a", "z"])).toEqual(["<none>", "end"]);
+  }, 120000);
+
+  // the printer half (print.scrml primTraps / textFitsCore): an unread body-top initializer that can trap is
+  // kept and runs at its place (§7.6 R1; #2129 r1 probes t03 / t04 — it had been dropped)
+  const UNREAD = (ini) => `${PRE}\${ ${ini} }\n<p id="z">end</p>\n</program>\n`;
+  for (const ini of ["const t: string = s.repeat(600000000);", "const t: string = s.padEnd(600000000);", "const t: string = w.repeat(2);"]) {
+    test(`kept, unread: ${ini}`, async () => {
+      const res = await result(UNREAD(ini));
+      expect(res.ok).toBe(true);
+      expect(res.client.js).toMatch(/strRepeat|strPadEnd/);
+    }, 120000);
+  }
+  test("left out, unread: a literal repeat on a literal receiver that fits", async () => {
+    const res = await result(UNREAD("const t: string = \"ab\".repeat(3);"));
+    expect(res.ok).toBe(true);
+    expect(res.client.js).not.toContain("strRepeat");
+  }, 120000);
+  test("runs: the unread huge repeat traps at its place (E-INDEX-OUT-OF-RANGE-RT)", async () => {
+    const res = await result(UNREAD("const t: string = s.repeat(600000000);"));
+    let msg = "";
+    try { await runBootstrapArtifact(res.client.html, res.client.js, [], {}, [], undefined); } catch (e) { msg = String(e?.message ?? e); }
+    expect(msg).toContain("E-INDEX-OUT-OF-RANGE-RT");
+  }, 120000);
+});
+
+// q8-fu (#2129 r1 review LOW-1; ruling:user-voice-scrml.md-S483-q8-division — governing clause "refuse only what
+// can actually trap"; its refusal is "`%` … by a possibly-zero int"): a `%` whose divisor the typer proved a
+// `number` gives NaN by 0 and owes no trap — accepted, as `/` is. A divisor proven `int` stays refused, and the
+// message names the int trap only for it.
+describe("q8-fu LOW-1: `%` by a number divisor is not a trap site", () => {
+  test("accepted: 7.0 % y, n % y, x % (y + 1.0) (y, x: number)", async () => {
+    for (const ini of ["const c: number = 7.0 % y;", "const c: number = n % y;", "const c: number = x % (y + 1.0);"]) {
+      const d = await errors(inIf(ini));
+      expect([ini, d.map((x) => x.code)]).toEqual([ini, []]);
+    }
+  }, 120000);
+  test("refused: a `number` dividend by an `int` divisor (the ruling's \"by a possibly-zero int\")", async () => {
+    const d = await errors(inIf("const c: number = 7.0 % (n - 2);"));
+    expect(d.map((x) => x.code)).toEqual(["E-FILE-SCOPE-INIT-IN-CONSTRUCT"]);
+    expect(d[0].message).toContain("by an `int` has no `int` value");
+    expect(d[0].message).toContain("refuse only what can actually trap");
   }, 120000);
 });
