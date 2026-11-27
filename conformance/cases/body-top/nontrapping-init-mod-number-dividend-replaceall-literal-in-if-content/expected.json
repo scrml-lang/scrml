@@ -1,0 +1,23 @@
+{
+  "id": "body-top-nontrapping-init-mod-number-dividend-replaceall-literal-in-if-content",
+  "description": "§7.6 rule (b) (S483 q8-fu2) — initializers inside `if=` content that cannot trap stay legal and run: a `%` with a `number` dividend by an `int` divisor (`7.0 % n0` — a `number`, NaN) and a `replaceAll` on literals that fit (`\"abc\".replaceAll(\"b\", \"xyz\")`).",
+  "language-version": "1.0",
+  "spec": "§7.6 rule (b) (S483), §7.6 R3, §19.17, §34",
+  "source-test": "compiler/self-host-v2/slice-m4/trapping-construct-init-s483.test.js",
+  "rationale": "ruling:user-voice-scrml.md-S483-q8-division, governing clause: \"inside a construct refuse only what can actually trap\" — `%` lowers to the host `%`, and a `number` operand makes the result a `number` (NaN by 0); the trap owed by gap g-bootstrap-int-overflow-and-mod-zero-untrapped-s469 is on an `int` result only (#2133 review item 3; prov=pa-ruled:S483-mixed-mod-no-trap). A `replaceAll` whose receiver and replacement are literals with a provably fitting result cannot trap (#2133 review MED-1).",
+  "expect": {
+    "notCodes": [
+      "E-FILE-SCOPE-INIT-IN-CONSTRUCT"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#a",
+        "text": "NaN axyzc"
+      },
+      {
+        "selector": "#z",
+        "text": "end"
+      }
+    ]
+  }
+}

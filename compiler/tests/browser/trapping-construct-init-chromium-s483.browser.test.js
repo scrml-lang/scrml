@@ -195,3 +195,29 @@ describe("q8-fu: a literal repeat / pad that can pass the longest string; `%` by
     expect(await load(out, ["a", "b", "z"])).toEqual({ errors: [], texts: ["<none>", "ababab", "end"] });
   }, 120000);
 });
+
+// q8-fu2 (#2133 review MED-1 / item 3) — in Chromium. `w.replaceAll("", r)` with a 1000-unit receiver and a
+// 600000-unit replacement would be (1000 + 1)·600000 + 1000 units, past the longest string: the runtime's
+// requireFits traps before any text is built (the review's r01 / r03 shape, without a 2^28-unit receiver).
+describe("q8-fu2: replaceAll that can pass the longest string; `%` of a number by an int", () => {
+  const PRE = `<program>\n\${ const n: int = 2; }\n\${ const n0: int = 0; }\n\${ const w: string = "x".repeat(1000); }\n\${ const r: string = "y".repeat(600000); }\n`;
+  test("MED-1: w.replaceAll(\"\", r) in an untaken if= — refused, exit 1 (base: compiled, page blank)", () => {
+    const c = compile(`${PRE}<p id="a" if=(n > 5)>\${ const c: string = w.replaceAll("", r); }\${c}</p>\n<p id="z">end</p>\n</program>\n`);
+    expect(c.exitCode).toBe(1);
+    expect(c.text).toContain("E-FILE-SCOPE-INIT-IN-CONSTRUCT");
+    expect(c.text).toContain("w.replaceAll(…)`, whose result is not proven to fit the longest string");
+  }, 120000);
+
+  test("MED-1 (ruling S483-unread-trapping-init-runs): the unread body-top w.replaceAll(\"\", r) runs at its place and traps (base: dropped, the page mounted)", async () => {
+    if (skip()) return;
+    const out = build(`${PRE}\${ const t: string = w.replaceAll("", r); }\n<p id="z">end</p>\n</program>\n`);
+    const res = await load(out, ["z"]);
+    expect(res.errors.some((e) => e.includes("E-INDEX-OUT-OF-RANGE-RT"))).toBe(true);
+  }, 120000);
+
+  test("item 3: `7.0 % n0` (a number, NaN) and a literal replaceAll that fits — compile and run inside an if=", async () => {
+    if (skip()) return;
+    const out = build(`${PRE}<p id="a" if=(n0 == 0)>\${ const m: number = 7.0 % n0; }\${ const q: string = "abc".replaceAll("b", "xyz"); }\${m} \${q}</p>\n<p id="z">end</p>\n</program>\n`);
+    expect(await load(out, ["a", "z"])).toEqual({ errors: [], texts: ["NaN axyzc", "end"] });
+  }, 120000);
+});

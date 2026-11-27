@@ -1,0 +1,7 @@
+// §7.6 rule (b) (S483 q8-fu2, #2133 review MED-1) — `replaceAll` checks its result against the longest string (2^29 − 24 UTF-16 units; past it is E-INDEX-OUT-OF-RANGE-RT, §19.17); a receiver whose length is not known can pass it, and the initializer runs before the `if=` test — E-FILE-SCOPE-INIT-IN-CONSTRUCT.
+<program>
+${ const n: int = 2; }
+${ let w: string = "xy"; }
+<p id="a" if=(n > 5)>${ const c: string = w.replaceAll("x", w); }${c}</p>
+<p id="z">end</p>
+</program>
