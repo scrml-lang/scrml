@@ -128,6 +128,17 @@ describe("a dropped value that reaches nothing server-only still runs for its tr
     expect(await outcome(k04)).toBe("alive");
     expect(await outcome(PROG(`<card t:string="x"/> renders <b>x</b>\n<card t=("p" + XS[5])/>`))).toBe("E-INDEX-OUT-OF-RANGE-RT");
   }, 600000);
+
+  test("a value that cannot trap (no call, no host call, no primitive that can trap — print.scrml initActs / primTraps) stays dropped: the output is as before", async () => {
+    const s = PROG(`\${ const B: string = "b"; }\n<card t:string="x"/> renders <b>x</b>\n<card t=(B + "x")/>\n<card t=(API_KEY)/>`);
+    const b = await build(s);
+    expect(b.ok).toBe(true);
+    expect(leaked(b.client)).toEqual([]);
+    // neither use site passes a value
+    expect(b.js.match(/mk_card_\w+\(rt\.instance\(decl_card_\w+, inst\$\.scope\)\)/g)?.length).toBe(2);
+    expect(b.js).not.toContain("givenSeed");
+    expect(await outcome(s)).toBe("alive");
+  }, 300000);
 });
 
 describe("#2130 review LOW-1 — a refused cell whose only reader is a dropped use-site value says so", () => {

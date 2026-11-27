@@ -8150,11 +8150,11 @@ ${
     // use site's value at the instance's mount; a kept default at the mount of each instance that gives
     // the field none), and nothing reads the field it fills, so its result is discarded. The others
     // are dropped as before (their trap is lost: they cannot run in the client — §7.6 rule (b)).
-    // A bare literal is never kept: it cannot trap, and running it shows nothing. Any other value that
-    // reaches nothing server-only is kept, as the ruling words it ("still evaluated for its trap"),
-    // whether or not it can trap: the printer holds no §19.17 trap-site facts (that analysis is
-    // analyze's, on the source tree), and a kept value that cannot trap runs with no observable
-    // effect. The trap of a value that reaches server-only code is lost — PERMANENT, ruled
+    // Only a value that CAN trap is judged and kept: one that acts (initActs — a call, a host call, or,
+    // since #2129 r1, a primitive that can trap, primTraps: the Core form of analyze.scrml
+    // trapSiteWhat's own sites; ruling:user-voice-scrml.md-S483-unread-trapping-init-runs). One that
+    // does not act cannot trap, and running it shows nothing, so it stays dropped (no byte change).
+    // The trap of a value that reaches server-only code is lost — PERMANENT, ruled
     // (gap g-boot-dropped-value-trap-s483).
     // FAIL CLOSED: the classification with the kept values as client code must give the same
     // server-only fields and cells, else nothing is kept (every value dropped, as before).
@@ -8196,7 +8196,7 @@ ${
                     if (hasInt(bmoved, f.sym.id) && live > 1) {
                         const key: string = fieldKey(d.sym, i);
                         for (const v of vs) {
-                            if (!isLitExpr(v) && !hasVal(kv, key, v)) {
+                            if (initActs(v) && !hasVal(kv, key, v)) {
                                 const one: ValPick = { keep: [], solo: [{ key: key, value: v }] };
                                 const s1: int[] = serverInitsExposing(bodyAsConsts(base, p, bcs, false, one), keep);
                                 if (!hasInt(s1, f.sym.id)) kv = kv.concat([{ key: key, value: v }]);
