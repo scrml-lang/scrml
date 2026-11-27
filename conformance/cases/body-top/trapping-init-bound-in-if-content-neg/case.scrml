@@ -1,0 +1,7 @@
+// §7.6 rule (b) (S483 r1, #2129 review HIGH-1) — a tape length the compiler could not prove inside the declared bound (`int[1..=2]` from an `int[]`) is checked when it runs (E-WRITE-INVARIANT-RT, §19.17), and the initializer runs before the `if=` test — E-FILE-SCOPE-INIT-IN-CONSTRUCT.
+<program>
+${ const items: int[] = []; }
+${ const n: int = 2; }
+<p id="a" if=(n > 5)>${ const c: int[1..=2] = items; }${c.length}</p>
+<p id="z">end</p>
+</program>

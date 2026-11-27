@@ -1,0 +1,23 @@
+{
+  "id": "body-top-trapping-init-bound-in-if-content-neg",
+  "description": "§7.6 rule (b) (S483 r1) — `${ const c: int[1..=2] = items; }` inside `<p if=(n > 5)>`: the unproven tape bound is checked at run time (E-WRITE-INVARIANT-RT) and the initializer runs before the test — E-FILE-SCOPE-INIT-IN-CONSTRUCT.",
+  "language-version": "1.0",
+  "spec": "§7.6 rule (b) (S483), §7.6 R3, §19.17, §34",
+  "source-test": "compiler/self-host-v2/slice-m4/trapping-construct-init-s483.test.js",
+  "rationale": "§7.6 rule (b) (S483): \"An initializer there that can trap SHALL be E-FILE-SCOPE-INIT-IN-CONSTRUCT\" — it runs once, just before the construct, whether or not the construct shows (§7.6 R3), so the construct's test does not guard it. ruling:user-voice-scrml.md-S482-trapping-construct-init — owner: \"yes, interim refusal now and the feature later\". Fix round r1 (#2129 review).",
+  "expect": {
+    "codes": [
+      "E-FILE-SCOPE-INIT-IN-CONSTRUCT"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-init-in-construct-s482",
+      "fails": {
+        "codes": [
+          "missing:E-FILE-SCOPE-INIT-IN-CONSTRUCT"
+        ]
+      }
+    }
+  }
+}

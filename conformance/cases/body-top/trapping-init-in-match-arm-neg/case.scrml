@@ -1,0 +1,12 @@
+// §7.6 rule (b) (S483) — a file-scope initializer that can trap (a checked number → int conversion, `floor`, E-INT-CONVERSION-RT), written inside a `<match>` arm: it runs once, just before the `<match>`, whatever the matched variant — E-FILE-SCOPE-INIT-IN-CONSTRUCT (INTERIM, g-boot-trapping-construct-init-s482).
+<program>
+${ import { floor } from "scrml:math"; }
+${ const x: number = 0.0 / 0.0; }
+${ type Phase:enum = { Idle, Ready } }
+<phase:Phase=.Ready/>
+<match for=Phase on=@phase>
+  <Idle><div><p>${ const k: int = floor(x); }${k}</p></div></>
+  <Ready><p>ready</p></>
+</match>
+<p id="z">end</p>
+</program>
