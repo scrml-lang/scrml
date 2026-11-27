@@ -307,7 +307,9 @@ function stallRetryLater(e) {
   const t = yieldTimer(() => {
     e.stallLater = false;
     if (e.disposed) return;
+    const was = stallId;
     sawYield();                                    // a timer task: the page has yielded
+    if (stallId !== was && e.stallRetry === stallId) return;   // that re-ran it, as a skipped effect
     watchYield();
     e.stall = 0;
     e.stallRetry = stallId;

@@ -9,3 +9,9 @@
 - Chromium rt: stream 2000/2000 0 logs; taskwrite timer/mc/fetch 100; taskreq fetch1 108 (visible + hidden)
 - node/bun exit with the delayed-retry timer pending: 83-126 ms, exit 0 (unref/u4.mjs)
 - tests added (5 happy-dom + 2 Chromium rt pages); SPEC §6.7.4 r5 note, §6.15 x2, §22.5; gaps (render-host-call-hang r4 para, P6 "may", meta-set body-top)
+- commit 2 (tests/SPEC/gaps) hook PASS
+- runtime-level batch (base/r3/r4): all r0-r3 probes equal r3; slow_rerun 1000ms 5.0s -> 3.0s; others unchanged
+- Chromium rt batch: pager/netloop/rowmount/gcport equal; stream 2000 0 logs (hidden: as r3); taskwrite/taskreq base values (+1 ruled slow-chain log)
+- P5 1x/6x/20x + hidden: o=299 c=150 no log; R10 hidden responsive
+- gates: conformance main vs head 2000 verdicts identical, 878/3/CRASH 0, runtimeExecuted 295; hgs 1/2 0 viol (2 threw) 2/2 0 viol (169 threw); corpus 3002 files 0 diffs; chromload 98 0 diffs; browser 53 files 1094 pass 0 fail
+- runtime tweak: stallRetryLater skips its own run when sawYield just re-ran the effect
