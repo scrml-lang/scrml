@@ -1,0 +1,9 @@
+// §7.6 rule (b) (S483 r1) — accepted inside `if=` content and run: `/` by a `number` binding (ruling:user-voice-scrml.md-S483-q8-division — ±∞/NaN, no trap), `%` by a `const` with a non-zero literal initializer, and a call handing a refined parameter a literal its static zone passes. (`scrml:math` `minOf` — a TRAP_FREE_STDLIB_FNS entry — is covered by the slice and Chromium tests: this runner does not copy stdlib host files.)
+<program>
+${ const items: int[] = []; }
+${ const y: number = 0.0; }
+${ const d: int(>0) = 3; }
+${ function pos(p: int(>0)) -> int { return p; } }
+<p id="a" if=(items.length == 0)>${ const q: number = 1.0 / y; }${ const m: int = 7 % d; }${ const p: int = pos(3); }${m} ${p} ${q > 0.0}</p>
+<p id="z">end</p>
+</program>
