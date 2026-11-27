@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "nod
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
-import { rowLines, readFences, mdBlocks, PlacementError, readsInfo, scan, check, checkAgainstBase, baseRulesOnHead, lowered, markerAllows, posix, caseIsNegativeFor, mdFiles, isExcluded } from "../../../scripts/retired-forms-lint.ts";
+import { rowLines, readFences, PlacementError, readsInfo, scan, check, checkAgainstBase, baseRulesOnHead, lowered, markerAllows, posix, caseIsNegativeFor, mdFiles, isExcluded } from "../../../scripts/retired-forms-lint.ts";
 import { Lexer } from "marked";
 import { analyze, view } from "../../../scripts/retired-forms-walk.ts";
 
@@ -271,7 +271,7 @@ describe("markdown is read as CommonMark reads it — marked's lexer (#2101 r3 F
   });
 });
 
-describe("each fence's line is marked's own token position (#2101 r4 F1)", () => {
+describe("each fence's line is commonmark.js's own sourcepos (#2101 r4 F1; S483 r1)", () => {
   const W = "fn f() { while (x) { } }";
   const NEG = "<!-- retired-neg: while-loop — the retired loop, shown for contrast -->";
   const F = ["```scrml", W, "```"];
@@ -304,43 +304,114 @@ describe("each fence's line is marked's own token position (#2101 r4 F1)", () =>
     const fs = readFences(["# P", "", "    ```scrml", "    " + W, "    ```", "", NEG, ...F, ""].join("\n"));
     expect([...fs[0].negIds]).toEqual(["while-loop"]);
   });
-  // marked re-joins a blockquote's lazy continuation after a nested list with an extra line, so at the end of
-  // the file its own cursor runs past the source: the fence after it is not where marked says
-  const UNPLACEABLE = "> - <div>\n    [a]: /u\n~~~";
-  test("a block marked places where the source does not hold it is a PlacementError, never a guess", () => {
-    expect(() => readFences(UNPLACEABLE)).toThrow(PlacementError);
+  // marked 14 re-joined a blockquote's lazy continuation after a nested list with an extra line, so at the end of
+  // the file its own cursor ran past the source and the fence after it was not where marked said. marked 18 (S483)
+  // places it where CommonMark does: an empty unclosed `~~~` fence at line 3, body from line 4.
+  test("S483: the r4 unplaceable block is placed on marked 18 exactly where CommonMark places it", () => {
+    expect(readFences("> - <div>\n    [a]: /u\n~~~").map((f) => [f.startLine, f.text])).toEqual([[4, ""]]);
   });
-  test("the gate exits 2 with a clean message on an unplaceable block (#2101 r4 NIT)", () => {
+  // marked 14 and marked 18 could not place this one (a nested blockquote's paragraph runs lazily over a table
+  // row): marked-internals placement exited 2. commonmark.js, the primary reader since S483 r1, places both fences
+  // from its own sourcepos — an empty `~~~` at line 3 (closed by the blockquote's end) and an unclosed one at 4.
+  test("S483 r1: the r4/r5 unplaceable shape is read on commonmark.js's lines (was exit 2)", () => {
+    expect(readFences("> > > para text\n| a | b |\n> > > ~~~\n> ~~~").map((f) => [f.startLine, f.text])).toEqual([[4, ""], [5, ""]]);
+  });
+  const gate = (md, ...extra) => {
     const d = mkdtempSync(join(tmpdir(), "rfl-"));
     try {
       mkdirSync(join(d, "docs"), { recursive: true });
-      writeFileSync(join(d, "docs/x.md"), UNPLACEABLE);
+      writeFileSync(join(d, "docs/x.md"), md);
       writeFileSync(join(d, "baseline.json"), JSON.stringify({ soft: {}, pending: {} }));
-      const r = spawnSync(process.execPath, [join(ROOT, "scripts/retired-forms-lint.ts"), "--root", d, "--ledger", join(ROOT, "compiler/retired-forms.json"), "--baseline", join(d, "baseline.json")], { encoding: "utf8" });
-      expect(r.status).toBe(2);
-      expect(r.stderr).toContain("docs/x.md: cannot place a markdown fence");
-      expect(r.stderr).not.toContain("    at ");     // no stack trace
+      return spawnSync(process.execPath, [join(ROOT, "scripts/retired-forms-lint.ts"), "--root", d, "--ledger", join(ROOT, "compiler/retired-forms.json"), "--baseline", join(d, "baseline.json"), ...extra], { encoding: "utf8" });
     } finally { rmSync(d, { recursive: true, force: true }); }
+  };
+  // S483 r0 HIGH-1 (review probe failopen1.md): marked 18 spliced the outer blockquote's `text` so its later
+  // segment was placed 5 lines low, onto a decoy copy of the fence inside an HTML block, under the decoy's marker —
+  // exit 0. Read by AST position the real fence is at line 12 (body 13), its preceding sibling is the nested
+  // blockquote, and the decoy is HTML-block content: the hit is reported, at line 13.
+  const FAILOPEN1 = [...Array(10).fill("> > a"), "b", "> ```scrml", "> " + W, "> ```", "> <div>",
+    "> <!-- retired-neg: while-loop — decoy -->", "> ```scrml", "> " + W, "> ```", "> </div>", ...Array(5).fill(">"), ""].join("\n");
+  test("S483 r1 HIGH-1: a decoy marker in an HTML block does not mark the real fence (read on line 13, unmarked)", () => {
+    expect(readFences(FAILOPEN1).map((f) => [f.startLine, f.text, [...f.negIds]])).toEqual([[13, W, []]]);
+    const r = gate(FAILOPEN1, "--json");
+    expect(r.status).toBe(1);
+    const hits = JSON.parse(r.stdout).hits.filter((h) => h.row === "while-loop");
+    expect(hits.map((h) => [h.file, h.line])).toEqual([["docs/x.md", 13]]);
+  });
+  test("S483 r1 HIGH-1 control: the same marker as the real fence's directly preceding sibling marks it", () => {
+    const md = FAILOPEN1.replace("b\n> ```scrml", "b\n\n> <!-- retired-neg: while-loop — the contrast -->\n> ```scrml");
+    expect(readFences(md).map((f) => [f.startLine, [...f.negIds]])).toEqual([[15, ["while-loop"]]]);
+  });
+  test("S483 r1: a marker counts only as the fence's preceding sibling in the same container, on the line above", () => {
+    const neg = "<!-- retired-neg: while-loop — the contrast -->";
+    const ids = (md) => readFences(md).map((f) => [...f.negIds]);
+    expect(ids(["- " + neg, "  ```scrml", "  " + W, "  ```", ""].join("\n"))).toEqual([["while-loop"]]);   // same list item
+    expect(ids([neg, "- ```scrml", "  " + W, "  ```", ""].join("\n"))).toEqual([[]]);                       // fence is in an item
+    expect(ids([neg, "", "```scrml", W, "```", ""].join("\n"))).toEqual([[]]);                               // a blank line between
+    expect(ids(["> " + neg, "> > ```scrml", "> > " + W, "> > ```", ""].join("\n"))).toEqual([[]]);           // a nested blockquote
+    expect(ids([neg.replace("while-loop", "x-row"), neg, "```scrml", W, "```", ""].join("\n"))).toEqual([["while-loop", "x-row"]]);   // markers stack
+    // r4rev b28: a marker line that closes an earlier `<!--` is the last line of one multi-line HTML block, not a
+    // marker of its own — it marks nothing (the r0 line-based reader marked it; S483 r1 reads by AST, fail-safe)
+    expect(ids(["<!--", neg, "```scrml", W, "```", ""].join("\n"))).toEqual([[]]);
+  });
+  // S483 r0 LOW-1: marked 18.2.0's lexer throws a TypeError on this text; the gate rethrew it (exit 1 — the
+  // "hits found" code — a raw stack, no file named). Every reader failure is now a named exit 2.
+  test("S483 r1 LOW-1: a reader crash is a PlacementError naming the reader, and the gate exits 2 naming the file", () => {
+    const CRASH = "+ =\n\t>-\nf\n";
+    expect(() => readFences(CRASH)).toThrow(PlacementError);
+    expect(() => readFences(CRASH)).toThrow(/marked failed to read the markdown \(TypeError/);
+    const r = gate(CRASH);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("docs/x.md: marked failed to read the markdown");
+    expect(r.stderr).not.toContain("    at ");     // no stack trace
   });
 
-  // #2101 r5 HIGH-1: marked 14 reads a fence after a lazy continuation inside a list in a blockquote as
-  // paragraph text, while CommonMark (commonmark.js; GitHub) renders it. The second reader turns that into exit 2.
+  // #2101 r5 HIGH-1: marked 14 read a fence after a lazy continuation inside a list in a blockquote as paragraph
+  // text, while CommonMark (commonmark.js; GitHub) renders it; the second reader turned that into exit 2.
+  // S483 (g-tool-retired-lint-marked-bump-s482): marked 18.2.0 reads it as CommonMark does, so the fence is READ,
+  // on the line CommonMark puts it (commonmark.js sourcepos: the opener, plus one for the first body line).
   const LAZY = {
-    "> - a / b / > fence": "# P\n\n> - a\nb\n> ```scrml\n> " + W + "\n> ```\n",
-    "- > a / > fence": "- > a\n> ```scrml\n> " + W + "\n> ```\n",
-    "> - a / > > fence": "> - a\n> > ```scrml\n> > " + W + "\n> > ```\n",
-    "> - > d / > > fence": "> - > d\n> > ```scrml\n> > " + W + "\n> > ```\n",
+    "> - a / b / > fence": ["# P\n\n> - a\nb\n> ```scrml\n> " + W + "\n> ```\n", 6],
+    "- > a / > fence": ["- > a\n> ```scrml\n> " + W + "\n> ```\n", 3],
+    "> - a / > > fence": ["> - a\n> > ```scrml\n> > " + W + "\n> > ```\n", 3],
+    "> - > d / > > fence": ["> - > d\n> > ```scrml\n> > " + W + "\n> > ```\n", 3],
   };
-  for (const [name, md] of Object.entries(LAZY)) {
-    test(`r5 HIGH-1 ${name}: a fence the two CommonMark readers read differently is a PlacementError, never passed`, () => {
-      expect(() => readFences(md)).toThrow(PlacementError);
+  for (const [name, [md, line]] of Object.entries(LAZY)) {
+    test(`S483 lazy ${name}: the fence is read on CommonMark's line (no exit 2)`, () => {
+      expect(readFences(md).map((f) => [f.startLine, f.text])).toEqual([[line, W]]);
     });
   }
-  test("r5 HIGH-1: the reproducer exits 2 through the gate, not 0", () => {
+  test("S483: the lazy reproducer's retired fence fails the gate (exit 1, the hit named), not 0 and not 2", () => {
     const d = mkdtempSync(join(tmpdir(), "rfl-"));
     try {
       mkdirSync(join(d, "docs"), { recursive: true });
-      writeFileSync(join(d, "docs/x.md"), LAZY["> - a / b / > fence"]);
+      writeFileSync(join(d, "docs/x.md"), LAZY["> - a / b / > fence"][0]);
+      writeFileSync(join(d, "baseline.json"), JSON.stringify({ soft: {}, pending: {} }));
+      const r = spawnSync(process.execPath, [join(ROOT, "scripts/retired-forms-lint.ts"), "--root", d, "--ledger", join(ROOT, "compiler/retired-forms.json"), "--baseline", join(d, "baseline.json")], { encoding: "utf8" });
+      expect(r.status).toBe(1);
+      expect(r.stdout + r.stderr).toContain("docs/x.md");
+      expect(r.stdout + r.stderr).toContain("while-loop");
+      expect(r.stderr).not.toContain("the two CommonMark readers disagree");
+    } finally { rmSync(d, { recursive: true, force: true }); }
+  });
+  // marked splices a blockquote's `text` with a nested blockquote's text length when it re-reads that nested
+  // blockquote after a lazy line; marked-internals placement exited 2 on these (the second: #2140 r0 review MED-1,
+  // "container could not be placed"). commonmark.js's sourcepos places them (S483 r1).
+  test("S483: a fence in a nested blockquote's list, then a top-level line, is placed (was exit 2)", () => {
+    expect(readFences("> > - ```scrml\n> >   " + W + "\n> >   ```\na\n").map((f) => [f.startLine, f.text])).toEqual([[2, W]]);
+    expect(readFences("> > - ```scrml\n> >   " + W + "\n> >   ```\na\n\n```scrml\n" + W + "\n```\n").map((f) => f.startLine)).toEqual([2, 7]);
+    expect(readFences("- c\n> > \n> > d\na\n>   b\n> ```scrml\n> " + W + "\n> ```\n").map((f) => [f.startLine, f.text])).toEqual([[7, W]]);
+  });
+  // marked 18.2.0, now only the cross-check, still reads some valid CommonMark differently (both directions; the
+  // S483 r1 fuzz measures the rate — g-tool-retired-lint-marked18-residual-s483), e.g. a fence opened in a list
+  // item in a blockquote, then an indented line with no `>` (CommonMark ends the blockquote and the fence; marked
+  // runs the fence on lazily): exit 2, fail closed
+  test("S483: a fence marked 18 reads and commonmark.js does not still exits 2 (the cross-check guards)", () => {
+    expect(() => readFences("> - ~~~scrml\n    " + W)).toThrow(/the two CommonMark readers disagree/);
+    const d = mkdtempSync(join(tmpdir(), "rfl-"));
+    try {
+      mkdirSync(join(d, "docs"), { recursive: true });
+      writeFileSync(join(d, "docs/x.md"), "> - ~~~scrml\n    " + W + "\n");
       writeFileSync(join(d, "baseline.json"), JSON.stringify({ soft: {}, pending: {} }));
       const r = spawnSync(process.execPath, [join(ROOT, "scripts/retired-forms-lint.ts"), "--root", d, "--ledger", join(ROOT, "compiler/retired-forms.json"), "--baseline", join(d, "baseline.json")], { encoding: "utf8" });
       expect(r.status).toBe(2);

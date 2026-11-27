@@ -52132,12 +52132,13 @@ exactly this (S482, #2101 r1–r5):**
   ledger lists with a reason (change and progress notes, the changelog, generated files, hand-offs, PA working notes
   and task lists, dated audits, scoping notes and disposition records, archived drafts, test fixtures, an
   untracked local playground, impl#1 internals and stage contracts, other frameworks' benchmarks, dependencies) and the directories it skips at any depth (`node_modules`, `dist`, dot-directories)
-  — every fenced code block, as CommonMark (GFM) reads it (the `marked` lexer, #2101 r3, cross-checked by
-  commonmark.js, #2101 r5), whose info string is
+  — every fenced code block, as CommonMark reads it (commonmark.js, the CommonMark reference implementation —
+  the primary reader since S483 — cross-checked by the `marked` GFM lexer, #2101 r5), whose info string is
   empty, starts with `scrml` (`scrml`, `scrml{.example}`, `scrml,ignore`) or is an attribute block with the
   class `.scrml` (`{.scrml}`), including a fence inside a blockquote or a list item (it ends where its container
-  ends); each fence is placed on its source lines by the lexer's own token positions, and a block that cannot be
-  placed exactly there exits 2 (it is never read at a guessed line). The file set — the `.scrml` roots, the excluded paths and the skipped directories — is the ledger's
+  ends); each fence is placed on its source lines by commonmark.js's own source positions (`sourcepos`), checked
+  against the source, and a file that cannot be read exactly — the two readers disagree, a position does not hold
+  in the source, or a reader fails — exits 2 naming the file (it is never read at a guessed line). The file set — the `.scrml` roots, the excluded paths and the skipped directories — is the ledger's
   `corpus`, so it is checked against the base like the rows (below). Source is read once,
   in source order, by a port of the bootstrap's readers: comments, strings, regular-expression literals, raw
   bodies (`<pre>`, `<code>`, `<script>`, `<style>`, §4.17; an unclosed one runs only to the next closing tag),
@@ -52149,8 +52150,10 @@ exactly this (S482, #2101 r1–r5):**
   names) whose expected codes name the row's code — one hit per expected occurrence of that code (its
   `codeCounts` entry, else 1; rows that share a code share the count), and for a row whose code is generic
   (`E-SCOPE-001`, `E-PARSE-FN`, `E-PARSE-TYPE`, `E-GRANT-UNKNOWN`) only when the case id also matches the row's
-  `caseIdPattern`; a fence with `<!-- retired-neg: <row-id> — <reason> -->` on the line(s) directly above it, at the
-  fence's blockquote depth; a `retired-ok: <row-id> — <reason>` inside a comment on the hit's line or the line
+  `caseIdPattern`; a fence with `<!-- retired-neg: <row-id> — <reason> -->` on the line(s) directly above it, in the
+  same container — each marker its own one-line HTML block that is the fence's preceding sibling as CommonMark reads
+  the file (consecutive marker lines stack), so a marker inside a larger HTML block, in another container, or above
+  a blank line marks nothing (S483: by position in the parse, never by matching text); a `retired-ok: <row-id> — <reason>` inside a comment on the hit's line or the line
   before. No section or region of any file is exempt — not §63, not §66.21 (#2101 r4): a negative example anywhere,
   this section included, is a fence marked `retired-neg`. A code named in prose or in a comment allows nothing.
 - *What fails:* any (row, file) count that differs from the baseline (`scripts/retired-forms-baseline.json`):
@@ -52168,17 +52171,15 @@ exactly this (S482, #2101 r1–r5):**
   at; the source walker, the markdown reader and the builtin detectors are the changed tree's own script, so
   narrowing them is a reviewed code diff, not a ledger diff the base rules catch (and a base ledger older than
   `corpus` is read with the changed tree's); fences tagged as another language, indented code
-  blocks, HTML `<pre>` blocks and markdown prose are not read; markdown the lexer mis-reads exits 2 rather
-  than be read or passed — both when its cursor runs past the source and when the fence texts it reads differ from
-  CommonMark's: marked 14 reads a fence after a lazy continuation line inside a list in a blockquote
-  (`> - a⏎b⏎> ```scrml…`) as paragraph text, so every markdown file is also read by commonmark.js, the reference
-  implementation, and the gate exits 2 when the two readers' multisets of read fence texts (each line trimmed)
-  differ (#2101 r5); **INTERIM:** that exit 2 asks the author to reshape valid CommonMark marked 14 mis-reads —
-  the capable form is one reader that agrees with CommonMark: marked 18.0.0 (published 2026-04-07) and later
-  agree with commonmark.js on the 40,000 r4 fuzz documents and the lazy-continuation reproducers (17.x and
-  earlier do not), but the gate's placement wrappers hook marked internals (`blockTokens`, tokenizer methods)
-  and must be re-proven on marked ≥ 18.0.0 before the bump (g-tool-retired-lint-marked-bump-s482); after it the
-  cross-check only guards against a regression; **INTERIM:** an unterminated string or template literal in a
+  blocks, HTML `<pre>` blocks and markdown prose are not read; markdown the two readers read differently exits
+  2 rather than be read or passed: every markdown file is read by commonmark.js (fences, lines and markers) and also
+  by `marked` 18.2.0, and the gate exits 2 when the two readers' multisets of read fence texts (each line trimmed)
+  differ (#2101 r5) or a reader throws (S483); **INTERIM:** marked 18.2.0 reads some valid CommonMark differently
+  from the reference — e.g. a fence opened in a list item in a blockquote and followed by an indented line with no
+  `>` (`> - ~~~scrml⏎    x`) — so such a file exits 2 and asks the author to reshape valid CommonMark (none in this
+  repository; the S483 fuzz measures about 0.7% of generated documents in the list-and-blockquote shapes and 8–12%
+  in the wide and adversarial shapes); the capable form drops the second reader or replaces it with one that agrees
+  with the reference (g-tool-retired-lint-marked18-residual-s483); **INTERIM:** an unterminated string or template literal in a
   fence (a stray ```` ``` ```` line inside it is a template-literal opener to scrml) hides the rest of that fence,
   as it would in a source file the compiler then refuses — the capable form fails the gate when a fence's text
   ends inside an unterminated string or template literal, so nothing after it goes unread; the hook reads the working tree, not the index (CI reads the commit);
