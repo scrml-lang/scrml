@@ -7,22 +7,22 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1997 of 1997 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **2000 of 2000 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 875 | 43.8% |
+| PASS | 878 | 43.9% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 3 | 0.2% |
+| FAIL | 3 | 0.1% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 628 | 31.4% |
 | UNSUPPORTED | 491 | 24.6% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 878; of those, 875 hold (99.7%). Runtime half executed on the bootstrap for 294 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 881; of those, 878 hold (99.7%). Runtime half executed on the bootstrap for 295 case(s).
 
-- **Vacuous** passes: 15 of 875 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **860**.
+- **Vacuous** passes: 15 of 878 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **863**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 1 of 3; the other 2 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
@@ -30,7 +30,7 @@ UNSUPPORTED by reason: bootstrap-unsupported 491.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **908** — PASS 536 · FAIL 3 · UNSUPPORTED 369. Twin holds 536 (non-vacuous 524). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **909** — PASS 537 · FAIL 3 · UNSUPPORTED 369. Twin holds 537 (non-vacuous 525). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 7 replace a twin's expectations · 14 exclude a case.
 - Superseded-code mappings applied: 8 case(s) (E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT, E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD, E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-RULE-INVALID-VARIANT→E-DECL-STATE-CHILD [applied] · E-ENGINE-INITIAL-INVALID-VARIANT→E-TYPE-VARIANT [applied] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -124,7 +124,7 @@ NOT-TWINNED by reason (628 cases; a case counts once per distinct reason):
 | attr-executable-sink | 28 | 12 | · | · | · | 11 | 5 | · | · |
 | auth | 65 | 12 | · | · | · | 15 | 38 | · | · |
 | block-grammar | 15 | 12 | · | · | · | 1 | 2 | · | · |
-| body-top | 47 | 40 | · | · | · | 1 | 6 | · | · |
+| body-top | 50 | 43 | · | · | · | 1 | 6 | · | · |
 | capability | 12 | 7 | · | · | · | · | 5 | · | · |
 | channel | 49 | 11 | · | · | · | 37 | 1 | · | · |
 | codegen | 4 | 2 | · | · | · | 1 | 1 | · | · |
@@ -208,7 +208,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (875)
+### PASS / CODES-ONLY (878)
 
 - `attr-executable-sink/base-href-data-neg` — PASS · TWIN
 - `attr-executable-sink/base-href-static-pos` — PASS · TWIN
@@ -269,6 +269,7 @@ none
 - `body-top/loose-prose-rejected` — PASS
 - `body-top/no-effect-statement-rejected` — PASS · TWIN
 - `body-top/nontrapping-init-in-if-content` — PASS · TWIN
+- `body-top/nontrapping-init-mod-number-dividend-replaceall-literal-in-if-content` — PASS
 - `body-top/nontrapping-init-mod-number-repeat-in-if-content` — PASS
 - `body-top/page-prose-rejected` — PASS · TWIN
 - `body-top/prose-after-declaration-rejected` — PASS · TWIN
@@ -283,8 +284,10 @@ none
 - `body-top/trapping-init-in-match-arm-neg` — PASS · TWIN
 - `body-top/trapping-init-in-slot-neg` — PASS · TWIN
 - `body-top/trapping-init-in-textarea-neg` — PASS
+- `body-top/trapping-init-mod-partial-divisor-in-if-content-neg` — PASS · TWIN
 - `body-top/trapping-init-pad-literal-in-if-content-neg` — PASS
 - `body-top/trapping-init-repeat-literal-in-if-content-neg` — PASS
+- `body-top/trapping-init-replaceall-in-if-content-neg` — PASS
 - `body-top/unknown-characters-rejected` — PASS
 - `capability/all-tokens-valid` — PASS
 - `capability/arg-union-repeated-token` — PASS
