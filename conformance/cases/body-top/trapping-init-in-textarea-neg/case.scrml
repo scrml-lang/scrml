@@ -1,0 +1,6 @@
+// §7.6 R3 (S483 r1, #2129 review MED-1) — `<textarea>` content holds no place: a file-scope initializer there runs just before the element, and one that can trap (an index read) is E-FILE-SCOPE-INIT-IN-CONSTRUCT, as in a construct.
+<program>
+${ const items: int[] = []; }
+<textarea>${ const f: int = items[0]; }${f}</textarea>
+<p id="z">end</p>
+</program>

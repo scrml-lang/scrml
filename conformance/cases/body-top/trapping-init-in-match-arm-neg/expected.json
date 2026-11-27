@@ -1,0 +1,26 @@
+{
+  "id": "body-top-trapping-init-in-match-arm-neg",
+  "description": "§7.6 rule (b) (S483) — `${ const k: int = floor(x); }` inside a `<match>` arm: the number → int conversion can trap (E-INT-CONVERSION-RT) and the initializer runs whatever the matched variant — E-FILE-SCOPE-INIT-IN-CONSTRUCT.",
+  "language-version": "1.0",
+  "spec": "§7.6 rule (b) (S483), §7.6 R3, §19.17, §34",
+  "source-test": "compiler/self-host-v2/slice-m4/trapping-construct-init-s483.test.js",
+  "rationale": "§7.6 rule (b) (S483): \"An initializer there that can trap SHALL be E-FILE-SCOPE-INIT-IN-CONSTRUCT\" — it runs once, just before the construct, whether or not the construct shows (§7.6 R3), so the construct's test does not guard it. ruling:user-voice-scrml.md-S482-trapping-construct-init — INTERIM: \"extend E-FILE-SCOPE-INIT-IN-CONSTRUCT to an initializer inside a construct that can fail at run time (indexing, `.value` on a maybe value, checked conversions, division by a possibly-zero value)\"; PERMANENT: branch-scoped declarations (owner: \"yes, interim refusal now and the feature later\").",
+  "expect": {
+    "codes": [
+      "E-FILE-SCOPE-INIT-IN-CONSTRUCT"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-init-in-construct-s482",
+      "fails": {
+        "codes": [
+          "emitted:E-ATTR-001=1",
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-STATE-UNDECLARED=1",
+          "missing:E-FILE-SCOPE-INIT-IN-CONSTRUCT"
+        ]
+      }
+    }
+  }
+}
