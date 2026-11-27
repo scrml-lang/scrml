@@ -8198,7 +8198,9 @@ ${
     // judged in the same fixed point — no second classifier. A component cell is a field of every
     // instance of its declaration; the classification is the DECLARATION's: a read through any
     // instance (the declaration's own renders and handlers — Lexical, an `as=` handle, the shared
-    // instance, a `<*x/>`) keeps the field client-read for every instance. One it makes server-only is
+    // instance; a `<*x/>` shows the renders, which read what they read) keeps the field client-read for
+    // every instance. s483 (lane s483-component-attr-server-only): and an ATTRIBUTE of a component, and a
+    // cell a use site gives a value — judged with all of its values (bodyCands). One it makes server-only is
     // a SHELL field in every instance (seed `not`) and no binding anywhere: the server artifact holds no
     // instance, and nothing reads the field, so running its seed is unobservable (§6.15 A1: a seed is a
     // value position) — the same reason an unread derived program cell runs nowhere.
@@ -8255,7 +8257,9 @@ ${
     // instance snapshot reads all of its declaration's), a part / compound / checked write, a
     // validity surface or its reset, a storage removal, an effect's, a request's or a reset rule's
     // dependency (a request's target too), an error list, a gate, a handle of an instance (a Lexical
-    // handle names every body cell; an `as=` / narrowed handle every component cell), a `<*x/>`.
+    // handle names every body cell; an `as=` / narrowed handle every component cell — ⚑ INTERIM,
+    // g-boot-component-handle-value-reads-all-s483: a handle used as a value is not followed to the
+    // fields read through it). A `<*x/>` reads nothing by itself (bodyViewIds, S483).
     // s483 (lane s483-component-cell-server-only; #2121 review MED-1, prov=pa-ruled:S483-reset-is-write):
     // a RESET — `reset(@c)`, or a `reset-on=` rule's write — is a Write whose value is the field's
     // own initializer re-run (InitOf, lower.scrml resetStmt / resetWrite): a statically checked
