@@ -17,3 +17,5 @@ Base: origin/main 353ffe643 (contains #2130). Branch s483-attr-trap.
   `not` explicitly so it does not run the default (base never ran it there).
 
 ## Log
+- 8499106da print.scrml keptVals/ValPick/Drop. r12g/i/j trap on head as on base (pre-#2130); r12c/d/h unchanged vs main; r12f unchanged. k01-k09 extra probes base==head.
+- slice-m4/dropped-value-trap-s483.test.js: 4/4 head; 2 fail on main (red before).
