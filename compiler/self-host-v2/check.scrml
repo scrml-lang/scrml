@@ -5358,7 +5358,7 @@ ${
     // at most ONE invariant check; that check names exactly the Commit's Writes, in order (each
     // entry's field index is its Write's field, its value the Write's Local, through the same
     // instance); and a Commit whose whole-field Writes touch a field its declaration's invariants
-    // read (Decl.invs, the construction check — every clause of the declaration) HOLDS one. A
+    // read (Decl.invReads — every clause of the declaration, r3) HOLDS one. A
     // lowering that drops, duplicates or mis-targets the check fails here. (A type's invariants
     // are not in Core, so a check owed only to the invariant of a field's TYPE is not required
     // here — g-boot-invariant-boundaries-lints-s483.)
@@ -5439,10 +5439,12 @@ ${
             if (w is given && !isFieldAtEdit(w.edit)) {
                 const owner: CapOwner | not = capOwner(p, w.cap);
                 if (owner is given) {
-                    const ci: Expr | not = owner.decl.invs;
-                    if (ci is given) {
+                    // r3 (#2128 r2 re-review H6): Decl.invReads — every clause's reads; Decl.invs omits a
+                    // clause decided at every construction, which a write still owes a check
+                    const rf: string[] = owner.decl.invReads;
+                    if (rf.length > 0) {
                         const f: string = owner.decl.fields[owner.idx].sym.hint;
-                        if (invReadFields(ci).indexOf(f) >= 0) return ["C7: the Commit writes `" + f + "` of <" + owner.decl.sym.hint + ">, which an invariant of the declaration reads, and holds no invariant check (§66.13.5: the group is checked once, after its Writes)"];
+                        if (rf.indexOf(f) >= 0) return ["C7: the Commit writes `" + f + "` of <" + owner.decl.sym.hint + ">, which an invariant of the declaration reads, and holds no invariant check (§66.13.5: the group is checked once, after its Writes)"];
                     }
                 }
             }
@@ -5455,58 +5457,6 @@ ${
             .FieldAt(path: x) :> true,
             // no-default-arm: one question of an edit — does it write below its field
             _ :> false
-        };
-    }
-
-    // The top fields a declaration's construction check reads: each check's `names` (a clause of
-    // the declaration itself, `at` []) with the siblings its derived fields are computed from, or
-    // the field its `at` starts at.
-    fn invReadFields(ci: Expr) -> string[] {
-        const a: Expr[] = guardArgs(ci);
-        if (a.length != 4) return [];
-        let out: string[] = [];
-        for (const ck of arrayItems(a[2])) {
-            const it: Expr[] = arrayItems(ck);
-            if (it.length >= 3) {
-                const at: string[] = strItems(it[0]);
-                if (at.length > 0) {
-                    out = out.concat([at[0]]);
-                } else {
-                    out = out.concat(strItems(it[2]));
-                    if (it.length >= 6) {
-                        for (const dv of arrayItems(it[5])) {
-                            const dd: Expr[] = arrayItems(dv);
-                            if (dd.length == 3) out = out.concat(strItems(dd[2]));
-                        }
-                    }
-                }
-            }
-        }
-        return out;
-    }
-
-    fn strItems(e: Expr) -> string[] {
-        let out: string[] = [];
-        for (const x of arrayItems(e)) {
-            const s: string = litStrOf(x);
-            if (s != "") out = out.concat([s]);
-        }
-        return out;
-    }
-
-    fn litStrOf(e: Expr) -> string {
-        return match e {
-            .Lit(lit: l) :> litStrIn(l),
-            // no-default-arm: one question of an expression — the string literal it is
-            _ :> ""
-        };
-    }
-
-    fn litStrIn(l: Literal) -> string {
-        return match l {
-            .Str(v: s) :> s,
-            // no-default-arm: one question of a literal — its string
-            _ :> ""
         };
     }
 

@@ -340,7 +340,7 @@ ${RANGE}
         let <v:string=""/>
     </>
 ${inv}
-    <main><p>\${@tok.v}</p><button onclick={ tagged() !{ .Transport(_) :> return }; }>t</button></main>`).replace("<program>", '<program db="sqlite:./tags.db">');
+    <main><p>\${@tok.v}</p><button onclick={ tagged() !{ .Transport(_) :> return }; }>t</button><button onclick={ @tok.v = @tok.v + "!"; }>w</button></main>`).replace("<program>", '<program db="sqlite:./tags.db">');
     const r = await result(SRC("    invariant (v != SECRET_TAG)"));
     expect(codes(r)).toEqual(["E-DECL-INVARIANT-IMPURE"]);
     expect(errs(r)[0].message).toContain("`SECRET_TAG` (only server code reads it");

@@ -3417,10 +3417,18 @@ export function invariantGuard(inst, writes, checks, loc, pre) {
       if (c[5]) for (const dv of c[5]) for (const d of dv[2]) need.add(d);
     }
   }
+  // r3 (#2128 r2 re-review H6): a field a write overwrites WHOLE (path empty, "set") is the
+  // written value in the candidate, whatever it held — it is not peeked (not read), so a whole
+  // write of a write-only cell through its check reads the cell no more than the plain write
+  // does (S482 write-only secret: a whole write is not a read; print.scrml invGuardFields `whole`).
+  const whole = new Set();
+  for (const w of writes) {
+    if (w[1].length === 0 && w[2] === "set") whole.add(typeof w[0] === "number" ? names[w[0]] : w[0]);
+  }
   const cand = {};
   for (const n of need) {
     const i = names.indexOf(n);
-    if (i >= 0) cand[n] = inst.fields[i].peek();
+    if (i >= 0 && !whole.has(n)) cand[n] = inst.fields[i].peek();
   }
   for (const [f, path, op, v] of writes) {
     const n = typeof f === "number" ? names[f] : f;

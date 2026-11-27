@@ -59,9 +59,11 @@ ${fields}
 </>
 ${inv}
 let <out:string=""/>
-<main><p>\${@tok.v}\${@out}</p><button onclick={ @out = srv(1) !{ .Transport(_) :> return }; }>b</button></main>
+<main><p>\${@tok.v}\${@out}</p><button onclick={ @out = srv(1) !{ .Transport(_) :> return }; }>b</button><button onclick={ @tok.v = @tok.v + @tok.v; }>w</button></main>
 </program>
 `;
+// r3 (#2128 r2 re-review H6): the page WRITES `v`, so the check runs in the client; with no write, the construction
+// is decided at compile time (§66.13.5 rule 10) and runs nowhere — see "r3 — a decided construction" below
 const STR = `    let <v:string="a"/>`;
 const INT = `    let <v:int=0/>`;
 
@@ -119,7 +121,7 @@ ${STR}
 </>
 invariant (v != K) [notKey]
 let <out:string=""/>
-<main><p>\${@tok.v}\${@out}\${K}</p><button onclick={ @out = srv(1) !{ .Transport(_) :> return }; }>b</button></main>
+<main><p>\${@tok.v}\${@out}\${K}</p><button onclick={ @out = srv(1) !{ .Transport(_) :> return }; }>b</button><button onclick={ @tok.v = @tok.v + @tok.v; }>w</button></main>
 </program>
 `;
     const r = await result(src);
@@ -137,6 +139,7 @@ const attrProg = (secret, card, use, inv) => `\${
 <program db="./app.db">
 \${
     type Row:struct = { name: string }
+    fn wrap(s: string) -> string { return s + "!"; }
     function label(id: int) -> string {
         const r: Row = ?{\`SELECT name FROM users WHERE id = \${id}\`}.get() !{ _ :> { return "none"; } };
         return r.name + API_KEY;
@@ -154,7 +157,8 @@ ${use}
 describe("H2d — an invariant on a component attribute whose value reaches server-only code is refused", () => {
   for (const [id, card, use] of [
     ["m01 (use-site value)", `<card t:string="x"/> renders <b>x</b>`, `<card t=(API_KEY)/>`],
-    ["m02 (default)", `<card t:string=(API_KEY)/> renders <b>x</b>`, `<card/>`],
+    // r3: a default the compiler does not fold (a call) — the construction check runs in the client
+    ["m02 (default)", `<card t:string=(wrap(API_KEY))/> renders <b>x</b>`, `<card/>`],
   ]) {
     test(`${id}: refused naming the attribute and the secret; the control is clean, the secret in no client file`, async () => {
       const secret = "zz-sk-" + id.slice(0, 3);
@@ -171,6 +175,15 @@ describe("H2d — an invariant on a component attribute whose value reaches serv
       expect(clientText(r2)).not.toContain(secret);
     }, 120000);
   }
+
+  test("r3: a construction the compiler decides (a constant default no use overrides) runs nowhere — admitted, no leak", async () => {
+    // §66.13.5 rule 10 / 7a: `t` is seeded API_KEY at every instance and `t != ""` folds true over it, so no check
+    // is printed; `t` stays a shell and API_KEY stays out of the client
+    const r = await result(attrProg("zz-sk-m02d", `<card t:string=(API_KEY)/> renders <b>x</b>`, `<card/>`, `invariant (t != "") [nonEmpty]`));
+    expect(codes(r)).toEqual([]);
+    expect(clientText(r)).not.toContain("zz-sk-m02d");
+    expect(r.client.js).not.toContain("invariantGuard");
+  }, 120000);
 
   test("an invariant over ANOTHER field of the component does not move the server-only attribute (no over-refusal)", async () => {
     // the construction check reads `n` only (runtime invariantGuard builds its candidate from the fields it names),

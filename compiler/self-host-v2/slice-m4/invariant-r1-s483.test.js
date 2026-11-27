@@ -54,9 +54,11 @@ ${fns}
 </>
 ${inv}
 let <out:string=""/>
-<main><p>\${@tok.v}\${@out}</p><button onclick={ @out = ${uses} !{ .Transport(_) :> return }; }>b</button></main>
+<main><p>\${@tok.v}\${@out}</p><button onclick={ @out = ${uses} !{ .Transport(_) :> return }; }>b</button><button onclick={ @tok.v = @tok.v + @out; }>w</button></main>
 </program>
 `;
+// r3 (#2128 r2 re-review H6): the page WRITES `v` (a check that runs in the client); with no write, a construction
+// the compiler decides (§66.13.5 rule 10 — `v` seeded "a", K a constant) runs nowhere and moves nothing (rule 7a)
 const SRV = (body) => `    function srv(id: int) -> string {
         const t = ?{\`SELECT 1 AS x WHERE \${id} = 1\`}.get() !{ _ :> { return ""; } };
         return ${body};

@@ -47,7 +47,7 @@ ${
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest, sqlInfo, isServerPlaced,
              failFact, builtinFile, blockReference, suspendAtOf, tempOf, joinOf, retOf, remoteCaller, serverCallErrorName, typeInfoName, fieldInfoName, ServerFacts, SrvCopy, sideCallee,
              sqlParamRep, distinctSqlParams, CssFacts, CssInline, CssBridge, LStep, LocalEdit, BoundCheck, boundCheckAt, editBoundNid, RefineCheck, refineCheckAt, txAtOf, txPlainAt, rowOfSite,
-             InvInfo, InvCheck, InvCapField, invDeepChecks, invInstanceChecks, invWholeChecks, invValueWholeChecks, invValueChecks, invGroupChecks, invCapField, invRefNames, invLoc, invProven } from "./analyze.scrml";
+             InvInfo, InvCheck, InvCapField, invDeepChecks, invInstanceChecks, invWholeChecks, invValueWholeChecks, invValueChecks, invGroupChecks, invCapField, invRefNames, invLoc, invProven, invConstructDecided } from "./analyze.scrml";
     import { RefineTop, refineTopOf, refineSpec, refineLitVerdict } from "./parse.scrml";
 
     // s451 — THE DIAGNOSTICS GATE. `core` is `not` whenever the analysis
@@ -3647,16 +3647,42 @@ ${
             if (rv is given) renders = stampViews(rv, cssRootAttrs(t, d), t.css.scopes.length > 0);
         }
         const wiring: WiringAttr[] = [];
-        return { sym: d.sym, key: declKey(t, d), kind: d.kind, single: d.single, fields: fields, renders: renders, wiring: wiring, handles: d.handles, invs: constructCheck(c, d) };
+        return { sym: d.sym, key: declKey(t, d), kind: d.kind, single: d.single, fields: fields, renders: renders, wiring: wiring, handles: d.handles, invs: constructCheck(c, d), invReads: invReadsOf(c, d) };
     }
 
     // s483 (Q21 lane 2) — a declaration's construction check (§66.13.5 "a use-site
     // initializer, construction"): every invariant on the fresh instance's seeded fields.
+    // r3 (#2128 r2 re-review H6; §66.13.5 rule 10): a clause the compiler decides true at every
+    // construction (analyze invConstructDecided — every field it reaches seeded from a constant default
+    // no use site overrides) is omitted: it runs nowhere, so it reads no field in the client (a
+    // write-only field seeded from a server-only constant stays a shell).
     fn constructCheck(c: LC, d: DeclInfo) -> Expr | not {
         if (d.invs.length == 0) return not;
-        const cks: InvCheck[] = invInstanceChecks(c.t, d, []);
+        let cks: InvCheck[] = [];
+        for (const ck of invInstanceChecks(c.t, d, [])) {
+            // only the declaration's own clauses (a field's TYPE clause, `at` non-empty, stays)
+            const own: boolean = ck.at.length == 0 && ck.sym.id == d.sym.id;
+            if (!own || !invConstructDecided(c.t, d, ck.inv)) cks = cks.concat([ck]);
+        }
         if (cks.length == 0) return not;
         return invGuardOf(c, InstRef.Lexical(0), [], cks, invLoc(c.t, d.file, d.span.start));
+    }
+
+    // r3: the top fields every invariant of `d` reads (core.scrml Decl.invReads — check.scrml C7)
+    fn invReadsOf(c: LC, d: DeclInfo) -> string[] {
+        if (d.invs.length == 0) return [];
+        let out: string[] = [];
+        for (const ck of invInstanceChecks(c.t, d, [])) {
+            let fs: string[] = [];
+            if (ck.at.length > 0) {
+                fs = [ck.at[0]];
+            } else {
+                fs = ck.names;
+                for (const dv of ck.derive) { fs = fs.concat(dv.deps); }
+            }
+            for (const f of fs) { if (out.indexOf(f) < 0) out = out.concat([f]); }
+        }
+        return out;
     }
 
     // s474 (door 3): a user declaration's output name is per-file qualified, always (core.scrml
@@ -5687,7 +5713,7 @@ ${
                 let gated: View[] = gateViews(p, rs, ext);
                 if (!isProgramKind(d.kind)) gated = reachList(namedFields(p, rs, not, [d.sym.id]), gated);
                 out = out.concat([{ sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: d.fields, renders: gated,
-                                    wiring: d.wiring, handles: d.handles, invs: d.invs }]);
+                                    wiring: d.wiring, handles: d.handles, invs: d.invs, invReads: d.invReads }]);
             } else {
                 out = out.concat([d]);
             }

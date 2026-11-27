@@ -6353,7 +6353,7 @@ ${
     }
 
     fn withRenders(d: Decl, rs: View[]) -> Decl {
-        return { sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: d.fields, renders: rs, wiring: d.wiring, handles: d.handles, invs: d.invs };
+        return { sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: d.fields, renders: rs, wiring: d.wiring, handles: d.handles, invs: d.invs, invReads: d.invReads };
     }
 
     // `p` with the program declaration's renders replaced by `rs`.
@@ -8337,7 +8337,7 @@ ${
             fs = fs.concat([{ sym: f.sym, ty: f.ty, init: Expr.Lit(Literal.Absent), mode: f.mode, role: f.role, grants: f.grants, graph: f.graph,
                               exported: f.exported, wcap: f.wcap, vals: f.vals, persist: f.persist, timing: f.timing }]);
         }
-        return { sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: fs, renders: d.renders, wiring: d.wiring, handles: d.handles, invs: d.invs };
+        return { sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: fs, renders: d.renders, wiring: d.wiring, handles: d.handles, invs: d.invs, invReads: d.invReads };
     }
 
     fn seedConst(p: CoreProgram, c: OuterCell) -> CoreConst[] {
@@ -8506,15 +8506,18 @@ ${
         let reads: int[] = [];
         let writes: int[] = [];
         let cur: int = -1;
+        let wc: int = -1;
         let skip: boolean = false;
         for (const n of ns) {
             const dn: int = nodeDeclId(n);
             if (dn >= 0) cur = dn;
+            const wn: int = invWriteCapOf(n);
+            if (wn != -2) wc = wn;
             const own: boolean = skip && invHandleNode(n);
             skip = false;
             if (!own) {
                 let u: ConstUse = { reads: [], writes: [] };
-                const g: int[] | not = invGuardReads(p, bc, n, cur);
+                const g: int[] | not = invGuardReads(p, bc, n, cur, wc);
                 if (g is given) {
                     u = readUse(g);
                     skip = true;
@@ -8554,14 +8557,16 @@ ${
 
     // The body cells an InvariantGuard node reads (see bodyUseAll), or `not` when `n` is not one whose
     // declaration and fields are known here.
-    fn invGuardReads(p: CoreProgram, bc: BodyCells, n: Node, cur: int) -> int[] | not {
+    fn invGuardReads(p: CoreProgram, bc: BodyCells, n: Node, cur: int, wc: int) -> int[] | not {
         const e: Expr | not = nodeExprOf(n);
         if (e is not) return not;
-        const g: InvGF | not = invGuardFields(p, e, cur);
+        const g: InvGF | not = invGuardFields(p, e, cur, wc);
         if (g is not) return not;
         let out: int[] = [];
         for (const ix of g.idxs) {
-            for (const id of bodyAt(bc, g.decl, ix)) { if (!hasInt(out, id)) out = out.concat([id]); }
+            if (!hasInt(g.whole, ix)) {
+                for (const id of bodyAt(bc, g.decl, ix)) { if (!hasInt(out, id)) out = out.concat([id]); }
+            }
         }
         return out;
     }
@@ -8570,13 +8575,25 @@ ${
     // writes, and those its checks name (a check below a field: that field; else the names and the
     // derived fields' dependencies) — or `not` when `e` is not a guard whose declaration and fields
     // are all known here (fail closed).
-    type InvGF:struct = { decl: int, idxs: int[] }
+    // r3 (#2128 r2 re-review H6; ruling:user-voice-scrml.md-S482-write-only-secret — a whole write
+    // is not a read): `whole` — the fields one of its writes overwrites WHOLE (path empty, op "set").
+    // The candidate's value of such a field is the written value, whatever the field held, so the
+    // runtime does not peek it (runtime invariantGuard) and the guard does not read it
+    // (invGuardReads): a whole-value write of a write-only cell through its check leaves the cell a
+    // shell, as the same write without the check does.
+    type InvGF:struct = { decl: int, idxs: int[], whole: int[] }
 
-    fn invGuardFields(p: CoreProgram, e: Expr, cur: int) -> InvGF | not {
+    fn invGuardFields(p: CoreProgram, e: Expr, cur: int, wc: int) -> InvGF | not {
         const a: Expr[] | not = invGuardArgs(e);
         if (a is not || a.length != 4) return not;
         const ws: Expr[] = invElems(a[1]);
-        const d: int = invGuardDecl(a[0], ws.length == 0, cur);
+        let d: int = invGuardDecl(a[0], ws.length == 0, cur);
+        // r3 (#2128 r2 re-review H6): a guard that writes, over a Lexical handle (a handler's own
+        // instance — `inst$`), is the value of a Write (lower invLone) or the check of a Commit's Writes
+        // (invGroup) over that Write's instance: the declaration is the one whose field the Write's
+        // capability writes (`wc`, the last Write the walk met — the guard's own, or the Commit's last).
+        // Its first entry must write that very field, else fail closed.
+        if (d < 0 && ws.length > 0 && wc >= 0 && invLexicalHandle(a[0])) d = invCapEntryDecl(p, wc, ws);
         if (d < 0) return not;
         let dd: Decl | not = not;
         for (const x of p.decls) { if (x.sym.id == d) dd = x; }
@@ -8584,14 +8601,23 @@ ${
         let names: string[] = [];
         for (const f of dd.fields) { names = names.concat([f.sym.hint]); }
         let idxs: int[] = [];
+        let whole: int[] = [];
         for (const w of ws) {
             const parts: Expr[] = invElems(w);
             if (parts.length == 0) return not;
             const i: int = invLitInt(parts[0]);
             const nm: string | not = invLitStr(parts[0]);
-            if (i >= 0) idxs = idxs.concat([i]);
-            else if (nm is given) idxs = idxs.concat([names.indexOf(nm)]);
+            let wi: int = -1;
+            if (i >= 0) wi = i;
+            else if (nm is given) wi = names.indexOf(nm);
             else return not;
+            idxs = idxs.concat([wi]);
+            if (parts.length == 4 && wi >= 0) {
+                const op: string | not = invLitStr(parts[2]);
+                if (op is given && op == "set" && invIsArrayLit(parts[1]) && invElems(parts[1]).length == 0 && !hasInt(whole, wi)) {
+                    whole = whole.concat([wi]);
+                }
+            }
         }
         for (const c of invElems(a[2])) {
             const parts: Expr[] = invElems(c);
@@ -8621,7 +8647,70 @@ ${
             if (ix < 0) return not;
             if (!hasInt(out, ix)) out = out.concat([ix]);
         }
-        return { decl: d, idxs: out };
+        return { decl: d, idxs: out, whole: whole };
+    }
+
+    // the write capability of a Write node (its Sym id), -1 for a Write with no capability here,
+    // -2 for any other node
+    fn invWriteCapOf(n: Node) -> int {
+        return match n {
+            .NStmt(s: s) :> invWriteCapStmt(s),
+            // no-default-arm: one question of a node — is it a Write
+            _ :> -2
+        };
+    }
+
+    fn invWriteCapStmt(s: Stmt) -> int {
+        return match s {
+            .Write(cap: c) :> c.id,
+            // no-default-arm: one question of a statement — is it a Write
+            _ :> -2
+        };
+    }
+
+    fn invLexicalHandle(h: Expr) -> boolean {
+        return match h {
+            .Handle(inst: i) :> invLexicalInst(i),
+            // no-default-arm: one question of a guard's first argument — is it a Lexical handle
+            _ :> false
+        };
+    }
+
+    fn invLexicalInst(i: InstRef) -> boolean {
+        return match i {
+            .Lexical :> true,
+            // no-default-arm: one question of an instance reference — is it Lexical
+            _ :> false
+        };
+    }
+
+    // The declaration whose field the capability `wc` writes, when the guard's writes `ws` name one of
+    // that declaration's fields that this capability writes (a lone guard: its one entry; a Commit's:
+    // the last Write's entry is among them) — else -1 (fail closed).
+    fn invCapEntryDecl(p: CoreProgram, wc: int, ws: Expr[]) -> int {
+        for (const d of p.decls) {
+            let i: int = 0;
+            for (const f of d.fields) {
+                const w: Sym | not = f.wcap;
+                if (w is given && w.id == wc) {
+                    for (const x of ws) {
+                        const parts: Expr[] = invElems(x);
+                        if (parts.length == 4 && invLitInt(parts[0]) == i) return d.sym.id;
+                    }
+                    return -1;
+                }
+                i = i + 1;
+            }
+        }
+        return -1;
+    }
+
+    fn invIsArrayLit(e: Expr) -> boolean {
+        return match e {
+            .ArrayOf :> true,
+            // no-default-arm: one question of an expression — is it a tape literal
+            _ :> false
+        };
     }
 
     // the declaration a guard's instance handle names: a shared instance or a child instance's
@@ -8987,7 +9076,7 @@ ${
     fn dropGivenDecl(d: Decl, keys: string[]) -> Decl {
         const rs: View[] | not = d.renders;
         if (rs is not || keys.length == 0) return d;
-        return { sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: d.fields, renders: dropGivenViews(rs, keys), wiring: d.wiring, handles: d.handles, invs: d.invs };
+        return { sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: d.fields, renders: dropGivenViews(rs, keys), wiring: d.wiring, handles: d.handles, invs: d.invs, invReads: d.invReads };
     }
 
     fn idleWatched(f: Field) -> boolean {
@@ -9080,7 +9169,7 @@ ${
         let ds: Decl[] = [];
         for (const d of p.decls) {
             if (d.sym.id == pd.sym.id) {
-                ds = ds.concat([dropGivenDecl({ sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: fs, renders: d.renders, wiring: d.wiring, handles: d.handles, invs: d.invs }, dropKeys)]);
+                ds = ds.concat([dropGivenDecl({ sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: fs, renders: d.renders, wiring: d.wiring, handles: d.handles, invs: d.invs, invReads: d.invReads }, dropKeys)]);
             } else if (d.kind == DeclKind.User) {
                 let cfs: Field[] = [];
                 let ci: int = 0;
@@ -9094,7 +9183,7 @@ ${
                     }
                     ci = ci + 1;
                 }
-                ds = ds.concat([dropGivenDecl({ sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: cfs, renders: d.renders, wiring: d.wiring, handles: d.handles, invs: d.invs }, dropKeys)]);
+                ds = ds.concat([dropGivenDecl({ sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: cfs, renders: d.renders, wiring: d.wiring, handles: d.handles, invs: d.invs, invReads: d.invReads }, dropKeys)]);
             } else {
                 ds = ds.concat([dropGivenDecl(d, dropKeys)]);
             }
@@ -9606,9 +9695,12 @@ ${
         let fids: int[] = [];
         let flabels: string[] = [];
         let cur: int = -1;
+        let wc: int = -1;
         for (const n of allNodes(Node.NProgram(p))) {
             const dn: int = nodeDeclId(n);
             if (dn >= 0) cur = dn;
+            const wn: int = invWriteCapOf(n);
+            if (wn != -2) wc = wn;
             const e: Expr | not = nodeExprOf(n);
             if (e is given) {
                 const pa: InvPrimAt | not = invPrimAt(e);
@@ -9619,7 +9711,7 @@ ${
                         ql = ql.concat([lbl]);
                         qc = qc.concat([""]);
                         qv = qv.concat([noVia]);
-                        const gf: InvGF | not = invGuardFields(p, e, cur);
+                        const gf: InvGF | not = invGuardFields(p, e, cur, wc);
                         if (gf is given) {
                             for (const d of p.decls) {
                                 if (d.sym.id == gf.decl) {
@@ -9827,9 +9919,10 @@ ${
     }
 
     // `p` with every invariant check left out: a declaration's construction check and a persisted
-    // cell's decode check gone (`not`), and the checks of every InvariantGuard / InvariantValue empty —
-    // the primitive itself, its instance, its writes and its value kept, so the program differs from
-    // `p` only by what the predicates (and their derived-field recomputations) read and call.
+    // cell's decode check gone (`not`), and every InvariantGuard / InvariantValue lowered as the plain
+    // value it guards (sivPrim; r3 — #2128 r2 re-review H6: r2 kept the primitive and emptied only its
+    // checks, so a guard's read of the field it overwrites stayed in this run), so the program is the
+    // one lowered with no invariant declared.
     fn invStripProgram(p: CoreProgram) -> CoreProgram {
         let ds: Decl[] = [];
         for (const d of p.decls) { ds = ds.concat([sivDecl(d)]); }
@@ -9859,7 +9952,7 @@ ${
         const rs: View[] | not = d.renders;
         let rs2: View[] | not = not;
         if (rs is given) rs2 = sivViews(rs);
-        return { sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: fs, renders: rs2, wiring: d.wiring, handles: d.handles, invs: not };
+        return { sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: fs, renders: rs2, wiring: d.wiring, handles: d.handles, invs: not, invReads: d.invReads };
     }
 
     fn sivField(f: Field) -> Field {
@@ -9903,7 +9996,7 @@ ${
             .Local :> e,
             .Read :> e,
             .Call(callee: c, args: a) :> Expr.Call(c, sivExprs(a)),
-            .Prim(op: o, args: a) :> Expr.Prim(o, sivPrimArgs(o, a)),
+            .Prim(op: o, args: a) :> sivPrim(o, a),
             .Match(scrut: s, arms: arms) :> Expr.Match(sivExpr(s), sivMatchArms(arms)),
             .ArrayOf(elems: xs) :> Expr.ArrayOf(sivExprs(xs)),
             .StructOf(ty: t, fields: xs) :> Expr.StructOf(t, sivExprs(xs)),
@@ -9925,17 +10018,44 @@ ${
         };
     }
 
-    // an invariant primitive's checks argument emptied; every other argument kept (and stripped)
-    fn sivPrimArgs(o: PrimOp, a: Expr[]) -> Expr[] {
-        const ci: int = invChecksArg(o);
-        let out: Expr[] = [];
-        let i: int = 0;
-        for (const x of a) {
-            if (i == ci) out = out.concat([Expr.ArrayOf([])]);
-            else out = out.concat([sivExpr(x)]);
-            i = i + 1;
+    // r3 (#2128 r2 re-review H6; SPEC §66.13.5 7a "decided twice — once with every invariant check
+    // left out"): an invariant primitive is lowered as the PLAIN value it guards — what the program
+    // holds with no invariant at all: an InvariantGuard is its first write's value (the value it
+    // returns — a lone Write's value), or `not` when it writes nothing (a construction check); an
+    // InvariantValue is its value `v`. Nothing of the primitive is left — not its instance handle, not
+    // the old values its writes are applied to — so a write the check guards reads in this run exactly
+    // what the same write reads with no invariant declared (a guard kept around a whole-value write
+    // would read the field it overwrites, and both runs would agree on a leak). A group's check — an
+    // Eval of an InvariantGuard in a Commit — is dropped (sivStmts).
+    fn sivPrim(o: PrimOp, a: Expr[]) -> Expr {
+        if (o == PrimOp.InvariantGuard) {
+            if (a.length >= 2) {
+                const ws: Expr[] = invElems(a[1]);
+                if (ws.length > 0) {
+                    const w0: Expr[] = invElems(ws[0]);
+                    if (w0.length == 4) return sivExpr(w0[3]);
+                }
+            }
+            return Expr.Lit(Literal.Absent);
         }
-        return out;
+        if (o == PrimOp.InvariantValue && a.length == 6) return sivExpr(a[3]);
+        return Expr.Prim(o, sivExprs(a));
+    }
+
+    fn sivGroupCheck(s: Stmt) -> boolean {
+        return match s {
+            .Eval(e: x) :> sivGuardExpr(x),
+            // no-default-arm: one question of a statement — is it a group's invariant check
+            _ :> false
+        };
+    }
+
+    fn sivGuardExpr(e: Expr) -> boolean {
+        return match e {
+            .Prim(op: o) :> o == PrimOp.InvariantGuard,
+            // no-default-arm: one question of an expression — is it an InvariantGuard
+            _ :> false
+        };
     }
 
     fn sivQuery(q: SqlQuery) -> SqlQuery {
@@ -9951,7 +10071,7 @@ ${
 
     fn sivStmts(ss: Stmt[]) -> Stmt[] {
         let out: Stmt[] = [];
-        for (const s of ss) { out = out.concat([sivStmt(s)]); }
+        for (const s of ss) { if (!sivGroupCheck(s)) out = out.concat([sivStmt(s)]); }
         return out;
     }
 

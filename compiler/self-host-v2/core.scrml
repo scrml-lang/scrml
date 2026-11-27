@@ -1131,7 +1131,13 @@ ${
         // initializer, construction"): an InvariantGuard over the fresh instance
         // (`Lexical(0)`, no writes) with every invariant of the declaration, run once its
         // fields are seeded; `not` when it has none.
+        // r3 (#2128 r2 re-review H6): a clause the compiler decides at every construction (analyze
+        // invConstructDecided, §66.13.5 rule 10) is not in it — it runs nowhere.
         invs: Expr | not,
+        // r3: the top fields EVERY invariant of the declaration reads (a clause's names, the siblings
+        // its derived fields are computed from, a field-type clause's field) — decided at
+        // construction or not. check.scrml C7 judges a Commit's owed check against it.
+        invReads: string[],
     }
 
     export type Param:struct    = { sym: Sym, ty: Type }
