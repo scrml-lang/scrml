@@ -52168,15 +52168,15 @@ exactly this (S482, #2101 r1–r5):**
   `corpus` is read with the changed tree's); fences tagged as another language, indented code
   blocks, HTML `<pre>` blocks and markdown prose are not read; markdown the lexer mis-reads exits 2 rather
   than be read or passed — both when its cursor runs past the source and when the fence texts it reads differ from
-  CommonMark's: marked 14 reads a fence after a lazy continuation line inside a list in a blockquote
-  (`> - a⏎b⏎> ```scrml…`) as paragraph text, so every markdown file is also read by commonmark.js, the reference
-  implementation, and the gate exits 2 when the two readers' multisets of read fence texts (each line trimmed)
-  differ (#2101 r5); **INTERIM:** that exit 2 asks the author to reshape valid CommonMark marked 14 mis-reads —
-  the capable form is one reader that agrees with CommonMark: marked 18.0.0 (published 2026-04-07) and later
-  agree with commonmark.js on the 40,000 r4 fuzz documents and the lazy-continuation reproducers (17.x and
-  earlier do not), but the gate's placement wrappers hook marked internals (`blockTokens`, tokenizer methods)
-  and must be re-proven on marked ≥ 18.0.0 before the bump (g-tool-retired-lint-marked-bump-s482); after it the
-  cross-check only guards against a regression; **INTERIM:** an unterminated string or template literal in a
+  CommonMark's: every markdown file is also read by commonmark.js, the reference implementation, and the gate exits
+  2 when the two readers' multisets of read fence texts (each line trimmed) differ (#2101 r5). marked 18.2.0 (S483,
+  g-tool-retired-lint-marked-bump-s482) reads the lazy-continuation class marked 14 mis-read (`> - a⏎b⏎> ```scrml…`)
+  as CommonMark does — the r4 fuzz (40,000 documents) and the four reproducers agree, with no exit 2;
+  **INTERIM:** marked 18 still reads a fence opened in a list item in a blockquote and followed by an indented
+  line with no `>` (`> - ~~~scrml⏎    x`) differently from CommonMark, and a few nested-container shapes cannot be
+  placed; both exit 2 and ask the author to reshape valid CommonMark — the capable form reads fences and their
+  lines from the CommonMark reference reader itself, so no second reader can disagree
+  (g-tool-retired-lint-marked18-residual-s483); **INTERIM:** an unterminated string or template literal in a
   fence (a stray ```` ``` ```` line inside it is a template-literal opener to scrml) hides the rest of that fence,
   as it would in a source file the compiler then refuses — the capable form fails the gate when a fence's text
   ends inside an unterminated string or template literal, so nothing after it goes unread; the hook reads the working tree, not the index (CI reads the commit);
