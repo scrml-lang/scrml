@@ -5553,9 +5553,10 @@ rather than trusting a declaration. Then, for an effect body:
    E-REQUEST-WRITE-UNPROVEN (§6.7.7 Normative Statements); a derived formula or render expression,
    E-VALUE-WRITE-UNPROVEN (§6.15 — ⚑ ruled, NOT built in the bootstrap: g-boot-render-host-call-hang-s482, queued as
    lane s483-q15b-pure-marker); and the per-update run bound above covers render effects too (§6.15, "The render
-   self-write hang"). ruling:user-voice-scrml.md-S483-host-calls-render-request. A render effect has a second bound
-   across updates, by time without yielding (§6.15, ruling:user-voice-scrml.md-S483-render-bound-time); an effect
-   body has only the per-update bound of this rule.)*
+   self-write hang"). ruling:user-voice-scrml.md-S483-host-calls-render-request. A render effect, and a runtime `^{}`
+   block placed in markup (pa-ruled:S483-render-bound-covers-markup-meta), has a second bound across updates, by time
+   without yielding (§6.15, ruling:user-voice-scrml.md-S483-render-bound-time); an effect body has only the per-update
+   bound of this rule.)*
 6. **Outside the analysis, stated:** a network echo — the body sends to a `<channel>` or calls the server, and a
    server push later writes a synced cell the effect lists — is a later write by a different writer (the push),
    not a write by the effect. It is possible, it is not a compile-time cascade, and no compile-time rule can see
@@ -8459,14 +8460,20 @@ case reads the same in all three rules.
   of one render effect and report the cycle rather than hang, in two ways. **Within one update**, as §6.7.4 rule 5
   requires for an effect: a render effect runs at most a fixed number of times (the same bound as an effect's) in one
   update. **Across updates, by time:** once the page has gone about one second without yielding to the event loop, a
-  render effect that has already run since the page last yielded SHALL NOT run again until the page yields, and the
-  stall SHALL be reported once. A render whose run leads back to itself through an awaited result (a `<request>`'s
-  settle) runs each lap in a new update, so a bound per update alone never meets it; the time bound does. The time
-  bound does not ask what caused a write: a loop whose writes come through a request's settle and a loop whose writes
-  come from host code's own microtask are bounded the same way. A chain of updates that ends inside the bound
-  completes, however many laps it takes; a chain that does not end before the bound is stopped, whether or not it
-  would have ended later, so where it stops depends on the machine's speed. The time bound covers render effects
-  only: an `<effect>` body keeps rule 5's per-update bound, and a single run that never returns is not bounded by
+  render effect that has already re-run more than three times since the page last yielded SHALL NOT run again until
+  the page yields, and the stall SHALL be reported once. Once the page yields, every run so skipped SHALL run once, so
+  the display catches up with the cells; if that run sets the same loop going again, its next re-run before the page
+  next yields is skipped without a second report and without another run on the yield after it. A render whose run
+  leads back to itself through an awaited result (a `<request>`'s settle) runs each lap in a new update, so a bound
+  per update alone never meets it; the time bound does. The time bound does not ask what caused a write: a loop whose
+  writes come through a request's settle and a loop whose writes come from host code's own microtask are bounded the
+  same way. The few re-runs allowed before the time is checked mean one slow update — a heavy render between two
+  settles that re-runs a display once or twice — is not taken for a loop. A chain of updates that ends inside the
+  bound completes, however many laps it takes; a chain that does not end before the bound is stopped, whether or not
+  it would have ended later, so where it stops depends on the machine's speed. The time bound covers render effects
+  and a runtime `^{}` block placed in markup (§22.5) — a block placed in markup is rendering work, and a block that
+  `meta.set`s a `<request>`'s dependency and `meta.get`s its target laps through the request's settle like a render
+  does. An `<effect>` body keeps rule 5's per-update bound, and a single run that never returns is not bounded by
   either. *(Provenance: ruling:user-voice-scrml.md-S483-host-calls-render-request — Q15, rec *"(a) a run cap on the
   render queue now, matching the S482 effect cap, so no shape can hang"*. RULED: *"yes, your recommendations on
   both"* · ruling:user-voice-scrml.md-S483-render-bound-time — owner chose *"Time without yielding (Recommended)"*:
@@ -8483,7 +8490,20 @@ case reads the same in all three rules.
   150-lap request and row-mount chains with answers immediate, by MessageChannel, setImmediate or a fake clock).
   Built in the bootstrap runtime (`compiler/self-host-v2/slice-m1/runtime/runtime.js` `drainQueues`,
   `RENDER_STALL_MS` = 1000, `globalThis.__scrml_render_stall_ms` overrides for tests; the per-update bound is the
-  effect queue's, `globalThis.__scrml_max_meta_runs`); impl#1 is frozen.)*
+  effect queue's, `globalThis.__scrml_max_meta_runs`); impl#1 is frozen.)* *(S483 fix round r3, #2123 — the runtime
+  `^{}` block, the re-run count and the run on the yield. Provenance: ruling:user-voice-scrml.md-S483-render-bound-time,
+  as above · pa-ruled:S483-render-bound-covers-markup-meta — the PA's reading that a runtime `^{}` block placed in
+  markup is rendering work, so the time bound applies to its re-runs (owner veto listed); a `^{}` + `<request>` ring
+  with no host code (probes M1 / M1c, 0 diagnostics) froze the page at load on base and r2 · "run once on the yield"
+  makes true what the r2 text and console message promised ("render effects run again once the page yields"): r2
+  skipped a run and never ran it again, so one slow update showed "Loading" for good (probe M2b) · the re-run count
+  (three) keeps one slow update and a fake clock advanced synchronously in a test from tripping the bound (review r2
+  MED-1, MED-2) · supersedes the r2 text "a render effect that has already run since the page last yielded SHALL
+  NOT run again" and "the time bound covers render effects only" · **Direction of change:** runtime-only, nothing
+  newly rejected; measured (Chromium and happy-dom): M1 / M1c finish loading about one second in and stay
+  responsive, logged once; M2b and loading_forever show "Done" as on base; a loop whose every lap costs 50 ms or
+  200 ms stops about 1.0 s in (r2: 3.3 s / 13 s — the clock is now read at each update's start); a MessageChannel
+  that never delivers falls back to the `setTimeout` captured at load, armed once a stall passes the bound.)*
 
 **Outside the analysis, stated.** As for effects (§6.7.4 rule 6): a value position that calls the server, whose
 server-side code later causes a push into a synced cell, is a later write by a different writer, not a write by the
@@ -8507,9 +8527,11 @@ declarations keep their own hydration rule. *(Provenance: ruling:user-voice-scrm
 - *(S483.)* A derived formula or a render expression that reaches an unproven host-backed function (§21.3.1),
   directly, through a scrml function or as a value, SHALL be rejected (E-VALUE-WRITE-UNPROVEN), the message naming
   the position and the call chain. ⚑ *Ruled, NOT built in the bootstrap — g-boot-render-host-call-hang-s482; queued:
-  lane s483-q15b-pure-marker.* An implementation's runtime SHALL bound the runs of one render effect — within one
-  update, and across the updates one chain of cause and effect makes before the page yields to the event loop — and
-  report the cycle rather than hang.
+  lane s483-q15b-pure-marker.* An implementation's runtime SHALL bound the runs of one render effect, and of a
+  runtime `^{}` block placed in markup, rather than hang: within one update, a fixed number of runs (§6.7.4 rule 5);
+  and across updates, once the page has gone about one second without yielding to the event loop, no further re-run of
+  one that has re-run more than three times since the page last yielded until the page yields — when each run so
+  skipped SHALL run once. Each stall SHALL be reported once.
 - Event-handler attribute values, `bind:` bindings, function bodies (judged at their call sites), lifecycle element
   bodies, engine `effect=` / `<onTransition>` bodies and body-top statement lists are not value positions.
 - E-VALUE-WRITES-STATE SHALL name the position, the written cell, the call chain and the fix by shape.
@@ -28745,7 +28767,12 @@ always pass all four arguments.
 > cell the other `meta.get`s therefore settle as in impl#1 (probed: `x` = 2). As in impl#1, a block runs at
 > most 100 times in one flush (`globalThis.__scrml_max_meta_runs` overrides the limit). After that it logs
 > impl#1's message, `[scrml] meta effect <id> exceeded <n> re-runs — possible infinite loop`, and skips the
-> run. The next flush counts again. A `meta.emit` made while the placeholder is still in a detached
+> run. The next flush counts again. *(S483 r3.)* A block in markup is rendering work, so it is also under §6.15's
+> stall bound: a block whose ring laps through a `<request>`'s settle (`meta.set` of the request's dependency,
+> `meta.get` of its target — a new flush each lap) is stopped once the page has gone about one second without
+> yielding, and runs once more when the page yields (pa-ruled:S483-render-bound-covers-markup-meta, reading
+> ruling:user-voice-scrml.md-S483-render-bound-time). The analyzer's ring check does not follow `meta.set`
+> (g-boot-request-ring-meta-set-s483). A `meta.emit` made while the placeholder is still in a detached
 > render (a mount builds its tree before inserting it) is handed to the gate after the insert, so the gate
 > judges the page `<form>` the block really stands in. An emit made once the placeholder is in the page
 > drops any emits still held, so an older emit never replaces a newer one. The gate is impl#1's runtime
