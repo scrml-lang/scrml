@@ -12891,13 +12891,17 @@ ${
     // (trapSiteWhat): an index read or an index write (`xs[i]`, `s[i]`, E-INDEX-OUT-OF-RANGE-RT); a
     // `slice` / `repeat` / `padStart` / `padEnd` position that is not a literal, or an `insert`
     // (isPositionArg, E-INDEX-OUT-OF-RANGE-RT); a length the typer could not prove inside a tape's
-    // bound (boundCheckAt, E-WRITE-INVARIANT-RT); a `/` or `%` whose divisor is not a non-zero number
-    // literal (the ruling's "division by a possibly-zero value"); a refinement checked at run time (a
-    // refined parameter, a refined `const` local whose value is not a literal the static zone passes —
-    // lower.scrml paramRefineChecks / localRefineCheck, E-CONTRACT-001-RT); and a host-backed function
-    // (§21.3.1: E-HOST-VALUE-MISMATCH-RT / E-HOST-THROW-RT; scrml:math's `floor` / `ceil` / `trunc` /
-    // `round` are E-INT-CONVERSION-RT; the other exports of a PURE_HOST_FILES file are not traps —
-    // pureHostFile's reading of that JS). A `.value` (any member) read of a `T | not` value is
+    // bound (boundCheckAt, E-WRITE-INVARIANT-RT — a typer fact: the pass runs after typeProgram, r1
+    // HIGH-1); a ~~`/` or~~ `%` whose divisor is not proven non-zero (divTrapWhat — r1, RULED S483
+    // ruling:user-voice-scrml.md-S483-q8-division: `/` never traps); a refinement checked at run time (a
+    // refined parameter — not at a call handing it a passing literal, literalCallPasses —, a refined
+    // `const` local whose value is not a literal the static zone passes — lower.scrml paramRefineChecks /
+    // localRefineCheck, E-CONTRACT-001-RT); and a host-backed function (§21.3.1:
+    // E-HOST-VALUE-MISMATCH-RT / E-HOST-THROW-RT; scrml:math's `floor` / `ceil` / `trunc` / `round` are
+    // E-INT-CONVERSION-RT; ~~the other exports of a PURE_HOST_FILES file are not traps~~ only the
+    // TRAP_FREE_HOST_EXPORTS are not, hostExportTrapFree — r1 HIGH-2). A function on
+    // TRAP_FREE_STDLIB_FNS is not a site, nor anything it calls (r1 LOW-2). The constructs are
+    // constructAt's, and the text elements (textHostAt, r1 MED-1). A `.value` (any member) read of a `T | not` value is
     // refused already, by the typer (E-TYPE-046: the construct's test does not narrow an initializer
     // that runs before it), and an unresolvable call by rule (b) (initReachDiags). Fail closed: a site
     // the walk reaches is counted whether or not that path runs.

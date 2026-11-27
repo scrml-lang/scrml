@@ -44,3 +44,16 @@ Gap: g-boot-trapping-construct-init-s482 (INTERIM; PERMANENT = branch-scoped dec
   message names the owed trap gap g-bootstrap-int-overflow-and-mod-zero-untrapped-s469.
 - LOW-2: nonZeroConst (o05 / o06), TRAP_FREE_STDLIB_FNS minOf / maxOf (o16), a literal call passing its refined
   parameters' static zone (o09; a self-reaching callee stays fail-closed). o01 / o02 left fail-closed (gap).
+- LOW-3 / ruling S483-unread-trapping-init-runs: print.scrml primTraps — a Core primitive that can trap (IndexRead,
+  TapeInsert, LengthCheck, RefineCheck, a computed slice / repeat / pad position, `%` by a non-literal) ACTS, so
+  the initializer is never left out as unobservable and runs at its place. n01 now traps as n03 does.
+- Corpus (2994 .scrml under examples / benchmarks / samples / conformance/cases; base = merged pre-change tree):
+  0 crashes either side; 0 newly rejected; 0 newly accepted; 0 diagnostic / message diffs; 0 client-JS and 0
+  server-JS diffs. Chromium load of the 329 files that compile on the bootstrap (320 pages, 9 no page), base and
+  head: 0 page errors on either side — 0 newly trapping at load.
+- Conformance cases (r1): body-top/{trapping-init-bound-in-if-content-neg, trapping-init-host-in-if-content-neg,
+  trapping-init-in-textarea-neg} (impl#1 XFAIL pinned, signature missing:E-FILE-SCOPE-INIT-IN-CONSTRUCT, carried
+  gap g-impl1-init-in-construct-s482), body-top/decided-init-in-if-content (passes on both). bootstrap-conformance
+  --json base vs head: CRASH 0 / 0; PASS 868 → 872; the only verdict differences are the 4 new cases (all PASS).
+- SPEC §7.6 R1 (ruling S483-unread-trapping-init-runs), rule (b) S483 paragraph (host list, `%` only, decided
+  cases, text elements), §34 row, provenance, §40-area sentence; gap g-boot-trapping-construct-init-s482 updated.

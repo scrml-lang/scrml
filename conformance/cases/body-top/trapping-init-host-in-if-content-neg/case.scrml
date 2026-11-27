@@ -1,0 +1,8 @@
+// §7.6 rule (b) (S483 r1, #2129 review HIGH-2) — `scrml:random`'s `randomInt` is host-backed and its `int` return decode can trap (E-HOST-VALUE-MISMATCH-RT for a NaN or huge bound); it is not on the trap-free host export list — E-FILE-SCOPE-INIT-IN-CONSTRUCT.
+<program>
+${ import { randomInt } from "scrml:random"; }
+${ const big: number = 1e300; }
+${ const n: int = 2; }
+<p id="a" if=(n > 5)>${ const r: int = randomInt(big, big); }${r}</p>
+<p id="z">end</p>
+</program>
