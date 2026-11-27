@@ -628,7 +628,7 @@ describe("s483 fix r3 — the stall bound: runtime `^{}` blocks, the re-run coun
     });
   });
 
-  test("MED-1 (ii): a LOOP the re-run on the yield restarts is not given another second — stopped at its first re-run, not logged again", async () => {
+  test("MED-1 (ii): a LOOP the re-run on the yield restarts is not given another second — stopped at its first re-run, not logged again; (r4) it laps once per bound after, never once per task", async () => {
     await withStall(50, async (scope, logged) => {
       const n = rt.cell(0);
       const r = rt.cell(0);
@@ -644,10 +644,15 @@ describe("s483 fix r3 — the stall bound: runtime `^{}` blocks, the re-run coun
       const ms = performance.now() - t0;
       expect(ms).toBeLessThan(2000);                 // not a second stall of 50 ms per yield, forever
       expect(logged.length).toBe(1);
+      // s483 r4 (#2123 r3 review MED-1): the skipped retry runs once more about one bound (50 ms) later, so
+      // the loop laps about once per bound — each lap one run, then stopped again — not once per task
+      // (r3: stopped for good, which also lost a later write from a task; protoA: once per task, 100% CPU)
       const settled = runs;
-      await macrotask(60);
-      expect(runs).toBe(settled);                    // the loop stays stopped
-      expect(logged.length).toBe(1);
+      await macrotask(260);
+      const laps = runs - settled;
+      expect(laps).toBeGreaterThanOrEqual(1);
+      expect(laps).toBeLessThanOrEqual(8);           // ~5 at one per 50 ms; a loop let go would be thousands
+      expect(logged.length).toBe(1);                 // not logged again
       armed = false;
       n.set(n.peek() + 1);                           // a later write: runs as usual, in a new watch
       await macrotask(5);
