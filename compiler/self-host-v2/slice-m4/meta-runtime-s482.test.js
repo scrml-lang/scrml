@@ -616,8 +616,14 @@ suite("s482 — Chromium", () => {
     await page.close();
   }, 60000);
 
+  // s483 (#2123 r3) — fixture migrated: the writing block was inside the `if=` section, and a runtime `^{}`
+  // inside a construct is a value position that may not write (E-VALUE-WRITES-STATE — §6.15 item 4, the Q5
+  // rider of ruling:user-voice-scrml.md-S482-runorder-model-c: "a runtime `^{}` block inside a construct is a
+  // value position"). The write now comes from a block at a spine place, which may write on its re-runs (the
+  // same rider), re-run by the same click AFTER the section's mount: the emit block's mount-time emit ("old")
+  // is still held for the insert when the write re-runs it connected ("new") — the path MED-3 fixed.
   test("r1 MED-3: a block mounted by a click shows the newest emit, not a held older one", async () => {
-    const { page } = await openChromium(P(`let <show:bool=false/>\nlet <s:string="old"/>\n<section if=@show><div id="h">^{ meta.emit("<b>" + meta.get("s") + "</b>"); }</div>\n<div>^{ meta.set("s", "new"); }</div></section>\n<p id="o">\${@s}</p>\n<button id="b" onclick=\${() => { @show = true; }}>b</button>`));
+    const { page } = await openChromium(P(`let <show:bool=false/>\nlet <s:string="old"/>\n<section if=@show><div id="h">^{ meta.emit("<b>" + meta.get("s") + "</b>"); }</div></section>\n<div>^{ if (meta.get("show")) { meta.set("s", "new"); } }</div>\n<p id="o">\${@s}</p>\n<button id="b" onclick=\${() => { @show = true; }}>b</button>`));
     await page.click("#b");
     await new Promise((r) => setTimeout(r, 100));
     expect(await page.evaluate(() => [document.querySelector("#h")?.textContent, document.querySelector("#o")?.textContent])).toEqual(["new", "new"]);
