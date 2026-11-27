@@ -1,0 +1,23 @@
+{
+  "id": "body-top-trapping-init-mod-partial-divisor-in-if-content-neg",
+  "description": "§7.6 rule (b) (S483 q8-fu2) — `${ const c: number = n % v(2); }` inside `<p if=(n > 5)>`, `v` a recursive function the compiler types only in part: the divisor is not proven a `number`, so the `%` may be between `int`s by 0 — E-FILE-SCOPE-INIT-IN-CONSTRUCT.",
+  "language-version": "1.0",
+  "spec": "§7.6 rule (b) (S483), §7.6 R3, §19.17, §34",
+  "source-test": "compiler/self-host-v2/slice-m4/trapping-construct-init-s483.test.js",
+  "rationale": "§7.6 rule (b) (S483 q8-fu2): a `%` is a trap site when neither operand is proven a `number` on every branch and the divisor is not proven non-zero; an operand with a branch the compiler could not type is not proven (#2133 review LOW-1 — fail closed). ruling:user-voice-scrml.md-S483-q8-division: \"inside a construct refuse only what can actually trap: keep `%` and integer division by a possibly-zero int refused\".",
+  "expect": {
+    "codes": [
+      "E-FILE-SCOPE-INIT-IN-CONSTRUCT"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-init-in-construct-s482",
+      "fails": {
+        "codes": [
+          "missing:E-FILE-SCOPE-INIT-IN-CONSTRUCT"
+        ]
+      }
+    }
+  }
+}

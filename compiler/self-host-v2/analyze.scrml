@@ -12912,10 +12912,12 @@ ${
     // (trapSiteWhat): an index read or an index write (`xs[i]`, `s[i]`, E-INDEX-OUT-OF-RANGE-RT); a
     // `slice` / `repeat` / `padStart` / `padEnd` position that is not a literal, a literal `repeat`
     // count / pad width whose result is not proven to fit the longest string (lengthTrapWhat — q8-fu,
-    // #2129 r1 MED-1), or an `insert`
+    // #2129 r1 MED-1), a `replaceAll` whose receiver and replacement are not literals proven to fit
+    // (replaceAllTrapWhat — q8-fu2, #2133 review MED-1), or an `insert`
     // (isPositionArg, E-INDEX-OUT-OF-RANGE-RT); a length the typer could not prove inside a tape's
     // bound (boundCheckAt, E-WRITE-INVARIANT-RT — a typer fact: the pass runs after typeProgram, r1
-    // HIGH-1); a ~~`/` or~~ `%` whose divisor is not proven non-zero nor a `number` (divTrapWhat — r1 / q8-fu LOW-1, RULED S483
+    // HIGH-1); a ~~`/` or~~ `%` between two operands neither proven a `number` whose divisor is not
+    // proven non-zero (divTrapWhat — r1 / q8-fu LOW-1 / q8-fu2, RULED S483
     // ruling:user-voice-scrml.md-S483-q8-division: `/` never traps); a refinement checked at run time (a
     // refined parameter — not at a call handing it a passing literal, literalCallPasses —, a refined
     // `const` local whose value is not a literal the static zone passes — lower.scrml paramRefineChecks /
@@ -12938,7 +12940,7 @@ ${
         const k: AExprK = e.k;
         const own: string = match k {
             .Index(obj: o, idx: ix) :> "reads `" + trapShown(e) + "` by position (a position outside it is the E-INDEX-OUT-OF-RANGE-RT trap, §19.17)",
-            .Binary(op: o, l: l, r: r) :> divTrapWhat(t, o, r),
+            .Binary(op: o, l: l, r: r) :> divTrapWhat(t, o, l, r),
             .Call(callee: c, args: a) :> callTrapWhat(t, e, c, a),
             // no-default-arm: every other expression traps only through its parts
             _ :> ""
@@ -13013,19 +13015,33 @@ ${
     // `number` (no `int` member: numberOnly) gives NaN by 0 — no trap is owed — and is accepted, as
     // `/` is. A divisor the typer proved `int` in whole or in part, or did not type, stays refused
     // (fail closed).
-    fn divTrapWhat(t: Tables, o: BinOp, r: AExpr) -> string {
+    // s483 q8-fu2 (#2133 review item 3; PA reading prov=pa-ruled:S483-mixed-mod-no-trap, under the
+    // same governing clause) — `%` lowers to the bare JS `%` for every operand type (print.scrml
+    // primJs), and numJoin gives `number` when either operand is a `number`: `7.0 % n0` is NaN, a
+    // `number`, and the s469 trap it would owe is defined on an `int` result only. So `%` is a trap
+    // site only when BOTH operands are `int` (the result is `int`) and the divisor is not proven
+    // non-zero: either operand proven a `number` on every branch (numberOnly) is not a site.
+    fn divTrapWhat(t: Tables, o: BinOp, l: AExpr, r: AExpr) -> string {
         if (o != BinOp.Mod) return "";
         if (positiveLit(r) || negLiteral(r) || nonZeroConst(t, r)) return "";
-        if (numberOnly(exprType(t, r.nid))) return "";
-        return "divides by `" + trapShown(r) + "` (`%`), which is not proven a non-zero value nor a `number` (`n % 0` by an `int` has no `int` value: the trap it owes is g-bootstrap-int-overflow-and-mod-zero-untrapped-s469 — refused fail closed, ruling:user-voice-scrml.md-S483-q8-division: \"refuse only what can actually trap: keep `%` … by a possibly-zero int refused\")";
+        if (numberOnly(exprType(t, r.nid)) || numberOnly(exprType(t, l.nid))) return "";
+        return "divides by `" + trapShown(r) + "` (`%`), with a result that may be an `int` (neither operand is proven a `number`) and a divisor not proven non-zero (an `int` `n % 0` has no `int` value: the trap it owes is g-bootstrap-int-overflow-and-mod-zero-untrapped-s469 — refused fail closed, ruling:user-voice-scrml.md-S483-q8-division: \"refuse only what can actually trap: keep `%` … by a possibly-zero int refused\")";
     }
 
     // The typer proved the value a `number` on every branch: no `int` member, no unknown one.
+    // s483 q8-fu2 (#2133 review LOW-1, w01) — a `Partial`'s members are only the branches the typer
+    // proved; the others are unknown, so a `Partial` is never proven `number` (fail closed).
     fn numberOnly(v: VType) -> boolean {
-        const xs: Type[] = memberTypes(v);
-        if (xs.length == 0) return false;
-        for (const x of xs) {
-            if (kindOf(unMaybe(x)) != 1) return false;
+        const ms: Type[] = match v {
+            .Known(t: x) :> [x],
+            .OneOf(ts: xs) :> xs,
+            .Partial(ts: xs) :> [],
+            .Absent :> [],
+            .Unknown :> []
+        };
+        if (ms.length == 0) return false;
+        for (const m of ms) {
+            if (kindOf(unMaybe(m)) != 1) return false;
         }
         return true;
     }
@@ -13071,6 +13087,7 @@ ${
     // that limit (textFitsLit); otherwise it is one — fail closed: the receiver's length is not
     // known (`big.repeat(2)` on a receiver of 2^28 units traps). The mirror is print.scrml primTraps.
     fn lengthTrapWhat(t: Tables, op: PrimOp, c: AExpr, args: AExpr[]) -> string {
+        if (op == PrimOp.StrReplaceAll) return replaceAllTrapWhat(t, c, args);
         if (op != PrimOp.StrRepeat && op != PrimOp.StrPadStart && op != PrimOp.StrPadEnd) return "";
         if (args.length == 0) return "";
         const n: number = litNumOf(args[0]);
@@ -13078,6 +13095,29 @@ ${
         if (textFitsLit(op == PrimOp.StrRepeat, n, recv, args.length > 1)) return "";
         const what: string = op == PrimOp.StrRepeat ? "count" : "width";
         return "calls `" + trapShown(c) + "(…)` with the " + what + " `" + trapShown(args[0]) + "`, whose result is not proven to fit the longest string (" + maxTextUnits() + " UTF-16 units; a longer one is the E-INDEX-OUT-OF-RANGE-RT trap, §19.17)";
+    }
+
+    // s483 q8-fu2 (#2133 review MED-1) — `replaceAll` checks its result the same way (runtime.js
+    // strReplaceAll → requireFits, E-INDEX-OUT-OF-RANGE-RT: "past the longest string"), so it is a
+    // site unless its receiver AND its replacement are literals (or never-written file-scope
+    // `const`s holding one) whose result provably fits (replaceAllFits). The searched-for text does
+    // not matter: the bound holds for every one, `""` included. The mirror is print.scrml primTraps.
+    fn replaceAllTrapWhat(t: Tables, c: AExpr, args: AExpr[]) -> string {
+        const recv: int = recvLitLen(t, c);
+        const wl: int = args.length > 1 ? litLenOf(t, args[1]) : -1;
+        if (replaceAllFits(recv, wl)) return "";
+        return "calls `" + trapShown(c) + "(…)`, whose result is not proven to fit the longest string (" + maxTextUnits() + " UTF-16 units; a longer one is the E-INDEX-OUT-OF-RANGE-RT trap, §19.17)";
+    }
+
+    // Does `s.replaceAll(find, with)` fit the longest string, for every `find`? `recv` / `with` —
+    // the `.length` of the receiver / the replacement when it is a literal, −1 otherwise. A string of
+    // length `k` is at most 2k UTF-16 units. The runtime's largest check (`find` "": a `with` before
+    // every code point and at the end, or the running count with each replacement) is at most
+    // (L + 1)·W + L units for a receiver of L units and a replacement of W units, so with L ≤ 2·recv
+    // and W ≤ 2·with it fits when (2·recv + 1)·2·with + 2·recv is within the limit.
+    fn replaceAllFits(recv: int, wl: int) -> boolean {
+        if (recv < 0 || wl < 0) return false;
+        return (2 * recv + 1) * 2 * wl + 2 * recv <= maxTextUnits();
     }
 
     // The longest string a result may be, in UTF-16 units — runtime.js MAX_TEXT_UNITS (2^29 − 24).
@@ -13123,9 +13163,15 @@ ${
             _ :> not
         };
         if (recv is not) return -1;
-        const own: int = strLitLen(recv);
+        return litLenOf(t, recv);
+    }
+
+    // The `.length` of a string literal, or of a file-scope `const` (never written) whose
+    // initializer is one; −1 otherwise.
+    fn litLenOf(t: Tables, x: AExpr) -> int {
+        const own: int = strLitLen(x);
         if (own >= 0) return own;
-        const id: int = constSymOfFact(nameFact(t.names, recv.nid));
+        const id: int = constSymOfFact(nameFact(t.names, x.nid));
         if (id < 0) return -1;
         for (const k of t.consts) {
             if (k.sym.id == id) {
@@ -13164,12 +13210,22 @@ ${
         if (pk != "") return pk;
         return match k {
             .Num(raw: r) :> r,
+            .Str(v: s) :> strShownShort(s),
             .Index(obj: o, idx: ix) :> trapShown(o) + "[" + trapShown(ix) + "]",
             .Member(obj: o, name: n) :> trapShown(o) + "." + n,
             .Call(callee: c) :> trapShown(c) + "(…)",
             // no-default-arm: anything else is shown by its shape
             _ :> "…"
         };
+    }
+
+    // A string literal for a message: quoted and re-escaped, cut after 16 UTF-16 units (never
+    // inside a surrogate pair) — s483 q8-fu2 (#2133 review item 4: a literal receiver showed `…`).
+    fn strShownShort(s: string) -> string {
+        if (s.length <= 16) return "\"" + strEscaped(s) + "\"";
+        const hi: int = s.charCodeAt(15);
+        const cut: int = hi >= 55296 && hi <= 56319 ? 15 : 16;
+        return "\"" + strEscaped(s.substring(0, cut)) + "…\"";
     }
 
     // A refined `const` local whose value the static zone does not pass (lower.scrml

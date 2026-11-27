@@ -5938,6 +5938,14 @@ ${
         if (rs is not) return [];
         const seen2: int[] = seen.concat([d.id]);
         let out: ValidityOf[] = namedFields(p, rs, sub, seen2);
+        // s483 (lane s483-attr-trap; #2130 review INFO-1, gap g-boot-attr-forward-compile-exponential-s483):
+        // a kid of a not-yet-created instance is itself a use — kidSub gives it the use's Sub, so
+        // kidFields would make exactly the call namedFields made already (viewFields `.Instance` →
+        // useFields, same `seen2`; every mounted instance is among the instances namedFields walks), and
+        // addFields keeps the first. Making it again doubled the work at every level: a chain of
+        // components each rendering the next took time exponential in its depth (25 deep: 11 s; 30: over
+        // 300 s).
+        if (!sub.live) return out;
         let k = 0;
         for (const v of mountedInstances(rs)) {
             out = addFields(out, kidFields(p, v, sub, k, seen2));

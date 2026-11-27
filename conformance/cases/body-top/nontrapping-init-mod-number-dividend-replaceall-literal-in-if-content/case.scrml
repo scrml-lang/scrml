@@ -1,0 +1,6 @@
+// §7.6 rule (b) (S483 q8-fu2, #2133 review items 3 and MED-1) — inside `if=` content, a `%` with a `number` dividend (`7.0 % n0`, n0: int — the result is a `number`, NaN by 0, no trap) and a `replaceAll` on literals whose result provably fits cannot trap: both stay legal and run.
+<program>
+${ const n0: int = 0; }
+<p id="a" if=(n0 == 0)>${ const m: number = 7.0 % n0; }${ const r: string = "abc".replaceAll("b", "xyz"); }${m} ${r}</p>
+<p id="z">end</p>
+</program>
