@@ -8063,7 +8063,7 @@ ${
         const outs: OuterCell[] = outerLive(p);
         const bcs: int[] = bodyCands(p);
         if (outs.length == 0 && bcs.length == 0) return p;
-        const si: int[] = serverInitsExposing(bodyAsConsts(outerAsConsts(p, outs, false), p, bcs, false), keep);
+        const si: int[] = serverInitsExposing(bodyAsConsts(outerAsConsts(p, outs, false), p, bcs, false, noPick()), keep);
         let moved: OuterCell[] = [];
         for (const oc of outs) { if (hasInt(si, oc.decl.id)) moved = moved.concat([oc]); }
         let bmoved: int[] = [];
@@ -8071,8 +8071,82 @@ ${
         if (moved.length == 0 && bmoved.length == 0) return p;
         let q: CoreProgram = p;
         if (moved.length > 0) q = outerAsConsts(p, moved, true);
-        if (bmoved.length > 0) q = bodyAsConsts(q, p, bmoved, true);
+        if (bmoved.length > 0) q = bodyAsConsts(q, p, bmoved, true, keptVals(p, outs, bcs, bmoved, si, keep));
         return q;
+    }
+
+    // =========================================================================
+    // s483 (lane s483-attr-trap; ruling:user-voice-scrml.md-S483-dropped-attr-trap — "a dropped value
+    // that reaches nothing server-only is still evaluated for its trap and the result discarded; a
+    // dropped value that reaches a secret cannot run in the client, so its trap loss is documented in
+    // SPEC with a gap"). A server-only component field (an attribute, or a cell a use site gives a
+    // value) has several values — its default and each use site's — and the classification judges
+    // them JOINED (joinVals): one that reaches a secret makes the field server-only, and every value
+    // was dropped, so a trap in another value that reaches nothing server-only stopped firing (#2130
+    // review MED-1: r12g, r12i, r12j). Each value of such a field is now judged ALONE, by the same
+    // classification (serverInitsExposing, no second classifier): the program with the field's binding
+    // holding that value only. One that leaves the field not server-only reaches nothing server-only,
+    // and it is KEPT — it runs in the client, at its place, as it did before the field was dropped (a
+    // use site's value at the instance's mount; a kept default at the mount of each instance that gives
+    // the field none), and nothing reads the field it fills, so its result is discarded. The others
+    // are dropped as before (their trap is lost: they cannot run in the client — §7.6 rule (b)).
+    // A bare literal is never kept: it cannot trap, and running it shows nothing. ⚑ INTERIM
+    // (g-boot-dropped-value-trap-s483): any other value that reaches nothing server-only is kept whether
+    // or not it can trap — the printer holds no trap-site facts (the §19.17 trap-site analysis is
+    // analyze's, on the source tree); a kept value that cannot trap runs with no observable effect.
+    // FAIL CLOSED: the classification with the kept values as client code must give the same
+    // server-only fields and cells, else nothing is kept (every value dropped, as before).
+    // =========================================================================
+    // `keep`: the values kept in the client (each by its field's key and its expression); `solo`: in a
+    // classification, the one value a field's binding holds (the per-value judgment).
+    type ValPick:struct = { keep: UseVal[], solo: UseVal[] }
+
+    fn noPick() -> ValPick {
+        return { keep: [], solo: [] };
+    }
+
+    fn hasVal(vs: UseVal[], key: string, e: Expr) -> boolean {
+        for (const v of vs) { if (v.key == key && v.value == e) return true; }
+        return false;
+    }
+
+    fn isLitExpr(e: Expr) -> boolean {
+        return match e {
+            .Lit(lit: x) :> true,
+            // no-default-arm: one question of an expression — is it a bare literal
+            _ :> false
+        };
+    }
+
+    fn keptVals(p: CoreProgram, outs: OuterCell[], bcs: int[], bmoved: int[], si: int[], keep: int[]) -> ValPick {
+        const base: CoreProgram = outerAsConsts(p, outs, false);
+        const uv: UseVal[] = compUseVals(p);
+        let kv: UseVal[] = [];
+        for (const d of p.decls) {
+            if (d.kind == DeclKind.User) {
+                let i: int = 0;
+                for (const f of d.fields) {
+                    const vs: Expr[] = fieldVals(d, i, uv);
+                    if (hasInt(bmoved, f.sym.id) && vs.length > 1) {
+                        const key: string = fieldKey(d.sym, i);
+                        for (const v of vs) {
+                            if (!isLitExpr(v) && !hasVal(kv, key, v)) {
+                                const one: ValPick = { keep: [], solo: [{ key: key, value: v }] };
+                                const s1: int[] = serverInitsExposing(bodyAsConsts(base, p, bcs, false, one), keep);
+                                if (!hasInt(s1, f.sym.id)) kv = kv.concat([{ key: key, value: v }]);
+                            }
+                        }
+                    }
+                    i = i + 1;
+                }
+            }
+        }
+        if (kv.length == 0) return noPick();
+        const pick: ValPick = { keep: kv, solo: [] };
+        const s2: int[] = serverInitsExposing(bodyAsConsts(base, p, bcs, false, pick), keep);
+        for (const oc of outs) { if (hasInt(si, oc.decl.id) != hasInt(s2, oc.decl.id)) return noPick(); }
+        for (const b of bcs) { if (hasInt(si, b) != hasInt(s2, b)) return noPick(); }
+        return pick;
     }
 
     // `p` with each cell of `cs` (cells declared outside the body, CoreProgram.outer) as a
@@ -8524,21 +8598,34 @@ ${
         return Expr.ArrayOf(vs);
     }
 
-    // `vs` with every use site's value for a field in `keys` dropped, at any depth (an element's
-    // children, an `if=` arm, an `<each>` row, a slot, a gather row)
-    fn dropGivenViews(vs: View[], keys: string[]) -> View[] {
-        let out: View[] = [];
-        for (const v of vs) { out = out.concat([dropGivenView(v, keys)]); }
+    // the values the binding of field `key` stands for (bodyAsConsts): `pick.solo`'s one, else every
+    // value `pick.keep` does not keep
+    fn boundVals(vs: Expr[], key: string, pick: ValPick) -> Expr[] {
+        for (const s of pick.solo) { if (s.key == key) return [s.value]; }
+        let out: Expr[] = [];
+        for (const v of vs) { if (!hasVal(pick.keep, key, v)) out = out.concat([v]); }
         return out;
     }
 
-    fn dropGivenView(v: View, keys: string[]) -> View {
+    // What dropGivenViews drops: every use site's value for a field in `keys`, except a value of
+    // `keep`; one dropped for a field in `absent` (its default is kept) is given as `not` instead.
+    type Drop:struct = { keys: string[], keep: UseVal[], absent: string[] }
+
+    // `vs` with every use site's value for a field in `dr.keys` dropped, at any depth (an element's
+    // children, an `if=` arm, an `<each>` row, a slot, a gather row)
+    fn dropGivenViews(vs: View[], dr: Drop) -> View[] {
+        let out: View[] = [];
+        for (const v of vs) { out = out.concat([dropGivenView(v, dr)]); }
+        return out;
+    }
+
+    fn dropGivenView(v: View, dr: Drop) -> View {
         return match v {
-            .El(tag: t, attrs: a, kids: ks) :> View.El(t, a, dropGivenViews(ks, keys)),
-            .Cond(arms: arms) :> View.Cond(dropGivenArms(arms, keys)),
-            .Each(src: s, bind: b, key: k, handles: hs, row: r) :> View.Each(s, b, k, hs, dropGivenViews(r, keys)),
-            .Instance(decl: d, attrs: attrs, slot: sl, alias: al) :> View.Instance(d, dropGivenAttrs(d, attrs, keys), dropGivenViews(sl, keys), al),
-            .Gather(g: g, rows: rows, key: k) :> View.Gather(g, dropGivenRows(rows, keys), k),
+            .El(tag: t, attrs: a, kids: ks) :> View.El(t, a, dropGivenViews(ks, dr)),
+            .Cond(arms: arms) :> View.Cond(dropGivenArms(arms, dr)),
+            .Each(src: s, bind: b, key: k, handles: hs, row: r) :> View.Each(s, b, k, hs, dropGivenViews(r, dr)),
+            .Instance(decl: d, attrs: attrs, slot: sl, alias: al) :> View.Instance(d, dropGivenAttrs(d, attrs, dr), dropGivenViews(sl, dr), al),
+            .Gather(g: g, rows: rows, key: k) :> View.Gather(g, dropGivenRows(rows, dr), k),
             .Text :> v,
             .RawText :> v,
             .Dyn :> v,
@@ -8554,28 +8641,32 @@ ${
         };
     }
 
-    fn dropGivenArms(arms: CondArm[], keys: string[]) -> CondArm[] {
+    fn dropGivenArms(arms: CondArm[], dr: Drop) -> CondArm[] {
         let out: CondArm[] = [];
-        for (const a of arms) { out = out.concat([{ test: a.test, body: dropGivenViews(a.body, keys) }]); }
+        for (const a of arms) { out = out.concat([{ test: a.test, body: dropGivenViews(a.body, dr) }]); }
         return out;
     }
 
-    fn dropGivenRows(rows: GatherRow[], keys: string[]) -> GatherRow[] {
+    fn dropGivenRows(rows: GatherRow[], dr: Drop) -> GatherRow[] {
         let out: GatherRow[] = [];
-        for (const r of rows) { out = out.concat([{ views: dropGivenViews(r.views, keys) }]); }
+        for (const r of rows) { out = out.concat([{ views: dropGivenViews(r.views, dr) }]); }
         return out;
     }
 
-    fn dropGivenAttrs(d: Sym, attrs: ConstructAttr[], keys: string[]) -> ConstructAttr[] {
+    fn dropGivenAttrs(d: Sym, attrs: ConstructAttr[], dr: Drop) -> ConstructAttr[] {
         let out: ConstructAttr[] = [];
-        for (const a of attrs) { if (keys.indexOf(fieldKey(d, a.field)) < 0) out = out.concat([a]); }
+        for (const a of attrs) {
+            const key: string = fieldKey(d, a.field);
+            if (dr.keys.indexOf(key) < 0 || hasVal(dr.keep, key, a.value)) out = out.concat([a]);
+            else if (dr.absent.indexOf(key) >= 0) out = out.concat([{ field: a.field, value: Expr.Lit(Literal.Absent) }]);
+        }
         return out;
     }
 
-    fn dropGivenDecl(d: Decl, keys: string[]) -> Decl {
+    fn dropGivenDecl(d: Decl, dr: Drop) -> Decl {
         const rs: View[] | not = d.renders;
-        if (rs is not || keys.length == 0) return d;
-        return { sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: d.fields, renders: dropGivenViews(rs, keys), wiring: d.wiring, handles: d.handles };
+        if (rs is not || dr.keys.length == 0) return d;
+        return { sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: d.fields, renders: dropGivenViews(rs, dr), wiring: d.wiring, handles: d.handles };
     }
 
     fn idleWatched(f: Field) -> boolean {
@@ -8597,7 +8688,7 @@ ${
     // (bodyDerived, judged on `orig`) gets no binding there (nothing runs an unread formula); in the
     // classification (`fin` false) it is one, so what its formula reaches is judged. Each cell
     // declared outside the body keeps its place (OuterCell.at moves past the bindings put before it).
-    fn bodyAsConsts(p: CoreProgram, orig: CoreProgram, cells: int[], fin: boolean) -> CoreProgram {
+    fn bodyAsConsts(p: CoreProgram, orig: CoreProgram, cells: int[], fin: boolean, pick: ValPick) -> CoreProgram {
         const pd: Decl | not = programDeclOf(p);
         if (pd is not || cells.length == 0) return p;
         let fs: Field[] = [];
@@ -8654,37 +8745,51 @@ ${
         // such a field is dropped from the renders (dropGivenDecl), in the classification too: there it
         // is the binding's initializer, not client code. In the program both printers print, the use site
         // passes nothing, so the instance holds the shell.
+        // s483 (lane s483-attr-trap; ruling:user-voice-scrml.md-S483-dropped-attr-trap): a value of `pick.keep`
+        // (keptVals — it reaches nothing server-only) is not dropped: a use site's stays in the renders, and
+        // a kept default stays the field's seed — then an instance whose own value IS dropped passes `not`
+        // (`absent`), so the default does not run where it did not before. The binding stands for the
+        // dropped values only, or for `pick.solo`'s one value (the per-value judgment).
         const uv: UseVal[] = compUseVals(p);
         let dropKeys: string[] = [];
+        let absent: string[] = [];
         for (const d0 of p.decls) {
             if (d0.kind == DeclKind.User) {
                 let j: int = 0;
                 for (const f0 of d0.fields) {
-                    if (hasInt(cells, f0.sym.id)) dropKeys = dropKeys.concat([fieldKey(d0.sym, j)]);
+                    if (hasInt(cells, f0.sym.id)) {
+                        const k0: string = fieldKey(d0.sym, j);
+                        dropKeys = dropKeys.concat([k0]);
+                        const i0: Expr | not = f0.init;
+                        if (i0 is given && hasVal(pick.keep, k0, i0)) absent = absent.concat([k0]);
+                    }
                     j = j + 1;
                 }
             }
         }
+        const dr: Drop = { keys: dropKeys, keep: pick.keep, absent: absent };
         let ds: Decl[] = [];
         for (const d of p.decls) {
             if (d.sym.id == pd.sym.id) {
-                ds = ds.concat([dropGivenDecl({ sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: fs, renders: d.renders, wiring: d.wiring, handles: d.handles }, dropKeys)]);
+                ds = ds.concat([dropGivenDecl({ sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: fs, renders: d.renders, wiring: d.wiring, handles: d.handles }, dr)]);
             } else if (d.kind == DeclKind.User) {
                 let cfs: Field[] = [];
                 let ci: int = 0;
                 for (const cf of d.fields) {
                     if (hasInt(cells, cf.sym.id)) {
-                        cfs = cfs.concat([shellField(cf)]);
-                        const vs: Expr[] = fieldVals(d, ci, uv);
+                        const ck: string = fieldKey(d.sym, ci);
+                        if (absent.indexOf(ck) >= 0) cfs = cfs.concat([cf]);
+                        else cfs = cfs.concat([shellField(cf)]);
+                        const vs: Expr[] = boundVals(fieldVals(d, ci, uv), ck, pick);
                         if (!fin && vs.length > 0) ks = ks.concat([{ sym: cf.sym, init: joinVals(vs), mutable: cf.wcap is given }]);
                     } else {
                         cfs = cfs.concat([cf]);
                     }
                     ci = ci + 1;
                 }
-                ds = ds.concat([dropGivenDecl({ sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: cfs, renders: d.renders, wiring: d.wiring, handles: d.handles }, dropKeys)]);
+                ds = ds.concat([dropGivenDecl({ sym: d.sym, key: d.key, kind: d.kind, single: d.single, fields: cfs, renders: d.renders, wiring: d.wiring, handles: d.handles }, dr)]);
             } else {
-                ds = ds.concat([dropGivenDecl(d, dropKeys)]);
+                ds = ds.concat([dropGivenDecl(d, dr)]);
             }
         }
         return { program: p.program, decls: ds, types: p.types, fns: p.fns, server: p.server, dbs: p.dbs, reset: p.reset, sqlError: p.sqlError,

@@ -1,0 +1,19 @@
+# progress — s483-attr-trap (lane; ruling:user-voice-scrml.md-S483-dropped-attr-trap)
+
+Base: origin/main 353ffe643 (contains #2130). Branch s483-attr-trap.
+
+## Findings at start
+- #2129 (trapSiteWhat / ownTrapSites) is NOT on main (PR open, r1 in flight). Its analysis runs on
+  analyze's AExpr; the printer works on Core. Nothing to reuse on main; the brief forbids a
+  parallel trap classifier. Decision: a dropped value is kept (run in the client) when it reaches
+  nothing server-only and is not a bare literal (a literal is the one value the printer knows
+  cannot trap without a classifier). Narrowing to "can trap" waits on #2129's printer-side trap
+  facts (its r1 item 6). Noted INTERIM in the gap.
+- Per-value judgment: each value of a mixed server-only component field is judged ALONE as the
+  field's binding by the same serverInits classification (no second classifier); a confirm
+  classification with the kept values in the client must reproduce the same server-only set,
+  else fall back to dropping all (fail closed: secure, trap lost).
+- A kept DEFAULT stays the field's seed; an instance whose own value was dropped then passes
+  `not` explicitly so it does not run the default (base never ran it there).
+
+## Log
