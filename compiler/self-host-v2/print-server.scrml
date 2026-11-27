@@ -81,7 +81,7 @@ ${
         // (print.scrml shakeProgram — no unreached nested function, no unconstructed component)
         const p: CoreProgram = shakeProgram(p0, []);
         // s482 r1 (#2105 review HIGH-1): print.scrml outerRefusal — never printed here either
-        const orf: string[] = outerRefusal(p);
+        const orf: string[] = outerRefusal(p, p0);
         if (orf.length > 0) return { js: "", refused: orf, routes: [] };
         // s481 r1 (#2041 review H1/M1): the bindings no code reads whose initializer reaches
         // server-only code — this artifact runs them (print.scrml serverInits)
