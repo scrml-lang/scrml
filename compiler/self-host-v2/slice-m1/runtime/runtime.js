@@ -115,19 +115,35 @@ const effectQueue = new Set();
 // microtask — writes the cell the render reads (probe R10). That microtask chain never lets the page yield, so
 // it hung. So the runtime watches for the page yielding to the event loop: when a flush starts and no yield
 // is being watched for, it starts a watch: a new `stallId`, the time (`stallSince`), and a tick posted to
-// itself through a MessageChannel (a setTimeout captured at load where there is none). The tick runs only in a
-// later task, so when it runs the page has yielded and the watch ends. A render effect (an `Effect`: an
-// interpolation, an attribute, an `if=` / `<each>`) that is about to RE-RUN — it already ran during this watch
-// — when RENDER_STALL_MS (`globalThis.__scrml_render_stall_ms` overrides, for tests) or more have passed since
-// the watch began is skipped, and the stall is logged once. After the page next yields, render effects run
-// again. Only render effects: an `<effect>` / `<request>` keeps the per-flush cap (s482), a runtime `^{}` block
-// its own. A finite chain of updates, however many laps, completes if it finishes within the bound; the trip
-// point depends on the machine's speed (accepted in the ruling). A single run that never returns is not bounded.
-// A yield the runtime cannot observe (a task that ran before its own tick did) still counts toward the bound.
+// itself through a MessageChannel. The tick runs only in a later task, so when it runs the page has yielded
+// and the watch ends.
+// WHAT IS BOUNDED: a render effect (an `Effect`: an interpolation, an attribute, an `if=` / `<each>`) and —
+// s483 r3 (pa-ruled:S483-render-bound-covers-markup-meta: a runtime `^{}` block placed in markup is rendering
+// work) — a runtime `^{}` block (a `MetaEffect`; a `^{}` + `<request>` ring through `meta.set` froze the page
+// at load, probe M1). A first run always runs. A RE-RUN is skipped when (a) the effect has already re-run
+// more than STALL_MIN_RERUNS times during this watch AND (b) RENDER_STALL_MS (`globalThis.__scrml_render_stall_ms`
+// overrides, for tests) or more have passed since the watch began; the stall is logged once. (a) is s483 r3:
+// a page whose one update is slow (a heavy render, then a flag cleared by a later settle) re-runs an effect
+// once or twice, which is not a loop, and a fake clock advanced synchronously in a test is not one either.
+// AFTER THE YIELD (s483 r3): every effect skipped in the stall is queued again and runs, once the page
+// yields, in the new watch — so the display catches up with the cells. A loop that this run restarts is
+// not given another second: in that watch a re-queued effect runs once, any re-run of it is skipped
+// (silently — the stall was logged), and it is not queued again. A loop's display may so stay one value
+// behind its cell until the next write.
+// An `<effect>` / `<request>` keeps the per-flush cap (s482). A finite chain of updates, however many laps,
+// completes if it finishes within the bound; the trip point depends on the machine's speed (accepted in the
+// ruling). A single run that never returns is not bounded. A yield the runtime cannot observe (a task that
+// ran before its own tick did) still counts toward the bound. Where there is no MessageChannel, or its tick
+// never arrives (a broken polyfill, a test double), the `setTimeout` captured at load is the yield signal:
+// it is armed once a watch has passed the bound (s483 r3), so a page that never stalls never posts a timer.
 const RENDER_STALL_MS = 1000;
+const STALL_MIN_RERUNS = 3;             // s483 r3: re-runs in one watch before the time bound applies
 let stallId = 0;                        // the current watch (advanced as each watch begins)
 let stallSince = 0;                     // when the current watch (a stretch without a yield) began
 let yieldWatched = false;               // a tick is posted and has not run yet
+let yieldTimerFor = 0;                  // the watch the fallback `setTimeout` was armed for (0: none)
+// the effects skipped in this watch, to run again once the page yields (s483 r3)
+const stallSkipped = new Set();
 // a render loop has been logged since the page last yielded — by the per-flush cap or the stall bound,
 // whichever met it first: one report per stall (a loop lapping through a request meets the per-flush cap in
 // every lap's flush, and each effect in it meets it; reported once, not once a lap or once an effect)
@@ -136,33 +152,53 @@ const stallClock = (() => {
   const p = globalThis.performance;
   return p !== undefined && p !== null && typeof p.now === "function" ? p.now.bind(p) : Date.now;
 })();
-const yieldTimer = globalThis.setTimeout;   // the host's, as the runtime loaded (fallback only)
+const yieldTimer = globalThis.setTimeout;   // the host's, as the runtime loaded (the fallback yield signal)
 const yieldPort = (() => {
   if (typeof MessageChannel !== "function") return null;
   const ch = new MessageChannel();
-  ch.port1.onmessage = sawYield;
+  ch.port1.onmessage = () => sawYield();
   // a server-side or test process must not stay alive for this port
   if (typeof ch.port1.unref === "function") ch.port1.unref();
   return ch.port2;
 })();
 
-/** A task ran: the page yielded to the event loop since the watch began. */
+/**
+ * A task ran: the page yielded to the event loop since the watch began. The effects the stall skipped
+ * run again now, in a new watch (s483 r3).
+ */
 function sawYield() {
   if (!yieldWatched) return;
   yieldWatched = false;
   loopReported = false;
+  if (stallSkipped.size === 0) return;
+  const again = [...stallSkipped];
+  stallSkipped.clear();
+  watchYield();
+  for (const e of again) {
+    if (e.disposed) continue;
+    e.stallRetry = stallId;
+    queue.add(e);
+  }
+  if (batchDepth === 0) flush();
 }
 
-/** A flush is starting: if no yield is being watched for, start a new watch (a new `stallId`) from now. */
+/**
+ * A flush is starting: if no yield is being watched for, start a new watch (a new `stallId`) from now.
+ * If one is, read the clock (s483 r3): a loop whose every lap is slow is stopped about RENDER_STALL_MS in,
+ * not up to 64 laps later.
+ */
 function watchYield() {
-  if (yieldWatched) return;
+  if (yieldWatched) {
+    if (!stallOver) readStallClock();
+    return;
+  }
   yieldWatched = true;
   stallId++;
   stallSince = stallClock();
   stallReRuns = 0;
   stallOver = false;
   if (yieldPort !== null) yieldPort.postMessage(0);
-  else if (typeof yieldTimer === "function") yieldTimer(sawYield, 0);
+  else armYieldTimer();
 }
 
 function renderStallMs() {
@@ -170,14 +206,49 @@ function renderStallMs() {
   return typeof n === "number" && n >= 0 ? n : RENDER_STALL_MS;
 }
 
-// The re-runs of this watch, and whether it has passed the bound. The clock is read on the first re-run
-// and every 64th after it, not on every one: a page re-rendering thousands of rows in one task pays for
-// a few clock reads, and a loop is stopped at most 63 re-runs after the bound.
+/** The fallback yield signal: the load-time `setTimeout`, once per watch; it ends only the watch it was armed for. */
+function armYieldTimer() {
+  if (yieldTimerFor === stallId || typeof yieldTimer !== "function") return;
+  const id = stallId;
+  yieldTimerFor = id;
+  const t = yieldTimer(() => { if (stallId === id) sawYield(); }, 0);
+  // a server-side or test process must not stay alive for this timer
+  if (t !== null && typeof t === "object" && typeof t.unref === "function") t.unref();
+}
+
+// The re-runs of this watch past the count, and whether it has passed the bound. Within one flush the
+// clock is read on the first such re-run and every 64th after it, not on every one (a page re-rendering
+// thousands of rows in one task pays for a few clock reads); each flush start reads it too (watchYield).
 let stallReRuns = 0;
 let stallOver = false;
+function readStallClock() {
+  stallOver = stallClock() - stallSince >= renderStallMs();
+  if (stallOver) armYieldTimer();
+}
 function pastStallBound() {
-  if (!stallOver && (stallReRuns++ & 63) === 0) stallOver = stallClock() - stallSince >= renderStallMs();
+  if (!stallOver && (stallReRuns++ & 63) === 0) readStallClock();
   return stallOver;
+}
+
+/**
+ * s483 r2/r3 — the stall bound for one queued run of a render effect or a runtime `^{}` block (above).
+ * True: skip the run.
+ */
+function stallSkips(e) {
+  if (e.stall !== stallId) {                       // its first run in this watch
+    e.stall = stallId;
+    e.stallRuns = 0;
+    return false;
+  }
+  if (e.stallRetry === stallId) return true;       // re-queued on the yield, and re-run again: stop it
+  if (++e.stallRuns <= STALL_MIN_RERUNS) return false;
+  if (!pastStallBound()) return false;
+  stallSkipped.add(e);
+  if (!loopReported) {
+    loopReported = true;
+    console.error("[scrml] render effects stopped: the page has gone " + renderStallMs() + " ms without yielding to the browser — possible infinite loop (a value a render reads keeps being written, through an awaited result or host code); the skipped renders run again once the page yields");
+  }
+  return true;
 }
 
 function track(source) {
@@ -330,16 +401,12 @@ function drainQueues() {
           }
           continue;
         }
-        // s483 r2 — the stall bound (RENDER_STALL_MS, above): a re-run once the page has gone the bound
-        // without yielding is skipped; logged once per stall (`loopReported`)
-        if (e.stall !== stallId) e.stall = stallId;
-        else if (pastStallBound()) {
-          if (!loopReported) {
-            loopReported = true;
-            console.error("[scrml] render effects stopped: the page has gone " + renderStallMs() + " ms without yielding to the browser — possible infinite loop (a value a render reads keeps being written, through an awaited result or host code); render effects run again once the page yields");
-          }
-          continue;
-        }
+        // s483 r2/r3 — the stall bound (RENDER_STALL_MS, above)
+        if (stallSkips(e)) continue;
+      } else if (e instanceof MetaEffect && !e.disposed) {
+        // s483 r3 — a runtime `^{}` block in markup is rendering work: the same stall bound (its own
+        // per-flush cap stays, MetaEffect.run)
+        if (stallSkips(e)) continue;
       }
     } else if (heldToRestore.size > 0) {
       // s480 — the render effects of this flush have settled: held elements whose every
@@ -622,6 +689,8 @@ class Effect {
     this.disposed = false;
     this.sources = new Set();
     this.stall = stallId;   // s483 r2: the stall it last ran in (drainQueues, the stall bound)
+    this.stallRuns = 0;     // s483 r3: its re-runs in that stall
+    this.stallRetry = 0;    // s483 r3: the stall it was queued again for, on the yield (stallSkips)
     stats.effects++;
     scope.own(() => {
       this.disposed = true;
@@ -5867,6 +5936,9 @@ class MetaEffect {
     this.maxRuns = metaMaxRuns();
     this.flushSeq = -1;
     this.flushRuns = 0;
+    this.stall = stallId;                            // s483 r3: the stall bound (stallSkips), as an Effect
+    this.stallRuns = 0;
+    this.stallRetry = 0;
     stats.effects++;
     scope.own(() => this.dispose());
     this.run();

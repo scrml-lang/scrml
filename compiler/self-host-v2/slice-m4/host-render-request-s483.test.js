@@ -30,7 +30,14 @@
 //      (p-R10_req_settle — the same loop through a `<request>`'s settle) and probe X2 (the glue's own
 //      microtask writes) leave the page responsive, one log per stall; probe P5 (a finite 299-step
 //      chain through `if=` arm remounts, no host code) completes as on base; probe P6 (the same ring
-//      without a limit) is bounded.
+//      without a limit) is bounded;
+//   5. s483 fix r3 (review r2): a runtime `^{}` block is under the same stall bound (pa-ruled:
+//      S483-render-bound-covers-markup-meta; probes M1 / M1c — a `^{}` + `<request>` ring that froze the
+//      page at load); a re-run is skipped only past STALL_MIN_RERUNS (3) re-runs in the watch AND the time
+//      bound (probes loading_forever / M2b, a fake clock installed before load); every skipped effect runs
+//      again once the page yields, and a loop that run restarts is stopped at its first re-run; the clock
+//      is read at each update's start (slow laps stop about the bound in); a MessageChannel that never
+//      delivers falls back to the load-time setTimeout.
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -323,7 +330,7 @@ describe("s483 fix r2 — the stall bound (RULED S483, ruling:user-voice-scrml.m
     }
   });
 
-  test("only a RE-run is skipped: a render effect mounted past the bound still runs its first run; after the yield, every one runs", async () => {
+  test("only a RE-run past the count is skipped: a render effect mounted past the bound still runs its first run; after the yield, every one runs", async () => {
     const scope = rt.root.child();
     const logged = [];
     const savedErr = console.error;
@@ -337,15 +344,21 @@ describe("s483 fix r2 — the stall bound (RULED S483, ruling:user-voice-scrml.m
       await macrotask();
       a.set(1);                                      // a flush: a watch begins; A's first run in it runs
       expect(runsA).toBe(2);
-      a.set(2);                                      // a re-run during the same watch, past the bound: skipped
-      expect(runsA).toBe(2);
+      a.set(2);                                      // s483 r3: up to STALL_MIN_RERUNS (3) re-runs in a
+      a.set(3);                                      // watch run whatever the clock says
+      a.set(4);
+      expect(runsA).toBe(5);
+      expect(logged).toEqual([]);
+      a.set(5);                                      // a 4th re-run during the same watch, past the bound: skipped
+      expect(runsA).toBe(5);
       expect(logged.length).toBe(1);
       expect(logged[0]).toContain(STALL_LOG + "0 ms");
       rt.effect(scope, () => { runsB++; a.get(); }); // a mount during the stall: its first run runs
       expect(runsB).toBe(1);
-      await macrotask(5);                            // the page yields
-      a.set(3);                                      // a new watch: each effect's first run in it runs
-      expect(runsA).toBe(3);
+      await macrotask(5);                            // the page yields: A's skipped run runs (s483 r3)
+      expect(runsA).toBe(6);
+      a.set(6);                                      // a new watch: each effect's first run in it runs
+      expect(runsA).toBe(7);
       expect(runsB).toBe(2);
       expect(logged.length).toBe(1);
     } finally {
@@ -452,6 +465,279 @@ describe("s483 fix r2 — the stall bound (RULED S483, ruling:user-voice-scrml.m
 });
 
 // ---------------------------------------------------------------------------
+// 3b. s483 fix r3 — the stall bound, review r2's findings
+// ---------------------------------------------------------------------------
+describe("s483 fix r3 — the stall bound: runtime `^{}` blocks, the re-run count, the re-run on the yield", () => {
+  const STALL_LOG = "[scrml] render effects stopped: the page has gone ";
+  const busy = (ms) => { const t = performance.now(); while (performance.now() - t < ms) { /* spin */ } };
+
+  // console.error captured, `__scrml_render_stall_ms` set, a scope disposed at the end
+  async function withStall(stallMs, fn) {
+    const scope = rt.root.child();
+    const logged = [];
+    const savedErr = console.error;
+    console.error = (...a) => logged.push(a.join(" "));
+    if (stallMs !== null) globalThis.__scrml_render_stall_ms = stallMs;
+    try {
+      await fn(scope, logged);
+    } finally {
+      delete globalThis.__scrml_render_stall_ms;
+      console.error = savedErr;
+      scope.dispose();
+    }
+  }
+
+  // A FRESH runtime module, loaded after `setup()` replaced host globals (a fake clock, a dead
+  // MessageChannel) — the runtime binds them at load. `teardown()` puts them back.
+  async function freshRuntime(tag, setup, teardown, fn) {
+    const d = mkdtempSync(join(tmpdir(), "s483-r3-" + tag + "-"));
+    copyFileSync(RUNTIME, join(d, "scrml-runtime.js"));
+    setup();
+    let fresh;
+    try {
+      fresh = await import(join(d, "scrml-runtime.js"));
+    } catch (err) {
+      teardown();
+      throw err;
+    }
+    const scope = fresh.root.child();
+    const logged = [];
+    const savedErr = console.error;
+    console.error = (...a) => logged.push(a.join(" "));
+    try {
+      await fn(fresh, scope, logged);
+    } finally {
+      console.error = savedErr;
+      teardown();
+      scope.dispose();
+      delete globalThis.__scrml_render_stall_ms;
+      rmSync(d, { recursive: true, force: true });
+    }
+  }
+
+  test("HIGH-1 (probe M1, pa-ruled:S483-render-bound-covers-markup-meta): a runtime `^{}` block's ring through a `<request>` (`meta.set` of the request's dependency) is bounded by the same stall bound, logged once", async () => {
+    await withStall(50, async (scope, logged) => {
+      const n = rt.cell(0);
+      const r = rt.cell(0);
+      let runs = 0;
+      rt.requestOn(scope, r, [n], () => ({ on: n.peek() + 1, then: (v) => { r.set(v); } }));
+      // the compiled `^{ meta.set("n", meta.get("r")); }`: every lap is the request's settle (a
+      // microtask) re-running the block — a new flush each lap, below the block's per-flush cap.
+      // Before r3 the block was outside the stall bound and the page never finished loading.
+      rt.metaEffect(scope, document.createElement("div"), "m1", (task, meta) => {
+        runs++;
+        n.set(meta.get(() => r.get()));
+      });
+      const res = await Promise.race([macrotask(20).then(() => "yielded"), new Promise((x) => setTimeout(() => x("hung"), 10000))]);
+      expect(res).toBe("yielded");
+      expect(runs).toBeGreaterThan(100);
+      expect(logged.length).toBe(1);
+      expect(logged[0]).toContain(STALL_LOG + "50 ms without yielding");
+      const settled = runs;
+      await macrotask(30);
+      expect(runs).toBe(settled);                    // stopped: the re-run on the yield does not restart it for good
+      expect(logged.length).toBe(1);
+    });
+  }, 30000);
+
+  test("HIGH-1: a `^{}` block's first run always runs, and a block re-run a few times in a slow stretch is not skipped", async () => {
+    await withStall(0, async (scope, logged) => {
+      const a = rt.cell(0);
+      let runs = 0;
+      rt.metaEffect(scope, document.createElement("div"), "m2", (task, meta) => { runs++; meta.get(() => a.get()); });
+      expect(runs).toBe(1);
+      await macrotask();
+      for (let i = 1; i <= 4; i++) a.set(i);         // its first run in the watch + 3 re-runs: all run
+      expect(runs).toBe(5);
+      a.set(5);                                      // a 4th re-run, past the bound: skipped
+      expect(runs).toBe(5);
+      expect(logged.length).toBe(1);
+      await macrotask(5);                            // the page yields: the skipped run runs
+      expect(runs).toBe(6);
+    });
+  });
+
+  test("MED-1 (probe loading_forever / M2b): one slow update that re-runs a display once or twice is not a loop — the display shows the cell, no log", async () => {
+    await withStall(0, async (scope, logged) => {
+      // the click sets a "loading" flag; a settle starts a heavy render; another settle clears the flag.
+      // The flag's display re-runs once in the stretch — under r2 that re-run was skipped (the stretch
+      // was past the bound) and never run again: "Loading" for good.
+      const loading = rt.cell(false);
+      const list = rt.cell(0);
+      let shown = "";
+      rt.effect(scope, () => { shown = loading.get() ? "Loading" : "Done"; });
+      rt.effect(scope, () => { if (list.get() > 0) busy(5); });
+      await macrotask();
+      loading.set(true);
+      await Promise.resolve().then(() => list.set(1));
+      await Promise.resolve().then(() => loading.set(false));
+      expect(shown).toBe("Done");
+      expect(logged).toEqual([]);
+    });
+  });
+
+  test("MED-1: a synchronous write, a busy stretch, a write — no batch (review r2 sync_handler_busy) — shows the last value", async () => {
+    await withStall(0, async (scope, logged) => {
+      const st = rt.cell("idle");
+      let shown = "";
+      rt.effect(scope, () => { shown = st.get(); });
+      await macrotask();
+      st.set("working");
+      busy(5);
+      st.set("done");
+      expect(shown).toBe("done");
+      expect(logged).toEqual([]);
+    });
+  });
+
+  test("MED-1 (ii): every effect the stall skipped runs again once the page yields — the display catches up with the cell", async () => {
+    await withStall(0, async (scope, logged) => {
+      // a FINITE chain of 8 settles, each writing what a display reads, without a yield: past the
+      // bound, the display's 4th re-run is skipped; after the yield it runs and shows the last value
+      const x = rt.cell(0);
+      let shown = -1;
+      let runs = 0;
+      rt.effect(scope, () => { runs++; shown = x.get(); });
+      await macrotask();
+      runs = 0;
+      for (let i = 1; i <= 8; i++) { await Promise.resolve(); x.set(i); }
+      expect(runs).toBe(4);                          // its first run in the watch + 3 re-runs
+      expect(shown).toBe(4);
+      expect(logged.length).toBe(1);
+      expect(logged[0]).toContain("the skipped renders run again once the page yields");
+      await macrotask(5);
+      expect(shown).toBe(8);
+      expect(runs).toBe(5);                          // once, not once per skipped write
+      expect(logged.length).toBe(1);
+    });
+  });
+
+  test("MED-1 (ii): a disposed effect the stall skipped is not run on the yield", async () => {
+    await withStall(0, async (scope, logged) => {
+      const x = rt.cell(0);
+      const inner = scope.child();
+      let runs = 0;
+      rt.effect(inner, () => { runs++; x.get(); });
+      await macrotask();
+      for (let i = 1; i <= 5; i++) x.set(i);         // first run in the watch + 3 re-runs, then skipped
+      expect(runs).toBe(5);
+      inner.dispose();
+      await macrotask(5);
+      expect(runs).toBe(5);
+      expect(logged.length).toBe(1);
+    });
+  });
+
+  test("MED-1 (ii): a LOOP the re-run on the yield restarts is not given another second — stopped at its first re-run, not logged again", async () => {
+    await withStall(50, async (scope, logged) => {
+      const n = rt.cell(0);
+      const r = rt.cell(0);
+      let runs = 0;
+      let armed = false;
+      rt.requestOn(scope, r, [n], () => ({ on: n.peek() + 1, then: (v) => { r.set(v); } }));
+      rt.effect(scope, () => { runs++; r.get(); if (armed) n.set(n.peek() + 1); });
+      await macrotask();
+      armed = true;
+      const t0 = performance.now();
+      n.set(n.peek() + 1);
+      await macrotask(20);                           // the stall, the yield, the re-run on the yield
+      const ms = performance.now() - t0;
+      expect(ms).toBeLessThan(2000);                 // not a second stall of 50 ms per yield, forever
+      expect(logged.length).toBe(1);
+      const settled = runs;
+      await macrotask(60);
+      expect(runs).toBe(settled);                    // the loop stays stopped
+      expect(logged.length).toBe(1);
+      armed = false;
+      n.set(n.peek() + 1);                           // a later write: runs as usual, in a new watch
+      await macrotask(5);
+      expect(runs).toBeGreaterThan(settled);
+    });
+  });
+
+  test("MED-2: a fake clock (performance.now + setTimeout) installed BEFORE the runtime loads, advanced synchronously by the test, does not trip it", async () => {
+    const realST = globalThis.setTimeout;
+    const realNow = performance.now;
+    let fakeNow = 0;
+    const fq = [];
+    const advance = (ms) => {
+      fakeNow += ms;
+      for (;;) {
+        fq.sort((p, q) => p.at - q.at);
+        if (fq.length === 0 || fq[0].at > fakeNow) break;
+        fq.shift().f();
+      }
+    };
+    await freshRuntime("fakeclock", () => {
+      performance.now = () => fakeNow;
+      globalThis.setTimeout = (f, ms = 0) => { fq.push({ at: fakeNow + ms, f }); return fq.length; };
+    }, () => {
+      performance.now = realNow;
+      globalThis.setTimeout = realST;
+    }, async (fresh, scope, logged) => {
+      // jest `advanceTimersByTime(3000)`: the click writes "saving" and arms a 3 s timer writing "saved"
+      const status = fresh.cell("idle");
+      let shown = "";
+      fresh.effect(scope, () => { shown = status.get(); });
+      for (let i = 0; i < 3; i++) await new Promise((r) => realST(r, 0));
+      status.set("saving");
+      globalThis.setTimeout(() => status.set("saved"), 3000);
+      advance(3000);
+      expect(shown).toBe("saved");                   // r2: "saving", with a false "infinite loop" log
+      expect(logged).toEqual([]);
+    });
+  });
+
+  test("MED-3: the clock is read at the start of each update — a loop whose every lap is slow stops about the bound in, not up to 64 laps later", async () => {
+    await withStall(100, async (scope, logged) => {
+      const n = rt.cell(0);
+      const r = rt.cell(0);
+      let runs = 0;
+      let armed = false;
+      rt.requestOn(scope, r, [n], () => ({ on: n.peek() + 1, then: (v) => { r.set(v); } }));
+      rt.effect(scope, () => { runs++; r.get(); if (armed) { busy(30); n.set(n.peek() + 1); } });
+      await macrotask();
+      armed = true;
+      runs = 0;
+      const t0 = performance.now();
+      n.set(n.peek() + 1);
+      await new Promise((x) => setTimeout(x, 0));
+      const ms = performance.now() - t0;
+      armed = false;
+      // r2 sampled the clock on the first re-run and every 64th: 64 laps of 30 ms, about 2 s
+      expect(runs).toBeLessThan(12);
+      expect(ms).toBeLessThan(600);
+      expect(logged.length).toBe(1);
+    });
+  }, 30000);
+
+  test("LOW-2: a MessageChannel that never delivers (replaced before load) — the load-time setTimeout ends the watch; later writes re-render", async () => {
+    const RealMC = globalThis.MessageChannel;
+    const realST = globalThis.setTimeout;
+    await freshRuntime("deadmc", () => {
+      globalThis.MessageChannel = class { constructor() { this.port1 = { onmessage: null }; this.port2 = { postMessage() {} }; } };
+    }, () => {
+      globalThis.MessageChannel = RealMC;
+    }, async (fresh, scope, logged) => {
+      globalThis.__scrml_render_stall_ms = 50;
+      const a = fresh.cell(0);
+      let shown = -1;
+      fresh.effect(scope, () => { shown = a.get(); });
+      a.set(1);
+      await new Promise((r) => realST(r, 120));     // real yields, past the bound
+      const seen = [];
+      for (let i = 2; i <= 8; i++) {
+        a.set(i);
+        seen.push(shown);
+        await new Promise((r) => realST(r, 0));
+      }
+      expect(seen).toEqual([2, 3, 4, 5, 6, 7, 8]);   // r2: the watch never ended — [1, 1, 1, …] from the 2nd
+      expect(logged).toEqual([]);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 4. Chromium (SCRML_BROWSER_TESTS=1; SCRML_CHROMIUM names the binary) — the COMPILED probes
 // ---------------------------------------------------------------------------
 const ON = process.env.SCRML_BROWSER_TESTS === "1";
@@ -468,6 +754,14 @@ const IF_STEPS = (adv, test) => `<program>\nfunction adv(s: int) -> int { return
   `<div if=\${${test}}><request id="ea" deps=[]>\${ @sa = adv(@sb); }</>even</div>\n` +
   `<div else>odd<request id="eb" deps=[]>\${ @sb = adv(@sa); }</></div>\n` +
   `<p id="o">\${@sa + @sb}</p>\n<p id="c">\${@sb}</p>\n<button id="b" onclick=\${() => { @sa = 0; @sb = 0; }}>b</button>\n</program>\n`;
+const META_RING = (display) => `<program>\nlet <n:int=0/>\nlet <r:int=0/>\n<request id="rq" deps=[@n]>\${ @r = @n + 1; }</>\n` +
+  `<div>^{ meta.set("n", meta.get("r")); }</div>\n` + (display ? `<p id="o">\${@r}</p>\n` : "") +
+  `<p id="c">\${@n}</p>\n<button id="b" onclick=\${() => { @n = @n + 1; }}>b</button>\n</program>\n`;
+const LOADING = `<program>\nfunction spin(k: int) -> int {\n  let s: int = 0;\n  for (let i: int = 0; i < k; i = i + 1) { s = s + (i % 7); }\n  return s;\n}\n` +
+  `let <k:int=0/>\nlet <big:int=0/>\nlet <done:int=0/>\n` +
+  `<request id="rq" deps=[@k]>\${ @big = @k; }</>\n<request id="rq2" deps=[@big]>\${ @done = @big; }</>\n` +
+  `<p id="o">\${@done == @k ? "Done" : "Loading"}</p>\n<p id="c">\${@big > 0 ? spin(@big) : 0}</p>\n` +
+  `<button id="b" onclick=\${() => { @k = @k + 1500000000; }}>b</button>\n</program>\n`;
 const PROBES = {
   // probe F9 (p-R1_interp): an interpolation whose glue clicks a button whose handler writes the cell it reads
   f9: { src: P(`<p id="o">\${ck() + @n}</p>`), glue: GLUE },
@@ -477,6 +771,13 @@ const PROBES = {
   x2: { src: P(`<p id="o">\${ck() + @n}</p>`), glue: GLUE_X2 },
   p5: { src: IF_STEPS("s < 150 ? s + 1 : s", "@sa <= @sb && @sb < 150"), glue: null },
   p6: { src: IF_STEPS("s + 1", "@sa <= @sb"), glue: null },
+  // s483 r3 — review r2 HIGH-1, probes M1 / M1c: a runtime `^{}` block and a `<request>` in a ring
+  // through `meta.set` — no host code, 0 diagnostics; on base and r2 the page never finished loading
+  m1: { src: META_RING(true), glue: null },
+  m1c: { src: META_RING(false), glue: null },
+  // s483 r3 — review r2 MED-1, probe M2b: one slow update (a ~1.5 s render between two settles) that
+  // re-runs the "Done" / "Loading" display once — r2 skipped that re-run and showed "Loading" for good
+  m2b: { src: LOADING, glue: null },
 };
 const STALL = "[scrml] render effects stopped: the page has gone 1000 ms without yielding to the browser";
 let browser, server, cdir, port;
@@ -611,6 +912,48 @@ suite("s483 host-render-request — Chromium, the compiled probes", () => {
     } else {
       expect(errors.length).toBe(1);
       expect(errors[0]).toContain(STALL);
+    }
+  }, 60000);
+
+  test("probe M1 (review r2 HIGH-1, compiled, no host code — a `^{}` block and a `<request>` in a ring through `meta.set`): the page loads and stays responsive, one log per stall", async () => {
+    // on base and r2 the page never finished loading: the block was outside the stall bound
+    // (pa-ruled:S483-render-bound-covers-markup-meta — a runtime `^{}` block in markup is rendering work)
+    const { before, atLoad, clicks, errors } = await clickProbe("m1", { loadLog: true });
+    expect(before).toBeGreaterThan(100);
+    expect(atLoad.length).toBe(1);
+    expect(atLoad[0]).toContain(STALL);
+    expect(typeof clicks).toBe("number");
+    expect(errors.length).toBe(1);
+    expect(errors[0]).toContain(STALL);
+  }, 60000);
+
+  test("probe M1c (the same ring, no render effect reading `@r`): the page loads and stays responsive, one log per stall", async () => {
+    const { before, atLoad, clicks, errors } = await clickProbe("m1c", { loadLog: true });
+    expect(before).toBeGreaterThan(100);
+    expect(atLoad.length).toBe(1);
+    expect(atLoad[0]).toContain(STALL);
+    expect(typeof clicks).toBe("number");
+    expect(errors.length).toBe(1);
+    expect(errors[0]).toContain(STALL);
+  }, 60000);
+
+  test("probe M2b (review r2 MED-1, compiled — one slow update re-runs the display once): it shows \"Done\", as on base, no log", async () => {
+    const page = await browser.newPage();
+    const errors = [];
+    page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+    page.on("pageerror", (e) => errors.push("pageerror " + e.message));
+    try {
+      await page.goto(`http://127.0.0.1:${port}/m2b/`);
+      await page.waitForSelector("#o", { timeout: 10000 });
+      expect(await page.evaluate(() => document.querySelector("#o").textContent)).toBe("Done");
+      await page.click("#b");
+      // the ~1.5 s render runs between the two settles; r2 left "Loading" for good
+      await page.waitForFunction(() => document.querySelector("#o").textContent === "Done" && document.querySelector("#c").textContent !== "0", { timeout: 15000, polling: 100 });
+      await new Promise((r) => setTimeout(r, 300));
+      expect(await page.evaluate(() => document.querySelector("#o").textContent)).toBe("Done");
+      expect(errors).toEqual([]);
+    } finally {
+      page.close().catch(() => {});
     }
   }, 60000);
 });
