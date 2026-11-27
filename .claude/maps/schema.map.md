@@ -1,6 +1,6 @@
 # schema.map.md
 # project: scrml
-# updated: 2026-11-08T16:47:39Z  commit: f92d1a8fb
+# updated: 2026-11-26T22:24:19Z  commit: fa24c93bb
 # Shapes only. No database of its own: scrml is a compiler; DB schemas belong to user programs (`<schema>`, SPEC §39).
 
 ## TypeScript Types & Interfaces (impl#1)
