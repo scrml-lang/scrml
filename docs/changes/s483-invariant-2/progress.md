@@ -59,3 +59,26 @@ impl#1 frozen (§66 Nominal there, §34.0).
 - PA reading filed in SPEC (open to owner veto): prov=pa-ruled:S483-const-initializer-list — the ruling's
   "(literals, enum variants, other such consts)" read as the whole list (`const LIM = 1 + 2` stays refused);
   a negated number literal counts as a literal.
+- server-only-const-neg re-authored without the deprecated `server` modifier (a `?{}` places `tagged` on the
+  server; the retired-forms gate counted `server function` in a new conformance case); its slice test proves the
+  constant stays out of the client artifact without the clause.
+
+## Gates (head f6656d4a1 + coverage row; base origin/main fa24c93bb)
+
+- pre-commit hook (f6656d4a1): 58713 pass / 0 fail / 255 skip, RESULT PASS (2b99a4cb6: 58705 / 0 / 255).
+- bootstrap-conformance --json: base PASS 864 / FAIL 3 / NOT-TWINNED 628 / UNSUPPORTED 491 / CRASH 0 / INVALID 0;
+  head PASS 872 (+ the 8 new invariant cases) / FAIL 3 / NOT-TWINNED 628 / UNSUPPORTED 491 / CRASH 0 / INVALID 0;
+  0 bucket or emitted-code changes on the 1986 shared cases.
+- conformance/run.ts (impl#1): 1783/1994 pass, 211 xfail (203 + 8 new, g-impl1-decl-invariant-unimplemented-s483), 0 FAIL.
+- slice-m4/invariant-write-s483.test.js 25 pass; invariant-decl-s483.test.js 45 pass (4 re-pinned + L1 test).
+- Chromium (SCRML_BROWSER_TESTS=1), the 13 s482/s483 browser files: 89 pass / 0 fail (invariant-write 6).
+- Corpus differential (compileSource, 2990 shared files): 0 newly rejected, 0 newly accepted, 0 code changes,
+  0 crashes; 8 head-only (the new cases). Byte-compare (compileFile, tree path normalized, runtime files excluded):
+  328 artifact-bearing files, 1 differs — conformance/cases/invariant/accepted (its declarations' construction
+  checks, expected).
+- host-global-scan --check --mode-shard 1/2 and 2/2: exit 0 / exit 0 (3 new esm throws pinned).
+- types-gate --check OK unchanged; s34-census --check-new --base origin/main PASS (7 rows); retired-forms-lint
+  --base-ref origin/main OK; spec-coverage-check 0 violations (the §66.13.5 row re-cited to the lane-3 gap);
+  gen-bootstrap-severity --check exit 4 on base and head alike (bot-owned).
+- Runtime size: slice-m1/runtime/runtime.js 422505 → 427966 bytes (+5461, +1.3%, mostly comments);
+  server-runtime.js 150528 → 150794 (+266, the re-export).
