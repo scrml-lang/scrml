@@ -8127,7 +8127,11 @@ ${
                 let i: int = 0;
                 for (const f of d.fields) {
                     const vs: Expr[] = fieldVals(d, i, uv);
-                    if (hasInt(bmoved, f.sym.id) && vs.length > 1) {
+                    // one value that is not a literal is the one that reaches server-only code (a literal
+                    // reaches nothing): nothing to keep, no classification to run
+                    let live: int = 0;
+                    for (const v0 of vs) { if (!isLitExpr(v0)) live = live + 1; }
+                    if (hasInt(bmoved, f.sym.id) && live > 1) {
                         const key: string = fieldKey(d.sym, i);
                         for (const v of vs) {
                             if (!isLitExpr(v) && !hasVal(kv, key, v)) {
