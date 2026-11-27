@@ -6389,13 +6389,15 @@ ${
     // place. The Core form of analyze.scrml trapSiteWhat's own sites: an index read (IndexRead —
     // E-INDEX-OUT-OF-RANGE-RT); a `slice` / `repeat` / `padStart` / `padEnd` position that is not a
     // non-negative int literal, or a literal `repeat` count / pad width whose result is not proven
-    // to fit the longest string (textFitsCore — q8-fu, #2129 r1 MED-1), an `insert` (TapeInsert);
+    // to fit the longest string (textFitsCore — q8-fu, #2129 r1 MED-1), a `replaceAll` whose
+    // receiver and replacement are not literals proven to fit (replaceAllFitsCore — q8-fu2, #2133
+    // review MED-1), an `insert` (TapeInsert);
     // an unproven tape bound (LengthCheck —
     // E-WRITE-INVARIANT-RT); a run-time refinement check (RefineCheck — E-CONTRACT-001-RT); a `%`
     // whose divisor is not a non-zero number literal (its trap is owed:
-    // g-bootstrap-int-overflow-and-mod-zero-untrapped-s469; a `number` divisor cannot trap — q8-fu
-    // LOW-1 — but this Core form carries no operand type, so it is kept: over-keeping only runs it
-    // at its place). A call already acts (it may reach any
+    // g-bootstrap-int-overflow-and-mod-zero-untrapped-s469; a `%` with a `number` operand cannot
+    // trap — q8-fu LOW-1 / q8-fu2 — but this Core form carries no operand type, so it is kept:
+    // over-keeping only runs it at its place). A call already acts (it may reach any
     // of these), and so does a host call (the E-INT-CONVERSION-RT conversions are host calls).
     fn primTraps(o: PrimOp, args: Expr[]) -> boolean {
         if (o == PrimOp.IndexRead || o == PrimOp.TapeInsert || o == PrimOp.LengthCheck || o == PrimOp.RefineCheck) return true;
@@ -6412,7 +6414,22 @@ ${
             if (args.length < 2 || !nonNegIntLitCore(args[1])) return true;
             return !textFitsCore(o == PrimOp.StrRepeat, litNumCore(args[1]), strLitLenCore(args[0]), args.length > 2);
         }
+        // s483 q8-fu2 (#2133 review MED-1) — `replaceAll` checks its result too (runtime.js
+        // strReplaceAll → requireFits): it traps unless the receiver and the replacement are string
+        // literals whose result provably fits, whatever is searched for (the mirror of analyze.scrml
+        // replaceAllTrapWhat / replaceAllFits; a literal only here — over-keeping is harmless).
+        if (o == PrimOp.StrReplaceAll) {
+            if (args.length < 3) return true;
+            return !replaceAllFitsCore(strLitLenCore(args[0]), strLitLenCore(args[2]));
+        }
         return false;
+    }
+
+    // A receiver of `recv` and a replacement of `wl` (`.length`s, −1 — not a literal): at most
+    // (2·recv + 1)·2·wl + 2·recv UTF-16 units at the runtime's largest check, for every `find`.
+    fn replaceAllFitsCore(recv: int, wl: int) -> boolean {
+        if (recv < 0 || wl < 0) return false;
+        return (2 * recv + 1) * 2 * wl + 2 * recv <= 536870888;
     }
 
     // s483 q8-fu (#2129 r1 review MED-1) — the mirror of analyze.scrml lengthTrapWhat / textFitsLit:

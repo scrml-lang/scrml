@@ -1,0 +1,7 @@
+// §7.6 rule (b) (S483 q8-fu2, #2133 review LOW-1) — a `%` whose divisor has a branch the compiler could not type (`v(2)`, a recursive function) is not proven a `number`: the result may be an `int`, and `n % 0` between `int`s owes a trap; the initializer runs before the `if=` test — E-FILE-SCOPE-INIT-IN-CONSTRUCT.
+<program>
+${ const n: int = 2; }
+${ function v(q: int) { if (q <= 1) return 0.0; return q * v(q - 1); } }
+<p id="a" if=(n > 5)>${ const c: number = n % v(2); }${c}</p>
+<p id="z">end</p>
+</program>

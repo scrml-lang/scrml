@@ -1,0 +1,23 @@
+{
+  "id": "body-top-trapping-init-replaceall-in-if-content-neg",
+  "description": "§7.6 rule (b) (S483 q8-fu2) — `${ const c: string = w.replaceAll(\"x\", w); }` inside `<p if=(n > 5)>`: a replaceAll whose receiver and replacement are not literals proven to fit can pass the longest string (E-INDEX-OUT-OF-RANGE-RT) and the initializer runs before the test — E-FILE-SCOPE-INIT-IN-CONSTRUCT.",
+  "language-version": "1.0",
+  "spec": "§7.6 rule (b) (S483), §7.6 R3, §19.17, §34",
+  "source-test": "compiler/self-host-v2/slice-m4/trapping-construct-init-s483.test.js",
+  "rationale": "§7.6 rule (b) (S483): \"An initializer there that can trap SHALL be E-FILE-SCOPE-INIT-IN-CONSTRUCT\"; a `replaceAll` is a trap site unless its receiver and replacement are literals whose result provably fits (S483 q8-fu2, #2133 review MED-1 — before, neither half counted it and the page blanked). ruling:user-voice-scrml.md-S482-trapping-construct-init — owner: \"yes, interim refusal now and the feature later\".",
+  "expect": {
+    "codes": [
+      "E-FILE-SCOPE-INIT-IN-CONSTRUCT"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-init-in-construct-s482",
+      "fails": {
+        "codes": [
+          "missing:E-FILE-SCOPE-INIT-IN-CONSTRUCT"
+        ]
+      }
+    }
+  }
+}
