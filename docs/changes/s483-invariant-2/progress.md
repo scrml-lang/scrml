@@ -161,3 +161,13 @@ impl#1 frozen (§66 Nominal there, §34.0).
   now (ts, ds) and deeper-first) for a lone set / append / prepend (lower invEditChecks) and every Commit path
   (invGroupChecks); invValueWholeChecks for a local part write. Chromium: n29 `@rs = mk()` and `@o = mk2()`
   trap; n27 server rows trap; c04 still traps. (Host probes must compile outside a dot path — E-IMPORT-011.)
+- committed 9d8435c65 (hook PASS).
+- M3: useInvs — a pure `fn` call of constants (invUsePureCall) admitted (n46 CLEAN, construction check holds
+  dbl(2)); a value reading a cell / row binder / local / declared value (invUseTracks) stays E-CONTRACT-003
+  PERMANENT; any other call (a `function`) E-BOOTSTRAP-UNSUPPORTED INTERIM + gap + capable form.
+- L4: fvBinary folds string `+` (fvStrOf) — `const P = "ab" + "c"` admitted, and decides E-WRITE-INVARIANT.
+- L5: useInvs recomputes sibling-derived fields (invDerivedOf) from the folded values before the verdict — n42
+  `<w b=(9)/>` over `span = b - a` is E-WRITE-INVARIANT (span = 9).
+- tests: slice-m4/invariant-r2-s483.test.js (16: leak negatives n01 n02 n02b n51 n60 m01 m02 + controls, M1,
+  precision, H4 / H5 compile side, M3, L4, L5); Chromium invariant-write-chromium-s483 "Chromium r2" (+3: n21,
+  n29 incl. a valid-tape control, n27 with the server artifact) — 14 / 14.

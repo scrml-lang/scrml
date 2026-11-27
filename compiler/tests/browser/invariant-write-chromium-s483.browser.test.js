@@ -13,9 +13,10 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const ROOT = resolve(import.meta.dir, "../../..");
 
@@ -263,5 +264,142 @@ describe("Chromium r1: derived fields are checked at the source write; a restore
     expect(bad.texts).toEqual([["1"]]);
     const good = await load(out, ["n"], [], `localStorage.setItem("app.rs", JSON.stringify([{ lo: 1, hi: 2 }, { lo: 3, hi: 9 }]))`);
     expect(good.texts).toEqual([["2"]]);
+  }, 120000);
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// r2 (#2128 r1 re-review). H4 — a restored / cross-tab value is checked inside an ENUM PAYLOAD too (§6.14.2 rules 1,
+// 3, 5). H5 — a whole-value write of a type that CONTAINS an invariant-bearing type judges the written value at its
+// whole depth: a host function's return (a tape of Range, a struct holding a Range) and a server function's rows
+// (§66.13.5 "When it is checked": every write).
+// ---------------------------------------------------------------------------------------------------------------
+
+// compile `files` (name → text; `main.scrml` the entry) in a fresh source dir; the output dir
+function buildFiles(files) {
+  const case_ = join(dir, `c${n++}`);
+  const src = case_ + "-src";
+  mkdirSync(src, { recursive: true });
+  for (const [f, text] of Object.entries(files)) writeFileSync(join(src, f), text);
+  const p = Bun.spawnSync(["bun", join(ROOT, "scripts/scrml-boot.ts"), "compile", join(src, "main.scrml"), "--output-dir", case_], { cwd: ROOT, stdout: "pipe", stderr: "pipe", env: { ...process.env, NO_COLOR: "1" } });
+  if (p.exitCode !== 0) throw new Error("did not compile: " + p.stderr.toString() + p.stdout.toString());
+  return { out: case_, src };
+}
+
+// load as `load` does, with the server artifact answering `/_scrml/*` (createServer, its root the source dir)
+async function loadServed(out, root, ids, clicks) {
+  const mod = await import(pathToFileURL(join(out, "program.server.js")).href);
+  const server = mod.createServer({ root, log: () => {} });
+  const srv = Bun.serve({ port: 0, async fetch(req) {
+    const p = new URL(req.url).pathname;
+    if (p.startsWith("/_scrml")) return (await server.fetch(req)) ?? new Response("not found", { status: 404 });
+    return new Response(Bun.file(join(out, p === "/" ? "index.html" : p)), { headers: { "content-type": p.endsWith(".js") ? "text/javascript" : "text/html" } });
+  } });
+  const page = await browser.newPage();
+  page.setDefaultTimeout(5000);
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+  const read = () => page.evaluate((xs) => xs.map((id) => (document.getElementById(id)?.textContent ?? "<none>").replace(/\s+/g, " ").trim()), ids);
+  try {
+    await page.goto(`http://localhost:${srv.port}/`);
+    await page.waitForTimeout(300);
+    const texts = [await read()];
+    for (const c of clicks) {
+      await page.click(c);
+      await page.waitForTimeout(500);
+      texts.push(await read());
+    }
+    return { errors, texts };
+  } finally {
+    await page.close();
+    srv.stop();
+  }
+}
+
+describe("Chromium r2: the whole depth — an enum payload, a host return, a server function's rows", () => {
+  test("H4 n21: a stored payload value that breaks the invariant is not restored, and a cross-tab one is refused", async () => {
+    if (skip()) return;
+    const out = build(`<program>
+\${
+    type Range:struct = { lo: int, hi: int } invariant (lo <= hi) [rng]
+    type Slot:enum = { Empty, Held(r: Range) }
+}
+let <s:Slot=(.Empty) persist="local" key="app.s"/>
+<main><p id="v">\${match @s { .Empty :> -1, .Held(r) :> r.lo }}</p></main>
+</program>
+`);
+    const wire = (lo, hi) => JSON.stringify({ variant: "Held", data: { r: { lo, hi } } });
+    const bad = await load(out, ["v"], [], `localStorage.setItem("app.s", ${JSON.stringify(wire(14, 2))})`);
+    expect(bad.texts).toEqual([["-1"]]);
+    expect(bad.errors).toEqual([]);
+    const good = await load(out, ["v"], [], `localStorage.setItem("app.s", ${JSON.stringify(wire(1, 2))})`);
+    expect(good.texts).toEqual([["1"]]);
+    const ev = (w) => `js:localStorage.setItem("app.s", ${JSON.stringify(w)}); window.dispatchEvent(new StorageEvent("storage", { key: "app.s", newValue: ${JSON.stringify(w)}, storageArea: localStorage }))`;
+    const x = await load(out, ["v"], [ev(wire(3, 7)), ev(wire(14, 2))], `localStorage.clear()`);
+    expect(x.texts).toEqual([["-1"], ["3"], ["-1"]]);
+  }, 120000);
+
+  test("H5 n29: a host function's tape of Range, and a struct holding a Range, are checked before the write", async () => {
+    if (skip()) return;
+    const { out } = buildFiles({
+      "glue.js": "export function mk() { return [{ lo: 9, hi: 3 }]; }\nexport function mk2() { return { r: { lo: 9, hi: 3 }, n: 1 }; }\nexport function ok() { return [{ lo: 1, hi: 3 }, { lo: 2, hi: 2 }]; }\n",
+      "main.scrml": `<host src="./glue.js">
+  mk() -> Range[replace]
+  mk2() -> Outer
+  ok() -> Range[replace]
+</host>
+<program>
+\${
+    type Range:struct = { lo: int, hi: int } invariant (lo <= hi) [rng]
+    type Outer:struct = { r: Range, n: int }
+}
+<rs:Range[replace]=([])/>
+let <o:Outer=({ r: { lo: 1, hi: 2 }, n: 0 })/>
+<main><p id="s">\${@rs.length}</p><p id="o">\${@o.r.lo}/\${@o.r.hi}</p>
+<button id="b" onclick={ @rs = mk(); }>b</button><button id="c" onclick={ @o = mk2(); }>c</button><button id="g" onclick={ @rs = ok(); }>g</button></main>
+</program>
+`,
+    });
+    const r = await load(out, ["s", "o"], ["#b", "#c", "#g"]);
+    expect(r.texts).toEqual([["0", "1/2"], ["0", "1/2"], ["0", "1/2"], ["2", "1/2"]]);
+    expect(r.errors.length).toBe(2);
+    for (const e of r.errors) {
+      expect(e).toContain("E-WRITE-INVARIANT-RT");
+      expect(e).toContain("lo = 9, hi = 3");
+    }
+  }, 120000);
+
+  test("H5 n27: a server function's rows are checked before the write; a single row too", async () => {
+    if (skip()) return;
+    const { out, src } = buildFiles({
+      "main.scrml": `<program db="./app.db">
+\${
+    type Range:struct = { lo: int, hi: int } invariant (lo <= hi) [rng]
+    function all() -> Range[replace] {
+        const t: Range[replace] = ?{\`SELECT lo, hi FROM rs ORDER BY id\`}.all() !{ _ :> { return []; } };
+        return t;
+    }
+    function one(a: int) -> Range {
+        const t: Range = ?{\`SELECT lo, hi FROM rs WHERE id = \${a}\`}.get() !{ _ :> { const z: Range = { lo: 0, hi: 0 }; return z; } };
+        return t;
+    }
+}
+<rs:Range[replace]=([])/>
+let <r:Range=({ lo: 0, hi: 0 })/>
+<main><p id="n">\${@rs.length}</p><p id="r">\${@r.lo}/\${@r.hi}</p>
+<button id="go" onclick={ @rs = all() !{ .Transport(_) :> return }; }>go</button>
+<button id="one" onclick={ @r = one(1) !{ .Transport(_) :> return }; }>one</button></main>
+</program>
+`,
+    });
+    const { Database } = await import("bun:sqlite");
+    const db = new Database(join(src, "app.db"), { create: true });
+    db.exec("CREATE TABLE rs (id INTEGER PRIMARY KEY, lo INTEGER, hi INTEGER); INSERT INTO rs VALUES (1, 9, 3); INSERT INTO rs VALUES (2, 4, 6);");
+    db.close();
+    const r = await loadServed(out, src, ["n", "r"], ["#go", "#one"]);
+    expect(r.texts).toEqual([["0", "0/0"], ["0", "0/0"], ["0", "0/0"]]);
+    const traps = r.errors.filter((e) => e.includes("E-WRITE-INVARIANT-RT"));
+    expect(traps.length).toBe(2);
+    for (const e of traps) expect(e).toContain("lo = 9, hi = 3");
   }, 120000);
 });

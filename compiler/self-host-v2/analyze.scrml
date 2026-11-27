@@ -34503,6 +34503,14 @@ ${
             if (q == 0) return FV.FBool(true);
             return FV.FNo;
         }
+        // r2 (#2128 r1 re-review L4; ruling:user-voice-scrml.md-S483-invariant-const-fold — "any initializer
+        // the compiler folds to a value at compile time (+ - * … over literals and other such consts)"):
+        // `+` of two strings is their concatenation (§45 — the string `+`)
+        if (o == BinOp.Add) {
+            const sa: string | not = fvStrOf(l);
+            const sb: string | not = fvStrOf(r);
+            if (sa is given && sb is given) return FV.FStr(sa + sb);
+        }
         const a: number | not = fvNumOf(l);
         const b: number | not = fvNumOf(r);
         if (a is not || b is not) return FV.FNo;
@@ -34525,6 +34533,17 @@ ${
             .FVar(name: n) :> -1,
             .FAbsent :> -1,
             .FNo :> -1
+        };
+    }
+
+    fn fvStrOf(v: FV) -> string | not {
+        return match v {
+            .FStr(s: s) :> s,
+            .FNum(n: n) :> not,
+            .FBool(b: b) :> not,
+            .FVar(name: n) :> not,
+            .FAbsent :> not,
+            .FNo :> not
         };
     }
 
@@ -34757,6 +34776,65 @@ ${
         return fvKind(invConstFold(t, e, 0)) != 0;
     }
 
+    // r2 (#2128 r1 re-review M3) — a use-site value that is a call of a pure `fn` (not a host function)
+    // whose arguments are compile-time constants (or such calls): a `fn` is pure (§48), so the value
+    // is the same at every evaluation — it tracks nothing.
+    fn invUsePureCall(t: Tables, v: AAttrValue) -> boolean {
+        const e: AExpr | not = valueExpr(v);
+        if (e is not) return false;
+        return invPureCallExpr(t, e, 0);
+    }
+
+    fn invPureCallExpr(t: Tables, e: AExpr, depth: int) -> boolean {
+        if (depth > 16) return false;
+        const k: AExprK = e.k;
+        return match k {
+            .Call(callee: c, args: xs) :> invPureCallOf(t, c, xs, depth),
+            // no-default-arm: one question of a use-site value — is it a call
+            _ :> false
+        };
+    }
+
+    fn invPureCallOf(t: Tables, c: AExpr, xs: AExpr[], depth: int) -> boolean {
+        const sym: int = invFnSymOf(nameFact(t.names, c.nid));
+        if (sym < 0) return false;
+        let pure: boolean = false;
+        for (const fi of t.fns) {
+            if (fi.sym.id == sym && fi.pure && fi.host is not) pure = true;
+        }
+        if (!pure) return false;
+        for (const x of xs) {
+            if (fvKind(invConstFold(t, x, 0)) == 0 && !invPureCallExpr(t, x, depth + 1)) return false;
+        }
+        return true;
+    }
+
+    // a use-site value that reads what can change: a cell, a row value, a local (a row binder), a
+    // declared value, a field, a validity surface, a request's state
+    fn invUseTracks(t: Tables, v: AAttrValue) -> boolean {
+        const e: AExpr | not = valueExpr(v);
+        if (e is not) return true;
+        for (const x of invExprsDeep(e)) {
+            const tag: string = exprTag(x);
+            if (tag == "At" || tag == "AtItem") return true;
+            const f: NameFact | not = nameFact(t.names, x.nid);
+            const live: boolean = match f {
+                .NLocal(sym: s) :> true,
+                .NField(decl: d) :> true,
+                .NInst(decl: d) :> true,
+                .NSurface(of: o) :> true,
+                .NReq(id: r) :> true,
+                .NConst(sym: s) :> false,
+                .NStruct(owner: o) :> false,
+                .NFn(sym: s) :> false,
+                .NLength :> false,
+                not :> false
+            };
+            if (live) return true;
+        }
+        return false;
+    }
+
     fn invUseLiveMsg(iv: InvInfo, what: string, field: string) -> string {
         return "`invariant (" + iv.text + ")` on " + what + " reads `" + field + "` (directly, or through a field computed from it), a locked field this use gives a value that is not a compile-time constant (a cell, a row binder, a local, a call) — a locked field given a live value TRACKS it, so the invariant would read that value by another route, and a declaration's invariant reads only the value's own fields (§66.13.5 rule 6, §66.9 rule 8; ruling:user-voice-scrml.md-S483-invariant-derived-split: a field that tracks a cell or a live use-site value stays refused, PERMANENT). Make it a `let` field (seeded once from the use site's value, then checked on every write), give it a constant here, or write a derived check (e.g. `<over=(…)/>`) and use it where the value changes";
     }
@@ -34789,7 +34867,17 @@ ${
                 for (const iv of di.invs) {
                     if (di.fields[i].wcap is not && invUseHeads(di, iv).indexOf(i) >= 0 && !hasErrIn(env.blame.spans, iv.span)) {
                         if (!invUseConst(env.t, a.value)) {
-                            tsu = report(tsu, env, a.span, "E-CONTRACT-003", invUseLiveMsg(iv, "`<" + e.tag + ">`", f));
+                            // r2 (#2128 r1 re-review M3): only a value that TRACKS (a cell, a row binder, a
+                            // local, a declared value) is the ruled PERMANENT refusal; a call of a pure `fn` of
+                            // compile-time constants never changes — the construction check holds it (admitted);
+                            // any other call is INTERIM (its reach is not judged here)
+                            if (invUsePureCall(env.t, a.value)) {
+                                // (admitted: `fn` is pure, §48 — the same value at every evaluation)
+                            } else if (invUseTracks(env.t, a.value)) {
+                                tsu = report(tsu, env, a.span, "E-CONTRACT-003", invUseLiveMsg(iv, "`<" + e.tag + ">`", f));
+                            } else {
+                                tsu = report(tsu, env, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`invariant (" + iv.text + ")` on `<" + e.tag + ">` reads `" + f + "`, a locked field this use gives a call that is not a pure `fn` of compile-time constants — whether that value can change (a `function` may read a cell) is not judged here yet, so the bootstrap refuses it (INTERIM, g-boot-invariant-derived-field-s483; the capable form follows the call's chain as an invariant's own calls are followed and admits one that reads no cell). Give the field a compile-time constant or a pure `fn` of constants here, or make it a `let` field (seeded once from the use site's value, then checked on every write)");
+                            }
                         } else if (invSiblingDerived(di, i)) {
                             // the run-time check recomputes this field from its initializer (invDeriveFor) — a
                             // use-site value would make that recomputation wrong for this instance (INTERIM)
@@ -34797,6 +34885,19 @@ ${
                         }
                     }
                 }
+            }
+        }
+        // r2 (#2128 r1 re-review L5): a field computed from its sibling fields (the run-time check
+        // recomputes it — invDeriveFor) is recomputed here too, from the folded values, dependencies first,
+        // so a literal use that provably breaks an invariant over it is E-WRITE-INVARIANT as a plain field's is
+        let names: string[] = [];
+        for (const nf of di.fields) { names = names.concat([nf.sym.hint]); }
+        for (const dv of invDerivedOf(di, names)) {
+            const ie: AExpr | not = valueExpr(di.fields[dv.idx].init);
+            if (ie is given) {
+                const dvv: FV = invFold(ie, ents, names);
+                ents = fvDrop(ents, dv.name);
+                if (fvKind(dvv) != 0) ents = ents.concat([{ path: dv.name, v: dvv }]);
             }
         }
         let ts: TypeState = tsu;
