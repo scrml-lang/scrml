@@ -33839,36 +33839,85 @@ ${
     type InvConstAt:struct = { id: int, by: string }
 
     fn invServerConstPass(g: Globals, t: Tables) -> Diag[] {
+        // r1 (#2128 review H2 HIGH): the server reader set is CLOSED over the call graph —
+        // every expression server code runs, followed into what it reaches, each once: a server
+        // function's body, the body of every function it calls (whatever that callee's own
+        // placement — a shared helper a server function calls runs on the server too, §12.2,
+        // through its server copy), the seed of a program cell such code reads, and the
+        // initializer of a constant such code reads (the largest set, §7.6 (b)). Before r1 only
+        // the DIRECT reads of server-placed bodies counted, so `function srv() { return key() }`
+        // with `fn key() { return K }` left `K` out, and an invariant reading `K` through its own
+        // `fn` chain was admitted and printed the constant into the client (probe g03). Now the
+        // set refused through a call is exactly the set refused directly (§66.13.5 rule 7).
         let srv: InvConstAt[] = [];
-        let progFields: int[] = [];
+        let fnSeen: int[] = [];
+        let fq: FnSrc[] = [];
+        let fby: string[] = [];
         for (const fs of g.fns) {
             const id: int = fs.info.sym.id;
-            if (t.server.servers.indexOf(id) >= 0 || t.server.inherited.indexOf(id) >= 0) {
-                for (const x of invBodyExprs(fs.f.body)) {
-                    srv = invAddConstRead(srv, t, x, "the server function `" + fs.info.name + "`");
-                    const pf: int = invProgFieldRead(t, x);
-                    if (pf >= 0 && progFields.indexOf(pf) < 0) progFields = progFields.concat([pf]);
-                }
+            if ((t.server.servers.indexOf(id) >= 0 || t.server.inherited.indexOf(id) >= 0) && fnSeen.indexOf(id) < 0) {
+                fnSeen = fnSeen.concat([id]);
+                fq = fq.concat([fs]);
+                fby = fby.concat(["the server function `" + fs.info.name + "`"]);
             }
         }
-        for (const d of t.decls) {
-            if (d.sym.id == t.program.id) {
-                for (const i of progFields) {
-                    if (i < d.fields.length) {
-                        for (const x of invAttrExprs(d.fields[i].init)) { srv = invAddConstRead(srv, t, x, "the seed of `@" + d.fields[i].sym.hint + "`, which server code reads"); }
+        let fieldSeen: int[] = [];
+        let xq: AExpr[] = [];
+        let xby: string[] = [];
+        let fi: int = 0;
+        let xi: int = 0;
+        let more: boolean = true;
+        for (; more; ) {
+            more = false;
+            // the queued function bodies: each expression is server code
+            for (; fi < fq.length; ) {
+                for (const x of invBodyExprs(fq[fi].f.body)) {
+                    xq = xq.concat([x]);
+                    xby = xby.concat([fby[fi]]);
+                }
+                fi = fi + 1;
+                more = true;
+            }
+            // the queued server expressions: a constant read, a called function, a program cell read
+            for (; xi < xq.length; ) {
+                const x: AExpr = xq[xi];
+                const by: string = xby[xi];
+                const n0: int = srv.length;
+                srv = invAddConstRead(srv, t, x, by);
+                if (srv.length > n0) {
+                    for (const k of t.consts) {
+                        if (k.sym.id == srv[n0].id) {
+                            for (const y of invExprsDeep(k.init)) {
+                                xq = xq.concat([y]);
+                                xby = xby.concat(["the initializer of `" + k.name + "`, which server code reads"]);
+                            }
+                        }
                     }
                 }
-            }
-        }
-        // a constant the initializer of a server-read constant reads is server-read (the largest set, §7.6 (b))
-        let j: int = 0;
-        for (; j < srv.length; ) {
-            for (const k of t.consts) {
-                if (k.sym.id == srv[j].id) {
-                    for (const x of invExprsDeep(k.init)) { srv = invAddConstRead(srv, t, x, "the initializer of `" + k.name + "`, which server code reads"); }
+                const sym: int = invFnSymOf(nameFact(t.names, x.nid));
+                if (sym >= 0 && fnSeen.indexOf(sym) < 0) {
+                    fnSeen = fnSeen.concat([sym]);
+                    const nx: FnSrc | not = fnSrcOfSym(g, sym);
+                    if (nx is given) {
+                        fq = fq.concat([nx]);
+                        fby = fby.concat([invThrough(by, nx.info.name)]);
+                    }
                 }
+                const pf: int = invProgFieldRead(t, x);
+                if (pf >= 0 && fieldSeen.indexOf(pf) < 0) {
+                    fieldSeen = fieldSeen.concat([pf]);
+                    for (const d of t.decls) {
+                        if (d.sym.id == t.program.id && pf < d.fields.length) {
+                            for (const y of invAttrExprs(d.fields[pf].init)) {
+                                xq = xq.concat([y]);
+                                xby = xby.concat(["the seed of `@" + d.fields[pf].sym.hint + "`, which server code reads"]);
+                            }
+                        }
+                    }
+                }
+                xi = xi + 1;
+                more = true;
             }
-            j = j + 1;
         }
         if (srv.length == 0) return [];
         let out: Diag[] = [];
@@ -33882,6 +33931,12 @@ ${
             for (const iv of ti.invs) { out = out.concat(invServerConstDiags(g, t, ti.file, iv, "`type " + ti.name + "`", srv)); }
         }
         return out;
+    }
+
+    // `by` (who reads) extended by the call into `name`: "the server function `srv`, through `key`".
+    fn invThrough(by: string, name: string) -> string {
+        if (by.indexOf(", through `") >= 0) return by + " → `" + name + "`";
+        return by + ", through `" + name + "`";
     }
 
     fn invAttrExprs(v: AAttrValue) -> AExpr[] {

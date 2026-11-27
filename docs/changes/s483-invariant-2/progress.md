@@ -82,3 +82,12 @@ impl#1 frozen (§66 Nominal there, §34.0).
   gen-bootstrap-severity --check exit 4 on base and head alike (bot-owned).
 - Runtime size: slice-m1/runtime/runtime.js 422505 → 427966 bytes (+5461, +1.3%, mostly comments);
   server-runtime.js 150528 → 150794 (+266, the re-export).
+
+## r1 (fix round, #2128 review FIX)
+
+- merged origin/main (b5f071c46: generated docs only); the reviewer's 81 probes compile byte-identical on
+  fe46cb8f7 and on the merge (compileall/cmpdiff: 81 identical, 0 differing, 0 code diffs).
+- H2: invServerConstPass closes the server reader set over the call graph (server fn bodies → every function they
+  call, any placement → program-cell seeds and constant initializers they read; each once). g03 now refused;
+  slice-m4/invariant-r1-s483.test.js (H2 block, 6) — each refused variant's no-invariant control has the secret
+  in no client file.
