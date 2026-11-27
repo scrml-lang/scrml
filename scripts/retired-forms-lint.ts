@@ -21,8 +21,10 @@
  *      r3 F5: the file set is ledger data, so --base-ref checks it like the rows):
  *        - .scrml files under `corpus.scrmlRoots`, minus `corpus.excluded` / `corpus.skipDirs`;
  *        - every .md file of the tree minus `corpus.excluded` (each with its reason) and `corpus.skipDirs` /
- *          dot-directories: every fenced code block as CommonMark (GFM) reads it — `marked`'s lexer (#2101 r3
- *          F1/F3), never a hand parser, cross-checked by commonmark.js (#2101 r5: a read-fence disagreement exits 2) — whose info string is empty, STARTS `scrml` (`scrml{.example}`,
+ *          dot-directories: every fenced code block as CommonMark reads it — commonmark.js, the reference
+ *          implementation, never a hand parser (#2101 r3 F1/F3; S483 r1: the primary reader, lines from its
+ *          `sourcepos`), cross-checked by marked's GFM lexer (#2101 r5: a read-fence disagreement exits 2) —
+ *          whose info string is empty, STARTS `scrml` (`scrml{.example}`,
  *          `scrml,ignore`) or is an attribute block with the class `.scrml` (`{.scrml}`); fences in
  *          blockquotes and list items included, each ending where CommonMark ends it. Fences tagged another
  *          language, indented code blocks, HTML `<pre>` blocks and prose are not read.
@@ -38,8 +40,10 @@
  *          that code's budget is not spent: one hit per expected occurrence (`codeCounts[code]`, else 1),
  *          shared by the rows that share the code;
  *        - a markdown fence is marked as a negative by `<!-- retired-neg: <row-id> — <reason> -->` on the
- *          line(s) directly above its opener, at the opener's blockquote depth (one marker per row;
- *          consecutive marker lines stack); each fence's line is marked's own token position (#2101 r4 F1);
+ *          line(s) directly above its opener, in the SAME container — a one-line HTML block that is the fence's
+ *          preceding sibling in commonmark.js's AST (one marker per row; consecutive marker lines stack); each
+ *          fence's line and each marker's are commonmark.js's own `sourcepos` (#2101 r4 F1; S483 r1 HIGH-1: by
+ *          AST position, never by text, so a decoy copy of a fence in an HTML block carries nothing);
  *        - no region of any file is exempt (#2101 r4 F2: SPEC "migration regions" are retired; a ledger that
  *          still lists `migrationRegions` fails);
  *        - `retired-ok: <row-id> — <reason>` stands in a COMMENT (`//`, `/* *\/`, `<!-- -->`) on the hit's
@@ -49,7 +53,8 @@
  *        - a HARD hit with no `pending` entry fails; a count above the baseline fails;
  *        - a count BELOW the baseline also fails until the baseline is lowered (`--update`), so slack is
  *          never left for a later PR to spend;
- *        - a markdown block that cannot be placed exactly on its source lines exits 2 (never read at a guess).
+ *        - a markdown file that cannot be read exactly exits 2 naming the file (never read at a guess): the two
+ *          readers disagree, a fence's position does not hold in the source, or a reader throws.
  *   4. With `--base-ref <rev>` (CI: the PR's base; the pre-commit hook: the merge-base with origin/main; an
  *      unresolvable rev exits 2) the baseline and ledger themselves are checked against that revision's:
  *        - no (row, file) count above the base's, no (row, file) key the base lacks — except a SOFT row the
@@ -72,12 +77,12 @@
  *     `;` / `{` / `}`;
  *   - a fence tagged as another language, an indented code block, an HTML `<pre>` block and prose are not
  *     read;
- *   - markdown the two readers read differently exits 2 via the commonmark.js cross-check. S483 bumped marked
- *     14 → 18.2.0 and re-proved the placement wrappers on it (g-tool-retired-lint-marked-bump-s482, resolved):
- *     the lazy-continuation class marked 14 mis-read (a fence after a lazy line inside a list in a blockquote)
- *     is now read as CommonMark reads it. marked 18 still reads a fence differently where a fence opened in a
- *     list item in a blockquote is followed by an indented line with no `>` (`> - ~~~scrml⏎    x` — CommonMark
- *     closes the blockquote and the fence; marked runs the fence on lazily); that exits 2, fail closed;
+ *   - markdown the two readers read differently exits 2 via the marked cross-check. S483 bumped marked 14 →
+ *     18.2.0 and (r1) made commonmark.js the primary reader, so placement needs no hooks into a lexer's internals
+ *     and no fence is ever placed by marked. marked 18.2.0 still reads some valid CommonMark differently — e.g. a
+ *     fence opened in a list item in a blockquote followed by an indented line with no `>` (`> - ~~~scrml⏎    x`:
+ *     CommonMark closes the blockquote and the fence, marked runs the fence on lazily); that exits 2, fail closed
+ *     (rates measured in g-tool-retired-lint-marked18-residual-s483);
  *   - a retired closer inside an unclosed raw body is raw text here (the bootstrap names it);
  *   - INTERIM: an unterminated string or template literal in a fence (a stray ``` line inside it opens one)
  *     hides the rest of that fence. The capable form: fail when a fence's text ends inside an unterminated
@@ -405,26 +410,6 @@ export function caseIsNegativeFor(row: Row, c: { id: string; codes: string[] } |
 
 export type Fence = { startLine: number; text: string; negIds: Set<string>; info: string };
 
-/** A line's blockquote prefix (`> `, `> > `, `>   `) stripped, and how many `>` it held. */
-function unquote(line: string): { text: string; depth: number } {
-  const m = /^(?:[ \t]{0,3}>[ \t]?)+/.exec(line);
-  if (!m) return { text: line, depth: 0 };
-  return { text: line.slice(m[0].length), depth: (m[0].match(/>/g) ?? []).length };
-}
-
-/** A line with its container prefixes — blockquote markers and list markers — removed, and leading space. */
-function containerless(line: string): string {
-  let s = line;
-  for (;;) {
-    const t = s.replace(/^[ \t]*>[ \t]?/, "").replace(/^[ \t]*(?:[-+*]|\d{1,9}[.)])(?:[ \t]+|$)/, "");
-    if (t === s) return s.trimStart();
-    s = t;
-  }
-}
-
-/** A code line compared across containers: blockquote markers and indentation are not content here. */
-const bodyKey = (l: string) => l.replace(/^[\s>]*/, "").trimEnd();
-
 /** Is an info string read as scrml (#2101 r2 MED-2, r3 F3)? Untagged, its first token starts `scrml`
  *  (`scrml`, `scrml{.example}`, `scrml,ignore`), or a pandoc attribute block with the class `.scrml`
  *  (`{.scrml}`, `{.scrml .numberLines}`). */
@@ -433,207 +418,88 @@ export const readsInfo = (info: string) => {
   return i === "" || i.startsWith("scrml") || /^\{\s*(?:[^}]*\s)?\.scrml(?![\w-])/.test(i);
 };
 
-type MdCode = { open: number; text: string; info: string; depth: number };
-type MdHeading = { line: number; level: number; top: boolean };
-
-/** A markdown block the gate cannot place exactly on its source lines (#2101 r4): the gate exits 2, it never
- *  reads a block at a guessed line. */
+/** A markdown file the gate cannot read exactly (#2101 r4): the two readers disagree, a reader gives a fence no
+ *  source position, or a reader fails. The gate exits 2 naming the file; it never reads a block at a guess. */
 export class PlacementError extends Error {}
-
-/** One `blockTokens` call of marked's lexer: the text it lexed (the whole file, a blockquote segment with its
- *  `>` markers stripped, or a list item's de-indented text — each maps line for line onto its source lines). */
-type Frame = { src: string; nl?: Int32Array };
-/** Where a token starts: its frame and its offset in the frame's text (exact — marked's own position). */
-type At = { frame: Frame; off: number } | null;
-
-/** Newlines in `s` before offset `off`. */
-function nlBefore(s: string, off: number): number {
-  let n = 0;
-  for (let i = s.indexOf("\n"); i >= 0 && i < off; i = s.indexOf("\n", i + 1)) n++;
-  return n;
-}
-function frameLine(f: Frame, off: number): number {
-  if (!f.nl) {
-    const at: number[] = [];
-    for (let i = f.src.indexOf("\n"); i >= 0; i = f.src.indexOf("\n", i + 1)) at.push(i);
-    f.nl = Int32Array.from(at);
-  }
-  let lo = 0, hi = f.nl.length;
-  while (lo < hi) { const m = (lo + hi) >> 1; if (f.nl[m] < off) lo = m + 1; else hi = m; }
-  return lo;
-}
-
-/**
- * marked's tokens, each fence / heading / blockquote / list tagged with its exact source position (#2101 r4
- * F1): every `blockTokens` call is a frame, and a tokenizer called from a frame starts at offset
- * `frame.length - remaining.length` — marked's own cursor, not a text search. A blockquote / list records the
- * frames its children were lexed in. A container marked re-reads with its lazy continuation (a blockquote's
- * nested blockquote / list) keeps the position of the token it replaces.
- */
-function lexPlaced(md: string): { tokens: any[]; top: Frame } {
-  const lexer: any = new Lexer({ gfm: true });
-  const tk: any = lexer.tokenizer;
-  const stack: (Frame | "tk")[] = [];
-  const ctxs: Frame[][] = [];
-  let top: Frame | null = null;
-  let last: any = null;
-  const blockTokens = lexer.blockTokens.bind(lexer);
-  lexer.blockTokens = (src: string, tokens?: any[], clipped?: boolean) => {
-    const frame: Frame = { src };
-    if (ctxs.length) ctxs[ctxs.length - 1].push(frame); else if (!top) top = frame;
-    stack.push(frame);
-    try { return blockTokens(src, tokens, clipped); } finally { stack.pop(); }
-  };
-  for (const name of ["fences", "heading", "lheading", "blockquote", "list"]) {
-    const orig = tk[name];
-    const container = name === "blockquote" || name === "list";
-    tk[name] = function (src: string) {
-      const caller = stack[stack.length - 1];
-      const prev = last;                       // the token a re-read replaces (tagged before this call)
-      const frames: Frame[] = [];
-      if (container) ctxs.push(frames);
-      stack.push("tk");
-      let t: any;
-      try { t = orig.call(this, src); } finally { stack.pop(); if (container) ctxs.pop(); }
-      if (!t) return t;
-      let at: At = null;
-      if (caller && caller !== "tk") at = { frame: caller, off: caller.src.length - src.length };
-      else if (prev?.__at && src.startsWith(prev.raw)) at = prev.__at;     // a re-read: same start as the token it replaces
-      t.__at = at;
-      t.__len = t.raw.length;                  // marked may later append a spacer `\n` to raw
-      if (container) t.__frames = frames;
-      last = t;
-      return t;
-    };
-  }
-  const tokens = lexer.lex(md);
-  if (!top) throw new PlacementError("marked lexed no frame");
-  return { tokens, top };
-}
-
-/**
- * The fenced code blocks and headings of a markdown text (`\n` line ends — callers normalise `\r\n` / `\r`, as
- * marked does), as CommonMark (GFM) reads them — `marked`'s lexer (#2101 r3 F1/F3). A fence inside a
- * blockquote, a list item (`- ```scrml` on the bullet line) or both is read with its container; an indented
- * "closer" inside a fence is content. Each block's line comes from marked's own token positions (#2101 r4 F1:
- * never a forward text search, which an identical decoy — an indented block, an HTML block — could capture):
- * a top-level token's line is its offset in the file; a blockquote child's is the blockquote's line plus the
- * child's line in the blockquote's text; a list item's is the list's line plus the item's line in the list's
- * raw. The placed line is then checked against the source (the opener there is a fence opener and every body
- * line follows; a heading's line is that heading); a block that cannot be placed exactly throws
- * `PlacementError`.
- */
-export function mdBlocks(md: string): { codes: MdCode[]; headings: MdHeading[] } {
-  const lines = md.split("\n");
-  const codes: MdCode[] = [];
-  const headings: MdHeading[] = [];
-  const { tokens, top } = lexPlaced(md);
-  const base = new Map<Frame, number>([[top, 0]]);
-  const fail = (what: string, why: string): never => { throw new PlacementError(`cannot place a markdown ${what} on its source lines (${why})`); };
-  /** The token's 0-based line, or null when marked gave it no position or its frame got no line. */
-  const lineIf = (t: any): number | null => {
-    const at: At = t.__at;
-    const b = at ? base.get(at.frame) : undefined;
-    return at && b !== undefined ? b + frameLine(at.frame, at.off) : null;
-  };
-  const lineOf = (t: any, what: string): number => lineIf(t) ?? fail(what, t.__at ? "its container could not be placed" : "marked gave it no position");
-  const visit = (toks: any[], isTop: boolean) => {
-    for (const t of toks) {
-      if (t.type === "code" && t.codeBlockStyle !== "indented") {
-        const what = `fence ${JSON.stringify(String(t.raw).split("\n")[0])}`;
-        const k = lineOf(t, what);
-        const body = t.text === "" ? [] : String(t.text).split("\n");
-        if (k >= lines.length || !/^(`{3,}|~{3,})/.test(containerless(lines[k]))) fail(what, `line ${k + 1} is not its opener`);
-        for (let b = 0; b < body.length; b++) {
-          if (k + 1 + b >= lines.length || bodyKey(lines[k + 1 + b]) !== bodyKey(body[b])) fail(what, `line ${k + 2 + b} is not its body`);
-        }
-        codes.push({ open: k, text: String(t.text), info: String(t.lang ?? ""), depth: unquote(lines[k]).depth });
-      } else if (t.type === "heading") {
-        const first = containerless(String(t.raw).split("\n")[0]).trimEnd();
-        const what = `heading ${JSON.stringify(first)}`;
-        const k = lineOf(t, what);
-        if (k >= lines.length || containerless(lines[k]).trimEnd() !== first) fail(what, `line ${k + 1} is not that heading`);
-        headings.push({ line: k, level: t.depth, top: isTop });
-      } else if (t.type === "blockquote") {
-        // segment 1 (frame 0) is marked's first `blockTokens` call in this blockquote: the lines from the
-        // blockquote's first line, each with its `>` marker stripped (marked's marker and setext rewrites keep
-        // every line break), so it stands at the blockquote's line by construction — not by a text match: when
-        // marked re-reads a nested blockquote after a lazy line it splices `text` with the nested token's text
-        // length, not the source's, and `text` stops matching even though segment 1 is placed (S483, marked 18).
-        // Each later segment stands right after the previous one (or after a child marked re-read past it) in
-        // `text`. A later frame that does not stand exactly there — or a blockquote whose text and raw disagree
-        // in line count (marked re-joins a re-read with an extra line) — gets no line: a fence or heading in it
-        // then fails, nothing else does
-        const L = lineIf(t);
-        const text = String(t.text);
-        const lineCount = (x: string) => x.replace(/\n+$/, "").split("\n").length;
-        const exact = lineCount(text) === lineCount(String(t.raw));
-        const frames: Frame[] = t.__frames ?? [];
-        const starts: number[] = [];
-        for (let i = 0; i < frames.length; i++) {
-          let start = 0;
-          if (i > 0) {
-            let end = starts[i - 1] + frames[i - 1].src.length;
-            for (const c of t.tokens ?? []) {
-              const j = c.__at ? frames.indexOf(c.__at.frame) : -1;
-              if (j >= 0 && j < i) end = Math.max(end, starts[j] + c.__at.off + c.__len);
-            }
-            start = end + 1;
-          }
-          starts.push(start);
-          if (L !== null && i === 0 && lineCount(frames[0].src) <= lineCount(String(t.raw))) base.set(frames[0], L);
-          else if (L !== null && i > 0 && exact && text.startsWith(frames[i].src, start)) base.set(frames[i], L + nlBefore(text, start));
-        }
-        visit(t.tokens ?? [], false);
-      } else if (t.type === "list") {
-        // each item's text maps line for line onto its source lines from the item's first line
-        const L = lineIf(t);
-        const frames: Frame[] = t.__frames ?? [];
-        let p = 0;
-        for (let i = 0; L !== null && i < t.items.length; i++) {
-          const it = t.items[i];
-          if (!String(t.raw).startsWith(it.raw, p)) break;
-          if (frames.length === t.items.length && frames[i].src === it.text) base.set(frames[i], L! + nlBefore(String(t.raw), p));
-          p += it.raw.length;
-        }
-        for (const it of t.items) visit(it.tokens ?? [], false);
-      }
-    }
-  };
-  visit(tokens, true);
-  return { codes, headings };
-}
 
 const NEG_MARKER = /^\s*<!--\s*retired-neg:\s*([\w-]+)(?:\s+(?:—|--|-)|\s*:)\s*[^\s>-][^>]*-->\s*$/;
 
-/** `\r\n` and `\r` line ends as `\n` — exactly as marked reads them, so source lines and tokens agree — and a
+/** `\r\n` and `\r` line ends as `\n` — as both readers read them, so source lines and positions agree — and a
  *  leading U+FEFF dropped, as cmark / GitHub drop it (#2101 r5rev LOW-1: neither marked nor commonmark.js does,
  *  so a BOM-prefixed fence went unread by both). */
-export const normalizeEol = (md: string) => md.replace(/^\uFEFF/, "").replace(/\r\n|\r/g, "\n");
+export const normalizeEol = (md: string) => md.replace(/^﻿/, "").replace(/\r\n|\r/g, "\n");
+
+/** A reader's exception, other than our own PlacementError, as a PlacementError naming the reader (S483 r1
+ *  LOW-1: marked 18.2.0's lexer throws a TypeError on `+ =⏎\t>-⏎f⏎`; that is exit 2 with the file named, never
+ *  exit 1 — the "hits found" code — with a raw stack). */
+function reading<T>(reader: string, f: () => T): T {
+  try { return f(); }
+  catch (e) {
+    if (e instanceof PlacementError) throw e;
+    const why = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+    throw new PlacementError(`${reader} failed to read the markdown (${why})`);
+  }
+}
 
 /**
- * Every fenced code block of a markdown text that is read (`readsInfo`), as CommonMark reads it (`mdBlocks`).
- * `startLine`: the 1-based line of its first body line (in the text with its line ends normalised); `text`: its
- * content. `negIds`: the row ids of `<!-- retired-neg: <id> — reason -->` markers on the line(s) directly above
- * the opener AT THE SAME BLOCKQUOTE DEPTH (#2101 r3: a `> <!-- … -->` does not mark an unquoted fence). No
- * region of any file is exempt (#2101 r4 F2): a negative is a marked fence, a case, or a `retired-ok` comment.
+ * Every fenced code block of a markdown text that is read (`readsInfo`), as CommonMark reads it — commonmark.js,
+ * the CommonMark reference implementation, is the PRIMARY reader (S483 r1, g-tool-retired-lint-marked18-
+ * residual-s483): each fence, its container and its lines come from commonmark.js's AST, never from a text search
+ * or from hooks into a lexer's internals. A fence inside a blockquote, a list item (`- ```scrml` on the bullet
+ * line) or both is read with its container; an indented "closer" inside a fence is content; an unclosed fence
+ * runs to the end of its container.
+ *   - `startLine`: the 1-based line of its first body line — the opener's line in commonmark.js's `sourcepos`,
+ *     plus one (in the text with its line ends normalised); the fence's content lines are the source lines after
+ *     the opener, one for one. The position is checked against the source (the opener line holds a fence opener at
+ *     the reported column; each body line ends with its content line) and a fence that fails is a PlacementError.
+ *   - `text`: its content (commonmark.js's `literal` without its final line break).
+ *   - `negIds`: the row ids of `<!-- retired-neg: <id> — reason -->` markers that are the fence's DIRECTLY
+ *     PRECEDING SIBLINGS in the same container — each marker its own one-line HTML block, on the line directly
+ *     above the fence (or above the previous marker): consecutive markers stack. Read by AST position, never by
+ *     text: a marker in another container (`> <!-- … -->` above an unquoted fence, #2101 r3), a marker inside an
+ *     HTML block, and an identical copy of the fence that is not a fence (an HTML block, an indented block — the
+ *     S483 r0 HIGH-1 decoy) mark nothing.
+ * No region of any file is exempt (#2101 r4 F2): a negative is a marked fence, a case, or a `retired-ok` comment.
+ * Then `crossCheck`: marked must read the same fences, or the gate exits 2.
  */
 export function readFences(md: string): Fence[] {
   md = normalizeEol(md);
   const lines = md.split("\n");
-  const { codes } = mdBlocks(md);
+  const doc = reading("commonmark.js", () => new CommonmarkParser().parse(md));
   const out: Fence[] = [];
-  for (const c of codes) {
-    if (!readsInfo(c.info)) continue;
+  const fail = (open: unknown, why: string): never => {
+    throw new PlacementError(`cannot place a markdown fence on its source lines (commonmark.js put its opener at line ${String(open)}; ${why})`);
+  };
+  const walker = doc.walker();
+  for (let e = walker.next(); e; e = walker.next()) {
+    const n: any = e.node;
+    if (!e.entering || n.type !== "code_block" || n.info === null || n.info === undefined) continue;   // info null: indented
+    const info = String(n.info);
+    if (!readsInfo(info)) continue;
+    const sp = n.sourcepos;
+    const open: number = sp?.[0]?.[0];
+    const col: number = sp?.[0]?.[1];
+    const end: number = sp?.[1]?.[0];
+    if (!Number.isInteger(open) || !Number.isInteger(col) || !Number.isInteger(end) || open < 1 || end < open || end > lines.length) fail(open, "commonmark.js gave it no source position in the file");
+    if (!/^[ \t]*(`{3,}|~{3,})/.test(lines[open - 1].slice(col - 1))) fail(open, `line ${open} is not its opener`);
+    const literal = String(n.literal ?? "");
+    const text = literal.endsWith("\n") ? literal.slice(0, -1) : literal;
+    const body = literal === "" ? [] : text.split("\n");
+    if (open + body.length > end) fail(open, `its ${body.length} content lines run past its last line ${end}`);
+    for (let b = 0; b < body.length; b++) {
+      const content = body[b].trim();
+      if (content !== "" && !lines[open + b].replace(/\0/g, "�").trimEnd().endsWith(content)) fail(open, `line ${open + 1 + b} is not its body`);
+    }
     const negIds = new Set<string>();
-    for (let k = c.open - 1; k >= 0; k--) {
-      const q = unquote(lines[k]);
-      if (q.depth !== c.depth) break;
-      const m = NEG_MARKER.exec(q.text);
+    for (let p: any = n.prev, above = open - 1; p && p.type === "html_block"; p = p.prev) {
+      const [s, t] = [p.sourcepos?.[0]?.[0], p.sourcepos?.[1]?.[0]];
+      if (s !== above || t !== above) break;         // a one-line HTML block on the line directly above
+      const m = NEG_MARKER.exec(String(p.literal ?? ""));
       if (!m) break;
       negIds.add(m[1]);
+      above--;
     }
-    out.push({ startLine: c.open + 2, text: c.text, negIds, info: c.info.trim().toLowerCase() });
+    out.push({ startLine: open + 1, text, negIds, info: info.trim().toLowerCase() });
   }
   crossCheck(md, out);
   return out;
@@ -644,35 +510,36 @@ export function readFences(md: string): Fence[] {
 const fenceKey = (text: string) => text.split("\n").map((l) => l.trim()).join("\n").replace(/\n+$/, "");
 
 /**
- * The second reader (#2101 r5 HIGH-1). marked 14 mis-read some valid CommonMark — a fence after a lazy
- * continuation line inside a list in a blockquote (`> - a⏎b⏎> ```scrml…`) was lexed as paragraph text — and the
- * fence GitHub renders would have gone unread. commonmark.js, the reference implementation, reads the same text;
- * when the multiset of READ fence texts (`readsInfo`) of the two readers differs, the gate throws
- * `PlacementError` (exit 2): a fence one reader reads and the other does not is never silently passed. S483
- * bumped marked to 18.2.0 (g-tool-retired-lint-marked-bump-s482, resolved): it reads that class as CommonMark
- * does (the r4 classify fuzz, seeds 11 and 23: 0 disagreements in 40,000). The check stays, as a regression guard
- * and because marked 18 still reads one shape differently: a fence opened in a list item in a blockquote and
- * followed by an indented line with no `>` (`> - ~~~scrml⏎    x`) — CommonMark ends the blockquote and the
- * fence there, marked continues the fence lazily.
+ * The second reader (#2101 r5 HIGH-1; S483 r1: the CROSS-CHECK, no longer the primary). marked (GFM) lexes the same
+ * text; when the multiset of READ fence texts (`readsInfo`) of the two readers differs, the gate throws
+ * `PlacementError` (exit 2): a fence one reader reads and the other does not is never silently passed. marked
+ * places nothing — lines and markers come from commonmark.js alone. marked 18.2.0 still reads some valid
+ * CommonMark differently, e.g. a fence opened in a list item in a blockquote and followed by an indented line with
+ * no `>` (`> - ~~~scrml⏎    x`: CommonMark ends the blockquote and the fence there, marked runs the fence on
+ * lazily); the S483 r1 fuzz measures the rate (g-tool-retired-lint-marked18-residual-s483). Those exit 2.
  */
 function crossCheck(md: string, read: Fence[]): void {
-  const want = new Map<string, number>();
-  const walker = new CommonmarkParser().parse(md).walker();
-  for (let e = walker.next(); e; e = walker.next()) {
-    const n = e.node;
-    if (e.entering && n.type === "code_block" && n.info !== null && readsInfo(n.info)) {
-      const k = fenceKey(n.literal ?? "");
-      want.set(k, (want.get(k) ?? 0) + 1);
+  const have = new Map<string, number>();
+  const tokens: any[] = reading("marked", () => new Lexer({ gfm: true }).lex(md));
+  const walk = (toks: any[]) => {
+    for (const t of toks) {
+      if (t.type === "code" && t.codeBlockStyle !== "indented" && readsInfo(String(t.lang ?? ""))) {
+        const k = fenceKey(String(t.text ?? ""));
+        have.set(k, (have.get(k) ?? 0) + 1);
+      }
+      if (Array.isArray(t.tokens)) walk(t.tokens);
+      if (Array.isArray(t.items)) walk(t.items);
     }
-  }
+  };
+  reading("marked", () => walk(tokens));
   for (const f of read) {
     const k = fenceKey(f.text);
-    const n = want.get(k) ?? 0;
-    if (n === 0) throw new PlacementError(`markdown fence at line ${f.startLine - 1} is read by marked but not by commonmark.js (the two CommonMark readers disagree)`);
-    want.set(k, n - 1);
+    const n = have.get(k) ?? 0;
+    if (n === 0) throw new PlacementError(`markdown fence at line ${f.startLine - 1} is read by commonmark.js but not by marked (the two CommonMark readers disagree)`);
+    have.set(k, n - 1);
   }
-  for (const [k, n] of want) {
-    if (n > 0) throw new PlacementError(`markdown fence ${JSON.stringify(k.split("\n")[0].slice(0, 60))} is read by commonmark.js but not by marked (the two CommonMark readers disagree)`);
+  for (const [k, n] of have) {
+    if (n > 0) throw new PlacementError(`markdown fence ${JSON.stringify(k.split("\n")[0].slice(0, 60))} is read by marked but not by commonmark.js (the two CommonMark readers disagree)`);
   }
 }
 
@@ -708,8 +575,9 @@ export function scan(root: string, ledger: Ledger): Hit[] {
     let fences: Fence[];
     try { fences = readFences(md); }
     catch (e) {
+      // every reader failure names the file and exits 2 (S483 r1 LOW-1): never an unnamed exit 1
       if (e instanceof PlacementError) throw new PlacementError(`${rel}: ${e.message}`);
-      throw e;
+      throw new PlacementError(`${rel}: the markdown could not be read (${e instanceof Error ? `${e.name}: ${e.message}` : String(e)})`);
     }
     for (const f of fences) {
       for (const row of rows) {
@@ -975,9 +843,9 @@ if (import.meta.main) {
   let code: number;
   try { code = main(); }
   catch (e) {
-    // a markdown block the gate cannot place exactly (#2101 r4 NIT): a clean message, exit 2 — never a guess
+    // a markdown file the gate cannot read exactly (#2101 r4 NIT): a clean message, exit 2 — never a guess
     if (!(e instanceof PlacementError)) throw e;
-    console.error(`retired-forms-lint: ${e.message} — the gate reads a block only at the line marked's lexer puts it, and only when commonmark.js reads the same fences; fix the markdown (or report a reader bug)`);
+    console.error(`retired-forms-lint: ${e.message} — the gate reads a fence only where commonmark.js (the CommonMark reference reader) puts it, and only when marked reads the same fences; fix the markdown (or report a reader bug)`);
     code = 2;
   }
   process.exit(code);
