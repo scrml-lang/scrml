@@ -1,0 +1,9 @@
+// §66.6.2 rule 2 (S483 r1) — a chain ending in `else` whose first branch does not mount the
+// declaration: guarded recursion, a finite tree.
+<program>
+<leaf t:string="L">
+</> renders <b>${t}</b>
+<tree d:int=2>
+</> renders <span>${d}<leaf if=(d == 0)/><tree d=(d - 1) else/></span>
+<main id="o"><tree/></main>
+</program>

@@ -1,0 +1,6 @@
+// §66.6.2 rule 2 (S483 r1) — both branches of an `if=` / `else` chain mount the declaration.
+<program>
+<card t:string="x">
+</> renders <div><card if=(t == "a")/><span else><card/></span></div>
+<main id="o"><card/></main>
+</program>

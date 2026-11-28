@@ -1,0 +1,6 @@
+// §66.6.2 rule 2 (S483) — a component whose render mounts itself.
+<program>
+<card t:string="x">
+</> renders <div id="o"><card/></div>
+<main><card/></main>
+</program>

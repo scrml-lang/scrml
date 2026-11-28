@@ -1,0 +1,13 @@
+// §66.6.2 rule 1 (S483) — two fields rendering each other.
+<program>
+${ type Ph:enum = { A, B } }
+<ph:Ph=.A single>
+  <A rule=.B><b id="o">x</b></>
+  <B rule=.A><div><*qh/></div></>
+</>
+<qh:Ph=.A single>
+  <A rule=.B><b>y</b></>
+  <B rule=.A><div><*ph/></div></>
+</>
+<main><*ph/></main>
+</program>

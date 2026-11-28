@@ -1,0 +1,13 @@
+// §66.6.2 rule 1 (S483) — no cycle: legal.
+<program>
+${ type Ph:enum = { A, B } }
+<qh:Ph=.A single>
+  <A rule=.B><b>y</b></>
+  <B rule=.A><i>q</i></>
+</>
+<ph:Ph=.A single>
+  <A rule=.B><div id="o"><*qh/></div></>
+  <B rule=.A><b>x</b></>
+</>
+<main><*ph/></main>
+</program>

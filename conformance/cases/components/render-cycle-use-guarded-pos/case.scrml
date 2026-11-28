@@ -1,0 +1,14 @@
+// §66.6.2 rule 2 (S483) — guarded recursion renders a finite tree.
+<program>
+${ type Ph:enum = { A, B } }
+<tree depth:int=3>
+</> renders <span>${depth}<tree depth=(depth - 1) if=(depth > 0)/></span>
+<card t:string="x">
+    <ph:Ph=.A>
+      <A rule=.B><b>leaf</b></>
+      <B rule=.A><div><card/></div></>
+    </>
+</> renders <i id="c"><*ph/></i>
+<main id="o"><tree/></main>
+<card/>
+</program>

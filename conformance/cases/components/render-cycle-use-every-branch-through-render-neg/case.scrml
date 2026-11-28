@@ -1,0 +1,11 @@
+// §66.6.2 rule 2 (S483 r2) — every branch mounts the declaration through another declaration's
+// render: `<pa>` and `<pb>` each render `<card/>`, and card's `if=` / `else` chain mounts one of them.
+<program>
+<pa t:string="a">
+</> renders <b><card/></b>
+<pb t:string="b">
+</> renders <i><card/></i>
+<card d:int=3>
+</> renders <span><pa if=(d > 0)/><pb else/></span>
+<main id="o"><card/></main>
+</program>

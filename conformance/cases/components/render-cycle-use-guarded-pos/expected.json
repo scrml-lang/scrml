@@ -1,0 +1,42 @@
+{
+  "id": "components-render-cycle-use-guarded-pos",
+  "description": "Guarded recursion is legal and renders a finite tree: a depth attribute with `if=` on the nested use, and a field arm mounting a new instance (#2116 y04).",
+  "language-version": "1.0",
+  "spec": "§66.6.2",
+  "provenance": "ruling:user-voice-scrml.md-S483-component-self-mount-error (\"Refuse unconditional (Recommended)\" ... \"Guarded recursion (under `if=` / `<match>`, a new instance each level) stays legal.\")",
+  "rationale": "§66.6.2 rule 2: \"Guarded recursion is legal\" — a nested use under `if=` / a state arm is a new instance each level.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-DECL-RENDER-CYCLE-"
+    ],
+    "notCodes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#o",
+        "text": "3210"
+      },
+      {
+        "selector": "#c",
+        "text": "leaf"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-render-cycle-unimplemented-s483",
+      "fails": {
+        "codes": [
+          "emitted:E-ATTR-001=3",
+          "emitted:E-COMPONENT-035=1",
+          "emitted:E-MARKUP-001=7",
+          "emitted:E-SCOPE-001=4",
+          "emitted:E-STMT-NO-EFFECT=2"
+        ],
+        "runtime": "sha256:067f633298de9c60"
+      }
+    }
+  }
+}

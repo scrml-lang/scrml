@@ -1,0 +1,12 @@
+// §66.6.2 rule 1 (S483 r1) — the cycle runs through a declaration's render: arm B of the program
+// field `ph` mounts `<card/>`, whose render shows `<*ph/>` again.
+<program>
+${ type Ph:enum = { A, B } }
+<ph:Ph=.B single>
+  <A rule=.B><b>x</b></>
+  <B rule=.A><div><card/></div></>
+</>
+<card t:string="c">
+</> renders <i><*ph/></i>
+<main id="o"><*ph/></main>
+</program>

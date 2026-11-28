@@ -1,0 +1,28 @@
+{
+  "id": "components-render-cycle-use-slot-neg",
+  "description": "A self-use as slot content of a component that shows its `<slot/>` unconditionally: E-DECL-RENDER-CYCLE-USE.",
+  "language-version": "1.0",
+  "spec": "§66.6.2",
+  "provenance": "ruling:user-voice-scrml.md-S483-component-self-mount-error (\"Refuse unconditional (Recommended)\" ... \"Guarded recursion (under `if=` / `<match>`, a new instance each level) stays legal.\")",
+  "rationale": "§66.6.2 rule 2: the slot content of a use whose declaration shows its `<slot/>` unconditionally is followed.",
+  "expect": {
+    "codes": [
+      "E-DECL-RENDER-CYCLE-USE"
+    ],
+    "notCodes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-render-cycle-unimplemented-s483",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=5",
+          "emitted:E-STMT-NO-EFFECT=2",
+          "missing:E-DECL-RENDER-CYCLE-USE"
+        ]
+      }
+    }
+  }
+}

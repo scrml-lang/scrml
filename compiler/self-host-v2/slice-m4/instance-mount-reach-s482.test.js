@@ -485,8 +485,9 @@ describe("F1: a shared reference constructs the seeds, not an unread derived fie
   }, 120000);
 });
 
-describe("F/U-2: a `<*f/>` inside the markup it renders is a named refusal, never a stack overflow", () => {
+describe("F/U-2: a `<*f/>` inside the markup it renders is a named refusal (E-DECL-RENDER-CYCLE-STAR, S483), never a stack overflow", () => {
   const SELF = "stands inside the markup it renders";
+  const NEVER = "Rendering it never ends";
   test("s08: a state-child body showing its own field", async () => {
     const es = await errors(P(`\${ type Ph:enum = { A, B } }
 <ph:Ph=.A single>
@@ -494,8 +495,9 @@ describe("F/U-2: a `<*f/>` inside the markup it renders is a named refusal, neve
   <B rule=.A><div><*ph/></div></>
 </>
 <main><*ph/></main>`));
-    expect(es.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(es[0].message).toContain("`<*ph/>` " + SELF);
+    expect(es.map((d) => d.code)).toEqual(["E-DECL-RENDER-CYCLE-STAR"]);
+    expect(es[0].message).toContain(SELF);
+    expect(es[0].message).toContain(NEVER);
   }, 120000);
 
   test("s08b: a field's `renders` holding its own `<*v/>`", async () => {
@@ -505,8 +507,9 @@ describe("F/U-2: a `<*f/>` inside the markup it renders is a named refusal, neve
 </>
 renders <span><*v/></span>
 <card/>`));
-    expect(es.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(es[0].message).toContain("`<*v/>` " + SELF);
+    expect(es.map((d) => d.code)).toEqual(["E-DECL-RENDER-CYCLE-STAR"]);
+    expect(es[0].message).toContain(SELF);
+    expect(es[0].message).toContain(NEVER);
   }, 120000);
 
   test("two engines rendering each other; a nested `<*qh/>` with no cycle still compiles", async () => {
@@ -520,7 +523,7 @@ renders <span><*v/></span>
   <B rule=.A><div><*ph/></div></>
 </>
 <main><*ph/></main>`));
-    expect(es.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(es.map((d) => d.code)).toEqual(["E-DECL-RENDER-CYCLE-STAR"]);
     expect(es[0].message).toContain(SELF);
     expect(await texts(P(`\${ type Ph:enum = { A, B } }
 <qh:Ph=.A single>

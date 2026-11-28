@@ -20,6 +20,7 @@
 [esm] conformance/cases/components/name-collides-reserved-cell-full-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved (impl#1 does not parse the §66 `let <x:T=v/>` cell form; S480 full reserved list on cells)
 [esm] conformance/cases/components/name-collides-reserved-cell-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved (impl#1 does not parse the §66 `let <x:T=v/>` cell form; S480 reserved cell names)
 [esm] conformance/cases/components/name-collides-reserved-cell-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved (impl#1 does not parse the §66 `let <x:T=v/>` cell form; S480 reserved cell names)
+[esm] conformance/cases/components/render-cycle-star-guarded-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved (impl#1 does not parse the §66 `let <x:T=v/>` cell form; an expect-reject case: E-DECL-RENDER-CYCLE-STAR, XFAIL on impl#1, g-impl1-render-cycle-unimplemented-s483; S483)
 [esm] conformance/cases/condition/known-int-markup-if-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved
 [esm] conformance/cases/condition/known-int-while-neg/case.scrml  # emit-client-esm: Unexpected token
 [esm] conformance/cases/condition/presence-bare-optional-markup-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved

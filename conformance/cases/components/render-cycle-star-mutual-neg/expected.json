@@ -1,0 +1,29 @@
+{
+  "id": "components-render-cycle-star-mutual-neg",
+  "description": "Two engines whose arms show each other (c01): E-DECL-RENDER-CYCLE-STAR.",
+  "language-version": "1.0",
+  "spec": "§66.6.2",
+  "provenance": "ruling:user-voice-scrml.md-S483-star-self-render-error (\"Named error, always (Recommended)\" ... \"Guards do not make it legal.\")",
+  "rationale": "§66.6.2 rule 1: fields whose markup shows each other.",
+  "expect": {
+    "codes": [
+      "E-DECL-RENDER-CYCLE-STAR"
+    ],
+    "notCodes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-render-cycle-unimplemented-s483",
+      "fails": {
+        "codes": [
+          "emitted:E-ATTR-001=6",
+          "emitted:E-COMPONENT-035=2",
+          "emitted:E-MARKUP-001=2",
+          "missing:E-DECL-RENDER-CYCLE-STAR"
+        ]
+      }
+    }
+  }
+}

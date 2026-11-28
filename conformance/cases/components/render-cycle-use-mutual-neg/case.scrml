@@ -1,0 +1,8 @@
+// §66.6.2 rule 2 (S483) — a mutual pair.
+<program>
+<pa t:string="x">
+</> renders <div><pb/></div>
+<pb t:string="y">
+</> renders <span><pa/></span>
+<main id="o"><pa/></main>
+</program>
