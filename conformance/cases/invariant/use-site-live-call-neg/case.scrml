@@ -1,0 +1,15 @@
+// §66.13.5 rule 7b (r3 of #2128, re-review H7) — a locked field a use site gives a call of a `fn` whose body reads
+// a cell: a §48 `fn` MAY read outer bindings (§48.5.3), so `dbl(2)` changes with `@k` and no write re-checks the
+// invariant — the field TRACKS `@k`: E-CONTRACT-003 at the use site, PERMANENT.
+<program>
+    ${
+        fn dbl(x: int) -> int { return x * @k; }
+    }
+    let <k:int=2/>
+    <w:struct>
+        let <a:int=0/>
+        <b:int=5/>
+    </> renders <i class="sp">${a}/${b}</i>
+    invariant (b - a <= 5) [ab]
+    <main><w b=(dbl(2))/><button id="k" onclick={ @k = 9; }>k</button></main>
+</program>

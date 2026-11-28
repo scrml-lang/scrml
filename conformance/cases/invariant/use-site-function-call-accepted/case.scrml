@@ -1,0 +1,14 @@
+// §66.13.5 rule 7b (r3 of #2128, re-review H7) — a use-site call is judged by what it reads, at any depth, not by
+// its keyword: a `function` of compile-time constants that reads nothing live is the same value at every
+// evaluation, so the construction check holds it. Admitted.
+<program>
+    ${
+        function seed(x: int) -> int { return x * 2; }
+    }
+    <w:struct>
+        let <a:int=0/>
+        <b:int=5/>
+    </> renders <i class="sp">${a}/${b}</i>
+    invariant (b - a <= 5) [ab]
+    <main><w b=(seed(2))/></main>
+</program>

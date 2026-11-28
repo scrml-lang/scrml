@@ -1,0 +1,13 @@
+// §66.13.5 rule 7b (r1 of #2128, review H3) — a locked field a use site gives a live value (a row binder) TRACKS
+// it; the invariant reads `min`: E-CONTRACT-003 at the use site, PERMANENT.
+<program>
+    <slider min:int=0 max:int=100>
+        let <value:int=50/>
+    </> renders <b class="sv">${value}</b>
+    invariant (min <= value && value <= max) [inRange]
+    <xs:int[replace]=([10])/>
+    <main>
+        <p id="n">${@xs.length}</p>
+        <each in=(@xs) as=x><slider min=(x)/></each>
+    </main>
+</program>

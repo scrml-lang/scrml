@@ -1,0 +1,23 @@
+// §66.13.5 rule 7a (r2 of #2128, re-review H2a) — ruling S483-invariant-const-read: "a server-only const stays
+// refused". The invariant reads `L`, whose initializer reads `K`, which only server code reads (`srv` holds a
+// `?{}` query, so route inference places it on the server, §12.2): checking the invariant in the client would print
+// `K` there. Refused through the constant chain exactly as `v != K` is refused directly.
+<program db="./app.db">
+    ${
+        const K = "zz-secret-chain";
+        const L = K;
+        function srv(id: int) -> string {
+            const t = ?{`SELECT 1 AS x WHERE ${id} = 1`}.get() !{ _ :> { return K; } };
+            return K;
+        }
+    }
+    <tok:struct>
+        let <v:string="a"/>
+    </>
+    invariant (v != L) [notKey]
+    let <out:string=""/>
+    <main>
+        <p>${@tok.v}${@out}</p>
+        <button onclick={ @out = srv(1) !{ .Transport(_) :> return }; }>b</button>
+    </main>
+</program>

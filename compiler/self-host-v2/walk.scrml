@@ -11,7 +11,7 @@
 ${
     import { Sym, Type, Place, InstRef, Literal, Pattern, Expr, MatchArm, EditKind, Stmt, Block, PathStep, Failable, OkArm, ErrArm, LoopHead, Gather, Lifted, GatherRow,
              Attr, View, CondArm, ConstructAttr, EffectDep, RequestState, Field, Decl, Fn, ServerFn, CoreProgram, CoreConst,
-             ValidityOf, validityInst } from "./core.scrml";
+             ValidityOf, validityInst, Persist } from "./core.scrml";
 
     // Every Core node kind, as one sum. Types, Syms and Literals are leaves of
     // the walk (they carry no Expr/Stmt/View below them).
@@ -94,6 +94,14 @@ ${
         return [Node.NExpr(e)];
     }
 
+    // r1 (#2128 review H1): a persisted field's restore check (Persist.invs) — the printer names
+    // its predicates' parameters (boundSyms)
+    fn persistInvs(f: Field) -> Node[] {
+        const ps: Persist | not = f.persist;
+        if (ps is not) return [];
+        return maybeExpr(ps.invs);
+    }
+
     fn maybeBlock(b: Block | not) -> Node[] {
         if (b is not) return [];
         return [Node.NBlock(b)];
@@ -137,7 +145,7 @@ ${
         return match n {
             .NProgram(p: p) :> programKids(p),
             .NDecl(d: d) :> declKids(d),
-            .NField(f: f) :> maybeExpr(f.init),
+            .NField(f: f) :> maybeExpr(f.init).concat(persistInvs(f)),
             .NFn(f: f) :> [Node.NBlock(f.body)],
             .NServerFn(f: f) :> [Node.NBlock(f.body)],
             .NBlock(b: b) :> stmtNodes(b.stmts),
@@ -221,6 +229,9 @@ ${
     fn declKids(d: Decl) -> Node[] {
         let out: Node[] = [];
         for (const f of d.fields) { out = out.concat([Node.NField(f)]); }
+        // s483 (Q21 lane 2): the declaration's construction check (an InvariantGuard)
+        const ci: Expr | not = d.invs;
+        if (ci is given) out = out.concat([Node.NExpr(ci)]);
         return out.concat(maybeViews(d.renders));
     }
 

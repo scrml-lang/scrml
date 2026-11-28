@@ -1,0 +1,41 @@
+{
+  "id": "invariant-local-part-write-trap-rt",
+  "description": "`x.lo = 0` keeps `lo <= hi` (r.lo becomes 0); `x.lo = 7` breaks it and traps before the local is rebound, so `@r = x` never runs (r.lo stays 0).",
+  "language-version": "1.0",
+  "spec": "§66.13.5",
+  "provenance": "ruling:user-voice-scrml.md-S483-struct-invariant-syntax (\"yes, your recommendations on all three plus the follow-up\"); ruling:user-voice-scrml.md-S482-struct-invariant-contract (\"RULED yes (a)\")",
+  "rationale": "§66.13.5 \"When it is checked\" lists \"a local value of the type\"; rule 10: the run-time check raises E-WRITE-INVARIANT-RT before the write.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-WRITE-INVARIANT",
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "input": [
+      {
+        "click": "#ok"
+      },
+      {
+        "click": "#bad"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#lo",
+        "text": "0"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-decl-invariant-unimplemented-s483",
+      "fails": {
+        "codes": [
+          "emitted:E-SCOPE-001=3",
+          "emitted:E-STATE-UNDECLARED=1"
+        ],
+        "runtime": "sha256:6a7bd15b29286996"
+      }
+    }
+  }
+}

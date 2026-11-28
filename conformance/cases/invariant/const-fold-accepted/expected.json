@@ -1,0 +1,11 @@
+{
+  "id": "invariant-const-fold-accepted",
+  "description": "An invariant reading a constant whose initializer is arithmetic over another constant (`const LIM = BASE * 2 - 1`): accepted (a compile-time constant).",
+  "language-version": "1.0",
+  "spec": "§66.13.5",
+  "provenance": "ruling:user-voice-scrml.md-S483-invariant-const-fold (\"Admit foldable arithmetic (Recommended)\")",
+  "rationale": "Ruling S483-invariant-const-fold: \"any initializer the compiler folds to a value at compile time (+ - * … over literals and other such consts) is a compile-time constant\".",
+  "expect": {
+    "codes": []
+  }
+}

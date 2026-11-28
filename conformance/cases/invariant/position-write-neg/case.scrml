@@ -1,0 +1,14 @@
+// §66.13.5 — a write at a tape position inside a value an invariant constrains is not checked by the
+// bootstrap's run-time check yet, so it is refused by name (INTERIM, g-boot-invariant-position-writes-s483) —
+// never written unchecked.
+<program>
+    <bag:struct>
+        <tags:string[write]=(["a", "b"])/>
+    </>
+    invariant (tags.every(t => t != ""))
+    renders <span>${tags.length}</span>
+    function clear() { @bag.tags[0] = ""; }
+    <main>
+        <button id="b" onclick=clear()>${@bag.tags.length}</button>
+    </main>
+</program>

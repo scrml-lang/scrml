@@ -1,0 +1,26 @@
+{
+  "id": "invariant-part-write-in-if-content-neg",
+  "description": "An initializer inside `if=` content calls a function whose local part write (`r.lo = k`, `Range` has an invariant) is checked when it runs: it can trap, so E-FILE-SCOPE-INIT-IN-CONSTRUCT.",
+  "language-version": "1.0",
+  "spec": "§66.13.5, §7.6, §19.17",
+  "provenance": "ruling:user-voice-scrml.md-S482-trapping-construct-init (\"yes, interim refusal now and the feature later\")",
+  "rationale": "Ruling S482-trapping-construct-init: \"extend E-FILE-SCOPE-INIT-IN-CONSTRUCT to an initializer inside a construct that can fail at run time\" — an invariant check is a §19.17 trap site.",
+  "expect": {
+    "codes": [
+      "E-FILE-SCOPE-INIT-IN-CONSTRUCT"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-decl-invariant-unimplemented-s483",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-SCOPE-001=5",
+          "emitted:E-STATE-UNDECLARED=2",
+          "missing:E-FILE-SCOPE-INIT-IN-CONSTRUCT"
+        ]
+      }
+    }
+  }
+}

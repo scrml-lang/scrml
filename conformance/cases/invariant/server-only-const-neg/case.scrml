@@ -1,0 +1,18 @@
+// Ruling S483-invariant-const-read — "a server-only const stays refused": a constant server code reads would
+// be printed into the client by an invariant checked there (§7.6 (b) keeps it out of the client). `tagged`
+// holds a `?{}` query, so route inference places it on the server (§12.2).
+<program db="sqlite:./tags.db">
+    ${
+        const SECRET_TAG = "zz-sk-live-777";
+        function tagged() {
+            ?{`DELETE FROM tags WHERE name = ${SECRET_TAG}`}.run() !{ _ :> return };
+        }
+    }
+    <tok:struct>
+        let <v:string=""/>
+    </>
+    invariant (v != SECRET_TAG)
+    <main>
+        <p id="v">${@tok.v}</p>
+    </main>
+</program>

@@ -1,0 +1,12 @@
+// §66.13.5 + §7.6 (b) S483 (r3 of #2128, re-review M8) — a local's part write of an invariant-bearing value is
+// checked when it runs (the E-WRITE-INVARIANT-RT trap, §19.17): an initializer inside `if=` content that calls a
+// function doing one can trap, and it runs before the construct whether or not it shows —
+// E-FILE-SCOPE-INIT-IN-CONSTRUCT (the trapping-construct-init refusal).
+<program>
+    ${
+        type Range:struct = { lo: int, hi: int } invariant (lo <= hi) [rng]
+        fn f(k: int) -> int { let r: Range = { lo: 1, hi: 2 }; r.lo = k; return r.lo; }
+    }
+    let <k:int=9/>
+    <main><div if=(@k > 100)>${ const z: int = f(9); }<p id="z">${z}</p></div><p id="k">${@k}</p></main>
+</program>

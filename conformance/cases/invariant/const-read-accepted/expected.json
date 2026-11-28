@@ -1,0 +1,45 @@
+{
+  "id": "invariant-const-read-accepted",
+  "description": "A compile-time constant read directly (`MAX_NIGHTS`) and through a `fn` chain (`fits` reads `LIMIT = MAX_NIGHTS`) compiles; `setEnd(14)` keeps the invariant, `setEnd(30)` traps before the write (end stays 14).",
+  "language-version": "1.0",
+  "spec": "§66.13.5",
+  "provenance": "ruling:user-voice-scrml.md-S483-invariant-const-read (\"Allow compile-time consts (Recommended)\"); ruling:user-voice-scrml.md-S483-struct-invariant-syntax (\"yes, your recommendations on all three plus the follow-up\"); ruling:user-voice-scrml.md-S482-struct-invariant-contract (\"RULED yes (a)\")",
+  "rationale": "Ruling S483-invariant-const-read: \"admit a file-scope const whose initializer is a compile-time constant (literals, enum variants, other such consts) and that is not server-only, directly and through a fn chain\".",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-DECL-INVARIANT-"
+    ],
+    "notCodes": [
+      "E-WRITE-INVARIANT",
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "input": [
+      {
+        "click": "#ok"
+      },
+      {
+        "click": "#bad"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#e",
+        "text": "14"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-decl-invariant-unimplemented-s483",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=2",
+          "emitted:E-SCOPE-001=13",
+          "emitted:E-STATE-UNDECLARED=1"
+        ],
+        "runtime": "sha256:6a7bd15b29286996"
+      }
+    }
+  }
+}

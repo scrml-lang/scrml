@@ -950,7 +950,7 @@ class Request {
       try {
         load = untrack(() => this.body(task));
       } catch (e) {
-        // F4 (A5): a Let initializer threw — a host error; the run is over
+        // F4 (A5): a Let initializer threw — a host error (r1 L3: or a trap, reported as one); the run is over
         task.cancel();
         reportHostError(e);
         this.idle();
@@ -1133,6 +1133,10 @@ export function suspend(task, value, k, onLiveReject) {
         const lift = callee !== undefined ? callee.restarts : null;
         batch(() => untrack(() => withStamp(stamp, frame, lift, k, v)));
       } catch (e) {
+        // r1 (#2128 review L3): a TRAP raised in a continuation (a reload's invariant check, an
+        // index past the end …) ends this unit (the continuation) and is reported once — the one
+        // reporter classifies it as a trap, with its code (§19.17), not as a host error; it is not
+        // a `!` error, so no `.error` is set
         reportHostError(e);
         abandonWaiting(task);
       } finally {
@@ -1219,8 +1223,14 @@ function abandonWaiting(task) {
 // s454 (U1b) — THE ONE REPORTER of host errors that surface asynchronously (a
 // throw in a continuation, a rejected suspension value). Default: the console.
 // `setHostErrorReporter` (tests, devtools) replaces it and returns the old one.
+// r1 (#2128 review L3): a trap (§19.17 — `E-WRITE-INVARIANT-RT` from a reload's check, …) is
+// reported as a trap with its code, not as a host error (it is the program's defined runtime
+// error, not a defect of the host).
 let hostErrorReporter = (e) => {
-  try { console.error("scrml: a host error in a continuation —", e); } catch { /* nothing to do */ }
+  try {
+    if (isTrap(e)) console.error("scrml: trap " + e.code + " in a continuation (§19.17) —", e);
+    else console.error("scrml: a host error in a continuation —", e);
+  } catch { /* nothing to do */ }
 };
 export function setHostErrorReporter(fn) {
   const prev = hostErrorReporter;
@@ -3289,6 +3299,164 @@ export function refineCheck(v, base, spec, shown, what, at) {
   throw new ScrmlTrap("E-CONTRACT-001-RT",
     "Value constraint violated at runtime. Type: " + shown + "; value: " + refineShowValue(v) + "; failing condition: " + failing + "; " + what + " (" + at + ")",
     { type: shown, value: v, failing, what, at });
+}
+
+// ---------------------------------------------------------------------------
+// s483 (Q21 lane 2) — DECLARATION INVARIANTS checked on every write (SPEC §66.13.5;
+// ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 2: "check every write
+// … one snapshot, all or nothing, checked once … otherwise the E-WRITE-INVARIANT-RT
+// trap before any write (S477)"). The compiler emits these only for a write that
+// touches a field an invariant reads and that it could not prove; the check runs on
+// the CANDIDATE value — the current value with the write applied — before anything
+// is written, so a refused write writes nothing and notifies nothing.
+//
+// One check is `[at, pred, names, owner, what]`: `at` the path (member names, tape
+// positions) from the candidate's root to the value the invariant constrains (`[]`
+// for a declaration's own invariant; `["range"]` for a field of a `type X:struct`
+// with invariants); `pred` the invariant as a function of the fields it reads, in
+// the order of `names`; `owner` / `what` name the declaration or type and the
+// invariant (its `[label]`, else its expression) for the trap. A `not` value at
+// `at` (an optional field that holds no value) has nothing to check. Two more `at`
+// steps reach the values a DECODED value holds (r1, #2128 review H1 — a restored
+// `persist=` value is checked whole, §6.14.2 rule 3): `"*"` — every element of a tape;
+// `"#V.n.name"` — the payload value of a value of variant `V` (any other variant: nothing):
+// position `n` of a positional `data` (the decoded / constructed value, §57.8), or the
+// declared field `name` of a named `data` object (the §57.8 wire form) — r2 (#2128 r1
+// re-review H4).
+// r1 (#2128 review H3; ruling:user-voice-scrml.md-S483-invariant-derived-split): an
+// optional sixth element `derive` — `[[name, fn, deps], …]`, the declaration's DERIVED
+// fields the invariant reads, dependencies first: each is recomputed on the candidate,
+// `fn(...deps' candidate values)`, before the invariant is judged, so a write to a field
+// a derived field is computed from is checked at that write ("check-at-source").
+// One write is `[name-or-index, path, op, v]`: `op` "set" writes `v` at `path`
+// below the field; "append" / "prepend" add the element `v`; "dropEnd" /
+// "dropFront" remove `v` elements (a tape edit, §66.12.6).
+
+function invShow(v) {
+  if (v === null || v === undefined) return "not";
+  if (typeof v === "string") return JSON.stringify(v);
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  if (Array.isArray(v)) return "[" + v.map(invShow).join(", ") + "]";
+  if (typeof v === "object" && typeof v.variant === "string" && "data" in v) return "." + v.variant + "(…)";
+  if (typeof v === "object") return "{ " + Object.keys(v).map((k) => k + ": " + invShow(v[k])).join(", ") + " }";
+  return "a " + typeof v;
+}
+
+function invEdit(cur, op, v) {
+  if (op === "append") return [...(cur ?? []), v];
+  if (op === "prepend") return [v, ...(cur ?? [])];
+  if (op === "dropEnd") return (cur ?? []).slice(0, Math.max(0, (cur ?? []).length - v));
+  if (op === "dropFront") return (cur ?? []).slice(v);
+  return v;
+}
+
+// `cur` with the write applied at `path` — a COPY along the path (values are immutable, §66.10)
+function invApply(cur, path, op, v) {
+  if (path.length === 0) return invEdit(cur, op, v);
+  const [k, ...rest] = path;
+  const base = cur ?? {};
+  const copy = Array.isArray(base) ? base.slice() : { ...base };
+  copy[k] = invApply(base[k], rest, op, v);
+  return copy;
+}
+
+function invEnsure(cand, check, loc) {
+  invEnsureAt(cand, check[0], 0, check, loc);
+}
+
+function invEnsureAt(val, at, i, check, loc) {
+  if (val === null || val === undefined) return;
+  if (i === at.length) { invJudge(val, check, loc); return; }
+  const k = at[i];
+  if (k === "*") {
+    if (Array.isArray(val)) for (const x of val) invEnsureAt(x, at, i + 1, check, loc);
+    return;
+  }
+  if (typeof k === "string" && k.startsWith("#")) {
+    const [variant, pos, name] = k.slice(1).split(".");
+    if (typeof val !== "object" || val.variant !== variant) return;
+    const data = val.data;
+    if (Array.isArray(data)) invEnsureAt(data[Number(pos)], at, i + 1, check, loc);
+    else if (data !== null && typeof data === "object") invEnsureAt(data[name], at, i + 1, check, loc);
+    return;
+  }
+  invEnsureAt(val[k], at, i + 1, check, loc);
+}
+
+function invJudge(val0, check, loc) {
+  const [, pred, names, owner, what, derive] = check;
+  let val = val0;
+  if (derive) {
+    val = { ...val0 };
+    for (const [n, f, deps] of derive) val[n] = f(...deps.map((d) => val[d]));
+  }
+  const args = names.map((n) => val[n]);
+  if (pred(...args) === true) return;
+  const shown = names.map((n, i) => n + " = " + invShow(args[i])).join(", ");
+  throw new ScrmlTrap("E-WRITE-INVARIANT-RT",
+    "the write would break the invariant " + what + " of " + owner + " — the candidate value has " + shown + " (" + loc + ") — nothing was written",
+    { owner, invariant: what, values: Object.fromEntries(names.map((n, i) => [n, args[i]])), at: loc });
+}
+
+/**
+ * A write to the fields of the declaration instance `inst` (one field, or a spread's
+ * group — §66.11.3): the candidate is the instance's current fields (read untracked)
+ * with every write in `writes` applied, checked against `checks` in order. Returns the
+ * first write's value, so a lone write's value passes through it. `pre` (optional): the
+ * write's own runtime contract check (edgeFirst / lengthFirst), run first (§66.13.5 order).
+ */
+export function invariantGuard(inst, writes, checks, loc, pre) {
+  if (pre && writes.length > 0) pre(writes[0][3]);
+  const names = inst.decl.fields;
+  const need = new Set();
+  for (const w of writes) need.add(typeof w[0] === "number" ? names[w[0]] : w[0]);
+  for (const c of checks) {
+    if (c[0].length > 0) need.add(c[0][0]);
+    else {
+      for (const n of c[2]) need.add(n);
+      if (c[5]) for (const dv of c[5]) for (const d of dv[2]) need.add(d);
+    }
+  }
+  // r3 (#2128 r2 re-review H6): a field a write overwrites WHOLE (path empty, "set") is the
+  // written value in the candidate, whatever it held — it is not peeked (not read), so a whole
+  // write of a write-only cell through its check reads the cell no more than the plain write
+  // does (S482 write-only secret: a whole write is not a read; print.scrml invGuardFields `whole`).
+  const whole = new Set();
+  for (const w of writes) {
+    if (w[1].length === 0 && w[2] === "set") whole.add(typeof w[0] === "number" ? names[w[0]] : w[0]);
+  }
+  const cand = {};
+  for (const n of need) {
+    const i = names.indexOf(n);
+    if (i >= 0 && !whole.has(n)) cand[n] = inst.fields[i].peek();
+  }
+  for (const [f, path, op, v] of writes) {
+    const n = typeof f === "number" ? names[f] : f;
+    cand[n] = invApply(cand[n], path, op, v);
+  }
+  for (const c of checks) invEnsure(cand, c, loc);
+  return writes.length > 0 ? writes[0][3] : undefined;
+}
+
+/**
+ * A value of a type with invariants: `cur` with the write `op` of `v` applied at
+ * `path` (`path` empty and `op` "set": `v` itself — a constructed or replacing value)
+ * is checked against `checks`. Returns `v`.
+ */
+export function invariantValue(cur, path, op, v, checks, loc) {
+  const cand = path.length === 0 && op === "set" ? v : invApply(cur, path, op, v);
+  for (const c of checks) invEnsure(cand, c, loc);
+  return v;
+}
+
+/** A lone graph write's edge check, as `transition` makes it, for invariantGuard to run first. */
+export function edgeFirst(target, table) {
+  return (to) => { if (!timedEdgeJudged(target)) checkEdge(target, table, to); };
+}
+
+/** A lone bounded-tape edit's length check (`sign` 1: one element added; -1: `v` removed), run first. */
+export function lengthFirst(target, sign, min, max, at) {
+  return (v) => lengthGuard(target, sign > 0 ? 1 : -v, min, max, at);
 }
 
 /**
@@ -6995,8 +7163,25 @@ function storageArea(store) {
   return store === "local" ? globalThis.localStorage : globalThis.sessionStorage;
 }
 
+/**
+ * r1 (#2128 review H1) — §6.14.2 r3 "decoded against the cell's current declared type and its
+ * full declared contract": does the decoded value `v` keep every invariant `checks` names
+ * (the type's, and those of every value it holds — `at` steps "*" / "#V.n.name")? A value that
+ * does not is a contract failure: it SHALL NOT reach the cell (the default is taken).
+ */
+function invariantsHold(v, checks, loc) {
+  if (!checks) return true;
+  try {
+    for (const c of checks) invEnsure(v, c, loc);
+    return true;
+  } catch (e) {
+    if (e instanceof ScrmlTrap) return false;
+    throw e;
+  }
+}
+
 /** §6.14.2 r3: the stored value of `key`, decoded — or null (take the default). Never throws. */
-function readStored(store, key, wire) {
+function readStored(store, key, wire, invs, loc) {
   let text = null;
   try {
     const area = storageArea(store);
@@ -7007,16 +7192,18 @@ function readStored(store, key, wire) {
   }
   if (text === null) return null;
   const r = decodeText(wire, text);
-  return r.ok ? r : null;
+  return r.ok && invariantsHold(r.value, invs, loc) ? r : null;
 }
 
 class Persisted {
-  constructor(scope, cell, init, store, key, wire) {
+  constructor(scope, cell, init, store, key, wire, invs, loc) {
     this.cell = cell;
     this.init = init;
     this.store = store;
     this.key = key;
     this.wire = wire;
+    this.invs = invs;
+    this.loc = loc;
     this.disposed = false;
     this.applying = false;
     // r6: the last store failed (no synthesized property reads it yet — O-061-1).
@@ -7070,7 +7257,8 @@ class Persisted {
     if (!mine) return;
     const text = e.key === null ? null : e.newValue;
     const r = text === null ? null : decodeText(this.wire, text);
-    const v = r !== null && r.ok ? r.value : untrack(this.init);
+    // r1 (H1): rule 5's failure half — a value that breaks an invariant takes the default
+    const v = r !== null && r.ok && invariantsHold(r.value, this.invs, this.loc) ? r.value : untrack(this.init);
     this.applying = true;
     try { batch(() => this.cell.set(v)); } finally { this.applying = false; }
   }
@@ -7080,15 +7268,19 @@ class Persisted {
  * A `persist=` cell (§6.14.2): seeded with its stored value decoded against
  * `wire`, else with `init()`; written on change; "local" synced across tabs.
  * Owned by `scope` (the instance's): its listener and observer go with it.
+ * `invs` / `loc` (r1, #2128 review H1; optional): the invariant checks of the
+ * cell's type, the value's whole depth — a stored or cross-tab value that breaks
+ * one is a contract failure and takes the default (§6.14.2 r1 "Restore is
+ * construction", r3, r5).
  */
-export function persisted(scope, init, store, key, wire) {
+export function persisted(scope, init, store, key, wire, invs, loc) {
   requireScope(scope, "a persisted cell");
   if (store !== "local" && store !== "session") throw new Error(`persist= storage ${JSON.stringify(store)} is not "local" or "session" (§6.14.1, E-PERSIST-STORAGE-UNKNOWN)`);
   const c = seeded(() => {
-    const r = readStored(store, key, wire);
+    const r = readStored(store, key, wire, invs, loc);
     return r !== null ? r.value : init();
   });
-  persistedCells.set(c, new Persisted(scope, c, init, store, key, wire));
+  persistedCells.set(c, new Persisted(scope, c, init, store, key, wire, invs, loc));
   return c;
 }
 

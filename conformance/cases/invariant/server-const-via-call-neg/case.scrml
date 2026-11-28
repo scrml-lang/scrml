@@ -1,0 +1,24 @@
+// §66.13.5 rule 7a (r1 of #2128, review H2) — a constant a server function reaches THROUGH A CALL is server code's
+// read too: `srv` (a `?{}` places it on the server, §12.2) calls `key()`, which reads K. The invariant reaches K
+// through its own `fn` chain (`ok` → `key`). Refused, E-DECL-INVARIANT-IMPURE — before r1 it was admitted and the
+// constant's value was printed into the client artifact.
+<program db="sqlite:./keys.db">
+    ${
+        const K = "zz-sk-live-g03";
+        fn key() -> string { return K; }
+        fn ok(v: string) -> bool { return v != key(); }
+        function srv(id: int) -> string {
+            const t = ?{`SELECT 1 AS x WHERE ${id} = 1`}.get() !{ _ :> { return ""; } };
+            return key();
+        }
+    }
+    <tok:struct>
+        let <v:string="a"/>
+    </>
+    invariant (ok(v)) [notKey]
+    let <out:string=""/>
+    <main>
+        <p id="v">${@tok.v}${@out}</p>
+        <button id="b" onclick={ @out = srv(1) !{ .Transport(_) :> return }; }>b</button>
+    </main>
+</program>

@@ -1,0 +1,16 @@
+// §66.13.5 — "a local value of the type": a part write of a local whose type carries an invariant is checked
+// on the local's candidate; a trap leaves the local and everything after it unrun.
+type Range:struct = { lo: int, hi: int } invariant (lo <= hi)
+<program>
+    let <r:Range=({ lo: 1, hi: 2 })/>
+    function loc(n: int) {
+        let x: Range = { lo: 1, hi: 2 };
+        x.lo = n;
+        @r = x;
+    }
+    <main>
+        <button id="ok" onclick=loc(0)>ok</button>
+        <button id="bad" onclick=loc(7)>bad</button>
+        <p id="lo">${@r.lo}</p>
+    </main>
+</program>

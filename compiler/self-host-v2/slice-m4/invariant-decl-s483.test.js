@@ -107,7 +107,11 @@ describe("refused at the declaration", () => {
     ["a `function` call", "    function check() { return true; }\n", "invariant (check())", "declared `function`"],
     ["a host call (r1 F3: a method on a host global)", "", "invariant (Date.now() > start)", "a host global"],
     ["a file-scope `let` (r1 F6: named a `let`, not a constant)", "    ${ let lim = 3; }\n", "invariant (end <= lim)", "the file-scope `let` `lim`"],
-    ["a file-scope constant", "    ${ const LIMIT = 3; }\n", "invariant (end <= LIMIT)", "file-scope constant"],
+    // s483-invariant-2 (ruling:user-voice-scrml.md-S483-invariant-const-read): a compile-time constant
+    // (`const LIMIT = 3`) is admitted — invariant-write-s483.test.js; a non-constant initializer stays refused
+    // r1 (ruling:user-voice-scrml.md-S483-invariant-const-fold): `1 + 2` folds, so it is a constant now — a
+    // function call is the non-constant stand-in
+    ["a file-scope constant whose initializer is not a compile-time constant", "    ${ fn three() -> int { return 3; } const LIMIT = three(); }\n", "invariant (end <= LIMIT)", "not a compile-time constant"],
     ["a write", "", "invariant (start = 1)", "writes a value"],
   ];
   for (const [name, pre, clause, msg] of impure) {
@@ -180,7 +184,8 @@ describe("r1 F1 — a `fn` reached from an invariant reads no cell and no outer 
     ["b03: a `fn` reading a cell", "    let <limit:int=3/>\n    ${ fn ok(a: int, b: int) -> bool { return b - a <= @limit; } }\n", "invariant (ok(start, end))", "E-CONTRACT-003", ["calls `ok`, which reads the cell `@limit`"]],
     ["b04: a `fn` reading a mutable file-scope `let`", "    ${ let lim = 3;\n       fn ok(a: int, b: int) -> bool { return b - a <= lim; }\n       function bump() { lim = lim + 1; } }\n", "invariant (ok(start, end))", "E-DECL-INVARIANT-IMPURE", ["the file-scope `let` `lim`", "a write can change it"]],
     ["a two-deep chain to a cell, naming the chain", "    let <limit:int=3/>\n    ${ fn inner(a: int) -> int { return a + @limit; }\n       fn ok(a: int, b: int) -> bool { return b <= inner(a); } }\n", "invariant (ok(start, end))", "E-CONTRACT-003", ["(through `ok` → `inner`)", "`@limit`"]],
-    ["a `fn` reading a file-scope constant (the direct-read rule, exactly)", "    ${ const MAXW = 30;\n       fn ok(a: int, b: int) -> bool { return b - a <= MAXW; } }\n", "invariant (ok(start, end))", "E-DECL-INVARIANT-IMPURE", ["the file-scope constant `MAXW`"]],
+    // s483-invariant-2: a compile-time constant is admitted through the chain too; a non-constant one is not
+    ["a `fn` reading a non-constant file-scope constant (the direct-read rule, exactly)", "    ${ fn thirty() -> int { return 30; }\n       const MAXW = thirty();\n       fn ok(a: int, b: int) -> bool { return b - a <= MAXW; } }\n", "invariant (ok(start, end))", "E-DECL-INVARIANT-IMPURE", ["the file-scope constant `MAXW`", "not a compile-time constant"]],
     ["a `fn` reading a cell on one branch only", "    let <limit:int=3/>\n    ${ fn ok(a: int, b: int) -> bool { if (a > 100) { return b <= @limit; } return a <= b; } }\n", "invariant (ok(start, end))", "E-CONTRACT-003", ["`@limit`"]],
   ];
   for (const [name, pre, clause, code, msgs] of cases) {
@@ -206,7 +211,6 @@ describe("r1 F2 — a captured `invariant(…)` call is never silent", () => {
     ["a24: a `function invariant` call after a declaration's closer", "    function invariant(x: bool) { @hits = @hits + 1; }\n    let <hits:int=0/>\n    <r:struct>\n        let <a:int=0/>\n    </>\n    invariant(true);\n    <main><p>${@hits}</p></main>", "the `function` `invariant`"],
     ["a23: a non-bool argument gets the named diagnostic, not E-DECL-INVARIANT-NOT-BOOL", "    function invariant(x: int) { @hits = @hits + x; }\n    let <hits:int=0/>\n    <r:struct>\n        let <a:int=0/>\n    </>\n    invariant(1);\n    <main><p>${@hits}</p></main>", "rename it or move the call"],
     ["a18: after a `type :struct` body in a logic block", "    ${\n        function invariant(x: bool) { @hits = @hits + 1; }\n        type R:struct = { lo: int, hi: int }\n        invariant(true);\n    }\n    let <hits:int=0/>\n    <main><p>${@hits}</p></main>", "on `type R`"],
-    ["a constant named `invariant` in scope", "    ${ const invariant = 3; }\n    <r2:struct>\n        let <a:int=0/>\n        let <b:int=1/>\n    </>\n    invariant (a <= b)\n    <main><p>${@r2.a}</p></main>", "the file-scope constant `invariant`"],
   ];
   for (const [name, body, msg] of cases) {
     test(name, async () => {
@@ -218,6 +222,13 @@ describe("r1 F2 — a captured `invariant(…)` call is never silent", () => {
   }
 });
 
+// s483-invariant-2 (#2120 r1 re-review L1, prov=pa-ruled:S483-capture-callable-only): a binding named `invariant`
+// captures the clause only when it can be called — `const invariant = 3` cannot, so the clause is a clause.
+test("L1: a non-callable constant named `invariant` does not capture the clause (probe a09)", async () => {
+  const r = await result(prog("    ${ const invariant = 3; }\n    <r2:struct>\n        let <a:int=0/>\n        let <b:int=1/>\n    </>\n    invariant (a <= b)\n    <main><p>${@r2.a}</p></main>"));
+  expect(codes(r)).toEqual([]);
+}, 120000);
+
 // F3 MED (prov=pa-ruled:S483-direct-equals-fn-purity): what a pure `fn` body may use on its own values is
 // allowed directly; what it may not stays refused. Review probes b06 (now accepted, as b21 was).
 describe("r1 F3 — direct purity equals pure-`fn` purity", () => {
@@ -226,10 +237,15 @@ describe("r1 F3 — direct purity equals pure-`fn` purity", () => {
     expect(codes(r)).toEqual([]);
   }, 120000);
 
-  test("a callback reading a file-scope constant: E-DECL-INVARIANT-IMPURE", async () => {
-    const r = await result(prog(`    \${ const K = 5; }\n${RANGE}\n    invariant ([start, end].some(x => x > K))\n    <main><p>\${@dateRange.start}</p></main>`));
+  test("a callback reading a non-constant file-scope constant: E-DECL-INVARIANT-IMPURE", async () => {
+    const r = await result(prog(`    \${ fn five() -> int { return 5; } const K = five(); }\n${RANGE}\n    invariant ([start, end].some(x => x > K))\n    <main><p>\${@dateRange.start}</p></main>`));
     expect(codes(r)).toEqual(["E-DECL-INVARIANT-IMPURE"]);
     expect(errs(r)[0].message).toContain("`K`");
+  }, 120000);
+
+  test("s483-invariant-2: a callback reading a compile-time constant is admitted (ruling S483-invariant-const-read)", async () => {
+    const r = await result(prog(`    \${ const K = 5; }\n${RANGE}\n    invariant ([start, end].some(x => x > K))\n    <main><p>\${@dateRange.start}</p></main>`));
+    expect(codes(r)).toEqual([]);
   }, 120000);
 
   test("a block-bodied callback: refused by name (INTERIM)", async () => {

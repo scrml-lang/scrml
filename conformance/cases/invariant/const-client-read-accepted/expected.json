@@ -1,0 +1,11 @@
+{
+  "id": "invariant-const-client-read-accepted",
+  "description": "An invariant reading a compile-time constant that a server function AND the page read: accepted (the client holds the constant on its own account, so it is not server-only, §7.6 (b)).",
+  "language-version": "1.0",
+  "spec": "§66.13.5, §7.6",
+  "provenance": "ruling:user-voice-scrml.md-S483-invariant-const-read (\"Allow compile-time consts (Recommended)\")",
+  "rationale": "Ruling S483-invariant-const-read: \"admit a file-scope const whose initializer is a compile-time constant … and that is not server-only\".",
+  "expect": {
+    "codes": []
+  }
+}

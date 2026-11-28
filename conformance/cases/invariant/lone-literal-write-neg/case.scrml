@@ -1,0 +1,12 @@
+// §66.13.5 rule 9 — a write that provably breaks an invariant is the compile error E-WRITE-INVARIANT: here a
+// literal decides a one-field invariant.
+<program>
+    <counter:struct>
+        let <n:int=0/>
+    </>
+    invariant (n >= 0) [nonNegative]
+    function down() { @counter.n = -1; }
+    <main>
+        <button id="b" onclick=down()>${@counter.n}</button>
+    </main>
+</program>

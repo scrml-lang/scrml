@@ -1,0 +1,46 @@
+{
+  "id": "invariant-spread-all-or-nothing-rt",
+  "description": "`shift(15)` moves both fields in one spread (15, 25 — the split writes would trap); `squeeze(30, 3)` breaks `start <= end` and traps before either field is written (both stay 15, 25).",
+  "language-version": "1.0",
+  "spec": "§66.13.5, §66.11.3",
+  "provenance": "ruling:user-voice-scrml.md-S483-struct-invariant-syntax (\"yes, your recommendations on all three plus the follow-up\"); ruling:user-voice-scrml.md-S482-struct-invariant-contract (\"RULED yes (a)\")",
+  "rationale": "Ruling S483 item 2: \"The grouped write is the existing spread `@r = { ...@r, start: a, end: b }`: one snapshot, all or nothing, checked once.\"",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-WRITE-INVARIANT",
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "input": [
+      {
+        "click": "#sh"
+      },
+      {
+        "click": "#bad"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#s",
+        "text": "15"
+      },
+      {
+        "selector": "#e",
+        "text": "25"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-decl-invariant-unimplemented-s483",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=2",
+          "emitted:E-SCOPE-001=6",
+          "emitted:E-STATE-UNDECLARED=6"
+        ],
+        "runtime": "sha256:6a7bd15b29286996"
+      }
+    }
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "id": "invariant-field-write-trap-rt",
+  "description": "A direct field write `@dateRange.start = 20` under `invariant (start <= end)` (end 10) is checked at run time on the candidate value and traps (E-WRITE-INVARIANT-RT) before the write: start stays 0 and the handler's next statement never runs (n stays 0).",
+  "language-version": "1.0",
+  "spec": "§66.13.5",
+  "provenance": "ruling:user-voice-scrml.md-S483-struct-invariant-syntax (\"yes, your recommendations on all three plus the follow-up\"); ruling:user-voice-scrml.md-S482-struct-invariant-contract (\"RULED yes (a)\")",
+  "rationale": "§66.13.5 \"When it is checked\": every write that changes a field in the read set is checked on the candidate value before anything is written; rule 10: any other write is checked at run time and a violation is the E-WRITE-INVARIANT-RT trap, raised before the write; ruling S483 item 2: \"otherwise the E-WRITE-INVARIANT-RT trap before any write (S477)\".",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-WRITE-INVARIANT",
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#s",
+        "text": "0"
+      },
+      {
+        "selector": "#n",
+        "text": "0"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-decl-invariant-unimplemented-s483",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=2",
+          "emitted:E-SCOPE-001=7",
+          "emitted:E-STATE-UNDECLARED=2"
+        ],
+        "runtime": "sha256:6a7bd15b29286996"
+      }
+    }
+  }
+}
