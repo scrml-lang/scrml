@@ -31947,7 +31947,7 @@ are REFUSED by impl#1, `E-IMPL1-RULED-FORM-UNSUPPORTED` (its row lands with that
 | E-DECL-NEEDS-INITIALIZER | §6.2 | A `const`-derived cell with a type annotation and no RHS — `const <doubled>: int` or `const <items>: string[]` — has no expression to derive from. Shape 4's no-RHS canonical-empty default (§6.2 — `int`→0, `string`→"", `T[]`→[]) applies to PLAIN reactive cells ONLY; a derived (`const`) cell REQUIRES an initializer expression (§6.2 closing parenthetical, SPEC.md `A `const`-derived cell still requires an expression`). Resolution: `const <doubled>: int = @x * 2`, or drop `const` for a plain Shape-4 cell. The rule is UNCONDITIONAL over the annotation type — BOTH scalar and array const-derived forms fire (S260 ruling: the prior impl array-form exemption was removed). NOT retired (supersedes the older "RETIRED" note in the E-REFINEMENT-NO-DEFAULT row). Emitted at `compiler/src/ast-builder.js`. (S260 — uncatalogued-code backfill from the §34-vs-impl audit + the const-array ruling.) | Error |
 | E-FIXED-RETIRED | §15.7, §66.15.1 | A `fixed` attribute on an element. `fixed` is retired (S473 D26): a §66 use cannot override anything inside a declaration's `renders` (§66.6.9), so there is nothing to mark; the attribute is refused, never written to the DOM. **Provenance:** ruling:user-voice-scrml.md S473 D26 "your recs on all" — *"`fixed` is retired and refused with a named message."* Code name: PA reading, confirmed S475 (ruling:user-voice-scrml.md S475 "⭐ RULED — S475 owner questions, PA recs adopted wholesale" item 15, *"The older S473 veto-window readings are confirmed."*). **Nominal / not yet emitted** (`g-boot-fixed-attr-leaks-to-dom-s473`; impl#1 carries §15.7 for the legacy form). | Error |
 | E-DECL-ELEMENT-NAME-COLLIDES | §66.6.6 | A program cell whose name is an HTML element name, declared in a scope that also uses that name as a tag (`let <filter:string=""/>` and `<filter/>`): reported at the DECLARATION, naming the element and the tag use. The cell is legal when no tag use collides. **Provenance:** ruling:user-voice-scrml.md S473 "⭐ RULED — S473 review-surfaced decisions, all PA recs" ("your recs") item 3. Code name: PA reading, confirmed S475 (ruling:user-voice-scrml.md S475 "⭐ RULED — S475 owner questions, PA recs adopted wholesale" item 15, *"The older S473 veto-window readings are confirmed."*). (Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml`, PR #1678; Nominal on impl#1, which does not implement §66.) | Error |
-| E-DECL-RENDER-CYCLE-STAR | §66.6.2, §66.20 | §66 dialect: a `<*f/>` stands inside the markup it renders — a state-child body showing its own field, a child field's own `renders` holding its own `<*f/>`, or fields whose markup shows each other, directly or through a declaration's render (a use, a shared `<*x/>`; S483 r1) — guarded or not: the same field of the same instance at every level, so the render never ends. The message names every hop on the cycle with its `file:line:col` and which markup holds the next and the capable forms (show a different field; a component with a depth attribute). **Provenance:** ruling:user-voice-scrml.md-S483-star-self-render-error. Code name: PA reading (lane s483-self-render). **Nominal on impl#1** (impl#1 does not implement §66); emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`resolveStarField` → `starCycle` / `selfStarDiag`; through a declaration's render: `starThroughPass`). | Error |
+| E-DECL-RENDER-CYCLE-STAR | §66.6.2, §66.20 | §66 dialect: a `<*f/>` stands inside the markup it renders — a state-child body showing its own field, a child field's own `renders` holding its own `<*f/>`, or fields whose markup shows each other, directly or through a declaration's render (a use, a shared `<*x/>`; S483 r1) — guarded or not: the same field of the same instance at every level, so the render never ends; after a use on the way, a guard on that new instance's own writable state ends the cycle unless every branch of it leads back (S483 r2). The message names every hop on the cycle with its `file:line:col` and which markup holds the next and the capable forms (show a different field; a component with a depth attribute). **Provenance:** ruling:user-voice-scrml.md-S483-star-self-render-error. Code name: PA reading (lane s483-self-render). **Nominal on impl#1** (impl#1 does not implement §66); emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`resolveStarField` → `starCycle` / `selfStarDiag`; through a declaration's render: `starThroughPass`). | Error |
 | E-DECL-RENDER-CYCLE-USE | §66.6.2, §66.20 | §66 dialect: a plain use of a declaration inside its own `renders` — directly, or through other declarations' renders — that is unconditional on every path (no `if=` / `else-if=` / `else` on it or around it and in no `<each>` row — or every branch around it mounts it: each branch of an `if=` chain ending in `else`, each arm of a `<match>` covering every variant, each state arm of a field with an arm per variant; S483 r1): each mount mounts another, without end. Reported at the use, naming each use on the cycle with its `file:line:col` and every hop that makes it mount on every path and the guarded form (`<tree depth=(depth - 1) if=(depth > 0)/>`). Guarded recursion is legal. **Provenance:** ruling:user-voice-scrml.md-S483-component-self-mount-error. Code name: PA reading (lane s483-self-render). **Nominal on impl#1** (impl#1 does not implement §66); emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`selfMountPass` / `selfMountDiag`). | Error |
 | E-DECL-SLOT-OUTSIDE-RENDERS | §66.15.2 | §66 dialect: a `<slot/>` outside a declaration's `renders` — it names no use, so it would render nothing. (Rules 1–2 of §66.15.2 reuse E-COMPONENT-021 / E-COMPONENT-020.) **Provenance:** ruling:user-voice-scrml.md S473 D11 "your recs on all". Code name: PA reading, confirmed S475 (ruling:user-voice-scrml.md S475 "⭐ RULED — S475 owner questions, PA recs adopted wholesale" item 15, *"The older S473 veto-window readings are confirmed."*). Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`resolveSlot`) (`g-boot-slot-count-unchecked-s473`, resolved by s473-boot-ruled-refusals); Nominal on impl#1, which does not implement §66. | Error |
 | E-DECL-INVARIANT-IN-OPENER | §66.13.5, §66.2.5, §66.20 | §66 dialect: an `invariant (expr)` clause written inside a declaration's opener (`<r:struct invariant (a <= b)>`). The message says the clause follows the closer (`/>` or `</>`), with the declaration's field names bare — the S447 rule that a word introducing what follows stands outside the opener (the `E-DECL-RENDERS-IN-OPENER` parallel). **Provenance:** ruling:user-voice-scrml.md-S483-struct-invariant-syntax item 1 (*"`invariant (expr)` after the closer"*). Emitted by the bootstrap at `compiler/self-host-v2/parse.scrml` (`invariantInOpener`, `parseOpenerB`); Nominal on impl#1 (§34.0). Direction of change: newly-rejecting. | Error |
@@ -53733,11 +53733,31 @@ together).
    lead back (`<*p/>`'s arm shows `<*q/>`, whose arms show plain markup) is unaffected. **The cycle may run through a
    declaration's render** (S483 r1): a program field's state arm that mounts `<card/>` — or shows the shared
    instance `<*card/>` — whose render shows that same program field's `<*f/>` is a cycle too. The program's field
-   and a shared instance are one instance at every level, and the declaration on the way is mounted from the same
-   values at every level, so every guard on it answers the same; the error is at the `<*f/>` (or the shared
-   `<*card/>`) the cycle returns to, and the message names every hop — each `<*g/>`, each use whose render (or
-   whose slot content) the cycle passes through — and, for each, which markup holds the next (a state-child body
-   named by its variant, a field's own `renders`, a declaration's `renders`).
+   and a shared instance are one instance at every level, and every value a use on the way is mounted from (its
+   attributes) comes back from that one instance, so a guard on the program's state, on a shared instance's state
+   or on an attribute gives the same answer at every level and does not end it. **A guard on a new instance's own
+   state does** (S483 r2; PA reading `pa-ruled:S483-star-cycle-same-instance`): once the cycle has crossed a use, a
+   guard that reads that new instance's own writable state — a `let` child, a graph field, a derived field that
+   reads one — is not the ruled shape, because each instance's state is its own and changes on its own (a click
+   opens one level, and the new instance that level mounts starts again from its initial value), so the render can
+   end and is legal. Such a guard is an `if=` / `else-if=` / `else` branch at or after a condition that reads it, a
+   `<match on=>` that reads it, the state arms of that instance's own `<*cs/>`, an `<each>` or gather row over it,
+   and a used declaration's `<slot/>` behind such a guard of its own. It ends the cycle unless every branch of it
+   leads back — a chain ending in `else`, a `<match>` covering every variant, a state arm for every variant, each
+   reaching a `<*f/>` of that same field — and then whichever its state, each level renders the next: still the
+   error. The state such a new instance starts in is still a guard: when its arm leads back, the program compiles
+   and overflows at its mount (⚑ OPEN, `g-boot-constant-guard-recursion-s483`). The error is at the `<*f/>` (or the
+   shared `<*card/>`) the cycle returns to, and the message names every hop — each `<*g/>`, each use whose render
+   (or whose slot content) the cycle passes through, each guard on a new instance's state every branch of which
+   leads back — and, for each, which markup holds the next (a state-child body named by its variant, a field's own
+   `renders`, a declaration's `renders`); a hop that crosses a use is never called "the same instance".
+
+   ```scrml
+   <card t:string="c">
+     let <open:bool=false/>
+   </> renders <span><button onclick=(@card.open = true)>open</button><i if=(open)><*ph/></i></span>
+   // legal: arm B of the program field `ph` mounts `<card/>`; each new card starts closed (S483 r2)
+   ```
 2. **A use of a declaration inside its own render, unconditional on every path — `E-DECL-RENDER-CYCLE-USE`.** A
    plain use `<x …/>` (§66.6.1) inside `x`'s own `renders` — directly, or through other declarations' renders
    (`<a>` renders `<b/>`, whose render holds `<a/>`) — that is **unconditional on every path** SHALL be a compile
@@ -53745,7 +53765,10 @@ together).
    the next, without end. *Unconditional on every path*: every way the render can go mounts it. That holds for a
    use with no `if=` / `else-if=` / `else` on it or on any element around it in the render, outside every `<each>`
    row and every lifted gather row; and it holds for a use **every branch of whose construct mounts the
-   declaration** (S483 r1; PA reading `pa-ruled:S483-every-path-mounts` — every path then mounts it): each branch of
+   declaration** (S483 r1; PA reading `pa-ruled:S483-every-path-mounts` — every path then mounts it) — by a use
+   written in the branch, or through the render of a declaration the branch mounts on every path (S483 r2:
+   `<pa if=(d > 0)/><pb else/>`, where `<pa>` and `<pb>` each render `<card/>` on every path, mounts `<card>` on
+   every path; a branch that reaches it only through a guarded render does not count): each branch of
    an `if=` / `else-if=` / `else` chain that ends in `else`, each arm of a block `<match>` whose arms cover every
    variant (or hold `<_>`), and each state arm of a declaration's graph field shown by `<*f/>` when every variant
    has an arm (a program field's or a shared instance's `<*f/>` is rule 1's). Markup that always renders is
@@ -53754,7 +53777,7 @@ together).
    each use on the cycle with its place, every hop that makes it mount on every path (the slot carriers, the `<*v/>`
    whose `renders` it stands in, one use per branch), and give the capable form. **Guarded recursion is legal**:
    a nested use that some path does not mount — under an `if=` with no `else`, in a chain or a `<match>` with a
-   branch that does not mount it, in an `<each>` row, in a state arm of a field some state of which shows none —
+   branch that does not mount it (directly or through another declaration's render), in an `<each>` row, in a state arm of a field some state of which shows none —
    is a new instance at each level, and the branch that does not mount it can be taken at some level (its guard
    can read something that changes per level), so the tree can end. A guard the compiler could decide is always
    true (`if=(true)`, an `<each>` over a constant one-item tape, the state arm a new instance starts in) is still
@@ -53796,8 +53819,31 @@ together).
 > under `else` / a `<match>` arm / a state arm always "renders a finite tree"; both messages name every hop.
 > **Provenance:** ruling:user-voice-scrml.md-S483-star-self-render-error ("every such cycle");
 > ruling:user-voice-scrml.md-S483-component-self-mount-error ("unconditional on every path"); PA reading
-> pa-ruled:S483-every-path-mounts. **Direction of change:** newly-rejecting (bootstrap) — each newly refused shape
-> compiled and overflowed the stack at load (rule 1 through a render) or hung the compiler (rule 2, every branch).
+> pa-ruled:S483-every-path-mounts. **Direction of change:** newly-rejecting (bootstrap). *(Corrected S483 r2 — the
+> r1 sentence said every newly refused shape compiled and overflowed (rule 1 through a render) or hung the compiler
+> (rule 2, every branch); measured on base e25c84674, that is not so for all of them.)* Rule 1 through a render: a
+> cycle through a use or a shared instance with no guard on the way compiled and overflowed the stack at load
+> (#2139 review probes s08, s09); one guarded by an attribute that is false at every level compiled and rendered
+> (n08: the nested `<*ph/>` never shows) and is refused by the rule, not because it overflows; a cycle through a
+> render that also writes the field was already refused (s10, E-BOOTSTRAP-CORE-ILL-FORMED), and a shared
+> instance's own field (n09) by E-BOOTSTRAP-UNSUPPORTED. The cycles through a use guarded by that new instance's
+> own state that r1 refused (q01, q02d, q02e, q23 — compiled and rendered on base, one level per click) are legal
+> again (r2, below). Rule 2, every branch: m03, m03b, m04, n03, n10, n11 hung the compiler; m15 compiled and
+> overflowed.
+>
+> **Amendment S483 r2 (#2139 r1 re-review HIGH-1 / MED-1):** rule 1 — once a cycle has crossed a use, a guard
+> that reads that new instance's own writable state ends it unless every branch of it leads back (PA reading
+> `pa-ruled:S483-star-cycle-same-instance`); the false sentence that the declaration on the way "is mounted from the
+> same values at every level, so every guard on it answers the same" is replaced, and the message no longer calls a
+> hop that crosses a use "the same instance". Rule 2 — a branch mounts what the renders of its uses mount on every
+> path, too. **Provenance:** ruling:user-voice-scrml.md-S483-star-self-render-error ("it is the same field of the
+> same instance at every level, so any guard gives the same answer at every level"); PA reading
+> pa-ruled:S483-star-cycle-same-instance; ruling:user-voice-scrml.md-S483-component-self-mount-error ("directly or
+> through other declarations' renders"); PA reading pa-ruled:S483-every-path-mounts. **Direction of change:** rule 1
+> newly-accepting relative to r1 (never to base): q01, q02d, q02e, q23 compile and render as on base; one shape r1
+> refused now compiles and overflows at load as on base — a new instance whose initial state's arm leads back
+> (`g-boot-constant-guard-recursion-s483`). Rule 2 newly-rejecting: every branch mounting the declaration through
+> other renders (q04, q21, q24 — compiled and overflowed the stack at load on base and r1).
 
 #### 66.6.3 Self-reference inside `renders` (#8)
 
@@ -56421,7 +56467,7 @@ emitter). Every code below is Nominal on impl#1.
 | **`E-DECL-FIELD-TAG-NEEDS-STAR`** | Error | A bare `<f/>` names a child field of the enclosing declaration. Message: *"did you mean `<*f/>`?"* (§66.6.6). **Nominal on impl#1 — not yet emitted for the §66 form by impl#1** (impl#1 does not implement §66); **emitted by the bootstrap** (`compiler/self-host-v2/`) *(record-lag corrected S473 D31)*. |
 | **`E-DECL-STAR-PREDEFINED`** | Error | `<*x/>` where `x` is a predefined (HTML) declaration, e.g. `<*div/>` (§66.6.5). **Nominal on impl#1 — not yet emitted for the §66 form by impl#1** (impl#1 does not implement §66); **emitted by the bootstrap** (`compiler/self-host-v2/`) *(record-lag corrected S473 D31)*. |
 | **`E-DECL-STAR-REF-ATTR-WRITE`** | Error | An attribute on a `<*x …>` reference would write the referenced instance (§66.6.7). **Nominal on impl#1 — not yet emitted for the §66 form by impl#1** (impl#1 does not implement §66); **emitted by the bootstrap** (`compiler/self-host-v2/`) *(record-lag corrected S473 D31)*. |
-| **`E-DECL-RENDER-CYCLE-STAR`** | Error | A `<*f/>` stands inside the markup it renders — a state-child body showing its own field, a child field's `renders` holding its own `<*f/>`, or fields whose markup shows each other — guarded or not, directly or through a declaration's render (a use, a shared `<*x/>`; S483 r1) (§66.6.2 rule 1). The message names every hop on the cycle with its place and which markup holds the next. **Provenance:** ruling:user-voice-scrml.md-S483-star-self-render-error. **Nominal on impl#1** (impl#1 does not implement §66); **emitted by the bootstrap** at `compiler/self-host-v2/analyze.scrml` (`resolveStarField` → `starCycle` / `selfStarDiag`; `starThroughPass`). |
+| **`E-DECL-RENDER-CYCLE-STAR`** | Error | A `<*f/>` stands inside the markup it renders — a state-child body showing its own field, a child field's `renders` holding its own `<*f/>`, or fields whose markup shows each other — guarded or not, directly or through a declaration's render (a use, a shared `<*x/>`; S483 r1) — after a use on the way, a guard on that new instance's own writable state ends it unless every branch of it leads back (S483 r2) (§66.6.2 rule 1). The message names every hop on the cycle with its place and which markup holds the next. **Provenance:** ruling:user-voice-scrml.md-S483-star-self-render-error. **Nominal on impl#1** (impl#1 does not implement §66); **emitted by the bootstrap** at `compiler/self-host-v2/analyze.scrml` (`resolveStarField` → `starCycle` / `selfStarDiag`; `starThroughPass`). |
 | **`E-DECL-RENDER-CYCLE-USE`** | Error | A plain use of a declaration inside its own `renders` — directly or through other declarations' renders — that is unconditional on every path (no `if=` / `else-if=` / `else` on or around it and in no `<each>` row, or every branch of the chain ending in `else` / exhaustive `<match>` / full state-arm set around it mounts it; S483 r1) (§66.6.2 rule 2). Reported at the use; the message names each use on the cycle with its place. Guarded recursion is legal. **Provenance:** ruling:user-voice-scrml.md-S483-component-self-mount-error. **Nominal on impl#1** (impl#1 does not implement §66); **emitted by the bootstrap** at `compiler/self-host-v2/analyze.scrml` (`selfMountPass` / `selfMountDiag`). |
 | **`E-DECL-USE-ATTR`** | Error | An attribute on a plain use `<x …/>` that is not a declared attribute or child field of `x`, `as=`, or `if=` / `else-if=` / `else` — `class`, `style`, `id`, `aria-*`, `data-*`, `on…`, `bind:…`, `show=`, `key=`, a misspelled field, … (§66.6.9 rules 1, 2, 4); an attribute on a `<*x>` reference that names no field of `x`, `as=` included — except `if=` / `else-if=` / `else`, the open residue O18-r, which the bootstrap refuses as `E-BOOTSTRAP-UNSUPPORTED` for now (§66.6.9 rule 3); and a declared attribute's construction value written as a `{…}` block (a construction value is an expression). **Provenance:** ruling:user-voice-scrml.md S462 — *"I really like X so I accept your rec as a ratified path to X"* (dpa-069 item 1). **Nominal on impl#1** (impl#1 does not implement §66; its legacy component form keeps `E-COMPONENT-011`, §15.10); **the bootstrap emits it** (`compiler/self-host-v2/analyze.scrml` — `resolveUse`, `resolveStar`, `resolveConstructValue`). |
 | **`E-DECL-HANDLE-NOT-NARROWED`** | Error | A write OR a read (S437) through an `as=` handle typed `T \| not` (a conditionally-mounted instance) without a preceding narrowing (§66.7.5). **Nominal on impl#1 — not yet emitted for the §66 form by impl#1** (impl#1 does not implement §66); **emitted by the bootstrap** (`compiler/self-host-v2/`) *(record-lag corrected S473 D31)*. |

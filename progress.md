@@ -7,4 +7,6 @@
   least fixed point in selfMountPass); synthetic hop dropped when a kept every-branch hop already reaches it.
 - every-branch walk-through of an own-state guard: sub-search counts reaching ANY `<*g/>` of the start's
   field (StarGoal.key) — without it a1/a2/a3 (two `<*ph/>`) were missed and the printer hung.
+- SPEC §66.6.2 rule 1/2 + §34 rows + r1 direction corrected + r2 amendment; gaps: q22 owner question
+  filed, constant-guard gap extended (initB). Message uses `bool`. Probe table base/r1/r2 done.
 - tests: slice-m4 r2 describes (68 pass), Chromium r2 describe, 2 conformance cases + impl#1 pins.
