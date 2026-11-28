@@ -277,16 +277,23 @@ function pastStallBound() {
  */
 function stallSkips(e) {
   if (e.stall !== stallId) {                       // its first run in this watch
+    // s483 r5: skipped in the last watch it ran in, it is still a stopped loop — this watch is a retry for
+    // it too (a run another effect's lap queued, not only one the yield re-queued). Without this, a loop
+    // with two drivers hands each the other a fresh bound on every delayed retry, and never ends.
+    const stopped = e.stallSkipAt !== 0 && e.stallSkipAt === e.stall;
     e.stall = stallId;
     e.stallRuns = 0;
+    if (stopped) e.stallRetry = stallId;
     return false;
   }
-  if (e.stallRetry === stallId) {                  // re-queued on the yield, and re-run again: stop it, and
+  if (e.stallRetry === stallId) {                  // a retry, re-run again: stop it, and
+    e.stallSkipAt = stallId;
     stallRetryLater(e);                            // run it once more ~RENDER_STALL_MS later (s483 r4)
     return true;
   }
   if (++e.stallRuns <= STALL_MIN_RERUNS && !(stallLong && e.stallRuns >= 2)) return false;
   if (!pastStallBound()) return false;
+  e.stallSkipAt = stallId;
   stallSkipped.add(e);
   if (!loopReported) {
     loopReported = true;
@@ -310,6 +317,8 @@ function stallRetryLater(e) {
     const was = stallId;
     sawYield();                                    // a timer task: the page has yielded
     if (stallId !== was && e.stallRetry === stallId) return;   // that re-ran it, as a skipped effect
+    // s483 r5: it has run since it was last skipped (a later write re-ran it): nothing is left to show
+    if (e.stall !== e.stallSkipAt) return;
     watchYield();
     e.stall = 0;
     e.stallRetry = stallId;
@@ -761,6 +770,7 @@ class Effect {
     this.stallRuns = 0;     // s483 r3: its re-runs in that stall
     this.stallRetry = 0;    // s483 r3: the stall it was queued again for, on the yield (stallSkips)
     this.stallLater = false; // s483 r4: a later retry run is armed (stallRetryLater)
+    this.stallSkipAt = 0;   // s483 r5: the watch it was last skipped in (0: never) — stallSkips
     stats.effects++;
     scope.own(() => {
       this.disposed = true;
@@ -6010,6 +6020,7 @@ class MetaEffect {
     this.stallRuns = 0;
     this.stallRetry = 0;
     this.stallLater = false;
+    this.stallSkipAt = 0;
     stats.effects++;
     scope.own(() => this.dispose());
     this.run();

@@ -236,7 +236,7 @@ describe("s483 fix r2 — the stall bound (RULED S483, ruling:user-voice-scrml.m
   }
   const STALL_LOG = "[scrml] render effects stopped: the page has gone ";
 
-  test("a loop lapping through a request's settle stops once the page has gone the bound without yielding, logged once; after the page yields, a write runs again", async () => {
+  test("a loop lapping through a request's settle stops once the page has gone the bound without yielding, logged once; after the page yields, a write runs again (r5: the loop it restarts is not given another bound)", async () => {
     await lapLoop(async ({ n, r, logged, runs, reset }) => {
       reset();
       const t0 = performance.now();
@@ -250,10 +250,14 @@ describe("s483 fix r2 — the stall bound (RULED S483, ruling:user-voice-scrml.m
       expect(logged[0]).toContain(STALL_LOG + "50 ms without yielding to the browser");
       expect(r.peek()).toBe(n.peek() + 1);           // the request's last settle landed; the render re-run was skipped
       reset();
-      n.set(n.peek() + 1);                           // the page yielded: render effects run again
+      n.set(n.peek() + 1);                           // the page yielded: the write runs the render again
       await macrotask();
-      expect(runs()).toBeGreaterThan(100);
-      expect(logged.length).toBe(2);                 // once per stall
+      expect(runs()).toBeGreaterThanOrEqual(1);
+      // s483 r5 (#2123 r4 review HIGH-1): the render was skipped in the last watch it ran in, so it is still
+      // a stopped loop — the write runs it, and the loop that run restarts is stopped at its next re-run
+      // (r2–r4: another full bound, frozen again and logged again — with two drivers, without end)
+      expect(runs()).toBeLessThan(10);
+      expect(logged.length).toBe(1);                 // the stall is reported once
     });
   });
 
@@ -938,6 +942,115 @@ describe("s483 fix r4 — a frame is a yield, a skipped retry runs again later, 
       console.error = savedErr;
       scope.dispose();
     }
+  });
+});
+
+describe("s483 fix r5 — a stopped loop stays stopped across its drivers; the delayed retry runs only what is left to show", () => {
+  async function withStall(stallMs, fn) {
+    const scope = rt.root.child();
+    const logged = [];
+    const savedErr = console.error;
+    console.error = (...a) => logged.push(a.join(" "));
+    globalThis.__scrml_render_stall_ms = stallMs;
+    try {
+      await fn(scope, logged);
+    } finally {
+      delete globalThis.__scrml_render_stall_ms;
+      console.error = savedErr;
+      scope.dispose();
+    }
+  }
+  const busy = (ms) => { const t = performance.now(); while (performance.now() - t < ms) { /* spin */ } };
+
+  test("HIGH-1 (#2123 r4 review, probe chain_retry K=2): a loop with two drivers is stopped once — one freeze, one log; after it the page answers and the loop laps about once per bound", async () => {
+    // Each effect reads its own cell; its run's microtask writes its own cell (a self-loop) and the
+    // other's. r4: each delayed retry's lap re-ran the OTHER effect outside its retry, with a fresh bound —
+    // a stall of the bound, then another, back to back without end, logged every time (killed at 40 s
+    // at the default bound; no timer task got through).
+    await withStall(50, async (scope, logged) => {
+      const K = 2;
+      const c = Array.from({ length: K }, () => rt.cell(0));
+      const runs = new Array(K).fill(0);
+      let armed = false;
+      for (let i = 0; i < K; i++) {
+        rt.effect(scope, () => {
+          runs[i]++;
+          c[i].get();
+          if (armed) Promise.resolve().then(() => { c[i].set(c[i].peek() + 1); const j = (i + 1) % K; c[j].set(c[j].peek() + 1); });
+        });
+      }
+      await macrotask();
+      armed = true;
+      c[0].set(1);
+      await macrotask(20);                           // the stall (about the bound), the yield
+      expect(logged.length).toBe(1);
+      // the page answers: a 5 ms heartbeat over 12 bounds — r4 froze the bound, back to back
+      const settled = runs[0] + runs[1];
+      let last = performance.now();
+      let maxGap = 0;
+      await new Promise((done) => {
+        const t0 = last;
+        const beat = () => {
+          const t = performance.now();
+          maxGap = Math.max(maxGap, t - last);
+          last = t;
+          if (t - t0 < 600) setTimeout(beat, 5); else done(null);
+        };
+        setTimeout(beat, 5);
+      });
+      armed = false;
+      expect(maxGap).toBeLessThan(45);               // no further stall of the bound (50 ms)
+      expect(logged.length).toBe(1);                 // reported once
+      const laps = runs[0] + runs[1] - settled;
+      expect(laps).toBeGreaterThanOrEqual(2);        // still lapping, about once per bound each
+      expect(laps).toBeLessThanOrEqual(60);          // a loop let go would be thousands
+    });
+  }, 20000);
+
+  test("HIGH-1: a stopped loop's mark clears after one watch it runs in without a skip — a later two-run update shows its last value at once", async () => {
+    await withStall(50, async (scope, logged) => {
+      const x = rt.cell(0);
+      let shown = -1;
+      rt.effect(scope, () => { shown = x.get(); });
+      await macrotask();
+      for (let i = 1; i <= 8; i++) { await Promise.resolve(); busy(20); x.set(i); }   // a finite slow chain trips
+      expect(logged.length).toBe(1);
+      await macrotask(5);                            // the yield: the skipped display runs again
+      expect(shown).toBe(8);
+      await macrotask(120);                          // a watch it ran in without a skip
+      x.set(20);
+      await Promise.resolve();
+      x.set(21);                                     // re-run in the same watch: not deferred
+      expect(shown).toBe(21);
+      expect(logged.length).toBe(1);
+    });
+  });
+
+  test("LOW-1 (#2123 r4 review, probe spurious3): the delayed retry does not run an effect again that has run since it was skipped", async () => {
+    await withStall(50, async (scope, logged) => {
+      const x = rt.cell(0);
+      let shown = -1;
+      let runs = 0;
+      let late = false;
+      rt.effect(scope, () => {
+        runs++;
+        shown = x.get();
+        if (late) { late = false; queueMicrotask(() => x.set(x.peek() + 1000)); }   // lands in the retry's watch
+      });
+      await macrotask();
+      for (let i = 1; i <= 8; i++) { await Promise.resolve(); busy(20); x.set(i); }   // a finite slow chain trips
+      expect(logged.length).toBe(1);
+      late = true;
+      await macrotask(5);                            // the yield: the retry runs (8); its re-run (1008) is
+      expect(shown).toBe(8);                         // skipped, and a delayed retry is armed
+      x.set(5000);                                   // a later write runs it as usual
+      expect(shown).toBe(5000);
+      const runsAfterWrite = runs;
+      await macrotask(150);                          // past the delayed retry
+      expect(runs).toBe(runsAfterWrite);             // r4: one more run, nothing changed
+      expect(shown).toBe(5000);
+      expect(logged.length).toBe(1);
+    });
   });
 });
 
